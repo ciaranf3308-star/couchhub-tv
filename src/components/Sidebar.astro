@@ -101,8 +101,8 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
           <circle r="3.5"  fill="currentColor" opacity="0.14" class="brand-mark__dot brand-mark__dot--6" />
         </g>
       </svg>
-      <span class="rail-reveal hidden rail-expanded:inline-flex items-baseline truncate text-[0.9375rem] tracking-[-0.02em]">
-        <span class="font-semibold text-fg">Extreme&nbsp;Infini</span><span class="font-extrabold text-accent tracking-[0.04em] ml-[0.05em]">TV</span>
+      <span class="rail-reveal hidden rail-expanded:inline-flex items-baseline truncate font-serif text-[1.0625rem] tracking-[-0.02em]">
+        <span class="text-fg">Nylah&nbsp;</span><span class="text-accent">Studios</span>
       </span>
     </a>
     <button
@@ -140,7 +140,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
         data-i18n-attr="aria-label:sidebar.searchWithShortcut;title:sidebar.searchWithShortcut"
         aria-current={searchActive ? "page" : undefined}
         class:list={[
-          "mt-2 flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-11",
+          "nylah-nav-item mt-2 flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-12 lg:min-h-14",
           "justify-center rail-expanded:justify-start",
           "border border-line bg-surface",
           "transition-colors outline-none",
@@ -148,8 +148,8 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
             ? "bg-surface-2 text-fg ring-1 ring-accent/40 border-transparent"
             : "text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg focus-visible:border-accent",
         ]}>
-        <IconSearch aria-hidden="true" stroke={searchActive ? 2 : 1.75} class:list={["size-5 shrink-0", searchActive ? "text-accent" : "text-fg-3"]} />
-        <span data-i18n="nav.search" class="rail-reveal hidden rail-expanded:inline truncate text-sm flex-1 text-left">Search</span>
+        <IconSearch aria-hidden="true" stroke={searchActive ? 2 : 1.75} class:list={["size-5 lg:size-6 shrink-0", searchActive ? "text-accent" : "text-fg-3"]} />
+        <span data-i18n="nav.search" class="rail-reveal hidden rail-expanded:inline truncate text-sm lg:text-[0.9375rem] flex-1 text-left">Search</span>
         <kbd class="rail-reveal hidden rail-expanded:inline-block text-2xs text-fg-3 border border-line rounded px-1.5 py-0.5 font-sans">
           Ctrl K
         </kbd>
@@ -170,7 +170,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
           title={label}
           data-i18n-attr={`aria-label:${key};title:${key}`}
           class:list={[
-            "flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-11",
+            "nylah-nav-item flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-12 lg:min-h-14",
             "justify-center rail-expanded:justify-start",
             "transition-[color,background-color,transform] duration-150 outline-none",
             "hover:bg-surface-2 focus-visible:bg-surface-2 active:scale-[0.98]",
@@ -183,7 +183,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
               aria-hidden="true"
               stroke={active ? 2 : 1.75}
               class:list={[
-                "size-5 shrink-0",
+                "size-5 lg:size-6 shrink-0",
                 active ? "text-accent" : "text-fg-3",
               ]}
             />
@@ -198,7 +198,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
                        tabular-nums ring-2 ring-bg">0</span>
             )}
           </span>
-          <span data-i18n={key} class="rail-reveal hidden rail-expanded:inline truncate text-sm font-medium">
+          <span data-i18n={key} class="rail-reveal hidden rail-expanded:inline truncate text-sm lg:text-[0.9375rem] font-medium">
             {label}
           </span>
           {isDownloads && (
@@ -242,20 +242,20 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
       title="Play on TV"
       data-i18n-attr="aria-label:cast.menu.playOnTv;title:cast.menu.playOnTv"
       class:list={[
-        "hidden relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-11",
+        "hidden relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-12 lg:min-h-14",
         "justify-center rail-expanded:justify-start",
         "transition-colors outline-none",
         "hover:bg-surface-2 focus-visible:bg-surface-2",
         "text-fg-2 hover:text-fg focus-visible:text-fg",
       ]}>
       <span class="relative inline-flex shrink-0">
-        <IconCast aria-hidden="true" stroke={1.75} class="size-5 shrink-0 text-fg-3" />
+        <IconCast aria-hidden="true" stroke={1.75} class="size-5 lg:size-6 shrink-0 text-fg-3" />
         <span
           id="sidebar-cast-dot"
           aria-hidden="true"
           class="hidden absolute -top-0.5 -right-0.5 size-2 rounded-full bg-accent ring-2 ring-bg"></span>
       </span>
-      <span data-i18n="cast.menu.playOnTv" class="rail-reveal hidden rail-expanded:inline truncate text-sm font-medium">
+      <span data-i18n="cast.menu.playOnTv" class="rail-reveal hidden rail-expanded:inline truncate text-sm lg:text-[0.9375rem] font-medium">
         Play on TV
       </span>
     </button>
@@ -266,7 +266,7 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
       title="Settings"
       data-i18n-attr="aria-label:nav.settings;title:nav.settings"
       class:list={[
-        "flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-11",
+        "nylah-nav-item flex items-center gap-3 rounded-xl px-2.5 py-2.5 min-h-12 lg:min-h-14",
         "justify-center rail-expanded:justify-start",
         "transition-colors outline-none",
         "hover:bg-surface-2 focus-visible:bg-surface-2",
@@ -278,11 +278,11 @@ const settingsActive = path === "/settings" || path.startsWith("/settings/")
         aria-hidden="true"
         stroke={settingsActive ? 2 : 1.75}
         class:list={[
-          "size-5 shrink-0",
+          "size-5 lg:size-6 shrink-0",
           settingsActive ? "text-accent" : "text-fg-3",
         ]}
       />
-      <span data-i18n="nav.settings" class="rail-reveal hidden rail-expanded:inline truncate text-sm font-medium">
+      <span data-i18n="nav.settings" class="rail-reveal hidden rail-expanded:inline truncate text-sm lg:text-[0.9375rem] font-medium">
         Settings
       </span>
     </a>

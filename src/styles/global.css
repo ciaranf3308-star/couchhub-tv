@@ -234,6 +234,186 @@ html.xt-theme-switching::view-transition-new(root) {
     --color-fg-2: light-dark(oklch(0.40 0.028 75), oklch(0.78 0.012 350));
     --color-fg-3: light-dark(oklch(0.46 0.026 75), oklch(0.62 0.012 350));
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Nylah Studios redesign tokens (v0.2.0, worker 1 — shell).
+   RedSilk family: deep wine burgundy (oklch hue 350) + warm beige
+   (hue 75), Instrument Serif display type. Other workers: consume
+   these ONLY as `var(--nylah-<name>, <fallback>)` — never hardcode
+   the values, so the palette can move in one place.
+   ────────────────────────────────────────────────────────────── */
+:root {
+    /* Palette */
+    --nylah-wine:        oklch(0.45 0.19 350);
+    --nylah-wine-deep:   oklch(0.155 0.045 350);
+    --nylah-wine-bright: oklch(0.72 0.17 350);
+    --nylah-wine-soft:   oklch(0.45 0.19 350 / 0.12);
+    --nylah-beige:       oklch(0.93 0.028 75);
+    --nylah-cream:       oklch(0.97 0.014 75);
+    --nylah-gold:        oklch(0.85 0.16 90);
+    /* Focus system — light-dark so the ring reads on both themes. */
+    --nylah-focus-ring:  light-dark(oklch(0.45 0.19 350), oklch(0.78 0.18 350));
+    --nylah-focus-glow:  light-dark(oklch(0.45 0.19 350 / 0.38), oklch(0.72 0.17 350 / 0.5));
+    --nylah-focus-halo:  light-dark(oklch(0.45 0.19 350 / 0.16), oklch(0.72 0.17 350 / 0.22));
+    /* Layout */
+    --nylah-rail-gap:    clamp(1.5rem, 2.5vw, 2.5rem);
+    --nylah-rail-title:  clamp(1.5rem, 1.25rem + 1vw, 2.25rem);
+    --nylah-hero-title:  clamp(2.5rem, 2rem + 3vw, 4.5rem);
+    --nylah-card-radius: 1rem;
+    --nylah-nav-item-min-h: 3.5rem;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Nylah focus system.
+   The gliding indicator (.xt-focus-glide, strengthened below at its
+   own rule) is the single focus ring: it follows keyboard / gamepad
+   focus and suppresses the static outline while tracking, so there
+   is never a double ring. Perf mode hides the glide, so the
+   :focus-visible fallback below is the ring there. Rail cards get a
+   lift + halo on focus; rating / year / genre lines use
+   .nylah-card__meta--focus and are revealed on the FOCUSED card
+   only — never on hover alone.
+   ────────────────────────────────────────────────────────────── */
+
+/* Perf mode hides the glide: the static ring must be just as strong,
+   on every viewport — not only html[data-tv], because the living-room
+   PC runs the desktop app. */
+html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabindex]):focus-visible {
+    outline: 3px solid var(--nylah-focus-ring, oklch(0.72 0.17 350));
+    outline-offset: 2px;
+    box-shadow: 0 0 24px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+}
+
+/* ── Home rails ─────────────────────────────────────────────── */
+.nylah-rails {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nylah-rail-gap, 2rem);
+    padding-bottom: var(--nylah-rail-gap, 2rem);
+}
+.nylah-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    min-width: 0;
+    scroll-margin-block: 1rem;
+}
+/* Rail header — the shared pattern for all five home rails. Reuses
+   .hub-section-head when a strip renders its own head (Continue
+   Watching does); the rules below restyle that head inside a rail so
+   both patterns land on the same look. */
+.nylah-rail__head,
+.nylah-rail .hub-section-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-inline: 0.25rem;
+    padding-bottom: 0;
+}
+.nylah-rail__title,
+.nylah-rail .hub-section-head__heading {
+    font-family: var(--font-serif);
+    font-size: var(--nylah-rail-title, 2rem);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--color-fg);
+}
+.nylah-rail__count,
+.nylah-rail .hub-section-head__count {
+    font-size: 0.8125rem;
+    color: var(--color-fg-3);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-bottom: 0.35rem;
+}
+/* Horizontal rail row: the strip scrolls, its scrollbar stays hidden
+   — the controller (or drag) moves it, never a scrollbar thumb. */
+.nylah-rail__row {
+    display: flex;
+    gap: 0.875rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0.25rem;
+    padding: 0.5rem 0.25rem;
+    margin: -0.5rem -0.25rem;
+    scrollbar-width: none;
+}
+.nylah-rail__row::-webkit-scrollbar {
+    display: none;
+}
+.nylah-rail__row > * {
+    scroll-snap-align: start;
+    scroll-margin-inline: 0.25rem;
+}
+/* Empty rails render nothing — no dead headers, no "no items" filler. */
+.nylah-rail:empty {
+    display: none;
+}
+
+/* ── Rail cards ─────────────────────────────────────────────── */
+.nylah-rail [data-nylah-item] {
+    scroll-margin-inline: 0.5rem;
+    scroll-margin-block: 0.5rem;
+    border-radius: var(--nylah-card-radius, 1rem);
+    transition:
+        transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+        border-color 180ms ease,
+        box-shadow 180ms ease;
+}
+.nylah-rail [data-nylah-item]:focus-visible {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: 0 10px 36px -8px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+}
+@media (prefers-reduced-motion: reduce) {
+    .nylah-rail [data-nylah-item]:focus-visible {
+        transform: none;
+    }
+}
+/* Focus-only meta (rating / year / genre / status). Shown on the
+   FOCUSED card, never on hover alone. */
+.nylah-card__meta--focus {
+    display: none;
+}
+[data-nylah-item]:focus-visible .nylah-card__meta--focus,
+[data-nylah-item]:focus-within .nylah-card__meta--focus {
+    display: block;
+}
+
+/* ── Home hero ──────────────────────────────────────────────── */
+.nylah-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.5rem 0.25rem 0;
+}
+.nylah-hero__title {
+    font-family: var(--font-serif);
+    font-size: var(--nylah-hero-title, 3rem);
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    line-height: 0.95;
+    color: var(--color-fg);
+}
+.nylah-hero__meta {
+    font-size: 0.9375rem;
+    color: var(--color-fg-2);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Left nav ─────────────────────────────────────────────────
+   Slim rail, big items: taller hit areas, larger glyphs and type,
+   and a wine bar on the active item so the current section reads
+   from the couch even with the rail collapsed to icons. */
+.nylah-nav-item[aria-current="page"] {
+    box-shadow: inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350));
+}
+[dir="rtl"] .nylah-nav-item[aria-current="page"] {
+    box-shadow: inset -3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350));
+}
+
 :root[data-accent="lime"] {
     --xt-tint-hue: 130;
     --color-accent:      var(--accent-swatch-lime);
@@ -2840,9 +3020,12 @@ html[data-density="comfortable"] :is(#movie-grid, #series-grid) { gap: 1.5rem; }
     height: 0;
     pointer-events: none;
     z-index: 60;
+    /* Nylah focus system: strong glowing ring — 3px wine core, halo,
+       outer glow. This is the one focus ring; see the Nylah tokens. */
     box-shadow:
-        0 0 0 1px var(--color-accent),
-        0 0 20px -10px color-mix(in oklch, var(--color-accent) 55%, transparent);
+        0 0 0 3px var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        0 0 0 7px var(--nylah-focus-halo, oklch(0.72 0.17 350 / 0.22)),
+        0 0 28px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
     border-radius: 12px;
     opacity: 0;
     transition: opacity 160ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -3175,10 +3358,12 @@ html[data-perf-mode="on"] * {
 
 /* -------------------------------------------------------------------------
  * TV: perf mode hides .xt-focus-glide, so D-pad focus needs its own ring.
+ * Nylah focus system: 3px wine ring + glow, matching the glide.
  * -------------------------------------------------------------------------*/
 html[data-tv] :is(a, button, summary, input, textarea, select, [tabindex]):focus-visible {
-    outline: 3px solid var(--color-accent);
+    outline: 3px solid var(--nylah-focus-ring, oklch(0.72 0.17 350));
     outline-offset: 2px;
+    box-shadow: 0 0 24px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
 }
 
 /* TV: compact hero so the poster grid below fits above the fold. */

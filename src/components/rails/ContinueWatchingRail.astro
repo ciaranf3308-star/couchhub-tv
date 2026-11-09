@@ -1,0 +1,26 @@
+---
+// Nylah Studios home rail 1 of 5: Continue Watching.
+//
+// Thin Astro shell around the existing ContinueWatching Svelte strip —
+// the data logic, card markup and progress state all stay in that
+// component (restyled in place for the 10-foot UI); this file only
+// gives the rail its place in the home stack and its navigation
+// contract. The other four rails are built by worker 2 and share the
+// same contract:
+//
+//   <section data-nylah-rail="<id>" class="nylah-rail"> … </section>
+//   every card's primary focusable carries `data-nylah-item`
+//   header uses .nylah-rail__head / .nylah-rail__title (or reuses
+//   .hub-section-head — global.css restyles both inside a rail)
+//   horizontal row uses .nylah-rail__row
+//
+// The gamepad rail model (src/scripts/lib/gamepad.ts) discovers rails
+// by [data-nylah-rail] at runtime, so a rail that renders nothing
+// (Continue Watching hides itself when empty) simply drops out of
+// the up/down order — no dead ends, no special-casing here.
+import ContinueWatching from "../ContinueWatching.svelte";
+---
+
+<section data-nylah-rail="continue-watching" class="nylah-rail">
+	<ContinueWatching client:load />
+</section>

@@ -1,12 +1,19 @@
 ---
+// Nylah Studios home (v0.2.0 redesign): a vertical stack of rails.
+// Up/down moves between rails, left/right within a rail — see
+// src/scripts/lib/gamepad.ts for the navigation model.
+//
+// Rail order is fixed: Continue Watching, Trending this week, AI
+// suggestions for Ciaran, AI suggestions for Aisling, IMDb top-rated.
+// The last four rails are built by worker 2; this page imports them
+// from ../components/rails/ — they must exist before this page builds.
 import Layout from "@/layouts/Layout.astro";
-import HubStrips from "@/components/HubStrips.svelte";
 import WelcomeCard from "@/components/WelcomeCard.astro";
-import {
-	IconDeviceTv,
-	IconMovie,
-	IconStack2,
-} from "@tabler/icons-svelte";
+import ContinueWatchingRail from "../components/rails/ContinueWatchingRail.astro";
+import TrendingRail from "../components/rails/TrendingRail.astro";
+import SuggestionsCiaranRail from "../components/rails/SuggestionsCiaranRail.astro";
+import SuggestionsAislingRail from "../components/rails/SuggestionsAislingRail.astro";
+import TopRatedRail from "../components/rails/TopRatedRail.astro";
 ---
 
 <Layout>
@@ -51,146 +58,26 @@ import {
 			<WelcomeCard />
 		</section>
 
-		<nav
-			id="hub-tiles"
-			aria-label="Browse" data-i18n-attr="aria-label:aria.browse"
-			class="grid gap-3 sm:gap-4 shrink-0
-				grid-cols-1
-				landscape:grid-cols-[2fr_1fr] landscape:grid-rows-2
-				lg:grid-cols-[2fr_1fr] lg:grid-rows-2">
-			<a
-				href="/livetv"
-				aria-label="Watch Live TV" data-i18n-attr="aria-label:aria.watchLiveTv"
-				style="animation-delay: 50ms;"
-				class="tile-enter lg:row-span-2 landscape:row-span-2 group relative flex flex-col justify-between
-					rounded-2xl border border-line bg-surface
-					p-6 sm:p-8 lg:p-12
-					min-h-56 landscape:min-h-0 lg:min-h-0 overflow-hidden
-					transition-[transform,border-color,background-color] duration-300 ease-out
-					hover:border-accent hover:bg-surface-2
-					focus-visible:bg-surface-2
-					hover:transform-[translateY(-2px)]
-					focus-visible:transform-[translateY(-2px)]">
-				<div
-					id="livetv-tile-art"
-					class="tile-art pointer-events-none"
-					aria-hidden="true"></div>
-				<div class="relative flex items-start justify-between gap-4 z-10">
-					<IconDeviceTv
-						aria-hidden="true"
-						stroke={1}
-						class="size-12 sm:size-16 lg:size-24 text-fg-3 shrink-0 transition-colors duration-200 group-hover:text-accent group-focus-visible:text-accent"
-					/>
-					<p
-						id="hero-eyebrow"
-						class="font-sans text-eyebrow font-medium uppercase text-fg-3 text-right pt-2 tabular-nums"
-						aria-hidden="true">
-					</p>
-				</div>
-				<div class="relative mt-auto pt-6 z-10">
-					<h2
-						data-i18n="nav.livetv"
-						class="font-serif tracking-[-0.02em] leading-[0.92] text-fg
-							group-hover:text-accent group-focus-visible:text-accent
-							transition-colors duration-200 ms-[-0.05em]"
-						style="font-size: clamp(3rem, 6vw + 1.5rem, 8.5rem);">
-						Live TV
-					</h2>
-					<p
-						id="livetv-tile-sub"
-						data-i18n="hub.tile.livetv.sub"
-						class="mt-4 sm:mt-5 text-sm sm:text-base text-fg-2 max-w-md font-sans tracking-tight truncate">
-						Channels, and what's on right now.
-					</p>
-				</div>
-			</a>
+		<header data-nylah-hero class="nylah-hero">
+			<h1 id="hero-greeting" class="nylah-hero__title">Good evening</h1>
+			<p
+				id="hero-eyebrow"
+				class="nylah-hero__meta tabular-nums"
+				aria-hidden="true">
+			</p>
+		</header>
 
-			<a
-				href="/movies"
-				aria-label="Browse Movies" data-i18n-attr="aria-label:aria.browseMovies"
-				style="animation-delay: 150ms;"
-				class="tile-enter group relative overflow-hidden flex flex-col justify-between
-					rounded-2xl border border-line bg-surface
-					p-5 sm:p-6
-					min-h-28 landscape:min-h-0 lg:min-h-0
-					transition-[transform,border-color,background-color] duration-300 ease-out
-					hover:border-accent hover:bg-surface-2
-					focus-visible:bg-surface-2
-					hover:transform-[translateY(-2px)]
-					focus-visible:transform-[translateY(-2px)]">
-				<div
-					id="movies-tile-art"
-					class="tile-art pointer-events-none"
-					aria-hidden="true"></div>
-				<IconMovie
-					aria-hidden="true"
-					stroke={1.25}
-					class="relative z-10 size-9 sm:size-10 lg:size-12 text-fg-3 transition-colors duration-200 group-hover:text-accent group-focus-visible:text-accent"
-				/>
-				<div class="relative z-10 mt-auto pt-4">
-					<h2 data-i18n="nav.movies" class="text-2xl sm:text-3xl lg:text-5xl font-serif tracking-[-0.02em] leading-[0.95]
-						text-fg group-hover:text-accent group-focus-visible:text-accent
-						transition-colors duration-200 ms-[-0.05em]">
-						Movies
-					</h2>
-					<p data-i18n="hub.tile.movies.sub" class="mt-1.5 text-sm text-fg-2">
-						Browse the library.
-					</p>
-				</div>
-			</a>
-
-			<a
-				href="/series"
-				aria-label="Browse Series" data-i18n-attr="aria-label:aria.browseSeries"
-				style="animation-delay: 250ms;"
-				class="tile-enter group relative overflow-hidden flex flex-col justify-between
-					rounded-2xl border border-line bg-surface
-					p-5 sm:p-6
-					min-h-28 landscape:min-h-0 lg:min-h-0
-					transition-[transform,border-color,background-color] duration-300 ease-out
-					hover:border-accent hover:bg-surface-2
-					focus-visible:bg-surface-2
-					hover:transform-[translateY(-2px)]
-					focus-visible:transform-[translateY(-2px)]">
-				<div
-					id="series-tile-art"
-					class="tile-art pointer-events-none"
-					aria-hidden="true"></div>
-				<IconStack2
-					aria-hidden="true"
-					stroke={1.25}
-					class="relative z-10 size-9 sm:size-10 lg:size-12 text-fg-3 transition-colors duration-200 group-hover:text-accent group-focus-visible:text-accent"
-				/>
-				<div class="relative z-10 mt-auto pt-4">
-					<h2 data-i18n="nav.series" class="text-2xl sm:text-3xl lg:text-5xl font-serif tracking-[-0.02em] leading-[0.95]
-						text-fg group-hover:text-accent group-focus-visible:text-accent
-						transition-colors duration-200 ms-[-0.05em]">
-						Series
-					</h2>
-					<p data-i18n="hub.tile.series.sub" class="mt-1.5 text-sm text-fg-2">
-						Shows and full seasons.
-					</p>
-				</div>
-			</a>
-		</nav>
-
-		<HubStrips client:load />
+		<div data-nylah-rails class="nylah-rails">
+			<ContinueWatchingRail />
+			<TrendingRail />
+			<SuggestionsCiaranRail />
+			<SuggestionsAislingRail />
+			<TopRatedRail />
+		</div>
 	</main>
 </Layout>
 
 <style>
-	@keyframes tile-enter {
-		from {
-			opacity: 0;
-			transform: translateY(12px);
-		}
-	}
-	.tile-enter {
-		animation: tile-enter 500ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-	}
-	html[data-first-run="true"] #hub-tiles {
-		display: none;
-	}
 	html[data-first-run="true"] #welcome {
 		display: flex;
 	}
@@ -200,12 +87,14 @@ import {
 	import "../scripts/updater-startup.js";
 	import { log } from "@/scripts/lib/log.js";
 	import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js";
-	import { getEntries, getActiveEntry, loadCreds } from "@/scripts/lib/creds.js";
-	import { getCached, hydrate as hydrateCache } from "@/scripts/lib/cache.js";
+	import { getEntries, getActiveEntry } from "@/scripts/lib/creds.js";
+	import { hydrate as hydrateCache } from "@/scripts/lib/cache.js";
 	import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.ts";
-	import { getRecents, ensureLoaded as ensurePrefsLoaded } from "@/scripts/lib/preferences.js";
-	import { getProgrammesSync, getNowNextForChannel, loadProgrammes } from "@/scripts/lib/epg-data.js";
 
+	// Hero: time-based greeting (big serif) + live meta line (time ·
+	// real channel count from the provider catalog). The greeting and
+	// the count are the only hero signals kept from the old hub tiles.
+	const greetingEl = document.getElementById("hero-greeting");
 	const eyebrow = document.getElementById("hero-eyebrow");
 	let heroChannelCount = 0;
 	const setHeroChannelCount = (count) => {
@@ -224,11 +113,12 @@ import {
 		};
 		const update = () => {
 			const now = new Date();
+			if (greetingEl) greetingEl.textContent = greet(now.getHours());
 			const time = new Intl.DateTimeFormat(undefined, {
 				hour: "numeric",
 				minute: "2-digit",
 			}).format(now);
-			const parts = [greet(now.getHours()), time];
+			const parts = [time];
 			if (heroChannelCount > 0) {
 				parts.push(t("hub.channelCount", { count: heroChannelCount.toLocaleString() }));
 			}
@@ -259,171 +149,26 @@ import {
 	document.addEventListener("xt:entries-updated", reconcileFirstRun);
 	document.addEventListener("xt:active-changed", reconcileFirstRun);
 
-	// ──────────────────────────────────────────────────────────
-	// Hub dashboard signals
-	// ──────────────────────────────────────────────────────────
-	const liveTileArt = document.getElementById("livetv-tile-art");
-	const liveTileSub = document.getElementById("livetv-tile-sub");
-	const moviesTileArt = document.getElementById("movies-tile-art");
-	const seriesTileArt = document.getElementById("series-tile-art");
-
-	const rotators = [];
-	function stopRotator() {
-		for (const rotator of rotators) clearInterval(rotator);
-		rotators.length = 0;
-	}
-
-	function startRotator(el, urls) {
-		if (!el || !urls.length) return;
-		const layers = [document.createElement("img"), document.createElement("img")];
-		for (const layer of layers) {
-			layer.className = "tile-art__layer";
-			layer.alt = "";
-			layer.decoding = "async";
-			layer.loading = "eager";
-			layer.referrerPolicy = "no-referrer";
-			layer.onerror = () => {
-				delete layer.dataset.on;
-			};
-			el.appendChild(layer);
-		}
-		let idx = 0;
-		let active = 0;
-		layers[active].src = urls[0];
-		layers[active].dataset.on = "true";
-		const advance = () => {
-			if (document.hidden) return;
-			idx = (idx + 1) % urls.length;
-			const next = active === 0 ? 1 : 0;
-			layers[next].src = urls[idx];
-			layers[next].dataset.on = "true";
-			delete layers[active].dataset.on;
-			active = next;
-		};
-		rotators.push(setInterval(advance, 8000));
-	}
-
-	function pickRandom(arr, count) {
-		if (arr.length <= count) return arr.slice();
-		const seen = new Set();
-		const out = [];
-		while (out.length < count && seen.size < arr.length) {
-			const idx = Math.floor(Math.random() * arr.length);
-			if (seen.has(idx)) continue;
-			seen.add(idx);
-			out.push(arr[idx]);
-		}
-		return out;
-	}
-
-	async function setupTileArt() {
+	// Hero signals: hydrate the live catalog once and publish the real
+	// channel count. (The old hub-tile artwork rotators and on-air
+	// line went away with the tiles; Continue Watching hydrates its
+	// own data.)
+	async function setupHeroSignals() {
 		try {
-			stopRotator();
 			const active = await getActiveEntry();
 			if (!active) return;
-			await Promise.all([
-				hydrateCache(active._id, "vod").catch(() => {}),
-				hydrateCache(active._id, "series").catch(() => {}),
-				hydrateCache(active._id, "live").catch(() => {}),
-				hydrateCache(active._id, "m3u").catch(() => {}),
-			]);
-			if (moviesTileArt) {
-				const vod = (getCached(active._id, "vod")?.data || [])
-					.filter((m) => m && m.logo)
-					.map((m) => m.logo);
-				const picks = pickRandom(vod, 6);
-				moviesTileArt.replaceChildren();
-				if (picks.length) startRotator(moviesTileArt, picks);
-			}
-			if (seriesTileArt) {
-				const series = (getCached(active._id, "series")?.data || [])
-					.filter((s) => s && s.logo)
-					.map((s) => s.logo);
-				const picks = pickRandom(series, 6);
-				seriesTileArt.replaceChildren();
-				if (picks.length) startRotator(seriesTileArt, picks);
-			}
-			await setupLiveSignals(active);
+			await hydrateCache(active._id, "live").catch(() => {});
+			setHeroChannelCount(readCachedLiveChannels(active._id).length);
 		} catch (e) {
-			log.warn("[hub] setupTileArt failed:", e);
+			log.warn("[hub] setupHeroSignals failed:", e);
 		}
-	}
-
-	async function setupLiveSignals(active) {
-		if (!liveTileArt || !liveTileSub) return;
-		await ensurePrefsLoaded();
-		const recents = getRecents(active._id, "live") || [];
-		const live = readCachedLiveChannels(active._id);
-		setHeroChannelCount(live.length);
-		const liveById = new Map(live.map((c) => [Number(c.id), c]));
-		let lastChannel = null;
-		if (recents.length) {
-			lastChannel = liveById.get(Number(recents[0].id)) || {
-				id: recents[0].id,
-				name: recents[0].name,
-				logo: recents[0].logo,
-				tvgId: null,
-			};
-		}
-		liveTileArt.replaceChildren();
-		if (!lastChannel) {
-			liveTileSub.textContent = t("hub.tile.livetv.sub");
-			return;
-		}
-		if (lastChannel.logo) {
-			const layer = document.createElement("img");
-			layer.className = "tile-art__layer tile-art__layer--logo";
-			layer.alt = "";
-			layer.decoding = "async";
-			layer.loading = "eager";
-			layer.referrerPolicy = "no-referrer";
-			layer.onerror = () => layer.remove();
-			layer.src = lastChannel.logo;
-			layer.dataset.on = "true";
-			liveTileArt.appendChild(layer);
-		}
-		const tvgId = lastChannel.tvgId || "";
-		const setOnAir = (programme) => {
-			if (!programme) return false;
-			liveTileSub.innerHTML =
-				`<span class="text-fg-3 uppercase tracking-wider text-eyebrow font-semibold mr-2">${escapeHtml(t("hub.tile.livetv.onNow"))}</span>` +
-				`<span class="text-fg-2">${escapeHtml(lastChannel.name)}</span>` +
-				`<span class="text-fg-3 mx-1.5">·</span>` +
-				`<span class="text-fg">${escapeHtml(programme.title)}</span>`;
-			return true;
-		};
-		const cached = getProgrammesSync(active._id);
-		const cachedHit = cached?.programmes && tvgId
-			? setOnAir(getNowNextForChannel(cached.programmes, lastChannel, active._id).current)
-			: false;
-		if (!cachedHit) {
-			liveTileSub.textContent = t("hub.tile.livetv.lastWatched", { name: lastChannel.name });
-			if (tvgId) {
-				try {
-					const creds = await loadCreds();
-					if (creds?.host) {
-						const state = await loadProgrammes(active._id, creds);
-						if (state?.programmes) {
-							const { current } = getNowNextForChannel(state.programmes, lastChannel, active._id);
-							if (current) setOnAir(current);
-						}
-					}
-				} catch {}
-			}
-		}
-	}
-
-	function escapeHtml(s) {
-		const d = document.createElement("div");
-		d.textContent = s || "";
-		return d.innerHTML;
 	}
 
 	if (typeof window !== "undefined") {
 		window.requestIdleCallback
-			? window.requestIdleCallback(setupTileArt, { timeout: 1500 })
-			: setTimeout(setupTileArt, 400);
-		document.addEventListener("xt:active-changed", setupTileArt);
-		document.addEventListener("xt:catalog-warmed", setupTileArt);
+			? window.requestIdleCallback(setupHeroSignals, { timeout: 1500 })
+			: setTimeout(setupHeroSignals, 400);
+		document.addEventListener("xt:active-changed", setupHeroSignals);
+		document.addEventListener("xt:catalog-warmed", setupHeroSignals);
 	}
 </script>

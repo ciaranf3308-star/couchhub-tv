@@ -16,12 +16,16 @@
 // native module and no extra permission.
 //
 // Mapping (standard mapping, Xbox controller):
-//   D-pad / left stick .... move focus (spatial navigation)
+//   D-pad / left stick .... move focus (spatial navigation; on the home
+//                            page the rail-aware model below takes over)
 //   A .................... activate the focused item
 //   B .................... back (Escape — closes dialogs, exits fullscreen
 //                            playback, per the app's own handlers)
-//   X .................... play / pause the current video
-//   Y .................... toggle fullscreen
+//   X .................... details of the focused card (opens its detail
+//                            page without autoplay); in the player it
+//                            stays play / pause — see inPlayerContext()
+//   Y .................... search; in the player it stays fullscreen
+//                            toggle — see inPlayerContext()
 //   LB / RB .............. seek -10s / +10s (video with a duration only)
 //   LT / RT .............. volume down / up
 //   Menu (Start) ......... open Settings
@@ -119,6 +123,191 @@ function togglePlayPause(): void {
   else video.pause();
 }
 
+// The player owns X / Y while it is the thing on screen: a video is
+// playing, fullscreen is active, or the dedicated player video exists.
+// Everywhere else X opens details and Y opens search, per the redesign
+// navigation model. This keeps the player controllable (there is no
+// other controller path to play/pause or fullscreen) without stealing
+// X / Y from browsing.
+function inPlayerContext(): boolean {
+  if (document.fullscreenElement) return true;
+  const playerVideo = document.querySelector<HTMLVideoElement>("#tv-player-video");
+  if (playerVideo) return true;
+  const video = currentVideo();
+  return !!video && !video.paused;
+}
+
+// X on a focused card: open its detail page without autoplay, so X is
+// "details" and A stays "play / resume". Only acts when stripping the
+// autoplay param actually changes the destination (movie / series
+// detail links); live channels and plain buttons are left alone.
+function openDetailsOfFocused(): void {
+  const el = document.activeElement as HTMLElement | null;
+  const link = el?.closest?.("a[href]") as HTMLAnchorElement | null;
+  if (!link) return;
+  const raw = link.getAttribute("href") || "";
+  if (!raw || raw === "#") return;
+  let href: string;
+  try {
+    const url = new URL(raw, window.location.href);
+    if (!url.searchParams.has("autoplay")) return;
+    url.searchParams.delete("autoplay");
+    href = url.pathname + url.search + url.hash;
+  } catch {
+    return;
+  }
+  if (href && href !== window.location.pathname + window.location.search) {
+    window.location.assign(href);
+  }
+}
+
+function goSearch(): void {
+  if (window.location.pathname === "/search") return;
+  window.location.assign("/search");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Nylah home rails — rail-aware navigation model (v0.2.0).
+//
+// Contract for rail components (worker 2's four rails + the Continue
+// Watching rail): each rail renders
+//   <section data-nylah-rail="<id>" class="nylah-rail"> … </section>
+// and marks the primary focusable of every card with `data-nylah-item`.
+// The home page wraps the stack in `[data-nylah-rails]`. Rail header
+// and row classes live in global.css (.nylah-rail__head / __title /
+// __row); a strip may reuse its existing .hub-section-head instead.
+//
+// Behaviour, only while the focused element is inside a rail (or no
+// element is focused yet):
+//   left / right ... move within the rail; at either end the move is
+//                    NOT consumed, so spatial navigation can carry it
+//                    on into the sidebar (left edge) as before.
+//   up / down ...... move to the adjacent rail, restoring that rail's
+//                    remembered column (focus memory); at the top /
+//                    bottom edge the move is NOT consumed, so spatial
+//                    navigation can carry it to the hero / nav.
+//   focus .......... is never lost: every handled move lands on a real
+//                    item, and a focusin handler scrolls the focused
+//                    item into view (both axes, nearest edge) so the
+//                    focused card is always visible.
+// Anything outside the rails (sidebar, dialogs, grids, player) keeps
+// the previous behaviour: plain arrow keys into spatial navigation.
+// ──────────────────────────────────────────────────────────────────────
+
+const railMemory = new Map<Element, number>();
+
+function isVisible(el: Element): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) return false;
+  return getComputedStyle(el).visibility !== "hidden";
+}
+
+function railItems(rail: Element): HTMLElement[] {
+  const marked = Array.from(
+    rail.querySelectorAll<HTMLElement>("[data-nylah-item]"),
+  ).filter((el) => isVisible(el));
+  if (marked.length > 0) return marked;
+  // Fallback for a rail whose cards carry no marker: top-level links
+  // and buttons only (a nested button inside a card link is not its
+  // own item).
+  const candidates = Array.from(
+    rail.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"),
+  ).filter((el) => isVisible(el));
+  return candidates.filter(
+    (el) =>
+      !candidates.some(
+        (other) => other !== el && other.contains(el),
+      ),
+  );
+}
+
+function homeRails(): Element[] {
+  return Array.from(document.querySelectorAll("[data-nylah-rail]")).filter(
+    (rail) => railItems(rail).length > 0 && isVisible(rail),
+  );
+}
+
+function focusRailItem(rail: Element, index: number): void {
+  const items = railItems(rail);
+  if (items.length === 0) return;
+  const clamped = Math.max(0, Math.min(index, items.length - 1));
+  railMemory.set(rail, clamped);
+  items[clamped].focus({ preventScroll: true });
+  // The focusin handler below scrolls it into view; calling it here
+  // too covers the (rare) case where focus was already on the item.
+  items[clamped].scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+// Returns true when the direction was consumed by the rail model.
+function handleRailDirection(dir: Direction): boolean {
+  const rails = homeRails();
+  if (rails.length === 0) return false;
+  const active = document.activeElement as HTMLElement | null;
+  const rail = active?.closest?.("[data-nylah-rail]") ?? null;
+
+  if (dir === "left" || dir === "right") {
+    if (!rail) return false;
+    const items = railItems(rail);
+    const at = items.indexOf(active as HTMLElement);
+    if (at === -1) return false;
+    const next = dir === "right" ? at + 1 : at - 1;
+    // Past either end: don't consume — spatial navigation carries the
+    // move on (left edge reaches the sidebar).
+    if (next < 0 || next >= items.length) return false;
+    focusRailItem(rail, next);
+    return true;
+  }
+
+  // up / down
+  if (!rail) {
+    // Nothing in a rail focused yet: Down from the hero (or from no
+    // focus at all) enters the first rail at its remembered item.
+    if (
+      dir === "down" &&
+      (!active ||
+        active === document.body ||
+        active.closest?.("[data-nylah-hero]"))
+    ) {
+      focusRailItem(rails[0], railMemory.get(rails[0]) ?? 0);
+      return true;
+    }
+    return false;
+  }
+  const atRail = rails.indexOf(rail);
+  const target = dir === "down" ? rails[atRail + 1] : rails[atRail - 1];
+  // Past the top / bottom rail: don't consume — spatial navigation
+  // carries the move to the hero / nav as before.
+  if (!target) return false;
+  const items = railItems(rail);
+  const col = items.indexOf(active as HTMLElement);
+  const remembered = railMemory.get(target) ?? 0;
+  const index = col === -1 ? remembered : Math.min(col, railItems(target).length - 1);
+  focusRailItem(target, Math.max(0, index));
+  return true;
+}
+
+function mountRailAutoScroll(): void {
+  const flag = "__couchhubTvRailAutoScrollMounted" as const;
+  if ((window as unknown as Record<string, unknown>)[flag]) return;
+  (window as unknown as Record<string, unknown>)[flag] = true;
+
+  document.addEventListener("focusin", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target || target === document.body) return;
+    const rail = target.closest?.("[data-nylah-rail]");
+    if (!rail) return;
+    // Remember the column so up/down restores it on return.
+    const items = railItems(rail);
+    const at = items.indexOf(target);
+    if (at !== -1) railMemory.set(rail, at);
+    // Auto-scroll: keep the focused item fully in view, both axes.
+    // block/inline "nearest" is a no-op when it is already visible,
+    // so manual scrolling is never fought. Instant, not smooth: a
+    // held D-pad repeats faster than a smooth scroll settles.
+    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+  });
+}
+
 function toggleFullscreen(): void {
   if (document.fullscreenElement) {
     void document.exitFullscreen().catch(() => {});
@@ -171,6 +360,9 @@ export function mountGamepad(): void {
   const markGamepadActive = () => {
     document.documentElement.classList.add("gamepad-active");
   };
+  // Rail auto-scroll + focus memory live here so keyboard (spatial
+  // nav) focus moves get them too, not only gamepad moves.
+  mountRailAutoScroll();
   window.addEventListener("pointerdown", () => {
     document.documentElement.classList.remove("gamepad-active");
   }, { passive: true });
@@ -180,6 +372,9 @@ export function mountGamepad(): void {
 
   function move(dir: Direction): void {
     markGamepadActive();
+    // Home rails get the rail-aware model; everything else falls
+    // through to plain arrow keys into spatial navigation.
+    if (handleRailDirection(dir)) return;
     dispatchKey(ARROW_KEY[dir]);
   }
 
@@ -280,11 +475,15 @@ export function mountGamepad(): void {
     }
     if (justPressed(BTN_X)) {
       markGamepadActive();
-      togglePlayPause();
+      // Player keeps play / pause; browsing opens the card's details.
+      if (inPlayerContext()) togglePlayPause();
+      else openDetailsOfFocused();
     }
     if (justPressed(BTN_Y)) {
       markGamepadActive();
-      toggleFullscreen();
+      // Player keeps the fullscreen toggle; browsing opens search.
+      if (inPlayerContext()) toggleFullscreen();
+      else goSearch();
     }
     if (justPressed(BTN_LB)) {
       markGamepadActive();
