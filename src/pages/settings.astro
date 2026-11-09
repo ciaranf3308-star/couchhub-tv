@@ -60,12 +60,14 @@ import CloseToTrayCard from "@/components/CloseToTrayCard.svelte"
 import ConnectionLimitBanner from "@/components/ConnectionLimitBanner.svelte"
 import AndroidNativePlayerCard from "@/components/AndroidNativePlayerCard.svelte"
 import RememberedAndroidPlayerCard from "@/components/RememberedAndroidPlayerCard.svelte"
+import ProfileSwitcher from "../components/ProfileSwitcher.astro"
 
 interface NavCard { id: string; labelKey: string; label: string; conditional?: boolean }
 interface NavSection { id: string; labelKey: string; label: string; cards: NavCard[]; danger?: boolean }
 
 const navStructure: NavSection[] = [
   { id: "settings-playlists", labelKey: "settings.group.playlists", label: "Playlists", cards: [] },
+  { id: "settings-profile", labelKey: "settings.group.profile", label: "Profile", cards: [] },
   { id: "settings-appearance", labelKey: "settings.group.appearance", label: "Appearance", cards: [
     { id: "card-display",    labelKey: "settings.section.display",     label: "Display" },
     { id: "card-behavior",   labelKey: "settings.appearance.behavior", label: "Behavior" },
@@ -273,6 +275,15 @@ const navStructure: NavSection[] = [
       </form>
     </dialog>
 
+    <!-- Group: Profile — who is watching. The switcher itself is worker 2's
+         ProfileSwitcher component; this page only mounts it. -->
+    <section id="settings-profile" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <h2 data-i18n="settings.group.profile" class="settings-group__title">Profile</h2>
+      <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <ProfileSwitcher />
+      </div>
+    </section>
+
     <!-- Group: Appearance (language, theme/font, perf mode, home page sections, close behavior) -->
     <section id="settings-appearance" class="settings-group scroll-mt-8 lg:scroll-mt-20">
       <h2 data-i18n="settings.group.appearance" class="settings-group__title">Appearance</h2>
@@ -454,7 +465,7 @@ const navStructure: NavSection[] = [
                       themeBtns[j].setAttribute("aria-checked", themeBtns[j].getAttribute("data-theme") === currentTheme ? "true" : "false");
                     }
                   }
-                  var currentAccent = localStorage.getItem("xt_accent") || "fuchsia";
+                  var currentAccent = localStorage.getItem("xt_accent") || "burgundy";
                   var accentGroup = document.getElementById("settings-accent");
                   if (accentGroup) {
                     var accentBtns = accentGroup.querySelectorAll(".accent-btn");
@@ -5448,6 +5459,38 @@ const navStructure: NavSection[] = [
         background: var(--color-accent);
         border-radius: 1px;
       }
+    }
+
+    /* ── Nylah Studios RedSilk reskin (scoped to this page) ──────────
+       Deep wine burgundy + warm beige come from the burgundy accent
+       preset in global.css; these rules only dress this page in that
+       family — Instrument Serif display titles, accent first letters,
+       warm depth on surfaces, and a glowing focus halo on the nav.
+       No setting is moved, renamed, or rewired here. */
+    .route-hero__title {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+    }
+    .settings-group__title {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: clamp(1.5rem, 0.8vw + 1.2rem, 2rem);
+      letter-spacing: -0.02em;
+    }
+    .settings-group__title::first-letter {
+      color: var(--color-accent);
+    }
+    .settings-surface,
+    .settings-group > .rounded-2xl {
+      box-shadow: 0 20px 45px -30px
+        color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    .settings-nav-link:focus-visible,
+    .settings-subnav-link:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent-soft),
+        0 0 16px var(--color-accent-soft);
     }
   </style>
 

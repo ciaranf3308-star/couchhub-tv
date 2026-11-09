@@ -35,6 +35,12 @@ import {
 import { mountCategoryPicker, genreLabelForCategory } from "@/scripts/lib/category-picker.ts"
 import { GENRE_CAT_PREFIX, GENRE_INDEX_EVENT, getGenreIndex, ensureGenreBoost } from "@/scripts/lib/genre-index.ts"
 import { mountSurprisePicker } from "@/scripts/lib/surprise-picker.ts"
+import {
+  mountBrowseFilters,
+  yearMatches,
+  ratingMatches,
+  parseYear,
+} from "@/scripts/lib/browse-filters.ts"
 import { mountPersonSuggestStrip } from "@/scripts/lib/person-suggest.ts"
 import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { renderProviderError } from "@/scripts/lib/provider-error.js"
@@ -245,6 +251,16 @@ mountSurprisePicker({
   triggerId: "series-surprise",
   getPool: () => filtered.map((group) => group.displayEntry),
   getPlaylistId: () => activePlaylistId,
+})
+
+// Year + rating chip filters (genre lives in the category picker above).
+// Mounted once; applyFilter() reads the handle, paintSeries() refreshes
+// the year decades from the loaded catalog.
+const browseFilters = mountBrowseFilters({
+  kind: "series",
+  containerId: "series-browse-filters",
+  getActivePlaylistId: () => activePlaylistId,
+  onChange: () => applyFilter(),
 })
 
 // STAR_OUTLINE / STAR_FILLED / BOOKMARK_FILLED are imported from entry-card.
@@ -883,6 +899,10 @@ function applyFilter() {
     const survivorIds = survivors.map((series) => series.id)
     const displayEntryId = pickPreferredEntryId(survivorIds, groupingIndex.tagByEntryId, preferredTags, groupingIndex.qualityRankByEntryId)
     const displayEntry = survivors.find((series) => series.id === displayEntryId) || survivors[0]
+    // Browse filters (year decade + minimum rating) apply to the display
+    // entry — the same level hide-watched uses above.
+    if (!yearMatches(displayEntry.year, browseFilters?.getYear() ?? "")) continue
+    if (!ratingMatches(displayEntry.rating, browseFilters?.getMinRating() ?? 0)) continue
     const maxScore = scoreById ? Math.max(...survivors.map((series) => scoreById.get(series.id) || 0)) : 0
     const maxAdded = Math.max(...survivors.map((series) => Number(series.added) || 0))
 
@@ -911,6 +931,25 @@ function applyFilter() {
         sensitivity: "base",
       })
     )
+  } else if (mode === "year-desc") {
+    // Titles with no year sort last in both directions.
+    displayGroups.sort((firstGroup, secondGroup) => {
+      const firstYear = parseYear(firstGroup.displayEntry.year) ?? -1
+      const secondYear = parseYear(secondGroup.displayEntry.year) ?? -1
+      if (secondYear !== firstYear) return secondYear - firstYear
+      return (firstGroup.displayEntry.name || "").localeCompare(secondGroup.displayEntry.name || "", "en", {
+        sensitivity: "base",
+      })
+    })
+  } else if (mode === "year-asc") {
+    displayGroups.sort((firstGroup, secondGroup) => {
+      const firstYear = parseYear(firstGroup.displayEntry.year) ?? Number.POSITIVE_INFINITY
+      const secondYear = parseYear(secondGroup.displayEntry.year) ?? Number.POSITIVE_INFINITY
+      if (firstYear !== secondYear) return firstYear - secondYear
+      return (firstGroup.displayEntry.name || "").localeCompare(secondGroup.displayEntry.name || "", "en", {
+        sensitivity: "base",
+      })
+    })
   }
 
   filtered = displayGroups
@@ -1011,6 +1050,7 @@ function showEmptyState() {
 async function paintSeries(data, fromCache, age) {
   all = data
   groupingIndex = buildGroupingIndex(all)
+  browseFilters?.refreshYears(data)
   if (listStatus) {
     listStatus.textContent =
       t("series.totalSeries", { count: all.length.toLocaleString() }) +
@@ -1111,6 +1151,7 @@ async function loadSeries() {
   syncHideWatchedControl()
   syncGroupLangsControl()
   syncLangFilterControl()
+  browseFilters?.sync()
   await hydrateCache(active._id, "series")
 
   const hit = getCached(active._id, "series")

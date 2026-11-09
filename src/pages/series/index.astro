@@ -62,6 +62,8 @@ import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@t
 						{ value: "default", label: "Default", key: "sort.default" },
 						{ value: "added", label: "Recently added", key: "sort.recentlyAdded" },
 						{ value: "rating", label: "Rating", key: "sort.rating" },
+						{ value: "year-desc", label: "Newest first", key: "sort.yearDesc" },
+						{ value: "year-asc", label: "Oldest first", key: "sort.yearAsc" },
 						{ value: "az", label: "A-Z", key: "sort.az" },
 					]}
 					selects={[
@@ -89,6 +91,10 @@ import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@t
 				</button>
 			</div>
 		</section>
+
+		<!-- Browse filters: year decade + minimum rating chips, rendered by
+		     browse-filters.ts (genre lives in the category picker above). -->
+		<div id="series-browse-filters" class="shrink-0"></div>
 
 		<!-- Active person filter -->
 		<div id="series-person-filter-row" hidden class="flex items-center gap-2 shrink-0 px-1">

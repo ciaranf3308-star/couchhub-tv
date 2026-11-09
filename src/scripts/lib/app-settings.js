@@ -273,7 +273,10 @@ export function setPerfMode(on) {
 // Accent color
 export function getAccent() {
   const stored = readLS(KEY_ACCENT, "")
-  return stored === ACCENT_RANDOM_ID || ACCENT_PRESETS.includes(stored) ? stored : "fuchsia"
+  // Nylah Studios default is burgundy (bedroom theme): Layout applies it
+  // when nothing is stored, so this must agree or the picker checks the
+  // wrong swatch on a fresh install.
+  return stored === ACCENT_RANDOM_ID || ACCENT_PRESETS.includes(stored) ? stored : "burgundy"
 }
 
 /** Picks a roll from `presets`, reusing `cachedRoll` when it's still a valid pick. */

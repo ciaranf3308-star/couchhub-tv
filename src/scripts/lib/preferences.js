@@ -41,6 +41,7 @@ export const EVT_SEARCH_RECENT_CHANGED = "xt:search-recent-changed"
 export const EVT_HIDE_WATCHED_CHANGED = "xt:hide-watched-changed"
 export const EVT_LANG_FILTER_CHANGED = "xt:lang-filter-changed"
 export const EVT_GROUP_LANGS_CHANGED = "xt:group-langs-changed"
+export const EVT_BROWSE_FILTERS_CHANGED = "xt:browse-filters-changed"
 
 let storePromise = null
 const STORE_LOAD_TIMEOUT_MS = 3000
@@ -245,6 +246,10 @@ function emptyEntry() {
     watchedSeriesOverride: Object.create(null),
     langFilter: { vod: "", series: "" },
     groupLangs: { vod: true, series: true },
+    browseFilters: {
+      vod: { year: "", minRating: 0 },
+      series: { year: "", minRating: 0 },
+    },
   }
 }
 
@@ -256,6 +261,7 @@ function hydrate(raw) {
     const v = val.viewSort && typeof val.viewSort === "object" ? val.viewSort : {}
     const langFilterRaw = val.langFilter && typeof val.langFilter === "object" ? val.langFilter : {}
     const groupLangsRaw = val.groupLangs && typeof val.groupLangs === "object" ? val.groupLangs : {}
+    const browseFiltersRaw = val.browseFilters && typeof val.browseFilters === "object" ? val.browseFilters : {}
     cache.set(pid, {
       favLive: new Set(Array.isArray(val.favLive) ? val.favLive : []),
       favVod: new Set(Array.isArray(val.favVod) ? val.favVod : []),
@@ -358,8 +364,8 @@ function hydrate(raw) {
           ? Object.assign(Object.create(null), val.watchSeries)
           : Object.create(null),
       viewSort: {
-        vod: ["default", "added", "az"].includes(v.vod) ? v.vod : "default",
-        series: ["default", "added", "az"].includes(v.series)
+        vod: ["default", "added", "rating", "az", "year-desc", "year-asc"].includes(v.vod) ? v.vod : "default",
+        series: ["default", "added", "rating", "az", "year-desc", "year-asc"].includes(v.series)
           ? v.series
           : "default",
         live: ["default", "number", "az", "za", "cataz"].includes(v.live)
@@ -395,6 +401,10 @@ function hydrate(raw) {
       groupLangs: {
         vod: groupLangsRaw.vod !== false,
         series: groupLangsRaw.series !== false,
+      },
+      browseFilters: {
+        vod: sanitizeBrowseFilters(browseFiltersRaw.vod),
+        series: sanitizeBrowseFilters(browseFiltersRaw.series),
       },
     })
   }
@@ -453,6 +463,10 @@ function dehydrate() {
       watchedSeriesOverride: { ...v.watchedSeriesOverride },
       langFilter: { vod: v.langFilter.vod, series: v.langFilter.series },
       groupLangs: { vod: v.groupLangs.vod, series: v.groupLangs.series },
+      browseFilters: {
+        vod: { ...(v.browseFilters?.vod ?? { year: "", minRating: 0 }) },
+        series: { ...(v.browseFilters?.series ?? { year: "", minRating: 0 }) },
+      },
     }
   }
   return out
@@ -1742,8 +1756,8 @@ export function getAllGlobalFavorites() {
 // View sort preferences (recently-added etc.)
 // ---------------------------------------------------------------------------
 const VALID_SORTS_BY_KIND = {
-  vod: new Set(["default", "added", "rating", "az"]),
-  series: new Set(["default", "added", "rating", "az"]),
+  vod: new Set(["default", "added", "rating", "az", "year-desc", "year-asc"]),
+  series: new Set(["default", "added", "rating", "az", "year-desc", "year-asc"]),
   live: new Set(["default", "number", "az", "za", "cataz"]),
 }
 
@@ -1822,6 +1836,73 @@ export function setGroupLanguages(playlistId, kind, enabled) {
   entry.groupLangs[kind] = next
   scheduleSave()
   dispatch(EVT_GROUP_LANGS_CHANGED, { playlistId, kind, enabled: next })
+}
+
+// ---------------------------------------------------------------------------
+// Browse filters (movies / series grid: year decade + minimum rating)
+// ---------------------------------------------------------------------------
+// Year values: "" (all years), a decade key like "2020s", or "older"
+// (before 1980). Rating values: 0 (any) or a minimum on the 0-10 scale.
+const VALID_YEAR_FILTERS = new Set([
+  "",
+  "older",
+  "1980s",
+  "1990s",
+  "2000s",
+  "2010s",
+  "2020s",
+  "2030s",
+])
+const VALID_MIN_RATINGS = new Set([0, 6, 7, 8, 9])
+
+function sanitizeBrowseFilters(raw) {
+  const fallback = { year: "", minRating: 0 }
+  if (!raw || typeof raw !== "object") return { ...fallback }
+  return {
+    year:
+      typeof raw.year === "string" && VALID_YEAR_FILTERS.has(raw.year)
+        ? raw.year
+        : "",
+    minRating: VALID_MIN_RATINGS.has(raw.minRating) ? raw.minRating : 0,
+  }
+}
+
+/** @param {string} playlistId @param {"vod"|"series"} kind */
+export function getBrowseYearFilter(playlistId, kind) {
+  const entry = cache.get(playlistId)
+  const v = entry?.browseFilters?.[kind]?.year
+  return typeof v === "string" && VALID_YEAR_FILTERS.has(v) ? v : ""
+}
+
+/** @param {string} playlistId @param {"vod"|"series"} kind @param {string} year */
+export function setBrowseYearFilter(playlistId, kind, year) {
+  if (!playlistId) return
+  const next = typeof year === "string" && VALID_YEAR_FILTERS.has(year) ? year : ""
+  const entry = getOrCreate(playlistId)
+  if (!entry.browseFilters[kind]) entry.browseFilters[kind] = { year: "", minRating: 0 }
+  if (entry.browseFilters[kind].year === next) return
+  entry.browseFilters[kind].year = next
+  scheduleSave()
+  dispatch(EVT_BROWSE_FILTERS_CHANGED, { playlistId, kind, year: next, minRating: entry.browseFilters[kind].minRating })
+}
+
+/** @param {string} playlistId @param {"vod"|"series"} kind */
+export function getBrowseMinRating(playlistId, kind) {
+  const entry = cache.get(playlistId)
+  const v = entry?.browseFilters?.[kind]?.minRating
+  return VALID_MIN_RATINGS.has(v) ? v : 0
+}
+
+/** @param {string} playlistId @param {"vod"|"series"} kind @param {number} minRating */
+export function setBrowseMinRating(playlistId, kind, minRating) {
+  if (!playlistId) return
+  const next = VALID_MIN_RATINGS.has(minRating) ? minRating : 0
+  const entry = getOrCreate(playlistId)
+  if (!entry.browseFilters[kind]) entry.browseFilters[kind] = { year: "", minRating: 0 }
+  if (entry.browseFilters[kind].minRating === next) return
+  entry.browseFilters[kind].minRating = next
+  scheduleSave()
+  dispatch(EVT_BROWSE_FILTERS_CHANGED, { playlistId, kind, year: entry.browseFilters[kind].year, minRating: next })
 }
 
 // ---------------------------------------------------------------------------
