@@ -1,4 +1,4 @@
-# CouchHub TV v0.1 — Deployment Handoff for Codex
+# Nylah Studios — Deployment Handoff for Codex
 
 **For:** Codex (installation agent on the real Windows mini PC)
 **Hardware:** MINISFORUM UM790 Pro, Ryzen 9 7940HS, Radeon 780M, 32 GB,
@@ -12,7 +12,7 @@ the first on-device run as the real verification pass.
 
 Upstream **Extreme InfiniTV is not a WPF/.NET app**. It is **Tauri 2 +
 Astro + Svelte 5** (Rust shell, web frontend), v1.9.0, GPL-3.0-or-later.
-CouchHub TV is a fork of that codebase, not a rewrite, and the fork
+Nylah Studios is a fork of that codebase, not a rewrite, and the fork
 follows the stack the upstream actually has:
 
 - Controller input is the **Gamepad API** in the web frontend
@@ -56,14 +56,14 @@ CI: `.github/workflows/build.yml` does the same build on
 ## 2. Install (portable installer, no admin claim — verify on device)
 
 1. Copy the NSIS installer to the mini PC and run it.
-2. Launch **CouchHub TV** from Start. Confirm the window opens titled
-   "CouchHub TV" with the blue accent (CouchHub palette).
+2. Launch **Nylah Studios** from Start. Confirm the window opens titled
+   "Nylah Studios" with the burgundy accent (Bedroom theme).
 3. First run shows the login / add-playlist screen. No playlist is
    bundled — see §3.
 
 ## 3. Configure the Xtream Codes account (on the PC, in the app)
 
-Do this in CouchHub TV under **Settings → Playlists → Add playlist →
+Do this in Nylah Studios under **Settings → Playlists → Add playlist →
 Xtream Codes** (or the first-run login screen), using the user's real
 subscription details. The field shape is documented in
 `docs/xtream-config.example.json` (placeholders only — the app does not
@@ -82,19 +82,19 @@ as the fallback. Do not modify HotPlayer.
 ## 4. CouchHub launcher integration
 
 CouchHub (the launcher) still points its TV tile at HotPlayer for now.
-Do **not** repoint it at CouchHub TV in this milestone — the launcher
-handoff says HotPlayer is the confirmed TV app. Once CouchHub TV is
+Do **not** repoint it at Nylah Studios in this milestone — the launcher
+handoff says HotPlayer is the confirmed TV app. Once Nylah Studios is
 validated on the hardware (§5), repointing the TV tile is a one-line
 config change in CouchHub (`%LOCALAPPDATA%\CouchHub\config.json`, TV
-target → the CouchHub TV executable) and is a separate decision for the
-user. Return home from CouchHub TV is designed for that future state:
+target → the Nylah Studios executable) and is a separate decision for the
+user. Return home from Nylah Studios is designed for that future state:
 View+Menu (2 s hold) or Ctrl+Alt+Home pauses video, exits fullscreen
-and minimises CouchHub TV, and CouchHub's own hotkey/tray brings its
+and minimises Nylah Studios, and CouchHub's own hotkey/tray brings its
 dashboard back.
 
 ## 5. Verify on the hardware (checklist — report results back)
 
-- [ ] Installer runs; app launches titled "CouchHub TV"; About in
+- [ ] Installer runs; app launches titled "Nylah Studios"; About in
       Settings shows the fork attribution to Extreme InfiniTV / GPL-3.0.
 - [ ] Xtream Codes login works with the real subscription; Live TV
       channels, categories and EPG load; a channel plays fullscreen.
@@ -154,4 +154,4 @@ dashboard back.
   taskbar to get back to CouchHub, and report exactly which trigger
   failed in which screen.
 - Do not install, bundle or modify HotPlayer, ES-DE or FreeTube as part
-  of CouchHub TV; do not add an IPTV subscription to the app.
+  of Nylah Studios; do not add an IPTV subscription to the app.

@@ -1,4 +1,4 @@
-// CouchHub TV — Xbox controller input via the Gamepad API.
+// Nylah Studios — Xbox controller input via the Gamepad API.
 //
 // Upstream Extreme InfiniTV already navigates by keyboard / D-pad through
 // spatial-navigation.js, but it has no Gamepad API support at all (no

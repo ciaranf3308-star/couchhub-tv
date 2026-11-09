@@ -21,7 +21,7 @@ interface Props {
   view: string
 }
 const { pageTitle, view } = Astro.props
-const documentTitle = `${pageTitle} | CouchHub TV`
+const documentTitle = `${pageTitle} | Nylah Studios`
 
 const path = Astro.url.pathname.replace(/\/$/, "") || "/tv"
 const activeNavHref = tvNavActiveHref(path)
@@ -131,7 +131,7 @@ const navItems = [
           } else if (storedAccent && storedAccent !== "fuchsia" && KNOWN_ACCENTS.indexOf(storedAccent) !== -1) {
             document.documentElement.setAttribute("data-accent", storedAccent)
           } else if (!storedAccent) {
-            // CouchHub TV default: burgundy accent (bedroom theme) — deep
+            // Nylah Studios default: burgundy accent (bedroom theme) — deep
             // wine in dark mode, warm beige in light mode.
             document.documentElement.setAttribute("data-accent", "burgundy")
           }
@@ -322,7 +322,7 @@ const navItems = [
         ;(window as any).__xtTvShellBooted = true
         bootTvShell()
       }
-      // CouchHub TV: Xbox controller (Gamepad API) + return home to CouchHub.
+      // Nylah Studios: Xbox controller (Gamepad API) + return home to CouchHub.
       mountGamepad()
       mountReturnHome()
     </script>

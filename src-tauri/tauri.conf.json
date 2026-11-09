@@ -1,7 +1,7 @@
 {
-  "productName": "CouchHub TV",
+  "productName": "Nylah Studios",
   "mainBinaryName": "couchhub-tv",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "identifier": "com.couchhub.tv",
   "build": {
     "frontendDist": "../dist",
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "CouchHub TV",
+        "title": "Nylah Studios",
         "width": 1300,
         "height": 850,
         "minWidth": 900,
@@ -47,7 +47,7 @@
     "targets": "all",
     "publisher": "CouchHub",
     "category": "public.app-category.video",
-    "copyright": "\u00a9 2026 CouchHub TV \u2014 fork of Extreme InfiniTV (\u00a9 2025 Ludovico Ferrara), GPL-3.0-or-later",
+    "copyright": "\u00a9 2026 Nylah Studios \u2014 fork of Extreme InfiniTV (\u00a9 2025 Ludovico Ferrara), GPL-3.0-or-later",
     "createUpdaterArtifacts": true,
     "android": {
       "versionCode": 101000000

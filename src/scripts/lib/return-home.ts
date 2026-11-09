@@ -1,4 +1,4 @@
-// CouchHub TV — return home to the CouchHub launcher.
+// Nylah Studios — return home to the CouchHub launcher.
 //
 // Triggers:
 //   - the gamepad View + Menu 2 s hold (dispatched as
@@ -8,10 +8,10 @@
 //
 // What happens: the current video (if any) is paused, fullscreen is
 // exited, and the Tauri window is minimised. CouchHub's own hotkey /
-// tray icon then brings the CouchHub dashboard back — CouchHub TV does
+// tray icon then brings the CouchHub dashboard back — Nylah Studios does
 // not try to launch or focus CouchHub itself, and it never closes,
 // kills or force-quits anything. Minimise (not hide/close) is deliberate:
-// if CouchHub is ever unavailable, CouchHub TV is still sitting in the
+// if CouchHub is ever unavailable, Nylah Studios is still sitting in the
 // taskbar where the user can bring it back.
 //
 // In a plain web preview (no Tauri) there is no window to minimise, so
@@ -19,7 +19,7 @@
 //
 // Untested on hardware: whether the gamepad View+Menu hold fires while
 // fullscreen playback owns the screen, and whether CouchHub's global
-// Ctrl+Alt+Home fires while CouchHub TV is the foreground app. Both are
+// Ctrl+Alt+Home fires while Nylah Studios is the foreground app. Both are
 // flagged for Codex in CODEX_HANDOFF.md — do not claim they work until
 // tested on the mini PC.
 

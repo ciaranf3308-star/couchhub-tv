@@ -14,8 +14,8 @@ interface Props {
 }
 const { pageTitle, showVersion = true } = Astro.props
 const documentTitle = pageTitle
-  ? `${pageTitle} | CouchHub TV`
-  : "CouchHub TV"
+  ? `${pageTitle} | Nylah Studios`
+  : "Nylah Studios"
 const appMode = import.meta.env.PUBLIC_APP_MODE || ""
 ---
 
@@ -32,7 +32,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     <meta name="theme-color" content="#f2dff0" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0e1628" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta property="og:title" content="CouchHub TV" />
+    <meta property="og:title" content="Nylah Studios" />
     <meta property="og:image" content="https://raw.githubusercontent.com/infinitel8p/Extreme-InfiniTV/refs/heads/main/src-tauri/icons/logos/icon-1024.png" />
     {
       appMode === "receiver" && (
@@ -251,7 +251,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
         } else if (storedAccent && storedAccent !== "fuchsia" && KNOWN_ACCENTS.indexOf(storedAccent) !== -1) {
           document.documentElement.setAttribute("data-accent", storedAccent);
         } else if (!storedAccent) {
-          // CouchHub TV default: burgundy accent (bedroom theme) — deep
+          // Nylah Studios default: burgundy accent (bedroom theme) — deep
           // wine in dark mode, warm beige in light mode.
           document.documentElement.setAttribute("data-accent", "burgundy");
         }
@@ -397,7 +397,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
           id="app-version"
           class="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-[max(1.25rem,env(safe-area-inset-right))] rounded-full bg-bg/75 backdrop-blur-sm px-2 py-0.5 text-2xs text-fg-3 tabular-nums pointer-events-none"
         >
-          CouchHub TV v{pkg.version} — fork of Extreme InfiniTV
+          Nylah Studios v{pkg.version} — fork of Extreme InfiniTV
         </div>
       )
     }
@@ -882,7 +882,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   }
   mountBackHandler()
   mountTvInputGuard()
-  // CouchHub TV: Xbox controller (Gamepad API) + return home to CouchHub.
+  // Nylah Studios: Xbox controller (Gamepad API) + return home to CouchHub.
   mountGamepad()
   mountReturnHome()
 
@@ -967,7 +967,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   const SpatialNavigation = window.SpatialNavigation
 
   console.log(
-    "%c∞ CouchHub TV%c\nFork of Extreme InfiniTV: https://github.com/infinitel8p/Extreme-InfiniTV",
+    "%c∞ Nylah Studios%c\nFork of Extreme InfiniTV: https://github.com/infinitel8p/Extreme-InfiniTV",
     "color: oklch(0.78 0.15 330); font: 600 1rem/1 ui-sans-serif, system-ui;",
     "color: oklch(0.6 0.011 250); font: 0.75rem/1.4 ui-sans-serif, system-ui;"
   )

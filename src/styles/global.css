@@ -168,7 +168,7 @@ html.xt-theme-switching::view-transition-new(root) {
     --accent-swatch-blue:    light-dark(oklch(0.50 0.20 250), oklch(0.78 0.15 250));
     --accent-swatch-violet:  light-dark(oklch(0.50 0.20 295), oklch(0.78 0.15 295));
     --accent-swatch-gold:    light-dark(oklch(0.55 0.15 85 ), oklch(0.85 0.16 90 ));
-    /* CouchHub TV "Burgundy" (bedroom theme): deep wine accent. */
+    /* Nylah Studios "Burgundy" (bedroom theme): deep wine accent. */
     --accent-swatch-burgundy: light-dark(oklch(0.45 0.19 350), oklch(0.72 0.17 350));
     --accent-swatch-lime:    light-dark(oklch(0.50 0.19 130), oklch(0.82 0.20 130));
     --accent-swatch-teal:    light-dark(oklch(0.50 0.13 185), oklch(0.80 0.13 185));
