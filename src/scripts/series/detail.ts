@@ -98,6 +98,7 @@ import {
   renderLanguagePills as sharedRenderLanguagePills,
 } from "@/scripts/lib/detail-chrome.ts"
 import { createInlineTrailer } from "@/scripts/lib/trailer-inline.ts"
+import { mountPauseOverlay } from "@/scripts/lib/pause-overlay.ts"
 import { fmtImdbRating, parseHmsToSeconds } from "@/scripts/lib/format.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
 import { t, initI18n, getActiveLocale } from "@/scripts/lib/i18n.js"
@@ -132,6 +133,9 @@ const langsEl = document.getElementById("series-detail-langs")
 const plotEl = document.getElementById("series-detail-plot")
 const posterEl = document.getElementById("series-detail-poster")
 const playerWrap = document.getElementById("series-detail-player-wrap")
+const playBtn = document.getElementById("series-detail-play")
+const playLabelEl = document.getElementById("series-detail-play-label")
+const playSubEl = document.getElementById("series-detail-play-sub")
 const favBtn = document.getElementById("series-detail-fav")
 const watchBtn = document.getElementById("series-detail-watch")
 const watchLabelEl = document.getElementById("series-detail-watch-label")
@@ -149,6 +153,28 @@ const seasonTabs = document.getElementById("series-season-tabs")
 const episodeList = document.getElementById("series-episode-list")
 
 wireDetailBackLink(backLink, "/series")
+
+// Nylah Studios v0.2.0 (w3): Play button — plays the resume/next episode
+// picked by the existing pickDefaultPlayEpisode() (same pick as the
+// poster badge). The sub-label refreshes from the episode actually
+// picked, so the button never advertises a stale episode.
+playBtn?.addEventListener("click", () => {
+  const ep = defaultPlayEpisode || pickDefaultPlayEpisode()
+  if (!ep) return
+  syncSeriesPlayButton(ep)
+  void playEpisode(ep)
+})
+
+// Nylah Studios v0.2.0 (w3): pause overlay — same shared helper as Live
+// TV and the movie page. Title/subtitle read text already on the page.
+mountPauseOverlay({
+  wrap: playerWrap,
+  getTitle: () => titleEl?.textContent?.trim() || "",
+  getSubtitle: () => nowPlayingEl?.textContent?.trim() || "",
+  getBadge: () => t("player.pauseOverlay.episode"),
+  isPlayerVisible: () =>
+    !!playerWrap && !playerWrap.classList.contains("hidden"),
+})
 
 // ----------------------------
 // State
@@ -442,7 +468,7 @@ function renderSeasonTabs(seasonKeys) {
     btn.type = "button"
     btn.dataset.season = key
     btn.className =
-      "rounded-lg px-3 py-1.5 text-sm border outline-none transition-colors " +
+      "rounded-lg px-4 py-2.5 text-base border outline-none transition-colors min-h-12 " +
       (key === currentSeason
         ? "border-accent bg-accent-soft text-fg"
         : "border-line text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg")
@@ -514,7 +540,7 @@ function renderEpisodes() {
   for (const [rowIndex, ep] of eps.entries()) {
     const row = document.createElement("div")
     row.className =
-      "episode-row flex items-center gap-3 p-3 rounded-xl bg-surface-2/40 " +
+      "episode-row flex items-center gap-3 p-4 rounded-xl bg-surface-2/40 " +
       "transition-colors hover:bg-surface-2 focus-within:bg-surface-2"
     row.dataset.epId = String(ep.id)
     row.dataset.epNum = String(ep.episode_num ?? "")
@@ -536,13 +562,13 @@ function renderEpisodes() {
     playBtn.type = "button"
     playBtn.className =
       "flex flex-1 min-w-0 items-center gap-3 text-left outline-none rounded-lg " +
-      "focus-visible:ring-1 focus-visible:ring-accent"
+      "focus-visible:ring-2 focus-visible:ring-accent"
     playBtn.addEventListener("click", () => playEpisode(ep))
 
     const num = document.createElement("div")
     num.dataset.role = "ep-num"
     num.className =
-      "episode-num shrink-0 size-10 rounded-md bg-surface-3 flex items-center justify-center text-sm font-semibold tabular-nums text-fg-2"
+      "episode-num shrink-0 size-12 rounded-md bg-surface-3 flex items-center justify-center text-base font-semibold tabular-nums text-fg-2"
     num.textContent = `E${ep.episode_num || "?"}`
     playBtn.appendChild(num)
 
@@ -550,12 +576,12 @@ function renderEpisodes() {
     wrap.className = "min-w-0 flex-1"
     const title = document.createElement("div")
     title.dataset.role = "ep-title"
-    title.className = "truncate text-sm font-medium text-fg"
+    title.className = "truncate text-base font-medium text-fg"
     title.textContent = ep.title || t("series.episode.fallback", { n: ep.episode_num || "" })
     wrap.appendChild(title)
 
     const meta = document.createElement("div")
-    meta.className = "truncate text-xs text-fg-3 tabular-nums"
+    meta.className = "truncate text-sm text-fg-3 tabular-nums"
     const bits = []
     const dur = ep.info?.duration || ""
     if (dur) bits.push(dur)
@@ -566,7 +592,7 @@ function renderEpisodes() {
 
     const overview = document.createElement("div")
     overview.dataset.role = "ep-overview"
-    overview.className = "text-xs text-fg-3 line-clamp-2 empty:hidden mt-0.5"
+    overview.className = "text-sm text-fg-3 line-clamp-2 empty:hidden mt-0.5"
     wrap.appendChild(overview)
 
     playBtn.appendChild(wrap)
@@ -708,6 +734,7 @@ function renderEpisodes() {
   }
   if (eps.length) episodesStaggered = true
   defaultPlayEpisode = pickDefaultPlayEpisode()
+  syncSeriesPlayButton(defaultPlayEpisode)
   playTvBtnHandle?.refresh()
   try { window.SpatialNavigation?.makeFocusable?.() } catch {}
   refreshSeasonEnrichment().catch((err) => {
@@ -1436,6 +1463,23 @@ function findEpisodeById(episodeId) {
     if (match) return match
   }
   return null
+}
+
+// Nylah Studios v0.2.0 (w3): keeps the Play button honest — visible only
+// once episodes have loaded, and its sub-label names the episode it will
+// actually play.
+function syncSeriesPlayButton(ep) {
+  if (!playBtn) return
+  if (!ep) {
+    playBtn.setAttribute("hidden", "")
+    return
+  }
+  playBtn.removeAttribute("hidden")
+  if (playLabelEl) playLabelEl.textContent = t("detail.action.play")
+  if (playSubEl) {
+    const sxe = `S${ep.season || currentSeason || "?"}E${ep.episode_num || "?"}`
+    playSubEl.textContent = ep.title ? `${sxe} · ${ep.title}` : sxe
+  }
 }
 
 /** Mirrors the poster-badge "resume next episode" pick, falling back to the first episode overall. */
