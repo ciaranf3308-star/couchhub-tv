@@ -71,15 +71,16 @@ jobs:
           VERSION="$(jq -r .version package.json)"
           echo "Publishing CouchHub TV $VERSION to $FEED_BASE"
 
-          # The bundler writes the updater manifest (latest.json) at the root
-          # of the bundle dir when createUpdaterArtifacts is true.
-          MANIFEST="$(find src-tauri/target/release/bundle -maxdepth 1 -name '*.json' -print -quit)"
-          test -n "$MANIFEST" || { echo "::error::No updater manifest found in src-tauri/target/release/bundle/"; exit 1; }
-          echo "Manifest: $MANIFEST"
-
+          # Tauri v2's bundler only emits the signed installers (.sig files);
+          # it does NOT generate the updater manifest, so update.json is
+          # built from the signed installer below (after the version guard).
           NSIS_INSTALLER="$(find src-tauri/target/release/bundle/nsis -name '*-setup.exe' -print -quit 2>/dev/null || true)"
           test -n "$NSIS_INSTALLER" || { echo "::error::No NSIS installer found in src-tauri/target/release/bundle/nsis/"; exit 1; }
           test -f "$NSIS_INSTALLER.sig" || { echo "::error::Missing signature: $NSIS_INSTALLER.sig (build did not sign the installer)"; exit 1; }
+          INSTALLER_NAME="$(basename "$NSIS_INSTALLER")"
+          # The installer filename contains a space; percent-encode it for
+          # every URL the feed serves (Pages decodes %20 back to the file).
+          ENCODED_NAME="${INSTALLER_NAME// /%20}"
           echo "Installer: $NSIS_INSTALLER"
 
           # Version guard: the feed must never be overwritten with different
@@ -88,8 +89,7 @@ jobs:
           if curl -fsSL "$FEED_BASE/update.json" -o /tmp/existing-update.json; then
             EXISTING_VERSION="$(jq -r .version /tmp/existing-update.json)"
             if [ "$EXISTING_VERSION" = "$VERSION" ]; then
-              INSTALLER_NAME="$(basename "$NSIS_INSTALLER")"
-              if curl -fsSL "$FEED_BASE/$INSTALLER_NAME.sig" -o /tmp/existing.sig; then
+              if curl -fsSL "$FEED_BASE/$ENCODED_NAME.sig" -o /tmp/existing.sig; then
                 if ! cmp -s /tmp/existing.sig "$NSIS_INSTALLER.sig"; then
                   echo "::error::Feed already contains version $VERSION with different files. Bump the version in package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml before pushing."
                   exit 1
@@ -102,16 +102,22 @@ jobs:
 
           mkdir -p "$FEED_DIR"
 
-          # Point the manifest's platform URLs at the public Pages feed.
-          # The bundler writes bare filenames (or release URLs); either way,
-          # the feed must serve the installer from its own base URL.
-          jq --arg base "$FEED_BASE" \
-            '.platforms |= with_entries(.value.url = ($base + "/" + (.value.url | split("/") | last)))' \
-            "$MANIFEST" > "$FEED_DIR/update.json"
+          # Build the updater manifest in the format the plugin expects:
+          # version, pub_date, and per-platform url + signature (the verbatim
+          # content of the generated .sig file, per the Tauri v2 updater docs).
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg date "$PUB_DATE" \
+            --arg url "$FEED_BASE/$ENCODED_NAME" \
+            --arg sig "$(cat "$NSIS_INSTALLER.sig")" \
+            --arg notes "CouchHub TV $VERSION" \
+            '{version: $version, notes: $notes, pub_date: $date, platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' \
+            > "$FEED_DIR/update.json"
 
           cp "$NSIS_INSTALLER" "$NSIS_INSTALLER.sig" "$FEED_DIR/"
-          # Also publish the MSI + signature when present so whichever bundle
-          # the manifest references is actually in the feed.
+          # Also publish the MSI + signature when present (handy for a manual
+          # install from the feed; the updater itself uses the NSIS build).
           for f in src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/msi/*.msi.sig; do
             [ -e "$f" ] && cp "$f" "$FEED_DIR/"
           done
