@@ -30,6 +30,7 @@
   import { searchPeople } from "@/scripts/lib/person-search.ts"
   import { resolvePersonTitleIds } from "@/scripts/lib/person-filter.ts"
   import { isTvDevice } from "@/scripts/lib/tv-detect"
+  import OnScreenKeyboard from "@/components/OnScreenKeyboard.svelte"
 
   /** @type {{ focusOnMount?: boolean }} */
   let { focusOnMount = false } = $props()
@@ -513,8 +514,33 @@
     window.location.href = item.href
   }
 
+  // The on-screen keyboard types into the same query: run the same
+  // debounce + actor search the physical input runs.
+  function onOskInput(nextValue) {
+    setQueryDebounced(nextValue)
+    scheduleActorSearch(nextValue)
+  }
+
+  // The keyboard's Search key: land focus on the first result card so a
+  // controller user can keep going with the D-pad, or back to the input
+  // when there is nothing to open.
+  function focusFirstResult() {
+    const first = document.querySelector(".search-result-card")
+    if (first) {
+      first.focus()
+      return
+    }
+    inputEl?.focus()
+  }
+
   function onKey(ev) {
     if (isTvDevice()) return
+    // Focus inside the on-screen keyboard belongs to the keyboard: B is
+    // backspace there (its own handler), arrows are spatial navigation,
+    // Enter/Space click the key. The search view must not clear the query
+    // or steal the key.
+    const targetEl = /** @type {HTMLElement | null} */ (ev.target)
+    if (targetEl?.closest?.("[data-osk]")) return
     const onInput = document.activeElement === inputEl
     const inRecentSection = !!recentSectionEl?.contains(document.activeElement)
     if (onInput && personMode && ev.key === "Backspace" && !query) {
@@ -524,14 +550,21 @@
       ev.preventDefault()
       exitPersonMode()
       inputEl?.focus()
-    } else if (onInput && ev.key === "ArrowDown" && showRecentSearches) {
-      ev.preventDefault()
-      ev.stopImmediatePropagation()
-      recentSectionEl?.querySelector(".recent-search-row")?.focus()
     } else if (onInput && ev.key === "ArrowDown") {
       ev.preventDefault()
       ev.stopImmediatePropagation()
-      if (results.length) activeIndex = (activeIndex + 1) % results.length
+      // The on-screen keyboard sits between the input and the results, so
+      // down from the input lands on its first key (controller users have
+      // no Tab key). From the keyboard, down reaches the results through
+      // spatial navigation; with no keyboard mounted, keep the old path.
+      const firstKey = document.querySelector("[data-osk] [data-osk-key]")
+      if (firstKey) {
+        firstKey.focus()
+      } else if (showRecentSearches) {
+        recentSectionEl?.querySelector(".recent-search-row")?.focus()
+      } else if (results.length) {
+        activeIndex = (activeIndex + 1) % results.length
+      }
     } else if (onInput && ev.key === "ArrowUp") {
       ev.preventDefault()
       ev.stopImmediatePropagation()
@@ -682,6 +715,12 @@
         </button>
       {/each}
     </div>
+
+    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
+    <OnScreenKeyboard
+      bind:value={query}
+      onInput={onOskInput}
+      onCommit={focusFirstResult} />
   </div>
 
   {#snippet warming(hint)}
@@ -737,6 +776,7 @@
         {:else}
           <p class="text-base text-fg-2 mb-1">{tr("search.helpHeading")}</p>
           <p class="text-2xs">{tr("search.helpKbd")}</p>
+          <p class="text-2xs mt-1">{tr("search.keyboardHint")}</p>
         {/if}
       </div>
     {:else if personMode && personTitleIds === null}
@@ -770,23 +810,18 @@
         {/if}
       </div>
     {:else}
-      <ul class="flex flex-col gap-1 pb-4">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-4">
         {#each results as result, idx (result.kind + ":" + result.id)}
-          {#if !personMode && result.kind === "person" && idx === 0}
-            <li class="px-2.5 pt-1 pb-1.5">
-              <span class="text-eyebrow font-medium uppercase tracking-wide text-fg-3">{tr("search.actors")}</span>
-            </li>
-          {/if}
-          <li class="result-row" style:--enter-delay={Math.min(idx, 12) * 18 + "ms"}>
-            {#if result.kind === "person"}
-              <button
-                type="button"
-                onmouseenter={() => (activeIndex = idx)}
-                onfocus={() => (activeIndex = idx)}
-                onclick={() => enterPersonMode(result.candidate)}
-                class="w-full text-left rounded-lg px-2.5 py-2 flex items-center gap-3 outline-none transition-colors focus-visible:bg-surface-2"
-                class:bg-surface-2={activeIndex === idx}>
-                <span class="size-12 shrink-0 rounded-full bg-surface-2 ring-1 ring-line overflow-hidden flex items-center justify-center text-2xs font-medium uppercase text-fg-3">
+          {#if result.kind === "person"}
+            <button
+              type="button"
+              onmouseenter={() => (activeIndex = idx)}
+              onfocus={() => (activeIndex = idx)}
+              onclick={() => enterPersonMode(result.candidate)}
+              style:--enter-delay={Math.min(idx, 12) * 18 + "ms"}
+              class="search-result-card result-row group relative rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line outline-none text-left transition-[transform,box-shadow] duration-150 hover:ring-accent hover:[transform:translateY(-2px)] focus-visible:ring-accent focus-visible:[transform:translateY(-2px)]">
+              <span class="flex aspect-[2/3] w-full items-center justify-center bg-surface-2 relative">
+                <span class="size-20 shrink-0 rounded-full bg-surface-3 ring-1 ring-line overflow-hidden flex items-center justify-center text-lg font-medium uppercase text-fg-3">
                   {#if result.profileUrl}
                     <img
                       use:cachedImg={{ url: result.profileUrl, kind: "poster" }}
@@ -794,62 +829,62 @@
                       loading="lazy" fetchpriority="low"
                       decoding="async"
                       referrerpolicy="no-referrer"
-                      width="48" height="48"
+                      width="80" height="80"
                       class="h-full w-full object-cover" />
                   {:else}
                     {personInitials(result.name)}
                   {/if}
                 </span>
-                <span class="flex-1 min-w-0">
-                  <span class="block truncate text-sm text-fg">{result.name}</span>
-                  <span class="block truncate text-2xs text-fg-3">{result.knownFor || tr("search.actorGeneric")}</span>
-                </span>
-                <span class="shrink-0 text-2xs uppercase tracking-wide text-fg-3 px-1.5 py-0.5 rounded border border-line">
+                <span class="absolute bottom-1.5 left-1.5 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold uppercase tracking-wide">
                   {tr("search.actorGeneric")}
                 </span>
-              </button>
-            {:else}
-              <a
-                href={result.href}
-                use:lazySeasons={result}
-                onmouseenter={() => (activeIndex = idx)}
-                onfocus={() => (activeIndex = idx)}
-                onclick={commitSearch}
-                class="w-full text-left rounded-lg px-2.5 py-2 flex items-center gap-3 outline-none transition-colors focus-visible:bg-surface-2"
-                class:bg-surface-2={activeIndex === idx}>
-                <span class="size-12 shrink-0 rounded-md bg-surface-2 ring-1 ring-line overflow-hidden flex items-center justify-center">
-                  {#if result.logo}
-                    <img
-                      use:cachedImg={{ url: result.logo, kind: result.kind === "live" ? "logo" : "poster" }}
-                      alt=""
-                      loading="lazy" fetchpriority="low"
-                      decoding="async"
-                      referrerpolicy="no-referrer"
-                      width="48" height="48"
-                      class="h-full w-full"
-                      class:object-cover={result.kind !== "live"}
-                      class:object-contain={result.kind === "live"} />
-                  {:else}
-                    <span class="text-2xs text-fg-3 uppercase">{kl(result.kind)[0]}</span>
-                  {/if}
-                </span>
-                <span class="flex-1 min-w-0">
-                  <span class="block truncate text-sm text-fg">{result.name}</span>
-                  <span class="block truncate text-2xs text-fg-3">{displaySubtitle(result)}</span>
-                </span>
-                <span class="shrink-0 text-2xs uppercase tracking-wide text-fg-3 px-1.5 py-0.5 rounded border border-line">
+              </span>
+              <span class="block px-2 py-2 min-w-0">
+                <span class="block truncate text-sm font-medium text-fg">{result.name}</span>
+                <span class="block truncate text-2xs text-fg-3">{result.knownFor || tr("search.actorGeneric")}</span>
+              </span>
+            </button>
+          {:else}
+            <a
+              href={result.href}
+              use:lazySeasons={result}
+              onmouseenter={() => (activeIndex = idx)}
+              onfocus={() => (activeIndex = idx)}
+              onclick={commitSearch}
+              style:--enter-delay={Math.min(idx, 12) * 18 + "ms"}
+              class="search-result-card result-row group relative rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line outline-none text-left transition-[transform,box-shadow] duration-150 hover:ring-accent hover:[transform:translateY(-2px)] focus-visible:ring-accent focus-visible:[transform:translateY(-2px)]">
+              <span class="block aspect-[2/3] w-full bg-surface-2 overflow-hidden relative">
+                {#if result.logo}
+                  <img
+                    use:cachedImg={{ url: result.logo, kind: result.kind === "live" ? "logo" : "poster" }}
+                    alt=""
+                    loading="lazy" fetchpriority="low"
+                    decoding="async"
+                    referrerpolicy="no-referrer"
+                    width="200" height="300"
+                    class="h-full w-full"
+                    class:object-cover={result.kind !== "live"}
+                    class:object-contain={result.kind === "live"} />
+                {:else}
+                  <span class="flex h-full w-full items-center justify-center text-2xl font-semibold text-fg-3">{kl(result.kind)[0]}</span>
+                {/if}
+                <span class="absolute bottom-1.5 left-1.5 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold uppercase tracking-wide">
                   {kl(result.kind)}
                 </span>
-              </a>
-            {/if}
-          </li>
+              </span>
+              <span class="block px-2 py-2 min-w-0">
+                <span class="block truncate text-sm font-medium text-fg">{result.name}</span>
+                <span class="block truncate text-2xs text-fg-3">{displaySubtitle(result)}</span>
+              </span>
+            </a>
+          {/if}
         {/each}
-        {#if scoredAll.items.length >= 500}
-          <li class="px-3 py-3 text-center text-2xs text-fg-3 italic">
-            {tr("search.showingTop", { n: results.length })}
-          </li>
-        {/if}
-      </ul>
+      </div>
+      {#if scoredAll.items.length >= 500}
+        <p class="px-3 py-3 text-center text-2xs text-fg-3 italic">
+          {tr("search.showingTop", { n: results.length })}
+        </p>
+      {/if}
     {/if}
   </div>
 </section>
@@ -870,6 +905,14 @@
   /* The wrapper carries the focus ring; Layout's global input outline would draw a second, inner one. */
   .search-input-wrap input:focus-visible {
     outline: none;
+  }
+
+  /* Glowing focus ring on result cards, same language as the poster
+     cards: accent ring plus a soft accent halo, legible from the couch. */
+  .search-result-card:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--color-accent-soft),
+      0 0 18px var(--color-accent-soft);
   }
 
   @media (pointer: coarse) {

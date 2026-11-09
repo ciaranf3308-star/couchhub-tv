@@ -296,10 +296,10 @@ describe("accent (random sentinel)", () => {
     expect(sessionStorage.getItem("xt_accent_roll")).toBeNull()
   })
 
-  it("falls back to fuchsia for a bogus stored accent value", async () => {
+  it("falls back to burgundy for a bogus stored accent value", async () => {
     localStorage.setItem("xt_accent", "not-a-real-color")
     const { getAccent } = await import("@/scripts/lib/app-settings.js")
-    expect(getAccent()).toBe("fuchsia")
+    expect(getAccent()).toBe("burgundy")
   })
 })
 
