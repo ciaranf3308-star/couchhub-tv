@@ -197,6 +197,7 @@
           style:--enter-delay={Math.min(idx, 6) * 28 + "ms"}>
           <a
             href={entry.href}
+            data-nylah-item
             onclick={(event) => { if (entry.unavailable) event.preventDefault() }}
             aria-label={entry.kind === "live"
               ? `Watch ${entry.name}`
@@ -215,7 +216,7 @@
                    bg-surface-2 ring-1 ring-line
                    transition-[transform,box-shadow] duration-150
                    hover:ring-[3px] hover:ring-accent
-                   outline-none focus-visible:ring-1 focus-visible:ring-accent
+                   outline-none focus-visible:ring-[3px] focus-visible:ring-accent
                    hover:transform-[translateY(-2px)]
                    focus-visible:transform-[translateY(-2px)]"
             class:opacity-50={entry.unavailable}>
@@ -319,19 +320,21 @@
 {/if}
 
 <style>
+  /* Nylah 10-foot sizes: cards read from the couch. rem-based, so the
+     Settings font scale still scales them. */
   .cw-item {
-    width: 8rem;
+    width: 10rem;
     animation: cw-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
     animation-delay: var(--enter-delay, 0ms);
   }
   @media (min-width: 40em) {
     .cw-item {
-      width: 9.5rem;
+      width: 12rem;
     }
   }
   @media (min-width: 64em) {
     .cw-item {
-      width: 11rem;
+      width: 14rem;
     }
   }
 
@@ -342,6 +345,15 @@
 
   /* Disabled in first-run mode */
   :global(html[data-first-run="true"]) .cw-section {
+    display: none;
+  }
+
+  /* Nylah rail: the strip scrolls under the controller, so its
+     scrollbar stays hidden like the other home rails. */
+  .cw-strip {
+    scrollbar-width: none;
+  }
+  .cw-strip::-webkit-scrollbar {
     display: none;
   }
 
