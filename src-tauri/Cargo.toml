@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.2"
+version = "0.1.3"
 description = "CouchHub TV — Xbox-controller-first IPTV player, fork of Extreme InfiniTV (GPL-3.0-or-later)"
 authors = ["CouchHub"]
 license = "GPL-3.0-or-later"

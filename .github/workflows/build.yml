@@ -36,6 +36,12 @@ jobs:
 
       - name: Build (Tauri, Windows x64)
         run: pnpm tauri build
+        env:
+          # Signs the installer and emits the updater manifest (latest.json).
+          # Empty on fork PRs (secrets are not passed there); the publish step
+          # below only runs on pushes to main, where the secrets exist.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
@@ -43,3 +49,80 @@ jobs:
           name: CouchHub-TV-win-x64
           path: src-tauri/target/release/bundle/
           if-no-files-found: error
+
+      # Publishes the signed installer + updater manifest to the public
+      # GitHub Pages feed (couchhub-updates repo) so installed copies of the
+      # app auto-update on launch. Pushes to main only, never PRs.
+      - name: Check out updates repo
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/checkout@v5
+        with:
+          repository: ciaranf3308-star/couchhub-updates
+          ssh-key: ${{ secrets.UPDATES_DEPLOY_KEY }}
+          path: couchhub-updates
+
+      - name: Publish update feed
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FEED_BASE="https://ciaranf3308-star.github.io/couchhub-updates/couchhub-tv"
+          FEED_DIR="couchhub-updates/couchhub-tv"
+          VERSION="$(jq -r .version package.json)"
+          echo "Publishing CouchHub TV $VERSION to $FEED_BASE"
+
+          # The bundler writes the updater manifest (latest.json) at the root
+          # of the bundle dir when createUpdaterArtifacts is true.
+          MANIFEST="$(find src-tauri/target/release/bundle -maxdepth 1 -name '*.json' -print -quit)"
+          test -n "$MANIFEST" || { echo "::error::No updater manifest found in src-tauri/target/release/bundle/"; exit 1; }
+          echo "Manifest: $MANIFEST"
+
+          NSIS_INSTALLER="$(find src-tauri/target/release/bundle/nsis -name '*-setup.exe' -print -quit 2>/dev/null || true)"
+          test -n "$NSIS_INSTALLER" || { echo "::error::No NSIS installer found in src-tauri/target/release/bundle/nsis/"; exit 1; }
+          test -f "$NSIS_INSTALLER.sig" || { echo "::error::Missing signature: $NSIS_INSTALLER.sig (build did not sign the installer)"; exit 1; }
+          echo "Installer: $NSIS_INSTALLER"
+
+          # Version guard: the feed must never be overwritten with different
+          # files under the same version. Bump the version (package.json,
+          # src-tauri/tauri.conf.json, src-tauri/Cargo.toml) to ship a new build.
+          if curl -fsSL "$FEED_BASE/update.json" -o /tmp/existing-update.json; then
+            EXISTING_VERSION="$(jq -r .version /tmp/existing-update.json)"
+            if [ "$EXISTING_VERSION" = "$VERSION" ]; then
+              INSTALLER_NAME="$(basename "$NSIS_INSTALLER")"
+              if curl -fsSL "$FEED_BASE/$INSTALLER_NAME.sig" -o /tmp/existing.sig; then
+                if ! cmp -s /tmp/existing.sig "$NSIS_INSTALLER.sig"; then
+                  echo "::error::Feed already contains version $VERSION with different files. Bump the version in package.json, src-tauri/tauri.conf.json and src-tauri/Cargo.toml before pushing."
+                  exit 1
+                fi
+              fi
+              echo "Version $VERSION is already published identically; nothing to do."
+              exit 0
+            fi
+          fi
+
+          mkdir -p "$FEED_DIR"
+
+          # Point the manifest's platform URLs at the public Pages feed.
+          # The bundler writes bare filenames (or release URLs); either way,
+          # the feed must serve the installer from its own base URL.
+          jq --arg base "$FEED_BASE" \
+            '.platforms |= with_entries(.value.url = ($base + "/" + (.value.url | split("/") | last)))' \
+            "$MANIFEST" > "$FEED_DIR/update.json"
+
+          cp "$NSIS_INSTALLER" "$NSIS_INSTALLER.sig" "$FEED_DIR/"
+          # Also publish the MSI + signature when present so whichever bundle
+          # the manifest references is actually in the feed.
+          for f in src-tauri/target/release/bundle/msi/*.msi src-tauri/target/release/bundle/msi/*.msi.sig; do
+            [ -e "$f" ] && cp "$f" "$FEED_DIR/"
+          done
+
+          cd couchhub-updates
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to publish."
+            exit 0
+          fi
+          git commit -m "CouchHub TV $VERSION"
+          git push origin HEAD:main

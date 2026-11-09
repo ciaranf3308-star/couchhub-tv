@@ -12,8 +12,12 @@ use serde_json::{json, Value};
 use tauri::Emitter;
 use tauri_plugin_updater::{Update, UpdaterExt};
 
-const ALLOWED_HOST: &str = "github.com";
-const ALLOWED_PATH_PREFIX: &str = "/infinitel8p/Extreme-InfiniTV/releases/download/";
+// The fork's own update hosts: the GitHub Pages feed (stable channel) and
+// our own GitHub releases (beta channel, if releases ever exist there).
+const ALLOWED_ENDPOINTS: &[(&str, &str)] = &[
+    ("ciaranf3308-star.github.io", "/couchhub-updates/couchhub-tv/"),
+    ("github.com", "/ciaranf3308-star/couchhub-tv/releases/download/"),
+];
 
 // Builder timeout covers the manifest fetch only - `check()` hands the Update a fresh `timeout: None`.
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
@@ -33,8 +37,9 @@ pub async fn updater_check_from(
 ) -> Result<Option<Value>, String> {
     let endpoint = tauri::Url::parse(&url).map_err(|e| format!("OTHER:{e}"))?;
     let is_allowed = endpoint.scheme() == "https"
-        && endpoint.host_str() == Some(ALLOWED_HOST)
-        && endpoint.path().starts_with(ALLOWED_PATH_PREFIX);
+        && ALLOWED_ENDPOINTS.iter().any(|(host, prefix)| {
+            endpoint.host_str() == Some(*host) && endpoint.path().starts_with(prefix)
+        });
     if !is_allowed {
         return Err(format!("OTHER:endpoint not allowed: {url}"));
     }

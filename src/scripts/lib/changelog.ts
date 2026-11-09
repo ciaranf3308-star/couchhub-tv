@@ -38,7 +38,7 @@ interface CacheShape {
 const PER_PAGE = 100
 
 export async function fetchReleases(
-  repoSlug = "infinitel8p/Extreme-InfiniTV"
+  repoSlug = "ciaranf3308-star/couchhub-tv"
 ): Promise<ReleaseSummary[]> {
   try {
     const cached = sessionStorage.getItem(CACHE_KEY)
