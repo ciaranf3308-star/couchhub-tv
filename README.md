@@ -1,4 +1,4 @@
-# Nylah Studios v0.1.4
+# Nylah Studios v0.1.5
 
 A custom, Xbox-controller-first IPTV application for Windows 11, built for
 a MINISFORUM UM790 Pro mini PC connected to a TV. It is the second half of
