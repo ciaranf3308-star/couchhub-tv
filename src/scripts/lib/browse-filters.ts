@@ -88,8 +88,11 @@ export function mountBrowseFilters(opts: {
   getActivePlaylistId: () => string
   onChange: () => void
 }): BrowseFiltersHandle | null {
-  const container = document.getElementById(opts.containerId)
-  if (!container) return null
+  const containerEl = document.getElementById(opts.containerId)
+  if (!containerEl) return null
+  // Non-null alias: TS does not carry the getElementById guard into the
+  // render() closure below, so keep the narrowed type explicit.
+  const container: HTMLElement = containerEl
 
   let yearOptions: string[] = []
   let yearGroupEl: HTMLElement | null = null
