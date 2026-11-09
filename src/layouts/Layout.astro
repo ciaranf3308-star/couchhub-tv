@@ -2,6 +2,7 @@
 import Sidebar from "@/components/Sidebar.astro"
 import TitleBar from "@/components/TitleBar.astro"
 import WindowResizeEdges from "@/components/WindowResizeEdges.astro"
+import ProfilePicker from "@/components/ProfilePicker.astro"
 import CatalogWarmingIndicator from "@/components/CatalogWarmingIndicator.svelte"
 import pkg from "../../package.json"
 import { TV_ROUTE_TABLE } from "@/scripts/lib/tv-routes"
@@ -406,6 +407,10 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
       injectVersion()
     </script>
     <CatalogWarmingIndicator client:idle />
+    {/* Nylah Studios v0.2.0: who-is-watching picker. Self-gated — only
+        shows after Xtream login when no profile is set. Mounted in the
+        shared layout so it appears on the page the user lands on. */}
+    <ProfilePicker />
   </body>
 </html>
 
