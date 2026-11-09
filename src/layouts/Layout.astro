@@ -251,8 +251,10 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
         } else if (storedAccent && storedAccent !== "fuchsia" && KNOWN_ACCENTS.indexOf(storedAccent) !== -1) {
           document.documentElement.setAttribute("data-accent", storedAccent);
         } else if (!storedAccent) {
-          // CouchHub TV default: blue accent, matching the CouchHub launcher.
-          document.documentElement.setAttribute("data-accent", "blue");
+          // CouchHub TV default: gold accent, matching the CouchHub
+          // launcher's boutique-hotel brass. The background and surface
+          // hues follow the accent, so the whole UI warms up with it.
+          document.documentElement.setAttribute("data-accent", "gold");
         }
         // Per-playlist override cache (playlist-accent.ts) wins over xt_accent.
         var activeAccentOverride = localStorage.getItem("xt_accent_active") || "";
