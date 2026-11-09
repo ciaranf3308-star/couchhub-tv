@@ -1,0 +1,233 @@
+---
+// ProfilePicker — "Who's watching?" overlay.
+//
+// Shows itself after Xtream login while no profile is active (nothing
+// picked yet). Big controller-friendly choices: Ciaran / Aisling, plus
+// "Everyone" for the shared household store. Picking a person activates
+// their profile and, on first pick, claims a one-time copy of the
+// household's existing watch history into their namespace (see
+// src/scripts/lib/profiles.ts). "Ask me later" hides it for this session
+// only. Settings (or anything else) can reopen it by dispatching
+// `nylah:show-profile-picker`.
+//
+// Mounting is worker 1's call (layout or home page); this file only
+// defines the component. It never renders anything until its own script
+// decides the picker should show.
+---
+<div
+  data-profile-picker
+  hidden
+  class="nylah-picker-overlay"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="nylah-picker-title">
+  <div class="nylah-picker-card">
+    <h2 id="nylah-picker-title" class="nylah-picker-title">Who's watching?</h2>
+    <p class="nylah-picker-sub">
+      Pick a profile so suggestions learn what each of you likes.
+    </p>
+
+    <div class="nylah-picker-choices">
+      <button type="button" class="nylah-picker-choice" data-profile-pick="ciaran">
+        <span class="nylah-picker-avatar" style="--profile-color: oklch(0.45 0.19 350)">C</span>
+        <span class="nylah-picker-name">Ciaran</span>
+      </button>
+      <button type="button" class="nylah-picker-choice" data-profile-pick="aisling">
+        <span class="nylah-picker-avatar" style="--profile-color: oklch(0.55 0.12 75)">A</span>
+        <span class="nylah-picker-name">Aisling</span>
+      </button>
+      <button type="button" class="nylah-picker-choice" data-profile-pick="shared">
+        <span class="nylah-picker-avatar" style="--profile-color: var(--color-fg-3)">H</span>
+        <span class="nylah-picker-name">Everyone</span>
+        <span class="nylah-picker-note">Shared household</span>
+      </button>
+    </div>
+
+    <button type="button" class="nylah-picker-later" data-profile-pick-later>
+      Ask me later
+    </button>
+  </div>
+</div>
+
+<style>
+  .nylah-picker-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: color-mix(in srgb, var(--color-bg) 72%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .nylah-picker-overlay[hidden] {
+    display: none;
+  }
+  .nylah-picker-card {
+    width: min(100%, 34rem);
+    text-align: center;
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: 1.25rem;
+    padding: 2rem 1.5rem 1.5rem;
+    box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+  }
+  .nylah-picker-title {
+    font-family: var(--font-serif);
+    font-size: clamp(1.75rem, 1vw + 1.5rem, 2.5rem);
+    line-height: 1.1;
+    color: var(--color-fg);
+    margin: 0 0 0.5rem;
+  }
+  .nylah-picker-sub {
+    color: var(--color-fg-2);
+    font-size: 0.95rem;
+    margin: 0 0 1.5rem;
+  }
+  .nylah-picker-choices {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  @media (min-width: 40em) {
+    .nylah-picker-choices {
+      flex-direction: row;
+    }
+  }
+  .nylah-picker-choice {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 1.25rem 0.75rem;
+    min-height: 7.5rem;
+    background: var(--color-surface-2);
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    color: var(--color-fg);
+    cursor: pointer;
+    transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .nylah-picker-choice:hover {
+    transform: translateY(-2px);
+    border-color: var(--color-accent);
+  }
+  .nylah-picker-choice:focus-visible {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+  .nylah-picker-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.5rem;
+    height: 3.5rem;
+    border-radius: 9999px;
+    background: var(--profile-color);
+    color: white;
+    font-family: var(--font-serif);
+    font-size: 1.75rem;
+    line-height: 1;
+  }
+  .nylah-picker-name {
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+  .nylah-picker-note {
+    font-size: 0.8125rem;
+    color: var(--color-fg-3);
+  }
+  .nylah-picker-later {
+    margin-top: 1.25rem;
+    background: none;
+    border: none;
+    color: var(--color-fg-3);
+    font-size: 0.875rem;
+    cursor: pointer;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+  }
+  .nylah-picker-later:hover,
+  .nylah-picker-later:focus-visible {
+    color: var(--color-fg);
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-accent-soft);
+  }
+</style>
+
+<script>
+  import { getActiveEntry } from "@/scripts/lib/creds.js"
+  import {
+    getActiveProfileId,
+    activateProfile,
+    observeSharedActivity,
+    SHOW_PROFILE_PICKER_EVENT,
+  } from "@/scripts/lib/profiles.ts"
+
+  const overlay = document.querySelector<HTMLElement>("[data-profile-picker]")
+  if (overlay) {
+    const DISMISSED_KEY = "nylah_profile_picker_dismissed_v1"
+
+    function dismissedThisSession() {
+      try {
+        return sessionStorage.getItem(DISMISSED_KEY) === "1"
+      } catch {
+        return false
+      }
+    }
+
+    function show(focusFirst) {
+      overlay.hidden = false
+      if (focusFirst) {
+        const first = overlay.querySelector<HTMLElement>("[data-profile-pick]")
+        if (first) first.focus()
+      }
+    }
+
+    function hide() {
+      overlay.hidden = true
+    }
+
+    async function maybeShow() {
+      if (dismissedThisSession()) return
+      if (getActiveProfileId() !== null) return
+      const active = await getActiveEntry()
+      if (!active) return
+      show(true)
+    }
+
+    overlay.addEventListener("click", async (event) => {
+      const target = event.target as HTMLElement
+      const pickButton = target.closest<HTMLElement>("[data-profile-pick]")
+      if (pickButton) {
+        const profileId = pickButton.getAttribute("data-profile-pick") || "shared"
+        const active = await getActiveEntry()
+        if (active) observeSharedActivity(active._id)
+        activateProfile(active?._id || null, profileId)
+        hide()
+        return
+      }
+      if (target.closest("[data-profile-pick-later]")) {
+        try {
+          sessionStorage.setItem(DISMISSED_KEY, "1")
+        } catch {
+          // Dismissal is session-only; storage failure just re-shows later.
+        }
+        hide()
+      }
+    })
+
+    // Escape closes without picking (picker returns until a profile is set).
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hide()
+    })
+
+    document.addEventListener(SHOW_PROFILE_PICKER_EVENT, () => show(true))
+    document.addEventListener("xt:active-changed", maybeShow)
+    maybeShow()
+  }
+</script>

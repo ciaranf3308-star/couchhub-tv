@@ -1,0 +1,135 @@
+---
+// ProfileSwitcher — small "watching as" switcher for Settings.
+//
+// Worker 4 mounts this in Settings; this file only defines the component.
+// Three choices (Ciaran / Aisling / Everyone). Switching activates the
+// profile and, on first pick, claims a one-time copy of the household's
+// existing watch history into that profile's namespace (see
+// src/scripts/lib/profiles.ts).
+---
+<div class="nylah-switcher" data-profile-switcher>
+  <span class="nylah-switcher-label">Watching as</span>
+  <div class="nylah-switcher-choices" role="group" aria-label="Active profile">
+    <button
+      type="button"
+      class="nylah-switcher-choice"
+      data-profile-switch="ciaran"
+      aria-pressed="false">
+      Ciaran
+    </button>
+    <button
+      type="button"
+      class="nylah-switcher-choice"
+      data-profile-switch="aisling"
+      aria-pressed="false">
+      Aisling
+    </button>
+    <button
+      type="button"
+      class="nylah-switcher-choice"
+      data-profile-switch="shared"
+      aria-pressed="false">
+      Everyone
+    </button>
+  </div>
+  <p class="nylah-switcher-note" data-profile-switch-note></p>
+</div>
+
+<style>
+  .nylah-switcher {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .nylah-switcher-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-fg);
+  }
+  .nylah-switcher-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .nylah-switcher-choice {
+    padding: 0.625rem 1.125rem;
+    border-radius: 9999px;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface-2);
+    color: var(--color-fg-2);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+  }
+  .nylah-switcher-choice:hover {
+    border-color: var(--color-accent);
+    color: var(--color-fg);
+  }
+  .nylah-switcher-choice:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+  .nylah-switcher-choice[aria-pressed="true"] {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: var(--color-on-accent);
+  }
+  .nylah-switcher-note {
+    font-size: 0.8125rem;
+    color: var(--color-fg-3);
+    margin: 0;
+  }
+</style>
+
+<script>
+  import { getActiveEntry } from "@/scripts/lib/creds.js"
+  import {
+    getActiveProfileId,
+    getProfile,
+    activateProfile,
+    observeSharedActivity,
+    PROFILE_CHANGED_EVENT,
+  } from "@/scripts/lib/profiles.ts"
+
+  const switcher = document.querySelector<HTMLElement>("[data-profile-switcher]")
+  if (switcher) {
+    const noteEl = switcher.querySelector<HTMLElement>("[data-profile-switch-note]")!
+    const buttons = Array.from(
+      switcher.querySelectorAll<HTMLElement>("[data-profile-switch]")
+    )
+
+    function render() {
+      const activeId = getActiveProfileId()
+      for (const button of buttons) {
+        const id = button.getAttribute("data-profile-switch")
+        button.setAttribute("aria-pressed", id === activeId ? "true" : "false")
+      }
+      if (!activeId) {
+        noteEl.textContent = "No profile picked yet — suggestions use the shared household history."
+        return
+      }
+      const profile = getProfile(activeId)
+      noteEl.textContent =
+        activeId === "shared"
+          ? "Using the shared household history and favorites."
+          : `Suggestions learn from what ${profile?.name || activeId} watches.`
+    }
+
+    switcher.addEventListener("click", async (event) => {
+      const button = (event.target as HTMLElement).closest<HTMLElement>(
+        "[data-profile-switch]"
+      )
+      if (!button) return
+      const profileId = button.getAttribute("data-profile-switch") || "shared"
+      if (profileId === getActiveProfileId()) return
+      const active = await getActiveEntry()
+      if (active) observeSharedActivity(active._id)
+      activateProfile(active?._id || null, profileId)
+      render()
+    })
+
+    document.addEventListener(PROFILE_CHANGED_EVENT, render)
+    render()
+  }
+</script>
