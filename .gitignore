@@ -63,3 +63,6 @@ proxy/.dev.vars
 proxy/node_modules/
 proxy/.wrangler/
 proxy/worker-configuration.d.ts
+
+# Rust / Tauri build output
+src-tauri/target/

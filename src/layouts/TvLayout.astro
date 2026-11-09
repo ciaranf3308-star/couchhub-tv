@@ -14,13 +14,14 @@ import pkg from "../../package.json"
 import { CLASSIC_ROUTE_TABLE, tvNavActiveHref } from "@/scripts/lib/tv-routes"
 import "@/styles/global.css"
 import "@/styles/tv.css"
+import "@/styles/couchhub-tv.css"
 
 interface Props {
   pageTitle: string
   view: string
 }
 const { pageTitle, view } = Astro.props
-const documentTitle = `${pageTitle} | Extreme InfiniTV`
+const documentTitle = `${pageTitle} | CouchHub TV`
 
 const path = Astro.url.pathname.replace(/\/$/, "") || "/tv"
 const activeNavHref = tvNavActiveHref(path)
@@ -129,6 +130,9 @@ const navItems = [
             if (resolvedRandomAccent !== "fuchsia") document.documentElement.setAttribute("data-accent", resolvedRandomAccent)
           } else if (storedAccent && storedAccent !== "fuchsia" && KNOWN_ACCENTS.indexOf(storedAccent) !== -1) {
             document.documentElement.setAttribute("data-accent", storedAccent)
+          } else if (!storedAccent) {
+            // CouchHub TV default: blue accent, matching the CouchHub launcher.
+            document.documentElement.setAttribute("data-accent", "blue")
           }
           // Per-playlist override cache (playlist-accent.ts) wins over xt_accent.
           var activeAccentOverride = localStorage.getItem("xt_accent_active") || ""
@@ -310,11 +314,16 @@ const navItems = [
     <script>
       import "@/scripts/spatial-navigation"
       import { bootTvShell } from "@/scripts/tv/shell"
+      import { mountGamepad } from "@/scripts/lib/gamepad"
+      import { mountReturnHome } from "@/scripts/lib/return-home"
 
       if (!(window as any).__xtTvShellBooted) {
         ;(window as any).__xtTvShellBooted = true
         bootTvShell()
       }
+      // CouchHub TV: Xbox controller (Gamepad API) + return home to CouchHub.
+      mountGamepad()
+      mountReturnHome()
     </script>
   </body>
 </html>
