@@ -92,6 +92,7 @@ import {
   renderLanguagePills as sharedRenderLanguagePills,
 } from "@/scripts/lib/detail-chrome.ts"
 import { createInlineTrailer } from "@/scripts/lib/trailer-inline.ts"
+import { mountPauseOverlay } from "@/scripts/lib/pause-overlay.ts"
 import { fmtImdbRating, parseHmsToSeconds } from "@/scripts/lib/format.js"
 import { setRichPresence, clearRichPresence } from "@/scripts/lib/discord-rpc.js"
 import { t, initI18n, getActiveLocale } from "@/scripts/lib/i18n.js"
@@ -144,6 +145,17 @@ if (similarListEl) dragScroll(similarListEl)
 let trailerUrl = ""
 
 wireDetailBackLink(backLink, "/movies")
+
+// Nylah Studios v0.2.0 (w3): pause overlay — same shared helper as Live TV
+// and the series page. Title/subtitle read text already on the page.
+mountPauseOverlay({
+  wrap: playerWrap,
+  getTitle: () => titleEl?.textContent?.trim() || "",
+  getSubtitle: () => metaEl?.textContent?.trim() || "",
+  getBadge: () => t("player.pauseOverlay.movie"),
+  isPlayerVisible: () =>
+    !!playerWrap && !playerWrap.classList.contains("hidden"),
+})
 
 // ----------------------------
 // State

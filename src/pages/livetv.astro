@@ -238,11 +238,40 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 
 					<div
 						id="current"
-						class="flex items-center justify-between gap-2 px-1 text-sm text-fg-2 shrink-0">
+						class="flex items-center justify-between gap-2 px-1 text-base text-fg-2 shrink-0">
 						<div class="flex items-center gap-2 min-w-0">
 							<span data-i18n="livetv.statusOff" class="status-badge status-badge--off shrink-0">OFF</span>
 							<span class="truncate">-</span>
 						</div>
+					</div>
+
+					<!-- Nylah Studios v0.2.0 (w3): now/next strip under the player.
+					     Filled by paintCurrentNowNext() in stream.ts from the same
+					     EPG now/next data as the channel rows — no new fetching. -->
+					<div id="current-nownext" class="shrink-0 px-1" hidden>
+						<div class="flex items-baseline gap-2 min-w-0">
+							<span
+								data-nownext-eyebrow
+								class="text-xs font-bold uppercase tracking-[0.18em] text-accent shrink-0">Now</span>
+							<span
+								data-nownext-title
+								class="truncate min-w-0 flex-1 font-serif text-xl leading-tight text-fg"></span>
+							<span
+								data-nownext-time
+								class="text-sm text-fg-3 tabular-nums shrink-0"></span>
+						</div>
+						<div
+							data-nownext-barwrap
+							class="mt-1.5 h-1.5 rounded-full bg-surface-3 overflow-hidden"
+							hidden>
+							<div
+								data-nownext-fill
+								class="h-full rounded-full bg-accent transition-[width] duration-500"
+								style="width: 0%"></div>
+						</div>
+						<div
+							data-nownext-next
+							class="mt-1 truncate text-sm text-fg-3"></div>
 					</div>
 
 					<div
@@ -430,11 +459,51 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 				display: none;
 			}
 		}
+
+		/* Nylah Studios v0.2.0 (w3) — player chrome reskin, couch-first.
+		   The library control bars (video.js / artplayer / shaka) keep their
+		   own skins in global.css; this page only reskins the chrome around
+		   them, which is what the controller actually lands on. */
+		/* Bigger status badge + channel line: legible from the couch. */
+		:global(#current .status-badge) {
+			height: 2rem;
+			width: 2rem;
+			font-size: 0.75rem;
+		}
+		:global(#current .status-badge--catchup) {
+			width: auto;
+			padding-inline: 0.625rem;
+		}
+		/* The channel name inside #current is injected by stream.ts; give
+		   it the RedSilk serif and a larger size. */
+		:global(#current .text-accent) {
+			font-family: var(--font-serif);
+			font-size: 1.25rem;
+			letter-spacing: -0.01em;
+		}
+		/* EPG side-panel rows: a focused row must glow, not just ring —
+		   the row is the controller's landing target under the player. */
+		:global(#epg-list .epg-entry:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+		}
+		:global(#epg-list .epg-entry[data-now-playing="true"]) {
+			box-shadow:
+				0 0 0 1px color-mix(in oklch, var(--color-accent) 55%, transparent),
+				0 0 20px 2px color-mix(in oklch, var(--color-accent) 25%, transparent);
+		}
+		:global(#epg-list .epg-entry[data-now-playing="true"]:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				0 0 28px 6px color-mix(in oklch, var(--color-accent) 45%, transparent);
+		}
 	</style>
 
 	<script>
 		import "../scripts/stream/stream.ts";
 		import "../scripts/updater-startup.js";
+		import { mountPauseOverlay } from "../scripts/lib/pause-overlay.ts";
 
 		const playerEl = document.getElementById("player");
 		const playerEmpty = document.getElementById("player-empty");
@@ -446,6 +515,47 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			new MutationObserver(sync).observe(playerEl, {
 				attributes: true,
 				attributeFilter: ["hidden"],
+			});
+		}
+
+		// Nylah Studios v0.2.0 (w3): pause overlay — big transport hub over
+		// the picture. Title/subtitle read text already on the page (channel
+		// name in #current, now-playing row in the EPG side panel); nothing
+		// is fetched or invented here. No "more like this" row: Live TV has
+		// no similar-titles data on the page, and plumbing it in would be
+		// new data work, not a reskin.
+		const playerWrap = document.getElementById("player-wrap");
+		if (playerWrap) {
+			mountPauseOverlay({
+				wrap: playerWrap,
+				getTitle: () =>
+					document.querySelector("#current .text-accent")?.textContent?.trim() ||
+					document.querySelector("#current .truncate")?.textContent?.trim() ||
+					"",
+				getSubtitle: () => {
+					const row = document.querySelector(
+						'#epg-list [data-now-playing="true"]'
+					);
+					if (!row) return "";
+					const title =
+						row.querySelector('[data-role="epg-title"]')?.textContent?.trim() || "";
+					const time =
+						row.querySelector('[data-role="epg-time"]')?.textContent?.trim() || "";
+					return [title, time].filter(Boolean).join(" · ");
+				},
+				getBadge: () => {
+					const badge =
+						document.querySelector("#current .status-badge")?.textContent?.trim() ||
+						"";
+					// "ON" is the live badge — the overlay's own LIVE label
+					// covers it; any other badge text (e.g. catch-up) is
+					// passed through verbatim.
+					if (!badge || badge === "ON" || badge === "OFF") return null;
+					return badge;
+				},
+				isSuppressed: () => playerWrap.dataset.radioMode === "on",
+				isPlayerVisible: () =>
+					!!playerEl && !playerEl.hasAttribute("hidden"),
 			});
 		}
 

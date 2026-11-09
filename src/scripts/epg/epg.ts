@@ -64,6 +64,7 @@ const nowBtn = document.getElementById("epg-now")
 const prevDayBtn = document.getElementById("epg-prev-day")
 const nextDayBtn = document.getElementById("epg-next-day")
 const dayLabelEl = document.getElementById("epg-day-label")
+const focusStrip = document.getElementById("epg-focus-strip")
 
 // ----------------------------
 // State
@@ -79,6 +80,9 @@ let allChannels = []
 /** @type {Map<string, Array<{start:number,stop:number,title:string,desc:string}>>} channel id (tvg-id, lower-cased) → sorted programmes */
 const programmes = new Map()
 let viewStart = 0
+
+// Set once render() has landed focus on the now-playing cell.
+let epgInitialFocusDone = false
 
 const picker = mountCategoryPicker({
   kind: "epg",
@@ -343,8 +347,8 @@ function renderTimeHeader() {
     tick.className =
       "absolute top-0 bottom-0 flex items-end pb-1 select-none " +
       (isHour
-        ? "border-l border-line text-fg-2 text-xs tabular-nums px-1.5 font-medium"
-        : "border-l border-line/40 text-fg-3 text-2xs tabular-nums px-1.5")
+        ? "border-l border-line text-fg-2 text-sm tabular-nums px-1.5 font-medium"
+        : "border-l border-line/40 text-fg-3 text-xs tabular-nums px-1.5")
     tick.style.left = `${(i * 30 * PX_PER_HOUR) / 60}px`
     tick.textContent = fmtTime(ts)
     headerInner.appendChild(tick)
@@ -402,10 +406,10 @@ function renderChannelRow(channel, programmesForRow) {
   const nameWrap = document.createElement("div")
   nameWrap.className = "min-w-0 flex-1"
   const nameEl = document.createElement("div")
-  nameEl.className = "truncate text-sm font-medium text-fg"
+  nameEl.className = "truncate text-base font-semibold text-fg"
   nameEl.textContent = channel.name
   const sub = document.createElement("div")
-  sub.className = "truncate text-2xs text-fg-3 tabular-nums"
+  sub.className = "truncate text-xs text-fg-3 tabular-nums"
   const resolved = effectiveTvgId(channel, activePlaylistId)
   const isOverridden = !!(
     activePlaylistId &&
@@ -467,10 +471,19 @@ function renderChannelRow(channel, programmesForRow) {
         : isPast
         ? "epg-cell-past border-line bg-surface text-fg-3 hover:bg-surface-2 hover:text-fg-2 focus-visible:bg-surface-2 focus-visible:text-fg-2"
         : "border-line bg-surface text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg") +
-      " focus-visible:ring-1 focus-visible:ring-accent"
+      " focus-visible:ring-2 focus-visible:ring-accent"
     cell.style.left = `${left}px`
     cell.style.width = `${width}px`
     cell.title = `${fmtTime(p.start)}–${fmtTime(p.stop)} · ${p.title}${p.desc ? "\n\n" + p.desc : ""}`
+    // Nylah Studios v0.2.0 (w3): the focus strip above the grid reads the
+    // focused programme from these attributes — same data the cell already
+    // renders, so nothing is fetched or invented.
+    cell.dataset.start = String(p.start)
+    cell.dataset.stop = String(p.stop)
+    cell.dataset.title = p.title
+    cell.dataset.desc = p.desc || ""
+    cell.dataset.channel = channel.name
+    if (canReplay) cell.dataset.replay = "1"
     cell.addEventListener("click", () => {
       const dialogOpts = {
         title: p.title,
@@ -491,7 +504,7 @@ function renderChannelRow(channel, programmesForRow) {
     })
 
     const titleLine = document.createElement("div")
-    titleLine.className = "truncate text-xs font-medium"
+    titleLine.className = "truncate text-sm font-medium"
     if (canReplay) {
       const replayDot = document.createElement("span")
       replayDot.className = "epg-cell-replay-dot"
@@ -502,7 +515,7 @@ function renderChannelRow(channel, programmesForRow) {
       titleLine.textContent = p.title
     }
     const timeLine = document.createElement("div")
-    timeLine.className = "truncate text-2xs text-fg-3 tabular-nums"
+    timeLine.className = "truncate text-xs text-fg-3 tabular-nums"
     timeLine.textContent = `${fmtTime(p.start)}–${fmtTime(p.stop)}`
     cell.append(titleLine, timeLine)
 
@@ -726,8 +739,86 @@ gridEl?.addEventListener(
   true
 )
 
+// ----------------------------
+// Focused-programme strip (Nylah Studios v0.2.0, w3)
+// ----------------------------
+// Grid cells are small by necessity, so the focused cell's full title,
+// times, description and next programme live in the strip above the
+// grid. Everything shown comes from the focused cell's own data
+// attributes (the same data the cell renders) or its next sibling cell
+// in the same row — nothing is fetched or invented.
+function hideFocusStrip() {
+  if (focusStrip) focusStrip.hidden = true
+}
+
+function updateFocusStrip(cell: HTMLElement) {
+  if (!focusStrip) return
+  const badge = focusStrip.querySelector("[data-focus-badge]")
+  const titleEl = focusStrip.querySelector("[data-focus-title]")
+  const timeEl = focusStrip.querySelector("[data-focus-time]")
+  const channelEl = focusStrip.querySelector("[data-focus-channel]")
+  const descEl = focusStrip.querySelector("[data-focus-desc]")
+  const nextEl = focusStrip.querySelector("[data-focus-next]")
+  if (!badge || !titleEl || !timeEl || !channelEl || !descEl || !nextEl) return
+
+  const start = Number(cell.dataset.start)
+  const stop = Number(cell.dataset.stop)
+  const title = cell.dataset.title || ""
+  if (!title || !Number.isFinite(start) || !Number.isFinite(stop)) {
+    hideFocusStrip()
+    return
+  }
+  const now = Date.now()
+  const isLive = start <= now && now < stop
+  const isPast = stop <= now
+  const isReplay = isPast && cell.dataset.replay === "1"
+  const state = isLive ? "now" : isReplay ? "replay" : isPast ? "past" : "upcoming"
+  badge.setAttribute("data-state", state)
+  badge.textContent =
+    state === "now"
+      ? t("epg.now")
+      : state === "replay"
+      ? t("epg.focused.replay")
+      : state === "past"
+      ? t("epg.focused.past")
+      : t("epg.focused.upcoming")
+  titleEl.textContent = title
+  timeEl.textContent = `${fmtTime(start)}–${fmtTime(stop)}`
+  channelEl.textContent = cell.dataset.channel || ""
+  descEl.textContent = cell.dataset.desc || ""
+  // Next programme on the same channel: the next cell in this row.
+  let nextCell: Element | null = cell.nextElementSibling
+  while (nextCell && !nextCell.classList.contains("epg-cell")) {
+    nextCell = nextCell.nextElementSibling
+  }
+  if (nextCell instanceof HTMLElement && nextCell.dataset.title) {
+    const nextStart = Number(nextCell.dataset.start)
+    const nextStop = Number(nextCell.dataset.stop)
+    nextEl.textContent =
+      Number.isFinite(nextStart) && Number.isFinite(nextStop)
+        ? `${t("epg.next")}: ${nextCell.dataset.title} (${fmtTime(nextStart)}–${fmtTime(nextStop)})`
+        : `${t("epg.next")}: ${nextCell.dataset.title}`
+  } else {
+    nextEl.textContent = ""
+  }
+  focusStrip.hidden = false
+}
+
+gridEl?.addEventListener("focusin", (event) => {
+  const cell = (event.target as HTMLElement | null)?.closest?.(
+    ".epg-cell"
+  ) as HTMLElement | null
+  if (cell) updateFocusStrip(cell)
+})
+
+gridEl?.addEventListener("focusout", (event) => {
+  const related = (event as FocusEvent).relatedTarget as Node | null
+  if (!related || !gridEl?.contains(related)) hideFocusStrip()
+})
+
 function render() {
   if (!gridEl || !bodyEl || !headerInner) return
+  hideFocusStrip()
   hideStatus()
 
   // Width of the grid content (channel col + visible time)
@@ -765,6 +856,24 @@ function render() {
   try {
     window.SpatialNavigation?.makeFocusable?.()
   } catch {}
+
+  // Controller-first landing: once, on the first grid paint, put focus on
+  // the programme airing now so the D-pad moves immediately instead of
+  // starting from the toolbar. Later renders (day/category changes) never
+  // steal focus — the user may be working in the toolbar by then.
+  if (!epgInitialFocusDone) {
+    epgInitialFocusDone = true
+    if (document.activeElement === document.body) {
+      const now = Date.now()
+      const cells = Array.from(bodyEl.querySelectorAll(".epg-cell")) as HTMLElement[]
+      const target = cells.find((cell) => {
+        const start = Number(cell.dataset.start)
+        const stop = Number(cell.dataset.stop)
+        return Number.isFinite(start) && Number.isFinite(stop) && start <= now && now < stop
+      })
+      if (target) target.focus({ preventScroll: false })
+    }
+  }
 }
 
 // ----------------------------

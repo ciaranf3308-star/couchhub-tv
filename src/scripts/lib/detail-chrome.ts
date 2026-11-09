@@ -210,15 +210,15 @@ export function renderCastList(opts: {
   for (const member of cast) {
     const interactive = !!member.tmdbPersonId
     const card = document.createElement(interactive ? "a" : "div")
-    card.className = "flex flex-col items-center gap-1.5 w-20 sm:w-24 shrink-0 snap-start text-center rounded-lg outline-none"
+    card.className = "flex flex-col items-center gap-1.5 w-24 sm:w-28 shrink-0 snap-start text-center rounded-lg outline-none"
     if (interactive) {
       ;(card as HTMLAnchorElement).href = buildPersonHref(member.name, member.tmdbPersonId)
-      card.classList.add("group", "cursor-pointer", "focus-visible:ring-1", "focus-visible:ring-accent")
+      card.classList.add("group", "cursor-pointer", "focus-visible:ring-2", "focus-visible:ring-accent")
     }
 
     const photoWrap = document.createElement("div")
     photoWrap.className =
-      "size-16 sm:size-20 rounded-full overflow-hidden bg-surface-2 ring-1 ring-line flex items-center justify-center text-fg-3"
+      "size-20 sm:size-24 rounded-full overflow-hidden bg-surface-2 ring-1 ring-line flex items-center justify-center text-fg-3"
     const profileUrl = castProfileUrl(member.profilePath)
     if (profileUrl) {
       const img = document.createElement("img")
@@ -241,7 +241,7 @@ export function renderCastList(opts: {
     info.className = "w-full"
     const nameEl = document.createElement("div")
     nameEl.className =
-      "truncate text-sm font-medium text-fg" +
+      "truncate text-base font-medium text-fg" +
       (interactive ? " group-hover:text-accent group-focus-visible:text-accent transition-colors" : "")
     nameEl.textContent = member.name
     const characterEl = document.createElement("div")

@@ -61,7 +61,7 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 			<span
 				id="epg-day-label"
 				aria-live="polite"
-				class="text-xs text-fg-3 tabular-nums whitespace-nowrap px-1 shrink-0">
+				class="text-sm font-medium text-fg-3 tabular-nums whitespace-nowrap px-1 shrink-0">
 				Today
 			</span>
 			<button
@@ -114,6 +114,37 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 			id="epg-status"
 			class="hidden rounded-2xl border border-line bg-surface px-4 py-6 text-fg-2 text-sm">
 			Loading…
+		</div>
+
+		<!-- Nylah Studios v0.2.0 (w3): focused-programme strip. The grid
+		     cells are small by necessity, so the focused cell's full title,
+		     times, description and next programme live here — filled from
+		     the focused cell's own data attributes, never invented. -->
+		<div
+			id="epg-focus-strip"
+			class="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3"
+			hidden>
+			<div class="flex items-baseline gap-3 min-w-0 flex-wrap">
+				<span
+					data-focus-badge
+					data-state="upcoming"
+					class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide"></span>
+				<span
+					data-focus-title
+					class="min-w-0 flex-1 font-serif text-2xl leading-tight text-fg truncate"></span>
+				<span
+					data-focus-time
+					class="text-sm text-fg-3 tabular-nums shrink-0"></span>
+			</div>
+			<div
+				data-focus-channel
+				class="mt-0.5 text-sm text-fg-2 truncate"></div>
+			<div
+				data-focus-desc
+				class="mt-1 text-sm text-fg-2 leading-relaxed line-clamp-2 empty:hidden"></div>
+			<div
+				data-focus-next
+				class="mt-1 text-sm text-fg-3 truncate empty:hidden"></div>
 		</div>
 
 		<!-- Grid container -->
@@ -304,6 +335,55 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 			</div>
 		</dialog>
 	</main>
+
+	<style>
+		/* Nylah Studios v0.2.0 (w3) — EPG grid reskin, controller-first.
+		   Grid cells are rendered at runtime by epg.ts without Astro's
+		   scope attribute, so their rules must be :global(). */
+		/* A focused cell glows, not just rings — it is the controller's
+		   landing target in a dense grid. */
+		:global(.epg-cell:focus-visible) {
+			z-index: 5;
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				0 0 24px 4px color-mix(in oklch, var(--color-accent) 45%, transparent);
+		}
+		/* The now-line is the grid's anchor: thicker, with a glow. */
+		:global(.epg-now-line) {
+			width: 2px;
+			box-shadow: 0 0 12px 1px color-mix(in oklch, var(--color-accent) 60%, transparent);
+		}
+		/* The focused row's channel column gets an accent edge, so the eye
+		   can follow the row across the time axis. */
+		:global(.epg-row:has(.epg-cell:focus-visible) > div:first-child) {
+			box-shadow: inset 3px 0 0 var(--color-accent);
+		}
+		/* Focus-strip badge states (badge classes are swapped by epg.ts). */
+		#epg-focus-strip [data-focus-badge][data-state="now"] {
+			background: var(--color-accent);
+			color: var(--color-on-accent, #fff);
+		}
+		#epg-focus-strip [data-focus-badge][data-state="replay"] {
+			background: var(--color-accent-soft);
+			color: var(--color-accent);
+			box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 50%, transparent);
+		}
+		#epg-focus-strip [data-focus-badge][data-state="upcoming"],
+		#epg-focus-strip [data-focus-badge][data-state="past"] {
+			background: var(--color-surface-2);
+			color: var(--color-fg-2);
+			box-shadow: inset 0 0 0 1px var(--color-line);
+		}
+		@media (prefers-reduced-motion: reduce) {
+			:global(.epg-cell:focus-visible),
+			:global(.epg-now-line) {
+				box-shadow: none;
+			}
+			:global(.epg-cell:focus-visible) {
+				box-shadow: 0 0 0 2px var(--color-accent);
+			}
+		}
+	</style>
 
 	<script>
 		import "../scripts/epg/epg.ts";

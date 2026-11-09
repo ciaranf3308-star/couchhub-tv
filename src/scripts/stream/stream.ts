@@ -274,9 +274,89 @@ const listStatus = document.getElementById("list-status")
 
 const searchEl = document.getElementById("search")
 const currentEl = document.getElementById("current")
+const currentNowNextEl = document.getElementById("current-nownext")
 const epgList = document.getElementById("epg-list")
 const epgPanel = document.getElementById("epg")
 const epgDayIndicator = document.getElementById("epg-day-indicator")
+
+// Nylah Studios v0.2.0 (w3): now/next strip under the player. Same EPG
+// now/next data as the channel rows (computeNowNext) — no new fetching,
+// no invented titles or times. Progress is the current programme's real
+// elapsed fraction.
+function setCurrentNowNext(parts: {
+  eyebrow: string
+  title: string
+  time: string
+  progress: number | null
+  next: string
+}) {
+  if (!currentNowNextEl) return
+  const eyebrow = currentNowNextEl.querySelector("[data-nownext-eyebrow]")
+  const titleEl = currentNowNextEl.querySelector("[data-nownext-title]")
+  const timeEl = currentNowNextEl.querySelector("[data-nownext-time]")
+  const barWrap = currentNowNextEl.querySelector("[data-nownext-barwrap]")
+  const fill = currentNowNextEl.querySelector("[data-nownext-fill]")
+  const nextEl = currentNowNextEl.querySelector("[data-nownext-next]")
+  if (!titleEl || !timeEl || !barWrap || !fill || !nextEl) return
+  if (!parts.title && !parts.next) {
+    currentNowNextEl.hidden = true
+    return
+  }
+  if (eyebrow) eyebrow.textContent = parts.eyebrow
+  titleEl.textContent = parts.title
+  timeEl.textContent = parts.time
+  if (parts.progress == null) {
+    barWrap.setAttribute("hidden", "")
+  } else {
+    barWrap.removeAttribute("hidden")
+    ;(fill as HTMLElement).style.width = `${Math.round(parts.progress * 100)}%`
+  }
+  nextEl.textContent = parts.next
+  ;(nextEl as HTMLElement).style.display = parts.next ? "" : "none"
+  currentNowNextEl.hidden = false
+}
+
+function paintCurrentNowNext() {
+  if (!currentNowNextEl) return
+  if (currentlyPlayingId == null || !activePlaylistId) {
+    currentNowNextEl.hidden = true
+    return
+  }
+  const channel = all.find((entry) => entry.id === currentlyPlayingId)
+  const state = getProgrammesSync(activePlaylistId)
+  if (!channel || !state) {
+    currentNowNextEl.hidden = true
+    return
+  }
+  const { current, next } = computeNowNext(
+    state.programmes,
+    channel,
+    activePlaylistId
+  )
+  if (!current && !next) {
+    currentNowNextEl.hidden = true
+    return
+  }
+  if (current) {
+    setCurrentNowNext({
+      eyebrow: t("epg.now"),
+      title: current.title,
+      time: formatTimeRange(current.start, current.stop),
+      progress: current.progress,
+      next: next
+        ? `${t("epg.next")}: ${next.title} (${formatTimeRange(next.start, next.stop)})`
+        : "",
+    })
+  } else if (next) {
+    setCurrentNowNext({
+      eyebrow: t("epg.next"),
+      title: next.title,
+      time: formatTimeRange(next.start, next.stop),
+      progress: null,
+      next: "",
+    })
+  }
+}
 
 let activePlaylistId = ""
 let activePlaylistTitle = ""
@@ -577,6 +657,8 @@ function refreshNowSlots() {
     const playBtn = row.querySelector("[data-role='play']")
     paintNowSlot(slot, playBtn, ch)
   }
+  // Same EPG refresh tick keeps the now/next strip under the player fresh.
+  paintCurrentNowNext()
 }
 
 function shouldWarnHevc(name) {
@@ -4103,6 +4185,7 @@ async function play(streamId, name, reason = "user") {
     if (sourceLogo instanceof HTMLElement) sourceLogo.style.viewTransitionName = ""
     showTuningOverlay(channelLogo)
     runScanLineSweep()
+    paintCurrentNowNext()
   }
 
   if (wantTransition) {
@@ -4305,6 +4388,20 @@ function renderCatchupCurrentRow(channel, title) {
   }
   wrap.appendChild(label)
   currentEl.appendChild(wrap)
+
+  // Catch-up has no EPG now/next slot (it is a recording, not the live
+  // schedule): the strip shows the programme being watched + its times.
+  setCurrentNowNext({
+    eyebrow: t("catchup.watchingLabel"),
+    title: title || channel.name || "",
+    time: catchupSession
+      ? catchupSession.kind === "programme"
+        ? `${formatWallClock(catchupSession.startUtcMs)}-${formatWallClock(catchupSession.stopUtcMs)}`
+        : formatWallClock(catchupSession.startUtcMs)
+      : "",
+    progress: null,
+    next: "",
+  })
 
   const backBtn = document.createElement("button")
   backBtn.type = "button"
@@ -5231,7 +5328,7 @@ function renderEpgSidePanelRows(past, upcoming, { isM3uSource, canLoadEarlier, i
       // has_archive narrows the badge/playability when the provider sends it; missing/null means "trust the channel-level catch-up window".
       const archiveKnownPlayable = programme.hasArchive == null ? true : programme.hasArchive
       const replayBadge = isPast && archiveKnownPlayable
-        ? `<span class="inline-flex shrink-0 items-center rounded-md border border-line bg-surface-2 px-1.5 text-2xs font-medium text-fg-3">${escapeHtml(t("catchup.badge"))}</span>`
+        ? `<span class="inline-flex shrink-0 items-center rounded-md border border-line bg-surface-2 px-1.5 text-xs font-medium text-fg-3">${escapeHtml(t("catchup.badge"))}</span>`
         : ""
       const dayKey = epgDayKey(programme.start)
       const daySeparator = dayKey !== previousDayKey ? renderEpgDaySeparator(programme.start) : ""
@@ -5247,16 +5344,16 @@ function renderEpgSidePanelRows(past, upcoming, { isM3uSource, canLoadEarlier, i
       return `
         ${daySeparator}
         <button type="button" data-epg-idx="${idx}"${isPlaying ? ' data-now-playing="true" aria-current="true"' : ""}
-          class="epg-entry block w-full min-h-11 text-left rounded-lg px-3 py-2 outline-none transition-colors
+          class="epg-entry block w-full min-h-12 text-left rounded-lg px-3.5 py-2.5 outline-none transition-colors
                  ${rowClass}
-                 focus-visible:ring-1 focus-visible:ring-accent">
+                 focus-visible:ring-2 focus-visible:ring-accent">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 min-w-0">
               ${dot}
-              <div class="font-medium text-fg truncate">${title}</div>
+              <div data-role="epg-title" class="text-base font-semibold text-fg truncate">${title}</div>
               ${replayBadge}
             </div>
-            <div class="text-xs text-fg-3 tabular-nums shrink-0">${start}–${end}</div>
+            <div data-role="epg-time" class="text-sm text-fg-3 tabular-nums shrink-0">${start}–${end}</div>
           </div>
           ${desc ? `<div class="mt-1 text-sm text-fg-2 leading-relaxed line-clamp-3">${desc}</div>` : ""}
         </button>`
@@ -5277,6 +5374,9 @@ function renderEpgSidePanelRows(past, upcoming, { isM3uSource, canLoadEarlier, i
     }
   }
   updateEpgDayIndicator()
+  // The side panel just (re)painted from the same EPG state — the strip
+  // under the player refreshes from it too.
+  paintCurrentNowNext()
 }
 
 /** M3U variant of loadEPG: renders the channel's XMLTV programmes (via effective tvg-id) through the shared renderer. */

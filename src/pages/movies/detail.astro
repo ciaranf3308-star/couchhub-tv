@@ -49,12 +49,12 @@ import {
           <h1
             id="movie-detail-title"
             hidden
-            class="font-semibold tracking-[-0.02em] leading-tight text-2xl sm:text-3xl">
+            class="font-serif font-semibold tracking-[-0.02em] leading-tight text-3xl sm:text-4xl lg:text-5xl">
           </h1>
           <div
             id="movie-detail-meta"
             hidden
-            class="detail-meta text-xs text-fg-3 tabular-nums">
+            class="detail-meta text-sm text-fg-3 tabular-nums">
           </div>
           <div
             id="movie-detail-langs"
@@ -120,7 +120,7 @@ import {
             id="movie-detail-play"
             type="button"
             class="dt-play-breath flex flex-col items-center justify-center gap-0 rounded-xl bg-accent text-bg
-                   px-5 py-2 text-sm font-semibold min-w-44 min-h-11
+                   px-6 py-3 text-base font-semibold min-w-52 min-h-14
                    hover:opacity-90 focus-visible:opacity-90
                    focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
                    active:scale-[0.97] transition duration-150">
@@ -130,7 +130,7 @@ import {
             </span>
             <span
               id="movie-detail-play-sub"
-              class="text-2xs font-normal opacity-80 tabular-nums leading-tight mt-0.5 empty:hidden"></span>
+              class="text-xs font-normal opacity-80 tabular-nums leading-tight mt-0.5 empty:hidden"></span>
           </button>
           <button
             id="movie-detail-restart"
@@ -247,7 +247,7 @@ import {
             <div
               id="movie-detail-tagline"
               hidden
-              class="text-sm text-fg-3">
+              class="text-base text-fg-3">
             </div>
             <div data-detail-skeleton class="flex flex-col gap-2">
               <div class="skel rounded h-3.5 w-full"></div>
@@ -257,7 +257,7 @@ import {
             <div
               id="movie-detail-plot"
               hidden
-              class="text-sm text-fg-2 leading-relaxed">
+              class="text-base text-fg-2 leading-relaxed">
             </div>
           </div>
 
@@ -265,23 +265,23 @@ import {
             <div
               id="movie-detail-director"
               hidden
-              class="text-xs text-fg-3">
+              class="text-sm text-fg-3">
             </div>
             <div
               id="movie-detail-fact-genre"
               hidden
-              class="flex items-center justify-between gap-3 text-xs">
+              class="flex items-center justify-between gap-3 text-sm">
               <span class="text-fg-3" data-i18n="detail.section.genre">Genre</span>
               <span data-role="fact-value" class="text-fg text-right truncate"></span>
             </div>
             <div
               id="movie-detail-fact-rating"
               hidden
-              class="flex items-center justify-between gap-3 text-xs">
+              class="flex items-center justify-between gap-3 text-sm">
               <span class="text-fg-3" data-i18n="detail.section.rating">Rating</span>
               <span data-role="fact-value" class="text-fg text-right truncate"></span>
             </div>
-            <div id="movie-detail-provider-people" hidden class="flex flex-col gap-1.5 text-xs">
+            <div id="movie-detail-provider-people" hidden class="flex flex-col gap-1.5 text-sm">
               <span class="text-fg-3" data-i18n="detail.cast">Cast</span>
               <div id="movie-detail-provider-people-list" class="flex flex-wrap gap-1.5"></div>
             </div>
@@ -289,7 +289,7 @@ import {
         </div>
 
         <section id="movie-detail-cast" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="text-lg font-semibold tracking-[-0.02em]" data-i18n="detail.cast">Cast</h2>
+          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.cast">Cast</h2>
           <div
             id="movie-detail-cast-list"
             class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
@@ -297,7 +297,7 @@ import {
         </section>
 
         <section id="movie-detail-similar" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="text-lg font-semibold tracking-[-0.02em]" data-i18n="detail.similar">Similar titles</h2>
+          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.similar">Similar titles</h2>
           <div
             id="movie-detail-similar-list"
             class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
@@ -307,6 +307,54 @@ import {
       </div>
     </div>
   </main>
+
+  <style>
+    /* Nylah Studios v0.2.0 (w3) — detail reskin. The poster, title and
+       action buttons are in this template, so plain scoped selectors
+       match them; runtime-injected rows (cast, episodes) need :global(). */
+    #movie-detail-poster {
+      box-shadow:
+        0 0 0 1px var(--color-line),
+        0 24px 64px -24px color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    /* Controller-first focus glow on every action button. */
+    .btn:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    #movie-detail-play:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 32px 6px color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    /* Cast cards are injected by detail-chrome.ts: a focused card glows. */
+    :global(#movie-detail-cast-list a:focus-visible) {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    :global(#movie-detail-similar-list a:focus-visible) {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #movie-detail-poster,
+      .btn:focus-visible,
+      #movie-detail-play:focus-visible,
+      :global(#movie-detail-cast-list a:focus-visible),
+      :global(#movie-detail-similar-list a:focus-visible) {
+        box-shadow: none;
+      }
+      .btn:focus-visible,
+      #movie-detail-play:focus-visible,
+      :global(#movie-detail-cast-list a:focus-visible),
+      :global(#movie-detail-similar-list a:focus-visible) {
+        box-shadow: 0 0 0 2px var(--color-accent);
+      }
+    }
+  </style>
 
   <script>
     import "@/scripts/movies/detail.ts"

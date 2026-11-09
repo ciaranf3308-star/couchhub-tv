@@ -2,6 +2,7 @@
 import Layout from "@/layouts/Layout.astro"
 import {
   IconChevronLeft,
+  IconPlayerPlay,
   IconBookmark,
   IconBrandYoutube,
   IconPictureInPicture,
@@ -46,16 +47,16 @@ import {
           <h1
             id="series-detail-title"
             hidden
-            class="font-semibold tracking-[-0.02em] leading-tight text-2xl sm:text-3xl">
+            class="font-serif font-semibold tracking-[-0.02em] leading-tight text-3xl sm:text-4xl lg:text-5xl">
           </h1>
           <div
             id="series-now-playing"
-            class="text-xs text-fg-3 truncate tabular-nums">
+            class="text-sm text-fg-3 truncate tabular-nums">
           </div>
           <div
             id="series-detail-meta"
             hidden
-            class="detail-meta text-xs text-fg-3 tabular-nums">
+            class="detail-meta text-sm text-fg-3 tabular-nums">
           </div>
           <div
             id="series-detail-langs"
@@ -116,6 +117,27 @@ import {
         </div>
 
         <div class="dt-enter dt-stagger-2 flex flex-wrap items-center gap-2">
+          <!-- Nylah Studios v0.2.0 (w3): series finally gets a Play button —
+               it plays the resume/next episode picked by the existing
+               pickDefaultPlayEpisode() (same pick as the poster badge), so
+               no new data or logic. Hidden until episodes load. -->
+          <button
+            id="series-detail-play"
+            type="button"
+            hidden
+            class="dt-play-breath flex flex-col items-center justify-center gap-0 rounded-xl bg-accent text-bg
+                   px-6 py-3 text-base font-semibold min-w-52 min-h-14
+                   hover:opacity-90 focus-visible:opacity-90
+                   focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
+                   active:scale-[0.97] transition duration-150">
+            <span class="inline-flex items-center gap-2 leading-none">
+              <IconPlayerPlay aria-hidden="true" stroke={2} class="btn-icon" />
+              <span id="series-detail-play-label">Play</span>
+            </span>
+            <span
+              id="series-detail-play-sub"
+              class="text-xs font-normal opacity-80 tabular-nums leading-tight mt-0.5 empty:hidden"></span>
+          </button>
           <button
             id="series-detail-fav"
             type="button"
@@ -214,7 +236,7 @@ import {
             <div
               id="series-detail-tagline"
               hidden
-              class="text-sm text-fg-3">
+              class="text-base text-fg-3">
             </div>
             <div data-detail-skeleton class="flex flex-col gap-2">
               <div class="skel rounded h-3.5 w-full"></div>
@@ -224,7 +246,7 @@ import {
             <div
               id="series-detail-plot"
               hidden
-              class="text-sm text-fg-2 leading-relaxed">
+              class="text-base text-fg-2 leading-relaxed">
             </div>
           </div>
 
@@ -232,23 +254,23 @@ import {
             <div
               id="series-detail-director"
               hidden
-              class="text-xs text-fg-3">
+              class="text-sm text-fg-3">
             </div>
             <div
               id="series-detail-fact-genre"
               hidden
-              class="flex items-center justify-between gap-3 text-xs">
+              class="flex items-center justify-between gap-3 text-sm">
               <span class="text-fg-3" data-i18n="detail.section.genre">Genre</span>
               <span data-role="fact-value" class="text-fg text-right truncate"></span>
             </div>
             <div
               id="series-detail-fact-rating"
               hidden
-              class="flex items-center justify-between gap-3 text-xs">
+              class="flex items-center justify-between gap-3 text-sm">
               <span class="text-fg-3" data-i18n="detail.section.rating">Rating</span>
               <span data-role="fact-value" class="text-fg text-right truncate"></span>
             </div>
-            <div id="series-detail-provider-people" hidden class="flex flex-col gap-1.5 text-xs">
+            <div id="series-detail-provider-people" hidden class="flex flex-col gap-1.5 text-sm">
               <span class="text-fg-3" data-i18n="detail.cast">Cast</span>
               <div id="series-detail-provider-people-list" class="flex flex-wrap gap-1.5"></div>
             </div>
@@ -256,7 +278,7 @@ import {
         </div>
 
         <section id="series-detail-cast" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="text-lg font-semibold tracking-[-0.02em]" data-i18n="detail.cast">Cast</h2>
+          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.cast">Cast</h2>
           <div
             id="series-detail-cast-list"
             class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
@@ -264,7 +286,7 @@ import {
         </section>
 
         <section id="series-detail-similar" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="text-lg font-semibold tracking-[-0.02em]" data-i18n="detail.similar">Similar titles</h2>
+          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.similar">Similar titles</h2>
           <div
             id="series-detail-similar-list"
             class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
@@ -287,6 +309,70 @@ import {
       </div>
     </div>
   </main>
+
+  <style>
+    /* Nylah Studios v0.2.0 (w3) — detail reskin. Poster, title and action
+       buttons are in this template, so plain scoped selectors match them;
+       season tabs and episode rows are injected by detail.ts and need
+       :global(). */
+    #series-detail-poster {
+      box-shadow:
+        0 0 0 1px var(--color-line),
+        0 24px 64px -24px color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    /* Controller-first focus glow on every action button. */
+    .btn:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    #series-detail-play:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 32px 6px color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    /* The episode now playing is the controller's anchor in the list. */
+    :global(.episode-row[data-now-playing="true"]) {
+      background: var(--color-accent-soft);
+      box-shadow:
+        0 0 0 1px color-mix(in oklch, var(--color-accent) 55%, transparent),
+        0 0 20px 2px color-mix(in oklch, var(--color-accent) 25%, transparent);
+    }
+    :global(.episode-row:focus-within) {
+      background: var(--color-surface-2);
+      box-shadow: 0 0 0 2px var(--color-accent);
+    }
+    :global(#series-season-tabs button:focus-visible) {
+      border-color: var(--color-accent);
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    :global(#series-detail-cast-list a:focus-visible),
+    :global(#series-detail-similar-list a:focus-visible) {
+      box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #series-detail-poster,
+      .btn:focus-visible,
+      #series-detail-play:focus-visible,
+      :global(.episode-row[data-now-playing="true"]),
+      :global(.episode-row:focus-within),
+      :global(#series-season-tabs button:focus-visible),
+      :global(#series-detail-cast-list a:focus-visible),
+      :global(#series-detail-similar-list a:focus-visible) {
+        box-shadow: none;
+      }
+      .btn:focus-visible,
+      #series-detail-play:focus-visible,
+      :global(.episode-row:focus-within),
+      :global(#series-season-tabs button:focus-visible) {
+        box-shadow: 0 0 0 2px var(--color-accent);
+      }
+    }
+  </style>
 
   <script>
     import "@/scripts/series/detail.ts"
