@@ -1,10 +1,9 @@
 /* CouchHub TV — ten-foot focus and CouchHub palette alignment.
  *
  * Upstream already ships a dark theme with user-selectable accents; the
- * fork defaults the accent to gold (see the pre-paint script in
- * Layout.astro / TvLayout.astro), matching the CouchHub launcher's
- * boutique-hotel brass on its warm charcoal background. The background
- * and surface hues follow the accent, so the whole UI warms up with it.
+ * fork defaults the accent to burgundy (see the pre-paint script in
+ * Layout.astro / TvLayout.astro) — the bedroom theme: deep wine in
+ * dark mode, warm beige in light mode.
  * This file only adds what upstream lacks: an unmistakable focus ring
  * while a controller is in use. It is deliberately small — the upstream
  * UI is preserved, not rebuilt.
@@ -15,13 +14,13 @@
  * added by gamepad.ts on first controller input and removed on the next
  * mouse click / physical keypress. */
 :root.gamepad-active :focus-visible {
-  outline: 3px solid var(--color-accent, #c9a227);
+  outline: 3px solid var(--color-accent, #9c2f42);
   outline-offset: 3px;
   border-radius: 6px;
 }
 
 :root.gamepad-active :focus {
-  outline: 3px solid var(--color-accent, #c9a227);
+  outline: 3px solid var(--color-accent, #9c2f42);
   outline-offset: 3px;
 }
 

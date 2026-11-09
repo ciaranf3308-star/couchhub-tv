@@ -168,6 +168,8 @@ html.xt-theme-switching::view-transition-new(root) {
     --accent-swatch-blue:    light-dark(oklch(0.50 0.20 250), oklch(0.78 0.15 250));
     --accent-swatch-violet:  light-dark(oklch(0.50 0.20 295), oklch(0.78 0.15 295));
     --accent-swatch-gold:    light-dark(oklch(0.55 0.15 85 ), oklch(0.85 0.16 90 ));
+    /* CouchHub TV "Burgundy" (bedroom theme): deep wine accent. */
+    --accent-swatch-burgundy: light-dark(oklch(0.45 0.19 350), oklch(0.72 0.17 350));
     --accent-swatch-lime:    light-dark(oklch(0.50 0.19 130), oklch(0.82 0.20 130));
     --accent-swatch-teal:    light-dark(oklch(0.50 0.13 185), oklch(0.80 0.13 185));
     --accent-swatch-silver:  light-dark(oklch(0.45 0.01 260), oklch(0.80 0.01 260));
@@ -211,6 +213,26 @@ html.xt-theme-switching::view-transition-new(root) {
     --color-accent-soft: light-dark(oklch(0.55 0.15 85 / 0.12), oklch(0.85 0.16 90 / 0.18));
     /* Yellow-gold is too light in both themes for white text. */
     --color-on-accent:   var(--color-bg);
+}
+:root[data-accent="burgundy"] {
+    --xt-tint-hue: 350;
+    --color-accent:      var(--accent-swatch-burgundy);
+    --color-accent-soft: light-dark(oklch(0.45 0.19 350 / 0.12), oklch(0.72 0.17 350 / 0.18));
+    /* Wine-red is mid-tone in both themes, so white text reads on it. */
+    --color-on-accent:   white;
+    /* Bedroom theme: unlike the other accents, burgundy re-tints the
+       surfaces themselves — the dark surface values are fixed slate
+       hues upstream, so the tint hue alone cannot warm them. Dark is
+       deep wine, light is warm beige. */
+    --color-bg:        light-dark(oklch(0.93 0.028 75), oklch(0.155 0.045 350));
+    --color-surface:   light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350));
+    --color-surface-2: light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350));
+    --color-surface-3: light-dark(oklch(0.85 0.036 75), oklch(0.32 0.05 350));
+    --color-line:      light-dark(oklch(0.82 0.036 75), oklch(0.36 0.045 350));
+    --color-line-soft: light-dark(oklch(0.87 0.03 75), oklch(0.28 0.04 350));
+    --color-fg:   light-dark(oklch(0.22 0.03 75), oklch(0.96 0.008 350));
+    --color-fg-2: light-dark(oklch(0.40 0.028 75), oklch(0.78 0.012 350));
+    --color-fg-3: light-dark(oklch(0.46 0.026 75), oklch(0.62 0.012 350));
 }
 :root[data-accent="lime"] {
     --xt-tint-hue: 130;
