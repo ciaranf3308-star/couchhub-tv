@@ -3,6 +3,7 @@ import Layout from "@/layouts/Layout.astro"
 import {
   IconChevronLeft,
   IconPlayerPlay,
+  IconBell,
   IconBookmark,
   IconBrandYoutube,
   IconPictureInPicture,
@@ -152,6 +153,14 @@ import {
             class="btn">
             <IconBookmark aria-hidden="true" stroke={2} class="btn-icon" />
             <span id="series-detail-watch-label">Watch later</span>
+          </button>
+          <button
+            id="series-detail-follow"
+            type="button"
+            aria-pressed="false"
+            class="btn">
+            <IconBell aria-hidden="true" stroke={2} class="btn-icon" />
+            <span id="series-detail-follow-label">Follow</span>
           </button>
           <button
             id="series-detail-pip"

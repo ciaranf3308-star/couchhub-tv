@@ -44,6 +44,8 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_livetv = MenuItem::with_id(app, "nav:/livetv", "Live TV", true, None::<&str>)?;
     let open_movies = MenuItem::with_id(app, "nav:/movies", "Movies", true, None::<&str>)?;
     let open_series = MenuItem::with_id(app, "nav:/series", "Series", true, None::<&str>)?;
+    let open_followed =
+        MenuItem::with_id(app, "nav:/followed", "Followed Series", true, None::<&str>)?;
     let open_search = MenuItem::with_id(app, "nav:/search", "Search", true, None::<&str>)?;
     let open_epg = MenuItem::with_id(app, "nav:/epg", "Guide", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
@@ -60,6 +62,7 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             &open_livetv,
             &open_movies,
             &open_series,
+            &open_followed,
             &open_search,
             &open_epg,
             &sep2,

@@ -7,6 +7,7 @@ import {
   loadCreds,
   getActiveEntry,
   isTauri,
+  isLikelyM3USource,
 } from "@/scripts/lib/creds.js"
 import { xtreamApiFetch, resolveStreamUrl } from "@/scripts/lib/xtream-api.js"
 import { isCastRoutingActive, routePlayToCast, castXtreamEpisodeToTv } from "@/scripts/lib/tv-cast.js"
@@ -107,13 +108,21 @@ import {
   getExternalLauncher,
   subscribeExternalPlayerExit,
 } from "@/scripts/lib/player-runtime.ts"
-import { toast } from "@/scripts/lib/toast.js"
+import { toast, toastError } from "@/scripts/lib/toast.js"
 import { setupExternalPlayerButton, surfaceLaunchErrorFallback } from "@/scripts/lib/external-player-button.ts"
 import { setupPlayOnTvButton } from "@/scripts/lib/play-on-tv-button.ts"
 import { createVideoScaleController } from "@/scripts/lib/video-scale.ts"
 import { openVideoScaleDialog, videoScaleModeLabelKey } from "@/scripts/lib/video-scale-dialog.ts"
 import { createSubtitleDelayController } from "@/scripts/lib/subtitle-delay-dialog.ts"
 import { buildSeriesStreamUrl } from "@/scripts/lib/stream-urls.ts"
+import {
+  followSeries,
+  unfollowSeries,
+  isFollowing,
+  clearUnreadForEpisode,
+  normalizeSnapshot,
+  FOLLOWED_CHANGED_EVENT,
+} from "@/scripts/lib/followed.ts"
 import { attachPosterContextMenu } from "@/scripts/lib/poster-menu.ts"
 import { attachPlayerInsights } from "@/scripts/lib/player-stats.ts"
 import { createVodPlaybackToasts } from "@/scripts/lib/vod-playback-toasts.ts"
@@ -139,6 +148,8 @@ const playSubEl = document.getElementById("series-detail-play-sub")
 const favBtn = document.getElementById("series-detail-fav")
 const watchBtn = document.getElementById("series-detail-watch")
 const watchLabelEl = document.getElementById("series-detail-watch-label")
+const followBtn = document.getElementById("series-detail-follow")
+const followLabelEl = document.getElementById("series-detail-follow-label")
 const trailerBtn = document.getElementById("series-detail-trailer")
 const taglineEl = document.getElementById("series-detail-tagline")
 const directorEl = document.getElementById("series-detail-director")
@@ -185,6 +196,12 @@ const autoplayEpisodeId = urlParams.get("autoplay") === "1"
   ? Number(urlParams.get("episode") || "0") || null
   : null
 let autoplayPending = !!autoplayEpisodeId
+// Deep-link handoff (?season=N&epnum=M[&autoplay=1], from the launcher /
+// New Episodes "Watch Now"): match by S/E numbers, not provider ids.
+const deepLinkSeason = Number(urlParams.get("season") || "0") || null
+const deepLinkEpNum = Number(urlParams.get("epnum") || "0") || null
+const deepLinkAutoplay = urlParams.get("autoplay") === "1"
+let deepLinkPending = deepLinkSeason != null && deepLinkEpNum != null
 let activePlaylistId = ""
 let creds = { host: "", port: "", user: "", pass: "" }
 let series = null
@@ -349,7 +366,15 @@ function openEpisodeMenu(ep, anchor, point) {
       () => {
         if (!activePlaylistId) return
         if (watchedOn) clearProgress(activePlaylistId, "episode", ep.id)
-        else markCompleted(activePlaylistId, "episode", ep.id, progressExtrasFor(ep))
+        else {
+          markCompleted(activePlaylistId, "episode", ep.id, progressExtrasFor(ep))
+          // Manually marked watched: clear its "new episode" notification.
+          void clearUnreadForEpisode(activePlaylistId, String(series?.id ?? seriesId), {
+            season: Number(ep.season || currentSeason) || 0,
+            episode: Number(ep.episode_num) || 0,
+            episodeId: Number(ep.id) || null,
+          })
+        }
         renderEpisodes()
       }
     )
@@ -419,6 +444,37 @@ function syncWatchButton() {
   watchBtn.classList.toggle("text-accent", onWatchlist)
   watchBtn.setAttribute("aria-pressed", String(onWatchlist))
 }
+
+// ----------------------------
+// Followed Series — bell button next to Fav / Watch later.
+// ----------------------------
+// A follow is only possible once a get_series_info payload has produced a
+// non-empty baseline (otherwise the first check would alert on the whole
+// back catalogue). M3U sources never produce one, so the button stays
+// disabled there with an explanation instead of a dead toggle.
+let followStateToken = 0
+async function syncFollowButton() {
+  if (!followBtn || !series || !activePlaylistId) return
+  const token = ++followStateToken
+  const canFollow = normalizeSnapshot(seriesInfoRaw).length > 0
+  const following = await isFollowing(activePlaylistId, String(series.id))
+  if (token !== followStateToken) return
+  if (followLabelEl) {
+    followLabelEl.textContent = following
+      ? t("followed.following")
+      : canFollow
+        ? t("followed.follow")
+        : t("followed.followUnavailable")
+  }
+  followBtn.classList.toggle("text-accent", following)
+  followBtn.setAttribute("aria-pressed", String(following))
+  followBtn.disabled = !canFollow && !following
+  followBtn.title = canFollow ? "" : t("followed.followUnavailableHint")
+}
+
+document.addEventListener(FOLLOWED_CHANGED_EVENT, () => {
+  void syncFollowButton()
+})
 
 // ----------------------------
 // Episode list rendering
@@ -904,8 +960,50 @@ function applySeriesInfo(data) {
     return
   }
 
+  // Deep-link handoff (?season=N&epnum=M[&autoplay=1], from the launcher or
+  // New Episodes "Watch Now"): match by S/E numbers, switch to that season,
+  // and either autoplay or scroll the episode into view. Runs on every
+  // applySeriesInfo until the target is found, so a cold cache pass that
+  // lacks the episode yet does not consume the link.
+  if (deepLinkPending && deepLinkSeason != null && deepLinkEpNum != null) {
+    let targetEp = null
+    let targetSeason = ""
+    for (const key of seasonKeys) {
+      if (Number(key) !== deepLinkSeason) continue
+      const ep = (byKey[key] || []).find((e) => Number(e.episode_num) === deepLinkEpNum)
+      if (ep) {
+        targetEp = ep
+        targetSeason = key
+        break
+      }
+    }
+    if (targetEp) {
+      currentSeason = targetSeason
+      renderSeasonTabs(seasonKeys)
+      renderEpisodes()
+      deepLinkPending = false
+      try {
+        urlParams.delete("season")
+        urlParams.delete("epnum")
+        urlParams.delete("autoplay")
+        const next = urlParams.toString()
+        history.replaceState(null, "", location.pathname + (next ? `?${next}` : ""))
+      } catch {}
+      if (deepLinkAutoplay) {
+        playEpisode(targetEp)
+      } else {
+        const row = episodeList?.querySelector(
+          `.episode-row[data-ep-num="${deepLinkEpNum}"]`
+        )
+        row?.scrollIntoView({ block: "center" })
+      }
+      return
+    }
+  }
+
   renderSeasonTabs(seasonKeys)
   renderEpisodes()
+  void syncFollowButton()
 }
 
 // Genre/rating repeat in the facts column at lg+, so the compact strip hides its own copies there.
@@ -1726,6 +1824,13 @@ async function playEpisode(episode, options = {}) {
         duration: dur,
         ...progressExtrasFor(currentEpisode),
       })
+      // Playback finished: the episode is watched, so its "new episode"
+      // notification (if any) is no longer unread.
+      void clearUnreadForEpisode(activePlaylistId, String(series?.id ?? seriesId), {
+        season: Number(currentEpisode.season || currentSeason) || 0,
+        episode: Number(currentEpisode.episode_num) || 0,
+        episodeId: Number(currentEpisode.id) || null,
+      })
       const nextEp = findNextEpisode(currentEpisode)
       if (nextEp) showUpNextOverlay(nextEp)
     },
@@ -2096,6 +2201,55 @@ document.addEventListener("xt:watchlist-changed", (e) => {
 })
 
 // ----------------------------
+// Followed Series — follow / unfollow toggle.
+// ----------------------------
+followBtn?.addEventListener("click", async () => {
+  if (!series || !activePlaylistId) return
+  const following = await isFollowing(activePlaylistId, String(series.id))
+  if (following) {
+    await unfollowSeries(activePlaylistId, String(series.id))
+    toast({ title: t("followed.unfollowed"), description: series.name || "" })
+    void syncFollowButton()
+    return
+  }
+  let info = seriesInfoRaw
+  if (normalizeSnapshot(info).length === 0 && creds.host && creds.user && creds.pass) {
+    // No provider payload cached yet (cold open): fetch once before refusing,
+    // so the button works the first time a series is ever opened.
+    try {
+      const r = await xtreamApiFetch("get_series_info", {
+        series_id: String(series.id),
+        series: String(series.id),
+      })
+      if (r.ok) {
+        info = await r.json()
+        setCached(activePlaylistId, `series_info_${series.id}`, info, SERIES_INFO_TTL_MS)
+        applySeriesInfo(info)
+      }
+    } catch (err) {
+      log.warn("[xt:series-detail] follow prefetch failed:", err)
+    }
+  }
+  const result = await followSeries({
+    playlistId: activePlaylistId,
+    seriesId: String(series.id),
+    seriesTitle:
+      series.name || series.title || t("list.seriesFallback", { id: series.id }),
+    posterUrl: series.logo || series.cover || null,
+    sourceKind: isLikelyM3USource(creds.host, creds.user, creds.pass) ? "m3u" : "xtream",
+    seriesInfo: info,
+  })
+  if (result.ok) {
+    toast({ title: t("followed.followed"), description: series.name || "" })
+  } else {
+    toastError(t("followed.followFailed"), {
+      description: t("followed.followUnavailableHint"),
+    })
+  }
+  void syncFollowButton()
+})
+
+// ----------------------------
 // Trailer
 // ----------------------------
 trailerBtn?.addEventListener("click", () => {
@@ -2231,6 +2385,7 @@ async function boot() {
   setAmbient(series.logo || null)
   syncFavButton()
   syncWatchButton()
+  void syncFollowButton()
   renderLanguagePills(list?.data || [])
 
   // Both probes are network-free (hydrate + memory read) and run under one bound,

@@ -13,6 +13,9 @@ mod external_player;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod firewall;
 
+mod followed;
+mod followed_core;
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod hevc_extension;
 
@@ -203,6 +206,10 @@ fn install_panic_hook() {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
+    // Followed Series launch args (--check-followed / --open-series): parsed
+    // once so the headless flag can gate the tray + window in setup().
+    let followed_launch = followed::FollowedLaunch::from_env();
+    let followed_headless = followed_launch.headless;
     // Must run before the builder exists: the main window is created before
     // setup(), so the WebKitGTK env var has to land before that.
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -217,13 +224,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(warmup::WarmupState::default())
-        .manage(receiver::ReceiverState::default());
+        .manage(receiver::ReceiverState::default())
+        .manage(followed_launch);
 
     #[cfg(not(target_os = "ios"))]
     let builder = builder.plugin(build_log_plugin().build());
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second launch hands its args to the running instance:
+            // deep links open the series, --check-followed runs a check.
+            followed::handle_second_instance(app, &args);
+        }))
         .plugin(external_player::sandbox_bootstrap_plugin())
         .plugin(
             // Nylah Studios v0.2.2: FULLSCREEN and DECORATIONS are NOT
@@ -272,6 +285,13 @@ pub fn run() {
             external_player::discover_external_players,
             firewall::receiver_firewall_status,
             firewall::receiver_firewall_allow,
+            followed::followed_headless_mode,
+            followed::followed_take_pending_deep_link,
+            followed::followed_headless_done,
+            followed::followed_publish_notifications,
+            followed::followed_schedule_status,
+            followed::followed_schedule_set,
+            followed::followed_schedule_repair,
             hevc_extension::install_appx_package,
             hevc_extension::is_store_build,
             receiver::receiver_start,
@@ -316,6 +336,9 @@ pub fn run() {
         ai_keyring::ai_key_has,
         ai_keyring::ai_key_delete,
         ai_keyring::ai_test_connection,
+        followed::followed_headless_mode,
+        followed::followed_take_pending_deep_link,
+        followed::followed_headless_done,
         receiver::receiver_start,
         receiver::receiver_stop,
         receiver::receiver_status,
@@ -335,17 +358,21 @@ pub fn run() {
     ]);
 
     let app = builder
-        .setup(|app| {
+        .setup(move |app| {
             install_panic_hook();
             log_session_banner(app);
             #[cfg(target_os = "android")]
             prune_old_android_logs(app);
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             external_player::sweep_orphan_mpv_sockets();
+            // Headless check mode: no tray icon, no window — the frontend
+            // runs the check and calls followed_headless_done to exit.
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            tray::install(app)?;
+            if !followed_headless {
+                tray::install(app)?;
+            }
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            {
+            if !followed_headless {
                 use tauri::Manager;
                 if let Some(main_window) = app.get_webview_window("main") {
                     if let Err(error) = main_window.set_decorations(false) {
@@ -373,6 +400,16 @@ pub fn run() {
         })
         .build(context)
         .expect("error while running tauri application");
+
+    if followed_headless {
+        // Safety net: a hung provider must never leave a ghost process
+        // behind after a scheduled check.
+        std::thread::spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(10 * 60));
+            log::warn!("[followed] headless check watchdog: exiting after 10 minutes");
+            std::process::exit(0);
+        });
+    }
 
     app.run(|_app_handle, _event| {
         // Tauri exit paths (e.g. tray Quit) may not run Drop for state behind Arcs, so kill any active ffmpeg session here.

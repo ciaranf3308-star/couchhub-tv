@@ -30,6 +30,7 @@ const KNOWN_ROUTES = new Set([
   "/livetv",
   "/movies",
   "/series",
+  "/followed",
   "/search",
   "/epg",
   "/downloads",
