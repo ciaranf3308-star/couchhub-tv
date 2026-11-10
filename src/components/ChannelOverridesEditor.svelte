@@ -185,7 +185,8 @@
 
   const INPUT_CLASS =
     "min-h-11 rounded-lg border border-line bg-bg px-3 py-2 text-sm text-fg outline-none " +
-    "focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent"
+    "focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent " +
+    "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
 </script>
 
 <div class="flex flex-col gap-4 overflow-x-clip" bind:this={root}>
@@ -210,7 +211,7 @@
     {#if rows.length}
       <ul class="flex flex-col gap-1.5 max-h-[50vh] overflow-y-auto overflow-x-hidden custom-scroll pe-1 -me-1">
         {#each rows.slice(0, ROW_RENDER_CAP) as row (row.key)}
-          <li class="flex items-center gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2">
+          <li class="flex items-center gap-3 rounded-lg border border-line bg-linear-to-r from-surface-2 to-surface px-3 py-2">
             <span class="inline-flex items-center justify-center size-8 rounded bg-bg border border-line/60 overflow-hidden shrink-0">
               {#if row.logo}
                 <img src={row.logo} alt="" class="max-w-full max-h-full object-contain" loading="lazy" />
@@ -249,7 +250,7 @@
             </span>
             <button
               type="button"
-              class="ms-auto shrink-0 inline-flex items-center justify-center min-h-9 pointer-coarse:min-h-11 rounded-lg border border-line bg-bg px-3 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg focus-visible:bg-surface-3 focus-visible:border-accent transition-colors outline-none"
+              class="ms-auto shrink-0 inline-flex items-center justify-center min-h-9 pointer-coarse:min-h-11 rounded-lg border border-line bg-bg px-3 text-xs text-fg-2 hover:bg-surface-3 hover:text-fg focus-visible:bg-surface-3 focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)] transition-colors outline-none"
               onclick={() => revert(row.key)}
               aria-label={tr("settings.channelOverrides.revertAria", { name: row.label })}>
               {tr("settings.channelOverrides.revert")}
@@ -267,7 +268,7 @@
     {/if}
 
     <div class="flex flex-col gap-2 pt-1 border-t border-line/60">
-      <span class="text-sm font-medium text-fg-2 pt-3">{tr("settings.channelOverrides.stripTitle")}</span>
+      <span class="font-serif text-base text-fg pt-3">{tr("settings.channelOverrides.stripTitle")}</span>
       <p class="text-xs text-fg-3 leading-relaxed">{tr("settings.channelOverrides.stripHelper")}</p>
       {#if !channelsLoaded}
         <!-- Channels load when the card opens; this branch is only the wait or a failure. -->

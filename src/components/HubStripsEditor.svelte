@@ -141,7 +141,7 @@
 
 <div class="flex flex-col gap-4 overflow-x-clip">
   <div class="flex items-baseline justify-between gap-2 flex-wrap">
-    <h3 class="text-sm font-semibold text-fg">{tr("settings.hubStrips.activeTitle")}</h3>
+    <h3 class="font-serif text-base text-fg">{tr("settings.hubStrips.activeTitle")}</h3>
     <button
       type="button"
       class="inline-flex items-center min-h-9 px-2 rounded-lg text-xs text-fg-3 hover:text-fg focus-visible:text-fg underline-offset-2 hover:underline outline-none pointer-coarse:min-h-11"
@@ -162,7 +162,7 @@
           ondragleave={() => onDragLeave(idx)}
           ondragend={onDragEnd}
           ondrop={(event) => onDrop(idx, event)}
-          class="reorder-row group flex items-center gap-2 rounded-lg border bg-surface-2 px-2 py-1.5 transition-[opacity,border-color] duration-150"
+          class="reorder-row group flex items-center gap-2 rounded-lg border bg-linear-to-r from-surface-2 to-surface px-2 py-1.5 transition-[opacity,border-color] duration-150"
           class:is-dragging={dragState?.fromIdx === idx}
           class:is-drop-target={dragOver?.idx === idx && dragState?.fromIdx !== idx}
           class:is-settling={justMoved?.id === row.id}
@@ -175,7 +175,7 @@
           <span class="shrink-0 flex items-center gap-1">
             <button
               type="button"
-              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 outline-none disabled:opacity-30"
+              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:ring-1 focus-visible:ring-accent outline-none disabled:opacity-30"
               aria-label={tr("settings.hubStrips.moveUpAria", { name: labelFor(row.id) })}
               title={tr("settings.hubStrips.moveUp")}
               disabled={idx === 0}
@@ -184,7 +184,7 @@
             </button>
             <button
               type="button"
-              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 outline-none disabled:opacity-30"
+              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:ring-1 focus-visible:ring-accent outline-none disabled:opacity-30"
               aria-label={tr("settings.hubStrips.moveDownAria", { name: labelFor(row.id) })}
               title={tr("settings.hubStrips.moveDown")}
               disabled={idx === activeRows.length - 1}
@@ -193,7 +193,7 @@
             </button>
             <button
               type="button"
-              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-bad hover:bg-bad-soft focus-visible:text-bad focus-visible:bg-bad-soft outline-none"
+              class="reorder-arrow size-9 pointer-coarse:size-11 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-bad hover:bg-bad/10 focus-visible:text-bad focus-visible:bg-bad/10 focus-visible:ring-1 focus-visible:ring-bad outline-none"
               aria-label={tr("settings.hubStrips.removeAria", { name: labelFor(row.id) })}
               title={tr("settings.hubStrips.remove")}
               onclick={() => remove(row.id)}>
@@ -213,7 +213,7 @@
           <li>
             <button
               type="button"
-              class="inline-flex items-center gap-1.5 min-h-9 pointer-coarse:min-h-11 rounded-full border border-line bg-surface-2 px-3 text-xs text-fg-2 hover:text-fg hover:border-line-soft hover:bg-surface-3 focus-visible:bg-surface-3 outline-none transition-colors"
+              class="inline-flex items-center gap-1.5 min-h-9 pointer-coarse:min-h-11 rounded-full border border-line bg-surface-2 px-3 text-xs text-fg-2 hover:text-fg hover:border-line-soft hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)] outline-none transition-colors"
               onclick={() => add(entry.id)}>
               <svg xmlns="http://www.w3.org/2000/svg" width="0.85rem" height="0.85rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
               <span>{labelFor(entry.id)}</span>
@@ -229,7 +229,9 @@
   .reorder-row.is-dragging { opacity: 0.4; }
   .reorder-row.is-drop-target {
     border-color: var(--color-accent);
-    box-shadow: 0 0 0 1px var(--color-accent) inset;
+    box-shadow:
+      0 0 0 1px var(--color-accent) inset,
+      0 0 20px var(--nylah-focus-glow);
   }
   .reorder-row.is-settling {
     animation: reorder-settle 320ms cubic-bezier(0.16, 1, 0.3, 1);

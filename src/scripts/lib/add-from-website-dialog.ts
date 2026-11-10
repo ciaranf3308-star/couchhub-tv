@@ -223,7 +223,7 @@ function headerHtml(): string {
     <header class="flex items-start gap-3.5 shrink-0 px-3">
       <span class="icon-mark icon-mark--lg" aria-hidden="true">${ICON_WORLD}</span>
       <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-        <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold leading-tight tracking-tight">${escapeHtml(t("sniffer.dialog.title"))}</h2>
+        <h2 id="${DIALOG_ID}-title" class="font-serif text-lg leading-tight tracking-tight">${escapeHtml(t("sniffer.dialog.title"))}</h2>
         <p class="text-sm text-fg-3 leading-relaxed">${escapeHtml(t("sniffer.dialog.subtitle"))}</p>
       </div>
     </header>
@@ -239,14 +239,14 @@ function candidateRowHtml(candidate: SniffCandidate, idx: number, checked: boole
     <div
       data-role="candidate-row"
       data-idx="${idx}"
-      class="xt-picker-row flex items-center gap-3 px-3 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-2 focus-within:bg-surface-2 focus-within:border-accent has-checked:border-accent/60 has-checked:bg-accent-soft/15"
+      class="xt-picker-row flex items-center gap-3 px-3 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-2 focus-within:bg-surface-2 focus-within:border-accent focus-within:shadow-[0_0_16px_var(--nylah-focus-glow)] has-checked:border-accent/60 has-checked:bg-accent-soft/15"
     >
       <label class="shrink-0 -m-3 p-3 inline-flex items-center justify-center rounded-lg cursor-pointer">
         <input
           type="checkbox"
           data-role="candidate-check"
           data-idx="${idx}"
-          class="size-4 accent-accent"
+          class="size-4 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           aria-label="${escapeHtml(t("sniffer.results.selectAria", { name: primaryPathLabel(candidate.url) }))}"
           ${checked ? "checked" : ""}
         />
@@ -327,7 +327,7 @@ function renderPhase(
     return `
       <div class="flex flex-col flex-auto min-h-0 p-5 sm:p-6 gap-5">
         ${headerHtml()}
-        <h3 class="text-sm font-semibold text-fg-2">${escapeHtml(t("sniffer.results.title"))}</h3>
+        <h3 class="font-serif text-base text-fg">${escapeHtml(t("sniffer.results.title"))}</h3>
         <div data-role="list" class="flex flex-col gap-2.5 overflow-y-auto min-h-0">${rows}</div>
         <footer class="flex items-center gap-3 shrink-0 mt-auto">
           <button type="button" data-role="cancel" class="btn">${escapeHtml(t("common.cancel"))}</button>
@@ -381,7 +381,7 @@ function renderPhase(
   return `
     <div class="flex flex-col flex-auto min-h-0 overflow-y-auto p-5 sm:p-6 gap-5">
       ${headerHtml()}
-      <p class="text-sm text-fg-2 py-6 text-center">${escapeHtml(message)}</p>
+      <p class="font-serif text-base text-fg-2 py-6 text-center">${escapeHtml(message)}</p>
       <footer class="flex items-center gap-3 shrink-0 mt-auto">
         <button type="button" data-role="back" class="btn">${escapeHtml(t("sniffer.backBtn"))}</button>
         <button type="button" data-role="cancel" class="btn ms-auto">${escapeHtml(t("common.cancel"))}</button>
@@ -747,10 +747,11 @@ function ensureDialog(): HTMLDialogElement | null {
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(36rem,calc(100vw-2rem))] max-h-[min(80dvh,36rem)]",
     "open:flex flex-col overflow-hidden",
-    "backdrop:bg-black/60",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
   document.body.appendChild(node)
   dlg = node

@@ -29,12 +29,14 @@ export interface ConfirmDialogOptions {
 const BUTTON_CLASS_DEFAULT =
   "rounded-xl px-4 py-2 text-sm font-semibold bg-accent text-bg " +
   "hover:opacity-90 focus-visible:opacity-90 focus-visible:outline-none " +
-  "focus-visible:ring-1 focus-visible:ring-accent"
+  "focus-visible:ring-2 focus-visible:ring-accent " +
+  "focus-visible:shadow-[0_0_20px_var(--nylah-focus-glow)]"
 
 const BUTTON_CLASS_DESTRUCTIVE =
   "rounded-xl px-4 py-2 text-sm font-semibold bg-bad text-bg " +
   "hover:opacity-90 focus-visible:opacity-90 focus-visible:outline-none " +
-  "focus-visible:ring-1 focus-visible:ring-bad"
+  "focus-visible:ring-2 focus-visible:ring-bad " +
+  "focus-visible:shadow-[0_0_20px_color-mix(in_oklch,var(--color-bad)_55%,transparent)]"
 
 function ensureDialog(): HTMLDialogElement {
   if (dlg) return dlg
@@ -42,14 +44,15 @@ function ensureDialog(): HTMLDialogElement {
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(28rem,calc(100vw-2rem))]",
-    "backdrop:bg-black/70",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
   node.innerHTML = `
     <div class="flex flex-col gap-4 p-5">
       <div class="flex flex-col gap-1.5">
-        <h2 id="${DIALOG_ID}-title" data-role="title" class="text-base font-semibold"></h2>
+        <h2 id="${DIALOG_ID}-title" data-role="title" class="font-serif text-lg"></h2>
         <p data-role="body" class="text-sm text-fg-2"></p>
         <button
           data-role="link"
@@ -60,7 +63,7 @@ function ensureDialog(): HTMLDialogElement {
         <button
           data-role="cancel"
           type="button"
-          class="rounded-xl border border-line px-4 py-2 text-sm hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent"></button>
+          class="rounded-xl border border-line px-4 py-2 text-sm hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"></button>
         <button
           data-role="confirm"
           type="button"

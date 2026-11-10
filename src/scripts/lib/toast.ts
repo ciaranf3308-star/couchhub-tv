@@ -25,7 +25,7 @@ type ToastEl = HTMLElement & { _xtCleanup?: () => void }
 //   toastError(title, opts?)
 //   toastWarn(title, opts?)
 //
-// variant: "default" (fuchsia) | "success" (--color-ok) | "warn" | "error"
+// variant: "default" (wine/burgundy) | "success" (--color-ok) | "warn" | "error"
 // duration: ms; 0 = sticky (manual dismiss only). Default 4000.
 //
 // Anchored top-center. Hover or keyboard focus pauses the timer.
@@ -76,14 +76,16 @@ function injectStyles() {
       width: 100%;
       min-width: 18rem;
       max-width: 28rem;
-      border-radius: 0.75rem;
-      background: var(--color-surface);
+      border-radius: var(--nylah-card-radius, 1rem);
+      /* RedSilk: warm gradient, never a flat fill; the shadow is wine,
+         not the cold hue-255 slate the base theme used to paint here. */
+      background: linear-gradient(135deg, var(--color-surface), var(--color-surface-2));
       color: var(--color-fg);
       border: 1px solid var(--color-line);
       font-family: var(--font-sans);
       box-shadow:
-        0 12px 32px -16px light-dark(oklch(0.165 0.013 255 / 0.20), oklch(0 0 0 / 0.55)),
-        0 4px 12px -6px light-dark(oklch(0.165 0.013 255 / 0.12), oklch(0 0 0 / 0.35));
+        var(--nylah-card-shadow, 0 12px 32px -12px var(--nylah-focus-glow)),
+        0 4px 12px -6px var(--nylah-focus-halo);
       opacity: 0;
       transform: translateY(-6px);
       animation: xt-toast-in 200ms ${EASE} forwards;
@@ -98,9 +100,9 @@ function injectStyles() {
     }
 
     .xt-toast__accent {
-      width: 3px;
+      width: 4px;
       flex-shrink: 0;
-      background: var(--color-accent);
+      background: linear-gradient(180deg, var(--nylah-wine-bright, var(--color-accent)), var(--color-accent));
     }
     .xt-toast--success .xt-toast__accent { background: var(--color-ok); }
     .xt-toast--warn    .xt-toast__accent { background: var(--color-warn); }
@@ -151,8 +153,9 @@ function injectStyles() {
       border-color: var(--color-accent);
     }
     .xt-toast__action:focus-visible {
-      outline: 1px solid var(--color-accent);
-      outline-offset: -1px;
+      outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+      outline-offset: 1px;
+      box-shadow: 0 0 14px var(--nylah-focus-glow);
     }
     @media (pointer: coarse) {
       .xt-toast__action {
@@ -185,8 +188,9 @@ function injectStyles() {
       color: var(--color-fg);
     }
     .xt-toast__close:focus-visible {
-      outline: 1px solid var(--color-accent);
-      outline-offset: -1px;
+      outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+      outline-offset: 1px;
+      box-shadow: 0 0 14px var(--nylah-focus-glow);
     }
     @media (pointer: coarse) {
       .xt-toast__close {

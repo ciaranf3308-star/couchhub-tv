@@ -2347,15 +2347,15 @@ const navStructure: NavSection[] = [
     id="settings-reset-dialog"
     aria-labelledby="settings-reset-title"
     aria-describedby="settings-reset-desc"
-    class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
-           w-[min(28rem,calc(100vw-2rem))] backdrop:bg-black/60">
+    class="fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0
+           w-[min(28rem,calc(100vw-2rem))] shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)] backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]">
     <div class="icon-mark-host flex flex-col p-5 gap-4">
       <div class="flex items-start gap-3">
         <span class="icon-mark icon-mark--bad icon-mark--lg">
           <IconAlertTriangle aria-hidden="true" stroke={2} />
         </span>
         <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-          <h2 id="settings-reset-title" data-i18n="settings.danger.dialogTitle" class="text-base font-semibold">
+          <h2 id="settings-reset-title" data-i18n="settings.danger.dialogTitle" class="font-serif text-lg">
             Reset everything?
           </h2>
           <p id="settings-reset-desc" data-i18n-html="settings.danger.dialogBody" class="text-sm text-fg-2">
@@ -2387,15 +2387,15 @@ const navStructure: NavSection[] = [
     id="settings-import-dialog"
     aria-labelledby="settings-import-title"
     aria-describedby="settings-import-desc"
-    class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
-           w-[min(28rem,calc(100vw-2rem))] backdrop:bg-black/60">
+    class="fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0
+           w-[min(28rem,calc(100vw-2rem))] shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)] backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]">
     <div class="icon-mark-host flex flex-col p-5 gap-4">
       <div class="flex items-start gap-3">
         <span class="icon-mark icon-mark--bad icon-mark--lg">
           <IconAlertTriangle aria-hidden="true" stroke={2} />
         </span>
         <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-          <h2 id="settings-import-title" class="text-base font-semibold">
+          <h2 id="settings-import-title" class="font-serif text-lg">
             Replace everything with this backup?
           </h2>
           <p id="settings-import-desc" class="text-sm text-fg-2">
@@ -5050,7 +5050,7 @@ const navStructure: NavSection[] = [
 
         const toggle = document.createElement("input")
         toggle.type = "checkbox"
-        toggle.className = "size-5 accent-accent"
+        toggle.className = "size-5 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         toggle.checked = isDiscordEnabledForPlaylist(entry._id)
         toggle.setAttribute(
           "aria-label",
@@ -5481,10 +5481,94 @@ const navStructure: NavSection[] = [
     .settings-group__title::first-letter {
       color: var(--color-accent);
     }
+    /* v0.3.0: cards are warm gradients, never flat fills, with layered
+       wine depth. The inset hairline keeps the top edge lit like the
+       launcher's tiles. */
     .settings-surface,
     .settings-group > .rounded-2xl {
-      box-shadow: 0 20px 45px -30px
-        color-mix(in oklch, var(--color-accent) 55%, transparent);
+      background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
+      box-shadow:
+        inset 0 1px 0 0 color-mix(in oklch, var(--color-accent) 12%, transparent),
+        0 10px 30px -14px var(--nylah-focus-halo),
+        0 20px 45px -30px
+          color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+    /* Card titles (Display, Playback, …) read as serif display type,
+       like the launcher's tile titles. Row labels stay sans. */
+    .settings-surface__header h3 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
+      font-size: 1.125rem;
+      letter-spacing: -0.01em;
+    }
+    /* Segmented controls: the selected segment is lit wine, not just a
+       flat tint — gradient + glow so the choice reads at 3 m. */
+    .settings-seg > .btn[aria-checked="true"],
+    .settings-seg > .btn[aria-pressed="true"] {
+      background: linear-gradient(
+        180deg,
+        var(--color-accent-soft),
+        color-mix(in oklch, var(--color-accent) 22%, transparent)
+      );
+      border-color: var(--color-accent);
+      box-shadow: 0 0 16px var(--nylah-focus-glow);
+    }
+    /* Accent swatches: the checked swatch glows wine. */
+    .accent-btn[aria-checked="true"] {
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-halo),
+        0 0 18px var(--nylah-focus-glow);
+    }
+    /* Inputs + selects: focus is a wine glow, not a bare ring. */
+    .field-input:focus {
+      border-color: var(--nylah-focus-ring, var(--color-accent));
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-halo),
+        0 0 18px var(--nylah-focus-glow);
+    }
+    /* Native checkboxes (toggles): a visible wine halo on focus. */
+    input[type="checkbox"]:focus-visible {
+      outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+      outline-offset: 2px;
+      box-shadow: 0 0 12px var(--nylah-focus-glow);
+    }
+    /* Buttons on this page lift with a wine glow on focus. */
+    .btn:focus-visible,
+    .btn-danger:focus-visible {
+      box-shadow: 0 0 18px var(--nylah-focus-glow);
+    }
+    /* Active nav link glows instead of only tinting. */
+    .settings-nav-link[aria-current="true"] {
+      box-shadow: 0 0 14px var(--nylah-focus-glow);
+    }
+    /* Danger zone: the card carries a warm bad tint + red depth, and its
+       heading is serif like every other card title. */
+    .settings-group--danger article {
+      background: linear-gradient(
+        165deg,
+        color-mix(in oklch, var(--color-bad) 7%, var(--color-surface)),
+        var(--color-surface-2)
+      );
+      box-shadow:
+        0 10px 30px -14px
+          color-mix(in oklch, var(--color-bad) 35%, transparent);
+    }
+    .settings-group--danger h3 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
+      font-size: 1.125rem;
+      letter-spacing: -0.01em;
+    }
+    /* Changelog markdown (What's new + Licenses): release headings are
+       serif display type; body stays sans. */
+    .changelog-md h1,
+    .changelog-md h2,
+    .changelog-md h3,
+    .changelog-md h4,
+    .changelog-md h5,
+    .changelog-md h6 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
     }
     .settings-nav-link:focus-visible,
     .settings-subnav-link:focus-visible {

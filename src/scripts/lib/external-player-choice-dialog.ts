@@ -22,13 +22,15 @@ const CHOICE_BUTTON_CLASS =
   "flex w-full items-center gap-3 min-h-14 rounded-xl border border-line bg-surface-2 px-3 " +
   "text-left transition duration-150 active:scale-[0.97] " +
   "hover:border-accent hover:bg-surface-3 " +
-  "focus-visible:outline-none focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent"
+  "focus-visible:outline-none focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent " +
+  "focus-visible:shadow-[0_0_20px_var(--nylah-focus-glow)]"
 
 // Ghost, so the player rows stay the focal point.
 const CANCEL_BUTTON_CLASS =
   "inline-flex items-center justify-center min-h-11 rounded-xl px-4 text-sm text-fg-2 " +
   "transition duration-150 active:scale-[0.97] hover:bg-surface-2 hover:text-fg " +
-  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent " +
+  "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
 
 function labelForChoice(choice: ExternalPlayerChoice): string {
   return choice === "vlc" ? "VLC" : "MPV"
@@ -46,14 +48,15 @@ function ensureDialog(): HTMLDialogElement {
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(24rem,calc(100vw-2rem))]",
-    "backdrop:bg-black/70",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
   node.innerHTML = `
     <div class="flex flex-col gap-4 p-5">
       <div class="flex flex-col gap-0.5">
-        <h2 id="${DIALOG_ID}-title" data-role="title" class="m-0 text-lg font-semibold tracking-tight"></h2>
+        <h2 id="${DIALOG_ID}-title" data-role="title" class="m-0 font-serif text-lg tracking-tight"></h2>
         <p data-role="subtitle" class="m-0 text-sm text-fg-3 empty:hidden"></p>
       </div>
       <div data-role="choices" class="flex flex-col gap-2"></div>
