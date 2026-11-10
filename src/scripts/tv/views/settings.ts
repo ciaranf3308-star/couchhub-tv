@@ -23,6 +23,8 @@ import {
   setUpdateChannel,
   getTvOverscan,
   setTvOverscan,
+  getLivetvResumeLastChannel,
+  setLivetvResumeLastChannel,
   TV_OVERSCAN_EVENT,
   TV_OVERSCAN_VALUES,
   getAccent,
@@ -258,6 +260,20 @@ const view: TvView = {
         value: overscan > 0 ? `${overscan}%` : t("settings.tvOverscan.off"),
         kind: "choice",
         onActivate: () => void pickOverscan(),
+      })
+
+      // Live TV: resume the last watched channel on entering Live TV.
+      // Default off — the landing screen stays the default.
+      rows.push({
+        id: "livetv-resume-last",
+        icon: ICON_DEVICE_TV,
+        label: t("settings.livetv.resumeLastChannel"),
+        kind: "toggle",
+        checked: getLivetvResumeLastChannel(),
+        onActivate: () => {
+          setLivetvResumeLastChannel(!getLivetvResumeLastChannel())
+          void renderRows()
+        },
       })
 
       if (isTauri) {

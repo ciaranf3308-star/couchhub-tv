@@ -1,9 +1,15 @@
 ---
-// TvProgrammeMeta — programme title / time / description (W1 contract, local copy).
+// TvProgrammeMeta — programme title / time / description (W1, canonical owner).
 //
-// NOTE (W2): W1's canonical file was not on this branch when W2 was
-// built; this is a local copy to the EXACT contract props. Integration
-// keeps W1's canonical version and deletes this duplicate.
+// Props: title, startMs, stopMs, desc?, catchup?, live?.
+// Renders title (+ LIVE badge) + time range + progress +
+// description + catch-up badge. Missing optional props are simply
+// omitted, never invented.
+//
+// Client-rendered callers build the same DOM with
+// buildProgrammeMetaElement() in src/scripts/lib/livetv-cards.ts —
+// same classes, same attributes. If this markup changes, change
+// that builder in the same commit.
 import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
 
 interface Props {

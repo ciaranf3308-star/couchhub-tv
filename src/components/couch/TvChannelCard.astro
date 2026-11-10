@@ -1,11 +1,19 @@
 ---
-// TvChannelCard — Live TV channel card (W1 contract, local copy).
+// TvChannelCard — Live TV channel card (W1, canonical owner).
 //
-// NOTE (W2): W1's canonical file was not on this branch when W2 was
-// built; this is a local copy to the EXACT contract props. Integration
-// keeps W1's canonical version and deletes this duplicate.
+// Props: channel {id, name, displayName?, logo?, chno?}, nowTitle?,
+// nextTitle?, progress?, catchup?, favourite?, size? ("large" |
+// "medium"), focusKey, href?.
+// Renders `article[data-channel-card][data-channel-id][data-focus-key]`
+// with a fitted logo (TvImage, or an initial mark when there is no
+// logo — never a fabricated logo), name, now / up-next lines, a
+// progress bar, a catch-up badge and a favourite mark. Missing
+// optional parts are omitted, never invented.
 //
-// Renders `article[data-channel-card][data-channel-id][data-focus-key]`.
+// Client-rendered rails (Home, Channel Browser) build the same DOM
+// with buildChannelCardElement() in
+// src/scripts/lib/livetv-cards.ts — same classes, same attributes.
+// If this markup changes, change that builder in the same commit.
 import TvImage from "./TvImage.astro";
 
 interface Props {

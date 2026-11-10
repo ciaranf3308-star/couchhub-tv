@@ -1,0 +1,60 @@
+---
+// TvChannelBrowser — Channel Browser shell (W1, canonical owner).
+//
+// Renders the mount point; the client script mounts the browser
+// from the cached playlist (mountCachedChannelBrowser — no fetch).
+// W2 mounts the same browser inside playback by importing
+// mountChannelBrowser / mountCachedChannelBrowser directly from
+// src/scripts/lib/livetv-browser.ts instead of using this shell.
+//
+// Props: initialCategoryId? (a group id, "favourites", "recents" or
+// "all"), initialFocusId? (channel id to return focus to),
+// browserId? (answers `livetv:browser-category` for this id;
+// Home uses "home").
+// Watch on a row dispatches the livetv:tune handoff by default;
+// highlight never tunes.
+interface Props {
+  initialCategoryId?: string;
+  initialFocusId?: string | number;
+  browserId?: string;
+}
+const { initialCategoryId, initialFocusId, browserId = "home" } = Astro.props;
+---
+
+<div
+  class="rs-livetv-browser-host"
+  data-livetv-browser-mount
+  data-browser-id={browserId}
+  data-initial-category={initialCategoryId}
+  data-initial-focus={initialFocusId != null ? String(initialFocusId) : undefined}
+>
+  <div class="rs-livetv-browser-host__loading" data-livetv-browser-loading>
+    Loading channels…
+  </div>
+</div>
+
+<script>
+  import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
+
+  const host = document.querySelector<HTMLElement>("[data-livetv-browser-mount]");
+  if (host && !host.dataset.browserArmed) {
+    host.dataset.browserArmed = "1";
+    const initialCategoryId = host.dataset.initialCategory || undefined;
+    const initialFocusRaw = host.dataset.initialFocus || undefined;
+    const initialFocusId = initialFocusRaw
+      ? (/^\d+$/.test(initialFocusRaw) ? Number(initialFocusRaw) : initialFocusRaw)
+      : undefined;
+    void mountCachedChannelBrowser(host, {
+      browserId: host.dataset.browserId || undefined,
+      initialCategoryId,
+      initialFocusId,
+    }).then((handle) => {
+      if (!handle) {
+        const loading = host.querySelector("[data-livetv-browser-loading]");
+        if (loading) {
+          loading.textContent = "No live playlist connected — add a playlist to browse live channels.";
+        }
+      }
+    });
+  }
+</script>

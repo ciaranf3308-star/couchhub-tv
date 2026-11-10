@@ -1333,3 +1333,415 @@ html[data-couch] .rs-livetv-play-browser-note[hidden] {
 html[data-couch] .rs-livetv-play-browser-note p {
   margin: 0;
 }
+
+/* ── Merge note (0.7.0 integration) ────────────────────────────── */
+/* W1's shared Live TV block below is appended AFTER the W2/W3
+   blocks on purpose: the overlapping .rs-livetv-channel-card /
+   .rs-livetv-programme-meta selectors are W1's canonical versions
+   (they match W1's canonical TvChannelCard/TvProgrammeMeta) and
+   win by cascade order. */
+
+/* ── Live TV shared (W1) ───────────────────────────────────────── */
+/* TvChannelCard / TvProgrammeMeta / Channel Browser. Dark RedSilk
+   only — no white surfaces, no desktop panels. The Home page's own
+   layout lives in livetv.astro (.rs-livetv-home-*); these shared
+   classes are what W2/W3 render against too. */
+
+/* Channel card (TvChannelCard.astro + buildChannelCardElement). */
+html[data-couch] .rs-livetv-channel-card {
+  flex-shrink: 0;
+  width: 20rem;
+  border-radius: 1rem;
+  border: 1px solid var(--rs-line);
+  background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
+  box-shadow: var(--rs-shadow);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-channel-card--large {
+  width: 24rem;
+}
+html[data-couch] .rs-livetv-channel-card__link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  color: var(--rs-text);
+  text-decoration: none;
+  height: 100%;
+}
+html[data-couch] .rs-livetv-channel-card__logo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--rs-bg) 60%, transparent);
+  border: 1px solid var(--rs-line);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-channel-card__logo .rs-image {
+  width: 100%;
+  height: 100%;
+}
+html[data-couch] .rs-livetv-channel-card__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+}
+html[data-couch] .rs-livetv-channel-card__initial {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-channel-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-channel-card__name {
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-channel-card__num {
+  color: var(--rs-text-2);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+html[data-couch] .rs-livetv-channel-card__now {
+  font-size: 1.125rem;
+  color: var(--rs-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-channel-card__next {
+  font-size: 1.125rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-channel-card__fav {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  color: var(--rs-accent);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+html[data-couch] .rs-livetv-channel-card__catchup {
+  align-self: flex-start;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--rs-accent);
+  border: 1px solid color-mix(in srgb, var(--rs-accent) 55%, transparent);
+  border-radius: 999px;
+  padding: 0.125rem 0.625rem;
+}
+html[data-couch] .rs-livetv-channel-card__progress {
+  display: block;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-channel-card__progress > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+}
+html[data-couch] .rs-livetv-channel-card {
+  position: relative;
+}
+html[data-couch] .rs-livetv-channel-card:focus-visible,
+html[data-couch] .rs-livetv-channel-card__link:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 2px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow);
+}
+
+/* Programme meta (TvProgrammeMeta.astro + buildProgrammeMetaElement). */
+html[data-couch] .rs-livetv-programme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-programme-meta__title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+html[data-couch] .rs-livetv-programme-meta__live {
+  display: inline-block;
+  margin-right: 0.625rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 0.375rem;
+  background: var(--rs-accent);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  vertical-align: middle;
+}
+html[data-couch] .rs-livetv-programme-meta__time {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-livetv-programme-meta__desc {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-programme-meta__catchup {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--rs-accent);
+}
+html[data-couch] .rs-livetv-programme-meta__progress {
+  display: block;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
+  overflow: hidden;
+  max-width: 28rem;
+}
+html[data-couch] .rs-livetv-programme-meta__progress > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+}
+
+/* Channel Browser (livetv-browser.ts). */
+html[data-couch] .rs-livetv-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+html[data-couch] .rs-livetv-browser__toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+html[data-couch] .rs-livetv-browser__search {
+  flex: 1;
+  min-width: 0;
+  min-height: 3.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+  color: var(--rs-text);
+  font-size: 1.25rem;
+}
+html[data-couch] .rs-livetv-browser__sort {
+  min-height: 3.5rem;
+  padding: 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+  color: var(--rs-text);
+  font-size: 1.25rem;
+}
+html[data-couch] .rs-livetv-browser__close {
+  min-height: 3.5rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+  color: var(--rs-text);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+html[data-couch] .rs-livetv-browser__categories {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+}
+html[data-couch] .rs-livetv-browser__category {
+  flex-shrink: 0;
+  min-height: 3.5rem;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+  color: var(--rs-text);
+  font-size: 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-browser__category.is-active {
+  border-color: var(--rs-accent);
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-livetv-browser__category:focus-visible,
+html[data-couch] .rs-livetv-browser__close:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__list {
+  position: relative;
+  height: 32rem;
+  max-height: 60vh;
+  overflow-y: auto;
+  border-radius: 1rem;
+  border: 1px solid var(--rs-line);
+  background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
+}
+html[data-couch] .rs-livetv-browser__viewport {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+}
+html[data-couch] .rs-livetv-browser__row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  height: 4.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--rs-line);
+  cursor: pointer;
+}
+html[data-couch] .rs-livetv-browser__row.is-highlighted {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--rs-accent) 16%, transparent),
+    color-mix(in srgb, var(--rs-accent) 5%, transparent)
+  );
+  box-shadow: inset 3px 0 0 var(--rs-accent);
+}
+html[data-couch] .rs-livetv-browser__row:focus-visible {
+  outline: none;
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__logo {
+  flex-shrink: 0;
+  width: 5.5rem;
+  height: 3.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--rs-bg) 60%, transparent);
+  border: 1px solid var(--rs-line);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-browser__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.25rem;
+}
+html[data-couch] .rs-livetv-browser__initial {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+html[data-couch] .rs-livetv-browser__name {
+  font-size: 1.375rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-browser__num {
+  color: var(--rs-text-2);
+  font-weight: 600;
+  margin-right: 0.5rem;
+}
+html[data-couch] .rs-livetv-browser__now,
+html[data-couch] .rs-livetv-browser__next {
+  font-size: 1.125rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-browser__progress {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-browser__progress > span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+}
+html[data-couch] .rs-livetv-browser__fav {
+  flex-shrink: 0;
+  color: var(--rs-accent);
+  font-size: 1.375rem;
+}
+html[data-couch] .rs-livetv-browser__catchup {
+  flex-shrink: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--rs-accent);
+  border: 1px solid color-mix(in srgb, var(--rs-accent) 55%, transparent);
+  border-radius: 999px;
+  padding: 0.125rem 0.625rem;
+}
+html[data-couch] .rs-livetv-browser__watch {
+  flex-shrink: 0;
+  min-height: 3rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-accent);
+  background: color-mix(in srgb, var(--rs-accent) 16%, transparent);
+  color: var(--rs-text);
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+html[data-couch] .rs-livetv-browser__watch:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__status {
+  margin: 0;
+  font-size: 1.125rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser-host__loading {
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+  padding: 1rem;
+}
+

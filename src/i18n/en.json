@@ -101,6 +101,7 @@
   "settings.tvOverscan.label": "Edge inset",
   "settings.tvOverscan.helperLong": "Most TVs hide a small band at each edge of the picture (overscan). If sidebar icons or version text look cut off, increase this to inset the whole UI by a few percent.",
   "settings.tvOverscan.off": "Off",
+  "settings.livetv.resumeLastChannel": "Resume last channel on entering Live TV",
   "settings.closeBehavior.title": "Close button behavior",
   "settings.closeBehavior.label": "Close button",
   "settings.closeBehavior.helper": "What happens when you click the window's X. \"Minimize to tray\" keeps the app running in the system tray so background features (programme reminders, downloads) keep working. \"Quit\" exits the app like other windows.",
