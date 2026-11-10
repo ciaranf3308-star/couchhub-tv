@@ -1,0 +1,127 @@
+/* Nylah Studios v0.3.0 — W9 Art + Atmosphere hooks
+ *
+ * Curated art assets (original, generated for this pass — RedSilk family:
+ * deep wine burgundy, brass/gold, warm beige/ivory, cinematic,
+ * boutique-hotel). Assets live in `public/art/`; this file only defines
+ * the CSS variables and hook classes. The coordinator wires these hooks
+ * into components during integration — no component file is edited here.
+ *
+ * Wiring note for the coordinator: import this file in
+ * `src/layouts/Layout.astro` after `couchhub-tv.css`:
+ *   import "../styles/nylah-art.css"
+ * Then apply `.nylah-art-backdrop` (+ a `--*` modifier below) to the
+ * home hero / login / profile picker surfaces, `.nylah-art-panel` to the
+ * empty-state panels, and `.nylah-ambient` anywhere a warm glow is
+ * wanted without an image.
+ *
+ * All colour values consume the shared `--nylah-*` tokens with the
+ * v0.3.0 plan values as fallbacks. No hex, no hue-255 slate anywhere.
+ */
+
+:root {
+  --nylah-art-hero: url("/art/hero-backdrop.jpg");
+  --nylah-art-login: url("/art/login-art.jpg");
+  --nylah-art-profiles: url("/art/profiles-art.jpg");
+  --nylah-art-empty-search: url("/art/empty-search.jpg");
+  --nylah-art-empty-library: url("/art/empty-library.jpg");
+  --nylah-art-player-empty: url("/art/player-empty.jpg");
+}
+
+/* Full-bleed art backdrop + warm dark gradient overlay, so ivory serif
+ * text stays legible over the image. The image is the hero art by
+ * default; use a `--*` modifier to swap in another asset. The overlay
+ * is heaviest at the bottom and left, where hero copy sits, and lifts
+ * toward the top-right where the art's own golden glow lives. */
+.nylah-art-backdrop {
+  position: relative;
+  isolation: isolate;
+  background-color: var(--nylah-wine-deep, oklch(0.155 0.045 350));
+  background-image: var(--nylah-art-hero);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+.nylah-art-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      105deg,
+      color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 88%, transparent) 0%,
+      color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 55%, transparent) 42%,
+      color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 18%, transparent) 68%,
+      transparent 100%
+    ),
+    linear-gradient(
+      to top,
+      color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 82%, transparent) 0%,
+      transparent 55%
+    );
+}
+
+/* Per-surface image swaps (same overlay, different art). */
+.nylah-art-backdrop--login { background-image: var(--nylah-art-login); }
+.nylah-art-backdrop--profiles { background-image: var(--nylah-art-profiles); }
+.nylah-art-backdrop--empty-search { background-image: var(--nylah-art-empty-search); }
+.nylah-art-backdrop--empty-library { background-image: var(--nylah-art-empty-library); }
+.nylah-art-backdrop--player-empty { background-image: var(--nylah-art-player-empty); }
+
+/* Contained panel backdrop: art inside a card/panel (empty states,
+ * search landing). Warm bottom shade keeps the panel's own copy legible
+ * without hiding the art. */
+.nylah-art-panel {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: 1rem;
+  background-color: var(--nylah-wine-deep, oklch(0.155 0.045 350));
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+}
+
+.nylah-art-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 78%, transparent) 0%,
+    color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 30%, transparent) 55%,
+    transparent 100%
+  );
+}
+
+.nylah-art-panel--empty-search { background-image: var(--nylah-art-empty-search); }
+.nylah-art-panel--empty-library { background-image: var(--nylah-art-empty-library); }
+.nylah-art-panel--player-empty { background-image: var(--nylah-art-player-empty); }
+
+/* Ambient warmth with no image: warm vignette + radial wine/gold glow.
+ * Layer behind home / login surfaces that should feel lit rather than
+ * flat. In the light theme the same glow reads as warm beige (the
+ * surface tokens already carry the warm hue there). */
+.nylah-ambient {
+  background:
+    radial-gradient(
+      120% 90% at 78% 8%,
+      color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 22%, transparent) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      90% 70% at 12% 88%,
+      color-mix(in oklch, var(--nylah-wine, oklch(0.45 0.19 350)) 26%, transparent) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      140% 140% at 50% 50%,
+      transparent 55%,
+      color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 55%, transparent) 100%
+    );
+}
