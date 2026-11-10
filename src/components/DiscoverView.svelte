@@ -1,11 +1,15 @@
-<!-- RedSilk Discover (W1, Discover CORE). Mounted on /discover.
-     Local-only: the catalogue is loaded once at mount, search and ranking
-     run in the page, and no network request happens during ordinary
-     controller navigation. The AI ranker (W2) is registered at mount and
-     only consulted (via rankWithAI) for natural-language questions — with
-     no ranker, or on any AI failure, local ranking runs. The followed-series
-     provider (W3) is registered at mount too, feeding the "New Episodes of
-     Followed Shows" row. -->
+<!-- RedSilk Discover (W2 reskin onto the W1 shared system). Mounted on
+     /discover. Logic is unchanged from the W1 Discover CORE: the
+     catalogue loads once at mount, search and ranking run in the page,
+     and no network request happens during ordinary controller
+     navigation. The AI ranker is registered at mount and only consulted
+     (via rankWithAI) for natural-language questions — with no ranker,
+     or on any AI failure, local ranking runs. The followed-series
+     provider is registered at mount too, feeding the "New Episodes of
+     Followed Shows" row.
+     Reskin: CouchLayout shell (discover.astro), TvKeyboard for mood
+     search, rs-rail / rs-card markup with the W1 image-fallback
+     structure, rs-empty / rs-skeleton states. -->
 <script>
   import { onMount } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -40,9 +44,12 @@
   import { aiRanker } from "@/scripts/lib/ai/ranking.ts"
   import { initAI } from "@/scripts/lib/ai/init.ts"
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
-  import { cachedImg } from "@/scripts/lib/img-cache.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
-  import OnScreenKeyboard from "@/components/OnScreenKeyboard.svelte"
+  import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
+  import {
+    armTvImageFallbacks,
+    fallbackMarkFor,
+  } from "@/scripts/lib/couch-image.ts"
 
   let query = $state("")
   let queryDebounced = $state("")
@@ -273,11 +280,20 @@
       loading = false
     }
   })
+
+  // W1 image fallback: arms the capture-phase error handler once; the
+  // scan covers images that already failed before this ran.
+  $effect(() => {
+    void rows
+    void searchResults
+    void loading
+    armTvImageFallbacks(document)
+  })
 </script>
 
-<div class="flex flex-col gap-4" data-discover-root>
-  <div class="flex flex-col gap-3">
-    <div class="flex items-center gap-2">
+<div class="rs-discover" data-discover-root>
+  <div class="rs-discover__search">
+    <div class="rs-discover__input-row">
       <label for="discover-query" class="sr-only">What are you in the mood for?</label>
       <input
         id="discover-query"
@@ -286,34 +302,30 @@
         oninput={(e) => onQueryInput(e.currentTarget.value)}
         placeholder="What are you in the mood for?"
         autocomplete="off"
-        class="discover-search-input min-w-0 flex-1 rounded-xl border border-line bg-surface px-4 py-3 text-base text-fg placeholder:text-fg-3 outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+        class="rs-discover-input" />
       {#if query || activeMood || moreLikeSeed}
         <button
           type="button"
           onclick={clearSearch}
-          class="btn shrink-0">Clear</button>
+          class="rs-discover-clear">Clear</button>
       {/if}
     </div>
 
     <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
-    <OnScreenKeyboard
+    <TvKeyboard
       bind:value={query}
       onInput={onOskInput}
-      onCommit={focusFirstResult} />
+      onCommit={focusFirstResult}
+      placeholder="What are you in the mood for?" />
 
-    <div class="flex items-center gap-2 overflow-x-auto custom-scroll -mx-1 px-1 pb-1" role="group" aria-label="Quick picks">
+    <div class="rs-discover__moods" role="group" aria-label="Quick picks">
       {#each MOOD_PRESETS as preset (preset.id)}
         <button
           type="button"
           onclick={() => pickMood(preset.id)}
           aria-pressed={activeMood === preset.id}
-          class="filter-chip rounded-full px-4 py-2 text-sm whitespace-nowrap transition-colors outline-none border"
-          class:bg-accent-soft={activeMood === preset.id}
-          class:text-accent={activeMood === preset.id}
-          class:border-accent={activeMood === preset.id}
-          class:text-fg-2={activeMood !== preset.id}
-          class:border-line={activeMood !== preset.id}
-          class:hover:bg-surface-2={activeMood !== preset.id}>
+          class="rs-discover-chip"
+          class:is-active={activeMood === preset.id}>
           {preset.label}
         </button>
       {/each}
@@ -321,27 +333,32 @@
   </div>
 
   {#if toast}
-    <p role="status" class="rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm text-fg">{toast}</p>
+    <p role="status" class="rs-discover-toast">{toast}</p>
   {/if}
 
   {#if loading}
-    <p class="text-sm text-fg-3 py-8 text-center">Loading your library…</p>
+    <div class="rs-skeleton rs-skeleton--hero" aria-hidden="true"></div>
+    <div class="rs-skeleton-row" style="display: flex; gap: 1.25rem;" aria-hidden="true">
+      {#each Array.from({ length: 6 }) as _, i}
+        <div class="rs-skeleton rs-skeleton--poster" style="flex: 1 1 0; min-width: 0; animation-delay: {i * 90}ms;"></div>
+      {/each}
+    </div>
   {:else if noPlaylist}
-    <div class="nylah-card rounded-2xl bg-surface p-6 text-center">
-      <p class="font-serif text-xl">Nothing to discover yet</p>
-      <p class="text-sm text-fg-3 mt-2">Add a playlist in Settings and Discover will learn from what you watch.</p>
-      <a href="/settings" class="btn btn-primary mt-4 inline-block">Go to Settings</a>
+    <div class="rs-empty" role="status">
+      <h2 class="rs-empty__title">Nothing to discover yet</h2>
+      <p class="rs-empty__message">Add a playlist in Settings and Discover will learn from what you watch.</p>
+      <a class="rs-empty__action" data-nylah-item href="/settings">Go to Settings</a>
     </div>
   {:else if loadFailed}
-    <div class="nylah-card rounded-2xl bg-surface p-6 text-center">
-      <p class="font-serif text-xl">Discover couldn't load</p>
-      <p class="text-sm text-fg-3 mt-2">Your library may still be warming up — try again in a moment.</p>
-      <button type="button" class="btn btn-primary mt-4" onclick={() => location.reload()}>Try again</button>
+    <div class="rs-empty" role="status">
+      <h2 class="rs-empty__title">Discover couldn't load</h2>
+      <p class="rs-empty__message">Your library may still be warming up — try again in a moment.</p>
+      <button type="button" class="rs-empty__action" onclick={() => location.reload()}>Try again</button>
     </div>
   {:else if showingSearch}
-    <section data-discover-results aria-label="Discover results">
-      <header class="nylah-rail__head">
-        <h2 class="nylah-rail__title font-serif">
+    <section class="rs-rail" data-discover-results data-nylah-rail="discover-results" aria-label="Discover results">
+      <div class="rs-rail__head">
+        <h2 class="rs-section-title">
           {#if moreLikeSeed}
             More like {moreLikeSeed.title}
           {:else if activeMood}
@@ -351,38 +368,38 @@
           {/if}
         </h2>
         {#if searching}
-          <p class="text-sm text-fg-3">Searching your library…</p>
+          <p class="rs-meta">Searching your library…</p>
         {/if}
-      </header>
+      </div>
       {#if searchResults && searchResults.length}
-        <ul class="nylah-rail__row flex gap-3 overflow-x-auto pb-2 snap-x custom-scroll">
+        <div class="rs-rail__row">
           {#each searchResults as item (candidateKey(item.candidate))}
             {@render discoverCard(item)}
           {/each}
-        </ul>
+        </div>
       {:else if !searching}
-        <p class="text-sm text-fg-3 py-6">Nothing matched — try a different word or a quick pick above. Discover only searches titles already in your library.</p>
+        <p class="rs-meta">Nothing matched — try a different word or a quick pick above. Discover only searches titles already in your library.</p>
       {/if}
     </section>
   {:else}
-    <div data-discover-rows class="flex flex-col gap-6">
+    <div data-discover-rows class="rs-discover__rows">
       {#each rows as row (row.id)}
         {#if row.items.length}
-          <section data-nylah-rail={row.id} class="nylah-rail" aria-label={row.title}>
-            <header class="nylah-rail__head">
-              <h2 class="nylah-rail__title font-serif">{row.title}</h2>
-              {#if row.subtitle}<p class="text-sm text-fg-3">{row.subtitle}</p>{/if}
-            </header>
-            <ul class="nylah-rail__row flex gap-3 overflow-x-auto pb-2 snap-x custom-scroll">
+          <section class="rs-rail" data-nylah-rail={row.id} aria-label={row.title}>
+            <div class="rs-rail__head">
+              <h2 class="rs-section-title">{row.title}</h2>
+            </div>
+            {#if row.subtitle}<p class="rs-meta">{row.subtitle}</p>{/if}
+            <div class="rs-rail__row">
               {#each row.items as item (candidateKey(item.candidate))}
                 {@render discoverCard(item)}
               {/each}
-            </ul>
+            </div>
           </section>
         {/if}
       {/each}
       {#if !rows.some((r) => r.items.length)}
-        <p class="text-sm text-fg-3 py-6 text-center">Your library looks empty — once titles are in, Discover will have picks for you here.</p>
+        <p class="rs-meta">Your library looks empty — once titles are in, Discover will have picks for you here.</p>
       {/if}
     </div>
   {/if}
@@ -392,49 +409,56 @@
   {@const c = item.candidate}
   {@const key = candidateKey(c)}
   {@const isFav = data?.taste.favouriteTitles.some((f) => `${f.kind}:${f.id}` === key)}
-  <li class="shrink-0 snap-start w-36 sm:w-44 lg:w-52">
-    <article class="nylah-card discover-card group relative rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line transition-[transform,box-shadow] duration-150 hover:ring-[3px] hover:ring-accent focus-within:ring-[3px] focus-within:ring-accent">
+  {@const cardKind = c.kind === "live" ? "channel" : "poster"}
+  {@const imageKind = c.kind === "live" ? "logo" : "poster"}
+  <div class="rs-discover-cell rs-discover-cell--{cardKind}">
+    <article class="rs-discover-card">
       <a
         href={candidateDetailHref(c)}
         data-nylah-item
+        data-couch-key={key}
         aria-label={`${c.title}${c.year ? ` (${c.year})` : ""}${c.kind === "live" ? ", live TV" : ""}`}
-        class="block outline-none">
-        <div class="w-full aspect-2-3 overflow-hidden bg-surface-2 relative">
-          {#if c.posterUrl}
-            <img
-              use:cachedImg={{ url: c.posterUrl, kind: c.kind === "live" ? "logo" : "poster" }}
-              src={c.posterUrl}
-              alt=""
-              loading="lazy"
-              fetchpriority="low"
-              decoding="async"
-              referrerpolicy="no-referrer"
-              width="200"
-              height="300"
-              class="h-full w-full object-cover" />
-          {:else}
-            <div class="h-full w-full flex flex-col items-center justify-center gap-2 px-3 text-fg-3 bg-linear-to-br from-surface-2 to-surface-3">
-              <span class="font-serif text-base text-center">{c.title}</span>
-            </div>
+        class="rs-card rs-card--{cardKind}">
+        <span class="rs-card__media">
+          <span
+            class="rs-image rs-image--{imageKind}{c.posterUrl ? '' : ' is-fallback'}"
+            data-tv-image
+            data-kind={imageKind}
+          >
+            {#if c.posterUrl}
+              <img
+                src={c.posterUrl}
+                alt=""
+                loading="lazy"
+                fetchpriority="low"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                data-tv-image-img
+              />
+            {/if}
+            <span class="rs-image__fallback" aria-hidden="true">
+              <span class="rs-image__fallback-mark">{fallbackMarkFor(imageKind, c.title)}</span>
+              <span class="rs-image__fallback-title">{c.title}</span>
+            </span>
+          </span>
+          {#if c.kind === "live"}
+            <span class="rs-card__badge">● Live</span>
           {/if}
           {#if c.rating}
-            <span class="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold tabular-nums" aria-label={`Rating ${fmtImdbRating(c.rating)} out of 10`}>
+            <span class="rs-discover-rating" aria-label={`Rating ${fmtImdbRating(c.rating)} out of 10`}>
               <span aria-hidden="true">★</span><span>{fmtImdbRating(c.rating)}</span>
             </span>
           {/if}
-          {#if c.kind === "live"}
-            <span class="absolute top-1.5 left-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-accent text-bg text-2xs font-semibold">● LIVE</span>
-          {/if}
-        </div>
-        <div class="px-2 py-2 min-w-0">
-          <div class="truncate text-sm font-medium text-fg">{c.title}</div>
-          <div class="text-2xs text-fg-3 tabular-nums">
+        </span>
+        <span class="rs-card__body">
+          <span class="rs-card__title">{c.title}</span>
+          <span class="rs-card__subtitle">
             {#if c.year}{c.year} · {/if}{c.kind === "series" ? "Series" : c.kind === "live" ? "Live TV" : "Film"}
-          </div>
-          <p class="text-2xs text-fg-2 mt-1 line-clamp-2 min-h-8">{item.reason}</p>
-        </div>
+          </span>
+          <span class="rs-card__meta rs-discover-reason">{item.reason}</span>
+        </span>
       </a>
-      <div class="flex flex-wrap gap-1 px-2 pb-2">
+      <div class="rs-discover-fb">
         <button type="button" onclick={() => feedback(c, "more-like-this")} class="discover-fb-btn" title="More like this">More like this</button>
         <button type="button" onclick={() => feedback(c, "not-interested")} class="discover-fb-btn" title="Not interested">Not interested</button>
         {#if c.kind !== "live"}
@@ -449,35 +473,165 @@
           title="Why this?">Why this?</button>
       </div>
       {#if whyOpen[key]}
-        <div class="mx-2 mb-2 rounded-lg bg-surface px-2.5 py-2 text-2xs text-fg-2 ring-1 ring-line">
+        <div class="rs-discover-why">
           <p>{item.reason}</p>
           {#if tasteSummary?.favouriteGenres.length}
-            <p class="mt-1 text-fg-3">Your top genres: {tasteSummary.favouriteGenres.join(", ")}.</p>
+            <p class="rs-meta">Your top genres: {tasteSummary.favouriteGenres.join(", ")}.</p>
           {:else}
-            <p class="mt-1 text-fg-3">No watch history yet — this pick comes from your library's ratings.</p>
+            <p class="rs-meta">No watch history yet — this pick comes from your library's ratings.</p>
           {/if}
         </div>
       {/if}
     </article>
-  </li>
+  </div>
 {/snippet}
 
 <style>
-  .discover-search-input {
-    font-size: 1.0625rem;
+  .rs-discover {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
   }
-  @media (min-width: 1024px) {
-    .discover-search-input {
-      font-size: 1.125rem;
-    }
+  .rs-discover__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+  }
+  .rs-discover__search {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .rs-discover__input-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .rs-discover-input {
+    min-width: 0;
+    flex: 1;
+    font-size: 1.375rem;
+    padding: 0.875rem 1.25rem;
+    border-radius: 0.75rem;
+    background: var(--rs-bg-2);
+    border: 1px solid var(--rs-line);
+    color: var(--rs-text);
+    outline: none;
+  }
+  .rs-discover-input::placeholder {
+    color: var(--rs-text-2);
+  }
+  .rs-discover-input:focus-visible {
+    border-color: var(--rs-focus);
+    box-shadow: 0 0 0 2px var(--rs-focus-glow);
+  }
+  .rs-discover-clear,
+  .rs-discover-chip {
+    font-size: 1.25rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 9999px;
+    border: 1px solid var(--rs-line);
+    background: transparent;
+    color: var(--rs-text-2);
+    cursor: pointer;
+    white-space: nowrap;
+    outline: none;
+  }
+  .rs-discover-clear:hover,
+  .rs-discover-clear:focus-visible,
+  .rs-discover-chip:hover,
+  .rs-discover-chip:focus-visible {
+    color: var(--rs-text);
+    background: var(--rs-surface);
+    border-color: var(--rs-focus);
+  }
+  .rs-discover-chip.is-active {
+    color: var(--rs-text);
+    background: var(--rs-accent);
+    border-color: var(--rs-accent);
+  }
+  .rs-discover__moods {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding: 0.25rem;
+    scrollbar-width: none;
+  }
+  .rs-discover__moods::-webkit-scrollbar {
+    display: none;
+  }
+  .rs-discover-toast {
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    padding: 0.875rem 1.25rem;
+    font-size: 1.25rem;
+    color: var(--rs-text);
+    margin: 0;
+  }
+  /* Rail cells: the shared rail widths apply to direct .rs-card
+     children; Discover cells wrap a card + its feedback buttons, so
+     the cell itself carries the same widths. */
+  .rs-discover-cell {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+  .rs-discover-cell--poster {
+    flex-basis: clamp(9rem, 11.5vw, 13rem);
+    width: clamp(9rem, 11.5vw, 13rem);
+  }
+  .rs-discover-cell--channel {
+    flex-basis: clamp(15rem, 19vw, 22rem);
+    width: clamp(15rem, 19vw, 22rem);
+  }
+  .rs-discover-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .rs-discover-card .rs-card {
+    width: 100%;
+  }
+  .rs-discover-rating {
+    position: absolute;
+    bottom: 0.625rem;
+    left: 0.625rem;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: rgb(0 0 0 / 0.55);
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  /* The reason reads as a second line under the title, not a clipped
+     single-line meta. */
+  .rs-discover-reason {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rs-discover-fb {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding: 0 0.25rem;
   }
   .discover-fb-btn {
-    border: 1px solid var(--color-line, rgb(255 255 255 / 0.12));
+    border: 1px solid var(--rs-line);
     border-radius: 9999px;
-    padding: 0.3rem 0.6rem;
-    font-size: 0.6875rem;
-    line-height: 1;
-    color: var(--color-fg-2);
+    padding: 0.375rem 0.75rem;
+    font-size: 1.125rem;
+    line-height: 1.2;
+    color: var(--rs-text-2);
     background: transparent;
     cursor: pointer;
     outline: none;
@@ -485,21 +639,28 @@
   }
   .discover-fb-btn:hover,
   .discover-fb-btn:focus-visible {
-    color: var(--color-fg);
-    background: var(--color-surface-2);
-    border-color: var(--color-accent);
+    color: var(--rs-text);
+    background: var(--rs-surface);
+    border-color: var(--rs-focus);
   }
   .discover-fb-btn[aria-pressed="true"] {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
+    color: var(--rs-focus);
+    border-color: var(--rs-accent);
   }
-  /* Strong wine focus glow on the card anchor, matching the v0.3.0
-     RedSilk treatment: the focused card must read from the couch. */
-  .discover-card a:focus-visible {
-    outline: none;
+  .rs-discover-why {
+    margin: 0 0.25rem;
+    border-radius: 0.75rem;
+    background: var(--rs-bg-2);
+    padding: 0.75rem 1rem;
+    font-size: 1.125rem;
+    line-height: 1.4;
+    color: var(--rs-text-2);
+    border: 1px solid var(--rs-line-soft);
   }
-  .discover-card:has(a:focus-visible) {
-    box-shadow: 0 0 0 2px var(--nylah-focus-ring, oklch(0.72 0.17 350)),
-      0 0 24px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+  .rs-discover-why p {
+    margin: 0;
+  }
+  .rs-discover-why p + p {
+    margin-top: 0.375rem;
   }
 </style>

@@ -1,7 +1,9 @@
 // Followed Series management view (/followed): New Episodes + followed shows.
 // Controller-first: every action is a native <button>, lists re-render on
 // the followed-changed events, and all provider text goes through
-// textContent (never innerHTML).
+// textContent (never innerHTML). Rendering uses the W1 RedSilk classes
+// (rs-followed-* in followed.astro + rs-image fallback structure); all
+// data and actions come from followed.ts, unchanged.
 import { log } from "@/scripts/lib/log.js"
 import {
   listSubscriptions,
@@ -21,6 +23,10 @@ import {
 import { isCompleted } from "@/scripts/lib/preferences.js"
 import { toast, toastError } from "@/scripts/lib/toast.ts"
 import { t } from "@/scripts/lib/i18n.js"
+import {
+  armTvImageFallbacks,
+  fallbackMarkFor,
+} from "@/scripts/lib/couch-image.ts"
 
 const newListEl = document.getElementById("followed-new-list")
 const newEmptyEl = document.getElementById("followed-new-empty")
@@ -48,23 +54,46 @@ function el(tag: string, className: string): HTMLElement {
   return node
 }
 
-function actionButton(label: string, onClick: () => void): HTMLButtonElement {
+function actionButton(
+  label: string,
+  onClick: () => void,
+  primary = false,
+): HTMLButtonElement {
   const btn = document.createElement("button")
   btn.type = "button"
-  btn.className = "btn"
+  btn.className = primary ? "rs-followed-btn rs-followed-btn--primary" : "rs-followed-btn"
   btn.textContent = label
   btn.addEventListener("click", onClick)
   return btn
 }
 
-function posterImg(url: string | null, title: string): HTMLImageElement | null {
+/**
+ * Poster in the W1 TvImage structure (rs-image + branded fallback, never
+ * a broken-image icon). No poster URL means no poster block at all.
+ */
+function posterBlock(url: string | null, title: string): HTMLElement | null {
   if (!url) return null
+  const wrap = el("div", "rs-followed-poster")
+  const image = el("div", "rs-image rs-image--poster")
+  image.setAttribute("data-tv-image", "")
+  image.setAttribute("data-kind", "poster")
   const img = document.createElement("img")
   img.src = url
   img.alt = ""
   img.loading = "lazy"
-  img.className = "followed-poster w-16 shrink-0 rounded-lg object-cover aspect-2/3"
-  return img
+  img.setAttribute("data-tv-image-img", "")
+  image.appendChild(img)
+  const fallback = el("div", "rs-image__fallback")
+  fallback.setAttribute("aria-hidden", "true")
+  const mark = el("span", "rs-image__fallback-mark")
+  mark.textContent = fallbackMarkFor("poster", title)
+  fallback.appendChild(mark)
+  const fallbackTitle = el("span", "rs-image__fallback-title")
+  fallbackTitle.textContent = title
+  fallback.appendChild(fallbackTitle)
+  image.appendChild(fallback)
+  wrap.appendChild(image)
+  return wrap
 }
 
 function statusText(sub: FollowedSubscription): string {
@@ -102,49 +131,53 @@ function renderNewEpisodes(groups: FollowedNotificationGroup[]): void {
   if (unread.length === 0 && read.length === 0) return
 
   for (const group of [...unread, ...read]) {
-    const card = el("article", "followed-card nylah-card flex gap-4 p-4")
-    const poster = posterImg(group.posterUrl, group.seriesTitle)
+    const card = el("article", "rs-followed-card")
+    const poster = posterBlock(group.posterUrl, group.seriesTitle)
     if (poster) card.appendChild(poster)
-    const body = el("div", "flex min-w-0 flex-1 flex-col gap-2")
-    const title = el("h3", "font-serif text-xl leading-tight")
+    const body = el("div", "rs-followed-body")
+    const title = el("h3", "rs-followed-title")
     title.textContent = group.seriesTitle
     body.appendChild(title)
-    const detected = el("p", "text-xs text-fg-3 tabular-nums")
+    const detected = el("p", "rs-meta")
     detected.textContent = t("followed.detectedOn", { when: fmtDate(group.detectedAt) })
     body.appendChild(detected)
-    const eps = el("ul", "flex flex-col gap-2")
+    const eps = el("ul", "rs-followed-episodes")
     for (const ep of group.episodes) {
-      const li = el("li", "flex flex-wrap items-center gap-2 text-sm")
-      const label = el("span", "min-w-0 flex-1")
+      const li = el("li", "rs-followed-episode")
+      const label = el("span", "rs-followed-episode-label")
       const watched = ep.episodeId != null && isCompleted(group.playlistId, "episode", ep.episodeId)
       label.textContent =
         `S${ep.season}E${ep.episode}` +
         (ep.episodeTitle ? ` — ${ep.episodeTitle}` : "") +
         (watched ? ` (${t("followed.watched")})` : "")
       li.appendChild(label)
-      const watchBtn = actionButton(t("followed.watchNow"), () => {
-        window.location.href = buildSeriesDetailUrl({
-          seriesId: group.seriesId,
-          season: ep.season,
-          episode: ep.episode,
-        })
-      })
+      const watchBtn = actionButton(
+        t("followed.watchNow"),
+        () => {
+          window.location.href = buildSeriesDetailUrl({
+            seriesId: group.seriesId,
+            season: ep.season,
+            episode: ep.episode,
+          })
+        },
+        true,
+      )
       li.appendChild(watchBtn)
       eps.appendChild(li)
     }
     body.appendChild(eps)
-    const actions = el("div", "flex flex-wrap gap-2")
+    const actions = el("div", "rs-followed-actions")
     if (!group.read) {
       actions.appendChild(
         actionButton(t("followed.markRead"), () => {
           void markNotificationRead(group.id).then(render)
-        })
+        }),
       )
     }
     actions.appendChild(
       actionButton(t("followed.dismiss"), () => {
         void dismissNotification(group.id).then(render)
-      })
+      }),
     )
     body.appendChild(actions)
     card.appendChild(body)
@@ -157,20 +190,20 @@ function renderFollowedList(subs: FollowedSubscription[]): void {
   listEl.replaceChildren()
   listEmptyEl?.toggleAttribute("hidden", subs.length > 0)
   for (const sub of subs) {
-    const card = el("article", "followed-card nylah-card flex gap-4 p-4")
-    const poster = posterImg(sub.posterUrl, sub.seriesTitle)
+    const card = el("article", "rs-followed-card")
+    const poster = posterBlock(sub.posterUrl, sub.seriesTitle)
     if (poster) card.appendChild(poster)
-    const body = el("div", "flex min-w-0 flex-1 flex-col gap-2")
-    const title = el("h3", "font-serif text-xl leading-tight")
+    const body = el("div", "rs-followed-body")
+    const title = el("h3", "rs-followed-title")
     title.textContent = sub.seriesTitle
     body.appendChild(title)
-    const meta = el("p", "text-xs text-fg-3 tabular-nums")
+    const meta = el("p", "rs-meta")
     meta.textContent = t("followed.episodesBaselined", { count: sub.baseline.length })
     body.appendChild(meta)
-    const status = el("p", "text-sm text-fg-2")
+    const status = el("p", "rs-body-text")
     status.textContent = statusText(sub)
     body.appendChild(status)
-    const actions = el("div", "flex flex-wrap gap-2")
+    const actions = el("div", "rs-followed-actions")
     if (sub.needsRebaseline) {
       const rebaselineBtn = actionButton(t("followed.rebaseline"), async () => {
         rebaselineBtn.disabled = true
@@ -179,7 +212,7 @@ function renderFollowedList(subs: FollowedSubscription[]): void {
           const response = await xtreamApiFetch(
             "get_series_info",
             { series_id: sub.seriesId, series: sub.seriesId },
-            { entryId: sub.playlistId }
+            { entryId: sub.playlistId },
           )
           if (!response.ok) throw new Error(`get_series_info HTTP ${response.status}`)
           const info = await response.json()
@@ -201,7 +234,7 @@ function renderFollowedList(subs: FollowedSubscription[]): void {
           toast({ title: t("followed.unfollowed"), description: sub.seriesTitle })
           void render()
         })
-      })
+      }),
     )
     const openBtn = actionButton(t("followed.openSeries"), () => {
       window.location.href = buildSeriesDetailUrl({ seriesId: sub.seriesId })
@@ -257,5 +290,9 @@ checkNowBtn?.addEventListener("click", async () => {
 
 document.addEventListener(FOLLOWED_CHANGED_EVENT, () => void render())
 document.addEventListener(FOLLOWED_NOTIFICATIONS_EVENT, () => void render())
+
+// W1 image fallback for the runtime-built posters (capture-phase error
+// handler; idempotent, safe to arm once per page load).
+armTvImageFallbacks(document)
 
 void render()

@@ -1,80 +1,185 @@
 ---
-import Layout from "@/layouts/Layout.astro"
+// Followed Series (W2 rebuild onto the W1 shared system):
+// New Episodes + followed shows, rendered by followed-page.ts into
+// the rs-* card system. All data comes from followed.ts (unchanged);
+// checks still run in the background and the notifications.json Rust
+// writer is untouched.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
 ---
 
-<Layout pageTitle="Followed Series">
-  <main class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-6 flex flex-col gap-6 flex-1 min-h-0">
-    <header class="route-hero route-hero--tv-compact shrink-0">
-      <h1 data-i18n="page.followed.heading" class="route-hero__title">Followed Series</h1>
-      <p data-i18n="page.followed.sub" class="route-hero__sub">
-        New episodes for the shows you follow, and the shows themselves. Checks run in the background — you never have to go looking.
-      </p>
-    </header>
+<CouchLayout pageTitle="Followed Series" activeNav="followed" view="followed">
+  <header class="rs-followed-head">
+    <h1 data-i18n="page.followed.heading" class="rs-page-title">Followed Series</h1>
+    <p data-i18n="page.followed.sub" class="rs-meta">
+      New episodes for the shows you follow, and the shows themselves. Checks run in the background — you never have to go looking.
+    </p>
+  </header>
 
-    <div class="flex flex-wrap items-center gap-2">
-      <button id="followed-check-now" type="button" class="btn">
-        <span data-i18n="followed.checkNow">Check now</span>
-      </button>
-      <a href="/settings#settings-followed" class="btn">
-        <span data-i18n="followed.checkSettings">Check settings</span>
-      </a>
-      <span id="followed-last-check" class="text-sm text-fg-3 tabular-nums" aria-live="polite"></span>
+  <div class="rs-followed-actions">
+    <button id="followed-check-now" type="button" class="rs-hero__action rs-hero__action--secondary">
+      <span data-i18n="followed.checkNow">Check now</span>
+    </button>
+    <a href="/settings#settings-followed" class="rs-hero__action rs-hero__action--secondary">
+      <span data-i18n="followed.checkSettings">Check settings</span>
+    </a>
+    <span id="followed-last-check" class="rs-meta" aria-live="polite"></span>
+  </div>
+
+  <section aria-labelledby="followed-new-heading" class="rs-followed-section">
+    <h2 id="followed-new-heading" class="rs-section-title">
+      <span data-i18n="followed.newEpisodes">New Episodes</span>
+      <span id="followed-unread-count" class="rs-meta"></span>
+    </h2>
+    <div id="followed-new-list" class="rs-followed-list"></div>
+    <div id="followed-new-empty" hidden>
+      <TvEmpty
+        title="No new episodes right now"
+        message="When a followed show adds an episode, it will appear here."
+        art="library"
+      />
     </div>
+  </section>
 
-    <section aria-labelledby="followed-new-heading" class="flex flex-col gap-3">
-      <h2 id="followed-new-heading" class="font-serif text-2xl tracking-[-0.02em]">
-        <span data-i18n="followed.newEpisodes">New Episodes</span>
-        <span id="followed-unread-count" class="text-base text-fg-3 tabular-nums"></span>
-      </h2>
-      <div id="followed-new-list" class="flex flex-col gap-3"></div>
-      <div id="followed-new-empty" hidden class="nylah-card flex flex-col items-center gap-3 p-6 text-center">
-        <img src="/art/empty-library.jpg" alt="" class="w-40 rounded-xl ring-1 ring-line" />
-        <p data-i18n="followed.newEmpty" class="text-sm text-fg-3">No new episodes right now. When a followed show adds an episode, it will appear here.</p>
-      </div>
-    </section>
-
-    <section aria-labelledby="followed-list-heading" class="flex flex-col gap-3">
-      <h2 id="followed-list-heading" class="font-serif text-2xl tracking-[-0.02em]" data-i18n="followed.followedShows">Followed shows</h2>
-      <div id="followed-list" class="flex flex-col gap-3"></div>
-      <div id="followed-list-empty" hidden class="nylah-card flex flex-col items-center gap-3 p-6 text-center">
-        <img src="/art/empty-library.jpg" alt="" class="w-40 rounded-xl ring-1 ring-line" />
-        <p data-i18n="followed.listEmpty" class="text-sm text-fg-3">Nothing followed yet. Open a series and tap Follow — new episodes will be checked for you in the background.</p>
-        <a href="/series" class="btn"><span data-i18n="followed.browseSeries">Browse series</span></a>
-      </div>
-    </section>
-  </main>
+  <section aria-labelledby="followed-list-heading" class="rs-followed-section">
+    <h2 id="followed-list-heading" class="rs-section-title" data-i18n="followed.followedShows">Followed shows</h2>
+    <div id="followed-list" class="rs-followed-list"></div>
+    <div id="followed-list-empty" hidden>
+      <TvEmpty
+        title="Nothing followed yet"
+        message="Open a series and tap Follow — new episodes will be checked for you in the background."
+        art="library"
+        actionLabel="Browse series"
+        actionHref="/series"
+      />
+    </div>
+  </section>
 
   <script>
     import "@/scripts/followed-page.ts"
     import "@/scripts/updater-startup.js"
   </script>
 
-  <style>
-    /* Nylah Studios v0.4.0 (w3) — RedSilk treatment for the Followed page:
-       serif titles, wine focus glow, warm card material. */
-    .route-hero__title {
-      font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+  <style is:global>
+    /* Followed cards are built at runtime by followed-page.ts, so
+       these rules must be global (Astro's scoped styles cannot reach
+       DOM created after render). All colours come from the W1 tokens. */
+    html[data-couch] .rs-followed-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
     }
-    .followed-card:focus-within {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+    html[data-couch] .rs-followed-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 2rem;
     }
-    .followed-card .btn:focus-visible {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
+    html[data-couch] .rs-followed-actions .rs-hero__action {
+      font-size: 1.25rem;
+      padding: 0.75rem 1.5rem;
     }
-    .followed-poster {
+    html[data-couch] .rs-followed-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    html[data-couch] .rs-followed-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    html[data-couch] .rs-followed-card {
+      display: flex;
+      gap: 1.25rem;
+      padding: 1.25rem;
+      background: var(--rs-surface);
+      border: 1px solid var(--rs-line-soft);
+      border-radius: var(--rs-radius);
+      box-shadow: var(--rs-shadow);
+      min-width: 0;
+    }
+    html[data-couch] .rs-followed-card:focus-within {
       box-shadow:
-        0 0 0 1px var(--color-line),
-        var(--nylah-card-shadow, 0 18px 48px -16px var(--nylah-focus-glow));
+        0 0 0 2px var(--rs-focus),
+        0 0 20px 2px var(--rs-focus-glow);
+    }
+    html[data-couch] .rs-followed-poster {
+      width: 6rem;
+      flex-shrink: 0;
+      border-radius: 0.75rem;
+      overflow: hidden;
+      box-shadow: var(--rs-shadow);
+    }
+    html[data-couch] .rs-followed-poster .rs-image--poster {
+      aspect-ratio: 2 / 3;
+    }
+    html[data-couch] .rs-followed-body {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      min-width: 0;
+      flex: 1;
+    }
+    html[data-couch] .rs-followed-title {
+      font-family: var(--rs-font-display);
+      font-size: 2rem;
+      line-height: 1.2;
+      margin: 0;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-followed-episodes {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    html[data-couch] .rs-followed-episode {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 1.25rem;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-followed-episode-label {
+      min-width: 0;
+      flex: 1;
+    }
+    html[data-couch] .rs-followed-btn {
+      font-size: 1.125rem;
+      font-weight: 600;
+      padding: 0.625rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-bg-2);
+      color: var(--rs-text);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-followed-btn:hover,
+    html[data-couch] .rs-followed-btn:focus-visible {
+      background: var(--rs-surface);
+      border-color: var(--rs-focus);
+    }
+    html[data-couch] .rs-followed-btn--primary {
+      background: var(--rs-accent);
+      border-color: var(--rs-accent);
+    }
+    html[data-couch] .rs-followed-btn:disabled {
+      opacity: 0.55;
+      cursor: default;
     }
     @media (prefers-reduced-motion: reduce) {
-      .followed-card:focus-within,
-      .followed-card .btn:focus-visible {
-        box-shadow: 0 0 0 2px var(--nylah-focus-ring, var(--color-accent));
+      html[data-couch] .rs-followed-card:focus-within,
+      html[data-couch] .rs-followed-btn:focus-visible {
+        box-shadow: 0 0 0 2px var(--rs-focus);
       }
     }
   </style>
-</Layout>
+</CouchLayout>
