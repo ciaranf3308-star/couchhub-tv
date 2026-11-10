@@ -1,0 +1,138 @@
+---
+// TvLiveLanding — Live TV Landing (0.9.0, W1).
+//
+// The cinematic landing the 0.9.0 shell (W5, livetv.astro) mounts in
+// place of the 0.7.0/0.8.0 Home: (A) Now Watching hero (TvLiveHero),
+// (B) a restrained quick-access row, (C) Browse by Category tiles.
+// No props — everything loads client-side from the cached playlist
+// via mountLivtvLanding() (src/scripts/lib/livetv-landing.ts).
+//
+// No rectangles inside rectangles: the landing is one flowing
+// column — hero band, then a text-button row divided by hairlines,
+// then the category row — no outer panel containing smaller panels.
+// No content overflows the viewport at 1920×1080: the hero is a
+// fixed band, the quick row wraps, the category row scrolls
+// horizontally. All sizes are rem-based on the existing root
+// scaling (couch.css), so 4K stays proportional.
+//
+// Opening the landing starts NO stream: mountLivtvLanding only
+// renders; tuning happens on an explicit Watch / quick-access /
+// category action. B/Escape on the landing goes to the app Home
+// ("/") via the `livetv:back` {context:"landing"} contract.
+import TvLiveHero from "@/components/couch/TvLiveHero.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
+---
+
+<div class="rs-livetv-landing" data-livetv-landing>
+	<TvLiveHero />
+
+	<!-- (B) Quick access — visually restrained: text buttons divided
+	     by hairlines, not a panel of panels. The Continue Watching
+	     button starts hidden; the mount shows it only when there is
+	     a last-watched channel, with that channel's name as its
+	     sublabel. Sublabels are filled from real counts only. -->
+	<nav
+		class="rs-livetv-landing-quick"
+		data-nylah-rail="livetv-landing-quick"
+		aria-label="Quick access">
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="continue"
+			data-nylah-item
+			data-couch-key="landing-quick-continue"
+			data-focus-key="landing-quick-continue"
+			hidden>
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">▶</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">Continue Watching</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="continue"></span>
+			</span>
+		</button>
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="favourites"
+			data-nylah-item
+			data-couch-key="landing-quick-favourites"
+			data-focus-key="landing-quick-favourites">
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">☆</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">Favourites</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="favourites"></span>
+			</span>
+		</button>
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="all"
+			data-nylah-item
+			data-couch-key="landing-quick-all"
+			data-focus-key="landing-quick-all">
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">☰</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">All Channels</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="all"></span>
+			</span>
+		</button>
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="guide"
+			data-nylah-item
+			data-couch-key="landing-quick-guide"
+			data-focus-key="landing-quick-guide">
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">▦</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">TV Guide</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="guide"></span>
+			</span>
+		</button>
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="search"
+			data-nylah-item
+			data-couch-key="landing-quick-search"
+			data-focus-key="landing-quick-search">
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">⌕</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">Search</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="search"></span>
+			</span>
+		</button>
+	</nav>
+
+	<!-- (C) Browse by Category — horizontal row of fixed-size tiles,
+	     filled by the mount from genuine provider groups. Hidden
+	     until the mount finds at least one group. -->
+	<section
+		class="rs-livetv-landing-categories"
+		data-landing-categories-section
+		data-nylah-rail="livetv-landing-categories"
+		aria-label="Browse by category"
+		hidden>
+		<h2 class="rs-livetv-landing-categories__title">Browse by Category</h2>
+		<div class="rs-livetv-landing-categories__row" data-landing-categories></div>
+	</section>
+
+	<div class="rs-livetv-landing__empty" data-landing-empty hidden>
+		<TvEmpty
+			title="No live playlist connected"
+			message="Add a playlist to browse live channels."
+			art="player"
+			actionLabel="Add a playlist"
+			actionHref="/login"
+		/>
+	</div>
+</div>
+
+<script>
+	import { mountLivtvLanding } from "@/scripts/lib/livetv-landing";
+
+	const host = document.querySelector<HTMLElement>("[data-livetv-landing]");
+	if (host && !host.dataset.landingArmed) {
+		host.dataset.landingArmed = "1";
+		void mountLivtvLanding(host);
+	}
+</script>
