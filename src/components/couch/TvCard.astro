@@ -3,10 +3,16 @@
 // Props: title, subtitle?, meta?, image?, imageAlt?, kind
 // ('poster' 2:3 | 'landscape' 16:9 | 'channel' logo FITTED),
 // progress? (0..1 watched fraction), badge?, href?, itemKey?
-// (stable key for per-route focus memory — prefer a catalogue id).
+// (stable key for per-route focus memory — prefer a catalogue id),
+// detail? (extra info revealed ONLY on focus/hover as an overlay
+// over the poster foot — never a permanent line under the card;
+// a named `detail` slot renders the same way when richer markup
+// is needed — pass one or the other, not both).
 // Focus: scale ~1.05 + elevation + focus ring, transform-only so
-// neighbours never reflow. Channel logos use object-fit: contain
-// (see couch.css) — never stretched.
+// neighbours never reflow; the detail overlay is opacity/transform
+// only for the same reason. Channel logos use object-fit: contain
+// (see couch.css) — never stretched. Images go through TvImage:
+// lazy by default, elegant fallback, never a broken-image icon.
 import TvImage from "./TvImage.astro";
 
 export type TvCardKind = "poster" | "landscape" | "channel";
@@ -22,6 +28,7 @@ interface Props {
   badge?: string;
   href?: string;
   itemKey?: string;
+  detail?: string;
 }
 const {
   title,
@@ -34,12 +41,14 @@ const {
   badge,
   href,
   itemKey,
+  detail,
 } = Astro.props;
 const imageKind = kind === "poster" ? "poster" : kind === "channel" ? "logo" : "backdrop";
 const pct =
   typeof progress === "number" && Number.isFinite(progress)
     ? Math.max(0, Math.min(1, progress))
     : null;
+const hasDetailSlot = Astro.slots.has("detail");
 const Tag = href ? "a" : "div";
 ---
 
@@ -59,6 +68,14 @@ const Tag = href ? "a" : "div";
       pct !== null && pct > 0 && (
         <span class="rs-card__progress" aria-hidden="true">
           <span class="rs-card__progress-fill" style={`width: ${Math.round(pct * 100)}%`} />
+        </span>
+      )
+    }
+    {
+      (detail || hasDetailSlot) && (
+        <span class="rs-card__detail">
+          {detail}
+          <slot name="detail" />
         </span>
       )
     }
