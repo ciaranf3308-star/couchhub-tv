@@ -76,7 +76,7 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
 
 /// Validate the launcher payload before it touches disk: must be JSON, an
 /// object, schemaVersion 1. The JS side builds it; this is the second gate.
-fn validate_notifications_json(json: &str) -> Result<(), String> {
+pub fn validate_notifications_json(json: &str) -> Result<(), String> {
     let value: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| format!("notifications.json is not valid JSON: {e}"))?;
     let schema = value
@@ -101,14 +101,14 @@ fn validate_notifications_json(json: &str) -> Result<(), String> {
 /// `schtasks /Query /TN <name> /XML` output carries the trigger interval as
 /// `<Interval>PT6H</Interval>` and the command as `<Command>...</Command>`.
 /// Substring search is enough — the file is machine-generated.
-fn parse_interval_hours_from_xml(xml: &str) -> Option<u32> {
+pub fn parse_interval_hours_from_xml(xml: &str) -> Option<u32> {
     let start = xml.find("<Interval>PT")? + "<Interval>PT".len();
     let rest = &xml[start..];
     let end = rest.find('H')?;
     rest[..end].parse::<u32>().ok()
 }
 
-fn parse_command_from_xml(xml: &str) -> Option<String> {
+pub fn parse_command_from_xml(xml: &str) -> Option<String> {
     let start = xml.find("<Command>")? + "<Command>".len();
     let rest = &xml[start..];
     let end = rest.find("</Command>")?;
@@ -117,7 +117,7 @@ fn parse_command_from_xml(xml: &str) -> Option<String> {
     Some(raw.replace("&quot;", "\""))
 }
 
-fn valid_interval(interval_hours: u32) -> Result<(), String> {
+pub fn valid_interval(interval_hours: u32) -> Result<(), String> {
     if matches!(interval_hours, 3 | 6 | 12 | 24) {
         Ok(())
     } else {

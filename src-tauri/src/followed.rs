@@ -6,6 +6,7 @@
 
 use std::sync::Mutex;
 
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::followed_core::{
