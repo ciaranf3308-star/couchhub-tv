@@ -784,7 +784,7 @@
           </ul>
         </div>
       {/if}
-      <div class="search-landing px-4 text-center text-sm text-fg-3 max-w-md mx-auto" class:py-12={!showRecentSearches} class:py-6={showRecentSearches}>
+      <div class="search-landing nylah-art-panel px-4 text-center text-sm text-fg-3 max-w-md mx-auto" class:py-12={!showRecentSearches} class:py-6={showRecentSearches}>
         {#if isWarming}
           {@render warming(tr("search.warmingHint"))}
         {:else}
@@ -806,7 +806,7 @@
         {/each}
       </ul>
     {:else if !results.length}
-      <div class="search-no-results px-4 py-12 text-center text-sm text-fg-3 max-w-md mx-auto">
+      <div class="search-no-results nylah-art-panel nylah-art-panel--empty-search px-4 py-12 text-center text-sm text-fg-3 max-w-md mx-auto">
         {#if personMode}
           <p class="search-no-results-text">{tr("search.noResultsForPerson", { name: personMode.name })}</p>
         {:else if isWarming}
@@ -1013,5 +1013,19 @@
     .search-no-results {
       box-shadow: none;
     }
+  }
+
+  /* v0.3.0 coordinator wiring: curated art in the landing + no-results
+     panels. The scoped `background:` shorthand above would reset the art
+     image, so re-assert it here (later + more specific). */
+  .search-landing.nylah-art-panel {
+    background-image: var(--nylah-art-hero);
+    background-size: cover;
+    background-position: center;
+  }
+  .search-no-results.nylah-art-panel--empty-search {
+    background-image: var(--nylah-art-empty-search);
+    background-size: cover;
+    background-position: center;
   }
 </style>

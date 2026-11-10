@@ -219,7 +219,7 @@
   {#if loading && !entries.length}
     <div class="text-sm text-fg-3 px-1">{tr("common.loading")}</div>
   {:else if !entries.length}
-    <div class="w7-empty rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
+    <div class="w7-empty nylah-art-panel nylah-art-panel--empty-library rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
       {tr("watchlist.helperEmpty")}
     </div>
   {:else if !visible.length}
@@ -337,5 +337,14 @@
     .filter-chip.active {
       box-shadow: none;
     }
+  }
+
+  /* v0.3.0 coordinator wiring: curated art in the empty panel. The
+     scoped `background:` shorthand above would reset the art image, so
+     re-assert it here. */
+  .w7-empty.nylah-art-panel--empty-library {
+    background-image: var(--nylah-art-empty-library);
+    background-size: cover;
+    background-position: center;
   }
 </style>

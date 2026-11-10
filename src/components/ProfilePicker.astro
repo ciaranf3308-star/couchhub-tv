@@ -18,7 +18,7 @@
   data-profile-picker
   data-nylah-dialog
   hidden
-  class="nylah-picker-overlay"
+  class="nylah-picker-overlay nylah-art-backdrop nylah-art-backdrop--profiles"
   role="dialog"
   aria-modal="true"
   aria-labelledby="nylah-picker-title">
@@ -167,6 +167,14 @@
     box-shadow:
       0 0 0 2px var(--nylah-focus-halo),
       0 0 14px var(--nylah-focus-glow);
+  }
+  /* v0.3.0 coordinator wiring: curated art behind the picker. The
+     overlay's own `background:` shorthand would reset the art image, so
+     re-assert it here (later + more specific). */
+  .nylah-picker-overlay.nylah-art-backdrop--profiles {
+    background-image: var(--nylah-art-profiles);
+    background-size: cover;
+    background-position: center;
   }
 </style>
 
