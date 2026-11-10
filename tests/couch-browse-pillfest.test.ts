@@ -379,29 +379,34 @@ describe("list tabs: one segmented control, all five lists work", () => {
 });
 
 describe("no pill-cluster markup remains in the Browse views", () => {
-  it("the genre mount point lives inside the filter row on all three pages", () => {
+  it("the genre mount point lives inside the filter row in both Browse sections", () => {
+    // 0.8.0 integration (W3): the standalone /movies and /series
+    // pages are redirects into /browse — the genre mount lives in
+    // Browse's movies + series sections, not in three separate pages.
+    for (const prefix of ["browse-movies-", "browse-series-"] as const) {
+      // The Genre select mount sits after the Rating select and before
+      // the list tabs — i.e. inside the one filter row.
+      const ratingIdx = browseAstro.indexOf(`id="${prefix}couch-browse-rating"`);
+      const genreIdx = browseAstro.indexOf(`id="${prefix}couch-browse-genres"`);
+      const tabsIdx = browseAstro.indexOf(`id="${prefix}couch-browse-tabs"`);
+      expect(ratingIdx, `browse.astro ${prefix} rating`).toBeGreaterThan(-1);
+      expect(genreIdx, `browse.astro ${prefix} genre mount`).toBeGreaterThan(-1);
+      expect(tabsIdx, `browse.astro ${prefix} tabs`).toBeGreaterThan(-1);
+      expect(genreIdx, `browse.astro ${prefix} genre after rating`).toBeGreaterThan(ratingIdx);
+      expect(genreIdx, `browse.astro ${prefix} genre before tabs`).toBeLessThan(tabsIdx);
+    }
+    expect(browseAstro).toContain("rs-browse-segmented");
+    expect(browseAstro).toContain("rs-browse-genre-filter");
+    expect(browseAstro).not.toContain('class="rs-browse-genres"');
+    // The retired standalone pages are pure redirects — no filter
+    // markup of any kind lives there any more.
     for (const [name, src] of [
-      ["browse.astro", browseAstro],
       ["movies/index.astro", moviesAstro],
       ["series/index.astro", seriesAstro],
     ] as const) {
-      // The Genre select mount sits after the Rating select and before
-      // the list tabs — i.e. inside the one filter row.
-      for (const prefix of name === "browse.astro"
-        ? ["browse-movies-", "browse-series-"]
-        : [""]) {
-        const ratingIdx = src.indexOf(`id="${prefix}couch-browse-rating"`);
-        const genreIdx = src.indexOf(`id="${prefix}couch-browse-genres"`);
-        const tabsIdx = src.indexOf(`id="${prefix}couch-browse-tabs"`);
-        expect(ratingIdx, `${name} ${prefix} rating`).toBeGreaterThan(-1);
-        expect(genreIdx, `${name} ${prefix} genre mount`).toBeGreaterThan(-1);
-        expect(tabsIdx, `${name} ${prefix} tabs`).toBeGreaterThan(-1);
-        expect(genreIdx, `${name} ${prefix} genre after rating`).toBeGreaterThan(ratingIdx);
-        expect(genreIdx, `${name} ${prefix} genre before tabs`).toBeLessThan(tabsIdx);
-      }
-      expect(src).toContain("rs-browse-segmented");
-      expect(src).toContain("rs-browse-genre-filter");
-      expect(src).not.toContain('class="rs-browse-genres"');
+      expect(src, name).toContain("Astro.redirect");
+      expect(src, name).not.toContain("couch-browse-genres");
+      expect(src, name).not.toContain("rs-browse-segmented");
     }
   });
 

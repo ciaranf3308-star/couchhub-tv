@@ -320,9 +320,15 @@ describe("browse.astro markup contract", () => {
     expect(browseAstro).toContain("No series yet");
   });
 
-  it("leaves a clearly-marked, empty search slot for W2", () => {
+  it("mounts W2's TvSearchAction in the search slot (integration)", () => {
+    // Integration wired W2's component into W1's slot: the slot is
+    // no longer empty — it mounts the search action client:load so
+    // the return trip from /search restores focus to it.
     expect(browseAstro).toContain("browse-search-slot");
-    expect(browseAstro).toMatch(/SEARCH SLOT \(W2\)/);
+    expect(browseAstro).toContain(
+      'import TvSearchAction from "@/components/couch/TvSearchAction.svelte"',
+    );
+    expect(browseAstro).toMatch(/<TvSearchAction client:load \/>/);
   });
 
   it("does not reintroduce serif or rebuild the Discover engines", () => {
