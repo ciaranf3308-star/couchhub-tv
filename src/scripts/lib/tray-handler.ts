@@ -28,6 +28,7 @@ const isAndroid = (() => {
 const KNOWN_ROUTES = new Set([
   "/",
   "/livetv",
+  "/browse",
   "/movies",
   "/series",
   "/followed",

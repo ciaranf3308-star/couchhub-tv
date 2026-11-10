@@ -390,7 +390,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
       id: "picked-for-you",
       title: "Picked for You",
       subtitle: "Based on what you've watched and loved",
-      href: "/discover",
+      href: "/browse",
       cards: input.picked,
     });
   }
@@ -414,7 +414,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
     rails.push({
       id: "continue-series",
       title: "Continue Your Series",
-      href: "/series",
+      href: "/browse?type=series",
       cards: input.continueSeries,
     });
   }
@@ -431,7 +431,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
       id: "hidden-gems",
       title: "Hidden Gems",
       subtitle: "Highly rated, not watched yet",
-      href: "/discover",
+      href: "/browse",
       cards: input.hiddenGems,
     });
   }

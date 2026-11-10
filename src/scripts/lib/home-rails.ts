@@ -832,7 +832,7 @@ function buildNextObsession(ctx: BuildContext, railIndex: number): HomeRail | nu
       ? "Based on what you've watched and loved"
       : "Highly rated in your library",
     items,
-    seeAllHref: "/discover",
+    seeAllHref: "/browse",
   }
 }
 
@@ -972,7 +972,7 @@ function buildHiddenGems(ctx: BuildContext, railIndex: number): HomeRail | null 
     title: "Hidden Gems",
     description: "Highly rated, not watched yet",
     items,
-    seeAllHref: "/discover",
+    seeAllHref: "/browse",
   }
 }
 
@@ -1099,7 +1099,7 @@ function buildContinueSeries(ctx: BuildContext, railIndex: number): HomeRail | n
     title: "Continue Your Series",
     description: "Pick up your series where you left off",
     items: items.slice(0, HOME_RAILS_LIMIT),
-    seeAllHref: "/series",
+    seeAllHref: "/browse?type=series",
   }
 }
 
