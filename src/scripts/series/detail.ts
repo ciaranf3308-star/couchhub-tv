@@ -165,7 +165,7 @@ const episodeList = document.getElementById("series-episode-list")
 
 wireDetailBackLink(backLink, "/series")
 
-// Nylah Studios v0.2.0 (w3): Play button — plays the resume/next episode
+// NylahBox Studios v0.2.0 (w3): Play button — plays the resume/next episode
 // picked by the existing pickDefaultPlayEpisode() (same pick as the
 // poster badge). The sub-label refreshes from the episode actually
 // picked, so the button never advertises a stale episode.
@@ -176,7 +176,7 @@ playBtn?.addEventListener("click", () => {
   void playEpisode(ep)
 })
 
-// Nylah Studios v0.2.0 (w3): pause overlay — same shared helper as Live
+// NylahBox Studios v0.2.0 (w3): pause overlay — same shared helper as Live
 // TV and the movie page. Title/subtitle read text already on the page.
 mountPauseOverlay({
   wrap: playerWrap,
@@ -1563,7 +1563,7 @@ function findEpisodeById(episodeId) {
   return null
 }
 
-// Nylah Studios v0.2.0 (w3): keeps the Play button honest — visible only
+// NylahBox Studios v0.2.0 (w3): keeps the Play button honest — visible only
 // once episodes have loaded, and its sub-label names the episode it will
 // actually play.
 function syncSeriesPlayButton(ep) {
@@ -1848,7 +1848,7 @@ function pushEpisodePresence(episode) {
     details: series.name || "Watching a series",
     state: `S${episode.season || currentSeason || "?"}E${episode.episode_num || "?"} · ${episode.title || ""}`.trim(),
     largeImage: series.logo || "logo",
-    largeText: series.name || "Extreme InfiniTV",
+    largeText: series.name || "NylahBox Studios",
     smallImage: "series",
     smallText: "Series",
     startTimestamp: Date.now(),
