@@ -35,15 +35,27 @@ const { id, title } = Astro.props;
   </div>
 </dialog>
 
-<script define:vars={{ dialogId: id }}>
+<script>
+  // Astro inlines a define:vars script verbatim, so the bare imports
+  // this dialog used to carry threw "Cannot use import statement
+  // outside a module" in the browser and the dialog nav never attached
+  // (W8) — not even the Search-button trigger wiring. A plain <script>
+  // is bundled as a module, so imports resolve; it cannot receive the
+  // dialog id via define:vars, so it wires every dialog on the page
+  // instead, guarded so a second script instance (or a second TvDialog)
+  // never double-attaches (double attach would register two
+  // spatial-nav sections under one id and fight over focus).
   import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.ts";
   import {
     openCouchDialog,
     closeCouchDialog,
   } from "@/scripts/lib/couch-focus.ts";
 
-  const dlg = document.getElementById(dialogId);
-  if (dlg instanceof HTMLDialogElement) {
+  document.querySelectorAll("dialog[data-nylah-dialog]").forEach((dlg) => {
+    if (!(dlg instanceof HTMLDialogElement) || !dlg.id) return;
+    if (dlg.dataset.dialogWired) return;
+    dlg.dataset.dialogWired = "1";
+    const dialogId = dlg.id;
     attachDialogSpatialNav(dlg);
     // Native close (B/Escape) still needs focus returned to the
     // invoker — the dialog's own close event is the hook. The
@@ -57,17 +69,20 @@ const { id, title } = Astro.props;
       .forEach((btn) =>
         btn.addEventListener("click", () => closeCouchDialog(dialogId)),
       );
-  }
-  document
-    .querySelectorAll(`[data-couch-dialog-open="${dialogId}"]`)
-    .forEach((trigger) =>
-      trigger.addEventListener("click", (event) =>
-        openCouchDialog(
-          dialogId,
-          event.currentTarget instanceof HTMLElement
-            ? event.currentTarget
-            : null,
-        ),
-      ),
-    );
+    document
+      .querySelectorAll(`[data-couch-dialog-open="${dialogId}"]`)
+      .forEach((trigger) => {
+        if (!(trigger instanceof HTMLElement)) return;
+        if (trigger.dataset.dialogTriggerWired) return;
+        trigger.dataset.dialogTriggerWired = "1";
+        trigger.addEventListener("click", (event) =>
+          openCouchDialog(
+            dialogId,
+            event.currentTarget instanceof HTMLElement
+              ? event.currentTarget
+              : null,
+          ),
+        );
+      });
+  });
 </script>

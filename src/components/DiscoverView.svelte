@@ -11,7 +11,7 @@
      search, rs-rail / rs-card markup with the W1 image-fallback
      structure, rs-empty / rs-skeleton states. -->
 <script>
-  import { onMount } from "svelte"
+  import { onMount, tick } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
   import { warmupActive } from "@/scripts/lib/catalog.js"
   import {
@@ -46,10 +46,75 @@
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
+  import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"
+  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
   } from "@/scripts/lib/couch-image.ts"
+
+  // Keyboard lifecycle (W2 Browse consolidation): the on-screen
+  // keyboard is hidden on landing and opens when the mood input receives
+  // focus; see src/scripts/lib/couch-keyboard.ts for the full contract
+  // (Escape / Hide-button dismiss, blur-to-a-real-element hides,
+  // commit moves focus to results).
+  /** @type {HTMLInputElement | null} */
+  let inputEl = null
+  const keyboard = new CouchKeyboardLifecycle()
+  let keyboardOpen = $state(false)
+  function syncKeyboard() {
+    keyboardOpen = keyboard.open
+  }
+  function onMoodInputFocus() {
+    keyboard.onInputFocus()
+    syncKeyboard()
+  }
+  function onMoodInputKeyDown(ev) {
+    if (ev.key === "Escape") {
+      // Dismiss first; focus stays on the mood input.
+      if (keyboard.dismiss()) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        syncKeyboard()
+      }
+      return
+    }
+    if (ev.key === "ArrowDown") {
+      // Down from the input opens the keyboard and lands on its first
+      // key (controller + physical path into the grid).
+      ev.preventDefault()
+      ev.stopPropagation()
+      keyboard.openKeyboard()
+      syncKeyboard()
+      requestAnimationFrame(() => {
+        document
+          .querySelector("[data-couch-keyboard] [data-osk-key]")
+          ?.focus()
+      })
+    }
+  }
+  function onKeyboardScopeFocusOut(ev) {
+    const next = /** @type {HTMLElement | null} */ (ev.relatedTarget)
+    const scope = /** @type {HTMLElement} */ (ev.currentTarget)
+    // Hide only when focus left the scope entirely. Focus moving
+    // between the input and the keyboard keys stays inside the scope
+    // (the keys live in it), and focus leaving to nowhere (gamepad B
+    // blur) keeps the keyboard so the next D-pad move can reach it.
+    const leftScope = !!next && !scope.contains(next)
+    keyboard.onScopeFocusOut(leftScope)
+    syncKeyboard()
+  }
+  function dismissKeyboardToInput() {
+    if (keyboard.dismissToInput()) {
+      syncKeyboard()
+      inputEl?.focus()
+    }
+  }
+  function onKeyboardCommit() {
+    keyboard.commit()
+    syncKeyboard()
+    focusFirstResult()
+  }
 
   let query = $state("")
   let queryDebounced = $state("")
@@ -283,40 +348,61 @@
 
   // W1 image fallback: arms the capture-phase error handler once; the
   // scan covers images that already failed before this ran.
+  // Focus restore (Browse consolidation): the rows render async after
+  // mount, long after CouchLayout's one-shot restore ran — so restore
+  // again after every rows render. restoreCouchFocus is a no-op when
+  // something is already focused or a modal is open, so this never
+  // moves focus during ordinary browsing; it only lands the remembered
+  // card when returning from a detail with focus on the body. It can
+  // never pop the keyboard open: the mood input sits in no rail, so
+  // focus memory never points at it.
   $effect(() => {
     void rows
     void searchResults
     void loading
     armTvImageFallbacks(document)
+    void tick().then(() => restoreCouchFocus())
   })
 </script>
 
 <div class="rs-discover" data-discover-root>
   <div class="rs-discover__search">
-    <div class="rs-discover__input-row">
-      <label for="discover-query" class="sr-only">What are you in the mood for?</label>
-      <input
-        id="discover-query"
-        type="search"
-        bind:value={query}
-        oninput={(e) => onQueryInput(e.currentTarget.value)}
-        placeholder="What are you in the mood for?"
-        autocomplete="off"
-        class="rs-discover-input" />
-      {#if query || activeMood || moreLikeSeed}
-        <button
-          type="button"
-          onclick={clearSearch}
-          class="rs-discover-clear">Clear</button>
-      {/if}
-    </div>
+    <!-- Keyboard scope: the mood input + the keyboard only. Focus
+         leaving this scope for a real element (mood chip, result)
+         hides the keyboard; the moods row sits outside the scope. -->
+    <div class="rs-discover__keyboard-scope" onfocusout={onKeyboardScopeFocusOut}>
+      <div class="rs-discover__input-row">
+        <label for="discover-query" class="sr-only">What are you in the mood for?</label>
+        <input
+          id="discover-query"
+          type="search"
+          bind:this={inputEl}
+          bind:value={query}
+          oninput={(e) => onQueryInput(e.currentTarget.value)}
+          onfocus={onMoodInputFocus}
+          onclick={onMoodInputFocus}
+          onkeydown={onMoodInputKeyDown}
+          placeholder="What are you in the mood for?"
+          autocomplete="off"
+          class="rs-discover-input" />
+        {#if query || activeMood || moreLikeSeed}
+          <button
+            type="button"
+            onclick={clearSearch}
+            class="rs-discover-clear">Clear</button>
+        {/if}
+      </div>
 
-    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
-    <TvKeyboard
-      bind:value={query}
-      onInput={onOskInput}
-      onCommit={focusFirstResult}
-      placeholder="What are you in the mood for?" />
+      <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears.
+           Hidden on landing; opens on input focus, hides on dismiss / blur / commit. -->
+      <TvKeyboard
+        bind:value={query}
+        open={keyboardOpen}
+        onInput={onOskInput}
+        onCommit={onKeyboardCommit}
+        onDismiss={dismissKeyboardToInput}
+        placeholder="What are you in the mood for?" />
+    </div>
 
     <div class="rs-discover__moods" role="group" aria-label="Quick picks">
       {#each MOOD_PRESETS as preset (preset.id)}

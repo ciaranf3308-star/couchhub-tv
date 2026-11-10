@@ -14,8 +14,15 @@
   //                        focus is inside [data-osk])
   //   X (controller) ..... clear — polled here, because the gamepad layer
   //                        maps X to play/pause and never emits a key for
-  //                        it. There is no video on /search, so hijacking
-  //                        X while the search view owns focus is safe.
+  //                        it. Scoped to the keyboard itself
+  //                        ([data-couch-keyboard], the TvKeyboard wrapper):
+  //                        the OSK renders on Search, Discover and inside
+  //                        the Movies/Series search dialogs, and no view
+  //                        root carries a shared class — the old
+  //                        guard named a class no element carries, so X
+  //                        never cleared (W6 audit). There is no video
+  //                        under any of those keyboards, so hijacking X
+  //                        while the keyboard owns focus is safe.
   //   D-pad / stick ...... move between keys (spatial navigation)
   //
   // The value is bound to the parent search query, so typing here and
@@ -73,7 +80,7 @@
     }
     if (pressed && !prevX) {
       const active = document.activeElement
-      if (active?.closest?.(".search-view")) clearAll()
+      if (active?.closest?.("[data-couch-keyboard]")) clearAll()
     }
     prevX = pressed
   }

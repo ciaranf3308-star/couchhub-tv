@@ -37,9 +37,77 @@
     suggestionsFor,
   } from "@/scripts/lib/couch-search.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
+  import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"
 
   /** @type {{ focusOnMount?: boolean }} */
   let { focusOnMount = false } = $props()
+
+  // Keyboard lifecycle (W2 Browse consolidation): the on-screen
+  // keyboard is hidden on initial load — including the programmatic
+  // mount focus below, which is suppressed — and opens when the search
+  // input receives focus; see src/scripts/lib/couch-keyboard.ts for
+  // the full contract (Escape / Hide-button dismiss, blur hides,
+  // commit moves focus to results, trailing-Escape swallow).
+  const keyboard = new CouchKeyboardLifecycle({
+    suppressInitialFocus: focusOnMount,
+  })
+  let keyboardOpen = $state(false)
+  function syncKeyboard() {
+    keyboardOpen = keyboard.open
+  }
+  function onSearchInputFocus() {
+    keyboard.onInputFocus()
+    syncKeyboard()
+  }
+  function onSearchInputKeyDown(ev) {
+    if (ev.key === "Escape") {
+      // Dismiss first; focus stays on the search input. Falls through
+      // (no-op) when the keyboard is already closed, so the window
+      // handler below still owns clear / go-back.
+      if (keyboard.dismiss()) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        syncKeyboard()
+      }
+      return
+    }
+    if (ev.key === "ArrowDown") {
+      // Down from the input opens the keyboard and lands on its first
+      // key; with it already open, land on the first key directly.
+      ev.preventDefault()
+      ev.stopPropagation()
+      if (!keyboard.open) {
+        keyboard.openKeyboard()
+        syncKeyboard()
+        tick().then(() => {
+          const firstKey = document.querySelector(
+            "[data-couch-keyboard] [data-osk-key]",
+          )
+          if (firstKey) firstKey.focus()
+        })
+      } else {
+        const firstKey = document.querySelector("[data-osk] [data-osk-key]")
+        if (firstKey) firstKey.focus()
+      }
+    }
+  }
+  function onSearchScopeFocusOut(ev) {
+    const next = /** @type {HTMLElement | null} */ (ev.relatedTarget)
+    const scope = /** @type {HTMLElement} */ (ev.currentTarget)
+    // Hide only when focus left the scope entirely. Focus moving
+    // between the input and the keyboard keys stays inside the scope
+    // (the keys live in it), and focus leaving to nowhere (gamepad B
+    // blur) keeps the keyboard so the next D-pad move can reach it.
+    const leftScope = !!next && !scope.contains(next)
+    keyboard.onScopeFocusOut(leftScope)
+    syncKeyboard()
+  }
+  function dismissSearchKeyboard() {
+    if (keyboard.dismissToInput()) {
+      syncKeyboard()
+      inputEl?.focus()
+    }
+  }
 
   // Read ?q= from the URL at mount time.
   function readUrlQuery() {
@@ -613,10 +681,13 @@
     scheduleActorSearch(nextValue)
   }
 
-  // The keyboard's Search key: land focus on the first result card so a
-  // controller user can keep going with the D-pad, or back to the input
-  // when there is nothing to open.
+  // The keyboard's Search key: hide the keyboard and land focus on
+  // the first result card so a controller user can keep going with the
+  // D-pad, or back to the input when there is nothing to open (the
+  // input focus reopens the keyboard — they are still typing).
   function focusFirstResult() {
+    keyboard.commit()
+    syncKeyboard()
     const first = document.querySelector(".couch-search__results .rs-card")
     if (first) {
       first.focus()
@@ -633,6 +704,34 @@
     // or steal the key.
     const targetEl = /** @type {HTMLElement | null} */ (ev.target)
     if (targetEl?.closest?.("[data-osk]")) return
+    // Keyboard dismiss owns Escape before the generic clear / go-back
+    // branches below — the first Escape closes the keyboard; a second
+    // one clears the query (or leaves, when empty).
+    // Trailing Escape: the gamepad layer blurs the input and then
+    // dispatches Escape on the body for a B press. Swallow exactly that
+    // one Escape (focus on body, fresh scope exit while the keyboard
+    // was open) so B does not also clear the query or leave Search.
+    if (
+      ev.key === "Escape" &&
+      keyboard.isFreshScopeExit() &&
+      (document.activeElement === document.body || !document.activeElement)
+    ) {
+      ev.preventDefault()
+      ev.stopImmediatePropagation()
+      return
+    }
+    if (ev.key === "Escape" && keyboard.open) {
+      ev.preventDefault()
+      ev.stopImmediatePropagation()
+      if (document.activeElement === inputEl) {
+        keyboard.dismiss()
+      } else {
+        keyboard.dismissToInput()
+        inputEl?.focus()
+      }
+      syncKeyboard()
+      return
+    }
     const onInput = document.activeElement === inputEl
     const inRecentSection = !!recentSectionEl?.contains(document.activeElement)
     if (onInput && personMode && ev.key === "Backspace" && !query) {
@@ -647,15 +746,28 @@
       ev.stopImmediatePropagation()
       // The on-screen keyboard sits between the input and the results, so
       // down from the input lands on its first key (controller users have
-      // no Tab key). From the keyboard, down reaches the results through
-      // spatial navigation; with no keyboard mounted, keep the old path.
-      const firstKey = document.querySelector("[data-osk] [data-osk-key]")
-      if (firstKey) {
-        firstKey.focus()
-      } else if (showRecentSearches) {
-        recentSectionEl?.querySelector(".recent-search-row")?.focus()
-      } else if (results.length) {
-        activeIndex = (activeIndex + 1) % results.length
+      // no Tab key). With the keyboard closed, open it first and land on
+      // its first key once mounted; from the keyboard, down reaches the
+      // results through spatial navigation; with no keyboard mounted,
+      // keep the old path.
+      if (!keyboard.open) {
+        keyboard.openKeyboard()
+        syncKeyboard()
+        tick().then(() => {
+          const firstKey = document.querySelector(
+            "[data-couch-keyboard] [data-osk-key]",
+          )
+          if (firstKey) firstKey.focus()
+        })
+      } else {
+        const firstKey = document.querySelector("[data-osk] [data-osk-key]")
+        if (firstKey) {
+          firstKey.focus()
+        } else if (showRecentSearches) {
+          recentSectionEl?.querySelector(".recent-search-row")?.focus()
+        } else if (results.length) {
+          activeIndex = (activeIndex + 1) % results.length
+        }
       }
     } else if (onInput && ev.key === "ArrowUp") {
       ev.preventDefault()
@@ -740,7 +852,7 @@
     <p class="rs-meta">{tr("page.search.subPrefix")}<kbd class="couch-search__kbd">{tr("search.shortcut")}</kbd>{tr("page.search.subSuffix")}</p>
   </div>
 
-  <div class="couch-search__controls">
+  <div class="couch-search__controls" onfocusout={onSearchScopeFocusOut}>
     <div data-focus-glide="off" class="couch-search__input-wrap">
       <svg xmlns="http://www.w3.org/2000/svg" width="1.5rem" height="1.5rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="couch-search__icon">
         <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -760,6 +872,9 @@
       <input
         bind:this={inputEl}
         value={personMode ? "" : query}
+        onfocus={onSearchInputFocus}
+        onclick={onSearchInputFocus}
+        onkeydown={onSearchInputKeyDown}
         oninput={(ev) => {
           const value = ev.currentTarget.value
           if (personMode) exitPersonMode()
@@ -837,11 +952,14 @@
       </div>
     {/if}
 
-    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
+    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears.
+         Hidden until the search input is focused; hides on dismiss / blur / commit. -->
     <TvKeyboard
       bind:value={query}
+      open={keyboardOpen}
       onInput={onOskInput}
-      onCommit={focusFirstResult} />
+      onCommit={focusFirstResult}
+      onDismiss={dismissSearchKeyboard} />
   </div>
 
   {#snippet resultCard(result, idx)}
