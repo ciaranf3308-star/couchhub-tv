@@ -1,29 +1,78 @@
 ---
-// TvCard — the Couch catalogue card.
-// Props: title, subtitle?, meta?, image?, imageAlt?, kind
-// ('poster' 2:3 | 'landscape' 16:9 | 'channel' logo FITTED),
-// progress? (0..1 watched fraction), badge?, href?, itemKey?
-// (stable key for per-route focus memory — prefer a catalogue id),
-// detail? (extra info revealed ONLY on focus/hover as an overlay
-// over the poster foot — never a permanent line under the card;
-// a named `detail` slot renders the same way when richer markup
-// is needed — pass one or the other, not both).
+// TvCard — the Couch catalogue card (C3, 0.10.0).
+//
+// Default: large artwork, readable title, ONE content-type badge,
+// ONE metadata line. No permanent feedback buttons under any poster,
+// anywhere — A / click opens details; feedback lives on the detail
+// screen + one contextual menu (see the detail screens, not here).
+//
+// Props: title, meta?, year?, runtime?, episodes?, image?,
+// imageAlt?, kind ('poster' 2:3 | 'landscape' 16:9 | 'channel' logo
+// FITTED), contentKind? (taxonomy kind — 'movie' | 'series' |
+// 'documentary-film' | 'documentary-series' | 'live'; the badge
+// shows its C1 kindLabel — 'Movie' | 'Series' | 'Documentary Film'
+// | 'Documentary Series' | 'Live TV'. W4 owns taxonomy.ts; until a
+// caller passes kindLabel() through `badge`, this local label map
+// carries the same strings — keep them in sync with C1), badge?
+// (explicit badge text; wins over contentKind), subtitle?
+// (legacy alias: used as the metadata line ONLY when no meta /
+// year / runtime / episode count is given), progress? (0..1 watched
+// fraction), href?, itemKey? (stable key for per-route focus memory
+// — prefer a catalogue id), detail? (extra info revealed ONLY on
+// focus/hover as an overlay over the poster foot — never a permanent
+// line under the card; a named `detail` slot renders the same way
+// when richer markup is needed — pass one or the other, not both).
+//
+// Metadata line (exactly one, in this order, only the parts the
+// provider actually supplied): year · runtime · episode count
+// ("2024 · 2h 5m", "2021 · 24 episodes", "2019"). An explicit `meta`
+// string wins verbatim (adapters keep their own meta lines, e.g.
+// movieMetaLine / seriesMetaLine — use `meta` for season counts,
+// "2021 · 3 seasons", which this composer does not build).
+// `runtime` is preformatted text ("2h 5m"); `episodes` is a count.
+//
 // Focus: scale ~1.05 + elevation + focus ring, transform-only so
 // neighbours never reflow; the detail overlay is opacity/transform
 // only for the same reason. Channel logos use object-fit: contain
 // (see couch.css) — never stretched. Images go through TvImage:
 // lazy by default, elegant fallback, never a broken-image icon.
+//
+// Data attributes the detail flow needs: data-nylah-item (focus /
+// spatial nav) + data-couch-key (focus memory) — do not remove or
+// rename them. data-content-kind is set when contentKind is given,
+// so rails can key off the kind without parsing the badge text.
 import TvImage from "./TvImage.astro";
 
 export type TvCardKind = "poster" | "landscape" | "channel";
+
+/** C1 content kinds (see contracts; W4 owns taxonomy.ts). */
+export type TvContentKind =
+  | "movie"
+  | "series"
+  | "documentary-film"
+  | "documentary-series"
+  | "live";
+
+/** C1 kindLabel strings — keep in sync with taxonomy.ts. */
+const CONTENT_KIND_LABELS: Record<TvContentKind, string> = {
+  movie: "Movie",
+  series: "Series",
+  "documentary-film": "Documentary Film",
+  "documentary-series": "Documentary Series",
+  live: "Live TV",
+};
 
 interface Props {
   title: string;
   subtitle?: string;
   meta?: string;
+  year?: string | number;
+  runtime?: string;
+  episodes?: number;
   image?: string;
   imageAlt?: string;
   kind?: TvCardKind;
+  contentKind?: TvContentKind;
   progress?: number;
   badge?: string;
   href?: string;
@@ -34,9 +83,13 @@ const {
   title,
   subtitle,
   meta,
+  year,
+  runtime,
+  episodes,
   image,
   imageAlt,
   kind = "poster",
+  contentKind,
   progress,
   badge,
   href,
@@ -50,12 +103,27 @@ const pct =
     : null;
 const hasDetailSlot = Astro.slots.has("detail");
 const Tag = href ? "a" : "div";
+// Badge: explicit text wins; otherwise the taxonomy kind label.
+const badgeText = badge ?? (contentKind ? CONTENT_KIND_LABELS[contentKind] : undefined);
+// ONE metadata line: explicit meta, else year · runtime · episodes
+// (only the parts supplied), else the legacy subtitle.
+const yearText = year == null || year === "" ? "" : String(year).trim();
+const runtimeText = (runtime ?? "").trim();
+const episodesText =
+  typeof episodes === "number" && Number.isFinite(episodes) && episodes > 0
+    ? episodes === 1
+      ? "1 episode"
+      : `${episodes} episodes`
+    : "";
+const composedMeta = [yearText, runtimeText, episodesText].filter(Boolean).join(" · ");
+const metaLine = (meta ?? "").trim() || composedMeta || (subtitle ?? "").trim();
 ---
 
 <Tag
   class={`rs-card rs-card--${kind}`}
   data-nylah-item
   data-couch-key={itemKey}
+  data-content-kind={contentKind}
   href={href}
   tabindex={href ? undefined : 0}
   role={href ? undefined : "button"}
@@ -63,7 +131,7 @@ const Tag = href ? "a" : "div";
 >
   <span class="rs-card__media">
     <TvImage src={image} alt={imageAlt ?? title} kind={imageKind} title={title} />
-    {badge && <span class="rs-card__badge">{badge}</span>}
+    {badgeText && <span class="rs-card__badge">{badgeText}</span>}
     {
       pct !== null && pct > 0 && (
         <span class="rs-card__progress" aria-hidden="true">
@@ -82,7 +150,6 @@ const Tag = href ? "a" : "div";
   </span>
   <span class="rs-card__body">
     <span class="rs-card__title">{title}</span>
-    {subtitle && <span class="rs-card__subtitle">{subtitle}</span>}
-    {meta && <span class="rs-card__meta">{meta}</span>}
+    {metaLine && <span class="rs-card__meta">{metaLine}</span>}
   </span>
 </Tag>

@@ -71,6 +71,23 @@
 html[data-couch] {
   font-size: clamp(12px, calc(min(100vw / 120, 100vh / 67.5)), 32px);
   color-scheme: dark;
+  /* H08/B12 (0.10.0): the canvas background lives HERE, on html —
+     not only on body. Before this fix the burgundy existed solely
+     as body's background, which reaches the canvas only by CSS
+     background propagation, and only on documents that load
+     CouchLayout. Any document that doesn't — the Astro static
+     redirect stubs (/movies, /series, /discover in 0.9.0: bare
+     documents, no layout, no styles, transparent html/body, held
+     2 s by <meta http-equiv="refresh">), error pages, the first
+     paint before the stylesheet lands — rendered on the browser /
+     WebView default WHITE canvas (reproduced headless at 1080p and
+     4K: pure-white 255 rows, body 18px tall, both backgrounds
+     transparent). Setting the background on html makes the canvas
+     burgundy for every Couch document regardless of body; the
+     matching Tauri backgroundColor (#170a0c, == --rs-bg) covers
+     documents that carry no Couch CSS at all. Do NOT "fix" a white
+     edge with an overlay — this is the cause. */
+  background: var(--rs-bg);
 
   /* Canonical RedSilk Couch tokens — exact directive values.
    *
@@ -154,7 +171,15 @@ html[data-couch] .rs-body {
   font-size: 1.375rem; /* 22px at 1920x1080 */
   line-height: 1.45;
   margin: 0;
+  /* Column flex so .rs-main's flex:1 actually stretches a short
+     page to the viewport (before 0.10.0 the flex:1 was dead code —
+     body was block — and the shell relied solely on min-height).
+     min-height: 100vh still carries short pages; 100dvh matches it
+     where the dynamic viewport differs. */
+  display: flex;
+  flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
 }
 
@@ -552,11 +577,14 @@ html[data-couch] .rs-card__meta {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* Clean hierarchy under a poster: title + ONE secondary line. When a
-   subtitle is present the meta line is detail spam — it stays in the
-   DOM (screen readers / focus reveal) but does not render a third
-   line under every card. Landscape/channel cards keep both lines:
-   episode and channel rows use the extra line. */
+/* Clean hierarchy under a poster: title + ONE secondary line. The
+   Astro TvCard (C3, 0.10.0) renders exactly one .rs-card__meta line
+   itself; this rule is for the JS mirror (couch-cards.ts), which
+   still emits both subtitle and meta spans — when a subtitle is
+   present the meta line stays in the DOM (screen readers / focus
+   reveal) but does not render a third line under every card.
+   Landscape/channel cards keep both lines: episode and channel rows
+   use the extra line. */
 html[data-couch] .rs-card--poster .rs-card__body:has(.rs-card__subtitle) .rs-card__meta {
   display: none;
 }
@@ -647,7 +675,13 @@ html[data-couch] .rs-rail__row {
   gap: 1.25rem;
   overflow-x: auto;
   scrollbar-width: none;
-  padding: 0.75rem 0.25rem 1rem; /* headroom for the 1.05 focus scale */
+  /* Headroom for the 1.05 focus scale: the row's overflow-x: auto
+     makes overflow-y clip, so a focused card's ring + meta line are
+     cut at the row edge unless the padding covers the scale. A large
+     card is ~520px tall, so the scale alone needs ~13px per side
+     plus the 3px ring — the old 0.75rem/1rem clipped the focused
+     card's meta line at the bottom (seen in the 0.10.0 W5 renders). */
+  padding: 1.25rem 0.25rem 1.5rem;
   scroll-behavior: smooth;
 }
 html[data-couch] .rs-rail__row::-webkit-scrollbar {
@@ -675,6 +709,87 @@ html[data-couch] .rs-rail--large .rs-rail__row > .rs-card--channel {
   flex: 0 0 clamp(22rem, 24vw, 28rem);
 }
 
+/* ── Rail variants (H04, 0.10.0) ──────────────────────────────────
+   W1 applies ONE .rs-rail--variant-<name> per rail (TvRail
+   `variant` prop: "film" | "series" | "documentary" | "followed" |
+   "live"). The differences are SUBTLE — a little more or less air
+   between cards, a slightly different title weight/size, a softer
+   or squarer card corner — so rails read as distinct kinds of
+   collection without becoming panels-in-panels. No backgrounds, no
+   borders around the rail, no nested containers; every value comes
+   from the --rs-* tokens, so no variant can drift purple. Omit the
+   variant for the neutral default rail. */
+html[data-couch] .rs-rail--variant-film .rs-rail__row {
+  gap: 1.5rem; /* films get the most air — cinematic, unhurried */
+}
+html[data-couch] .rs-rail--variant-film .rs-rail__head .rs-section-title {
+  font-size: 2.125rem;
+  letter-spacing: -0.01em;
+}
+html[data-couch] .rs-rail--variant-film .rs-card__media {
+  border-radius: 1.125rem;
+}
+html[data-couch] .rs-rail--variant-series .rs-rail__row {
+  gap: 1rem; /* series rails pack a little tighter — long lists */
+}
+html[data-couch] .rs-rail--variant-series .rs-rail__head .rs-section-title {
+  font-weight: 800;
+}
+html[data-couch] .rs-rail--variant-documentary .rs-rail__row {
+  gap: 1.25rem;
+}
+html[data-couch] .rs-rail--variant-documentary .rs-rail__head .rs-section-title {
+  font-size: 1.75rem;
+  letter-spacing: 0.04em;
+}
+html[data-couch] .rs-rail--variant-documentary .rs-card__media {
+  border-radius: 0.75rem; /* squarer, more editorial */
+}
+html[data-couch] .rs-rail--variant-followed .rs-rail__row {
+  gap: 1.25rem;
+}
+html[data-couch] .rs-rail--variant-followed .rs-card__media {
+  /* a whisper of a ring — personal, not loud */
+  box-shadow:
+    0 0 0 1px var(--rs-line-soft),
+    var(--rs-shadow);
+}
+html[data-couch] .rs-rail--variant-live .rs-rail__row {
+  gap: 1rem;
+}
+html[data-couch] .rs-rail--variant-live .rs-rail__head .rs-section-title {
+  font-size: 2rem;
+}
+html[data-couch] .rs-rail--variant-live .rs-card__media {
+  border-radius: 0.75rem;
+}
+
+/* ── Sparse rails (H06, 0.10.0) ───────────────────────────────────
+   .rs-rail--sparse (TvRail `sparse` prop) is the presentation for
+   a rail W1's minimum-population rule decided is thin but still
+   worth showing. It NEVER stretches the few cards it has: cards
+   render at default density even on a "large" rail, the title drops
+   a size and quiets to the secondary text colour, and the row keeps
+   its natural left-aligned widths — no stretched placeholders, no
+   empty slots, no giant lone poster. Hiding a rail outright or
+   consolidating several thin collections into one rail is W1's
+   render decision; this class is only the restyle for a sparse rail
+   that still renders. */
+html[data-couch] .rs-rail--sparse .rs-rail__row {
+  gap: 1rem;
+}
+html[data-couch] .rs-rail--sparse .rs-rail__head .rs-section-title {
+  font-size: 1.75rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-rail--sparse.rs-rail--large .rs-rail__row > .rs-card--poster {
+  flex-basis: clamp(9rem, 11.5vw, 13rem); /* default density, not large */
+}
+html[data-couch] .rs-rail--sparse.rs-rail--large .rs-rail__row > .rs-card--landscape,
+html[data-couch] .rs-rail--sparse.rs-rail--large .rs-rail__row > .rs-card--channel {
+  flex-basis: clamp(15rem, 19vw, 22rem);
+}
+
 /* ── Grids (TvGrid) ────────────────────────────────────────────── */
 
 html[data-couch] .rs-grid {
@@ -689,6 +804,98 @@ html[data-couch] .rs-grid {
 html[data-couch] .rs-grid > * {
   content-visibility: auto;
   contain-intrinsic-size: auto 24rem;
+}
+
+/* ── Filters (C5 / B09, 0.10.0) ───────────────────────────────────
+   The shared browse filters (src/scripts/lib/browse-filters.ts):
+   ONE labelled control per filter — a select, or a segmented
+   control where a filter has <=4 options (Type, Sort). Never one
+   pill per value, never a dense pill row. W2 renders these classes
+   from filterControlDescriptors(); a control whose catalogue has no
+   metadata for it renders DISABLED (visible but inert — it says
+   "this catalogue has no data for that" instead of silently
+   vanishing). Selects are controller-reachable like every other
+   focusable: the global :focus-visible ring applies, and the row
+   wraps instead of scrolling off-screen. */
+html[data-couch] .rs-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: flex-end;
+  padding: 0.25rem 0.25rem 0.5rem;
+}
+html[data-couch] .rs-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+html[data-couch] .rs-filter-field__label {
+  font-size: var(--rs-meta-size); /* 18px */
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-filter-field select {
+  min-height: 3.5rem;
+  max-width: 22rem;
+  padding: 0.625rem 2.5rem 0.625rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+  color: var(--rs-text);
+  font-family: var(--rs-font-body);
+  font-size: 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-couch] .rs-filter-field select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+html[data-couch] .rs-filter-field select:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+/* Segmented alternative for <=4-option filters (Type, Sort):
+   one control, one button per option, the active one in accent.
+   More than 4 options MUST use the select above — a segmented row
+   of 7+ values is the pillfest this system replaces. */
+html[data-couch] .rs-filter-segmented {
+  display: inline-flex;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-bg-2);
+}
+html[data-couch] .rs-filter-segmented__option {
+  min-height: 3rem;
+  padding: 0.5rem 1.125rem;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rs-text-2);
+  font-family: var(--rs-font-body);
+  font-size: 1.25rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+html[data-couch] .rs-filter-segmented__option:hover {
+  color: var(--rs-text);
+}
+html[data-couch] .rs-filter-segmented__option.is-active {
+  background: var(--rs-accent);
+  color: var(--rs-text);
+}
+html[data-couch] .rs-filter-segmented__option:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* ── Hero (TvHero) ─────────────────────────────────────────────── */
