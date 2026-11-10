@@ -66,3 +66,7 @@ proxy/worker-configuration.d.ts
 
 # Rust / Tauri build output
 src-tauri/target/
+
+# also ignore a stray node_modules symlink/file (the trailing-slash
+# pattern above matches directories only)
+node_modules

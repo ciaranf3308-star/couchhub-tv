@@ -33,7 +33,10 @@
 // Honesty rule: vote counts are NEVER fabricated. A missing vote_count
 // is treated as zero evidence (tier low, Bayesian = prior mean), never
 // as an average or a guess. Where the catalogue carries no vote counts
-// at all, the quality-gated rails hide rather than pretend.
+// at all, home-rails.ts falls back to its documented Tier 2 (a
+// TMDb-matched title whose provider rating is TMDb's vote_average) —
+// this module itself never invents the fallback, it only scores what
+// it is given.
 
 /** Prior mean rating — see the header note. */
 export const BAYESIAN_PRIOR_MEAN = 6.5

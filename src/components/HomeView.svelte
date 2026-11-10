@@ -1,11 +1,16 @@
-<!-- RedSilk Couch — Home (W3 production pass). Mounted on /.
-     Renders the W2 home-rails contract (see home-assembly.ts):
-     a cinematic hero from a real catalogue title, then rails in
-     order — Continue Watching, New Episodes, Picked for You,
-     Trending, Recently Added Movies, Continue Your Series, Favourite
-     Live Channels, Hidden Gems. A rail renders only when it has
-     meaningful data; an empty library shows the branded empty state,
-     never invented titles.
+<!-- RedSilk Couch — Home (production pass, 0.6.0). Mounted on /.
+     Renders the home-rails data layer (src/scripts/lib/home-rails.ts):
+     a cinematic hero from a real catalogue title, then rails in the
+     directive order — Continue Watching, New Episodes, Your Next
+     Obsession, Trending & Worth Watching, Hidden Gems, Tonight's
+     Picks, Recently Added Movies, Continue Your Series, Short & Sweet,
+     then genre rails. A rail renders only when it has meaningful
+     data; an empty library shows the branded empty state, never
+     invented titles. (The 0.5.0 "Picked for You" rail is the same
+     content as Your Next Obsession under its new name; the 0.5.0
+     Favourite Live Channels rail has no equivalent in the home-rails
+     module and is not rendered — live channels stay reachable from
+     Live TV. See the integration note in home-rails.ts.)
      Loading contract: cached first paint (getCachedHomeRails()
      renders synchronously), then a debounced progressive refresh;
      a failed refresh NEVER replaces valid cached content with an
@@ -25,12 +30,13 @@
   } from "@/scripts/lib/profiles.ts"
   import { ensureLoaded as ensurePrefsLoaded } from "@/scripts/lib/preferences.js"
   import { loadDiscoverData } from "@/scripts/lib/discover.ts"
+  import { loadTrending } from "@/scripts/lib/trending.ts"
   import {
     getCachedHomeRails,
     loadHomeRails,
     loadFollowedEpisodes,
     mergeHomePayload,
-  } from "@/scripts/lib/home-assembly.ts"
+  } from "@/scripts/lib/home-rails.ts"
   import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
   import {
     armTvImageFallbacks,
@@ -45,9 +51,9 @@
   let playlistId = $state("")
   let profileId = $state(SHARED_PROFILE_ID)
   let profileName = $state(null)
-  /** @type {import("@/scripts/lib/home-assembly.ts").HomeHero | null} */
+  /** @type {import("@/scripts/lib/home-rails.ts").HomeHero | null} */
   let hero = $state(null)
-  /** @type {Array<import("@/scripts/lib/home-assembly.ts").HomeRail>} */
+  /** @type {Array<import("@/scripts/lib/home-rails.ts").HomeRail>} */
   let rails = $state([])
 
   let mounted = false
@@ -122,8 +128,39 @@
       if (controller.signal.aborted) return
       const episodes = await loadFollowedEpisodes()
       if (controller.signal.aborted) return
+      // Playlist-dependent extras live in the view (the home-rails
+      // design): real progress rows and catalogue-matched trending,
+      // passed in so the data layer stays pure over DiscoverData.
+      const prefs = await import("@/scripts/lib/preferences.js")
+      if (controller.signal.aborted) return
+      let progressRows = []
+      try {
+        progressRows = prefs.getContinueWatching(playlistId, 12) || []
+      } catch {
+        progressRows = []
+      }
+      let trending = []
+      try {
+        const result = await loadTrending(playlistId)
+        if (controller.signal.aborted) return
+        trending = (result.items || []).map((item) => {
+          const year = parseInt(item.year, 10)
+          const rating = parseFloat(item.rating)
+          return {
+            kind: item.kind === "vod" ? "movie" : "series",
+            id: item.id,
+            title: item.name,
+            year: Number.isFinite(year) ? year : undefined,
+            rating: Number.isFinite(rating) ? rating : undefined,
+            posterUrl: item.logo ?? undefined,
+          }
+        })
+      } catch {
+        trending = []
+      }
       const fresh = await loadHomeRails(data, episodes, {
-        playlistId,
+        progressRows,
+        trending,
         signal: controller.signal,
       })
       if (controller.signal.aborted) return
@@ -430,15 +467,17 @@
     min-height: clamp(24rem, 42vh, 34rem);
   }
   /* Production pass — large card density: ~5–6 substantial cards per
-     visible rail at 1080p. This is the Home-side half of the W1
-     density variant (TvRail's own density prop lands with W1); the
-     values match the contract's "large" size until then. */
+     visible rail at 1080p. HomeView renders rails inline in Svelte,
+     not through the Astro TvRail component, so the values are repeated
+     here scoped — they MUST match W1's `.rs-rail--large` in couch.css
+     (poster clamp(15rem, 16.4vw, 19rem); landscape/channel
+     clamp(22rem, 24vw, 28rem)); update both together. */
   .rs-home .rs-rail__row > .rs-card--poster {
-    flex-basis: clamp(11rem, 14vw, 15.5rem);
+    flex: 0 0 clamp(15rem, 16.4vw, 19rem);
   }
   .rs-home .rs-rail__row > .rs-card--landscape,
   .rs-home .rs-rail__row > .rs-card--channel {
-    flex-basis: clamp(19rem, 23vw, 27rem);
+    flex: 0 0 clamp(22rem, 24vw, 28rem);
   }
   /* Quiet refresh-failure notice: text only, no banner, no accent. */
   .rs-home__notice {

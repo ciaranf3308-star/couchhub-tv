@@ -348,7 +348,7 @@ describe("catalogue mapping", () => {
   it("maps a provider row to a candidate (genres, year, rating, poster)", () => {
     const c = catalogRowToCandidate(
       "movie",
-      { id: 42, name: "Test Film", category: "Action / Adventure", rating: "8.4", year: "2023", logo: "https://x/poster.jpg" },
+      { id: 42, name: "Test Film", category: "Action / Adventure", rating: "8.4", year: "2023", logo: "https://x/poster.jpg", tmdb: 12345 },
       { castNames: ["Ada Star"], directorName: "Jane Doe" },
       "A plot."
     )
@@ -363,8 +363,16 @@ describe("catalogue mapping", () => {
       director: "Jane Doe",
       overview: "A plot.",
       posterUrl: "https://x/poster.jpg",
+      tmdbId: 12345,
       source: "catalog",
     })
+  })
+
+  it("leaves tmdbId undefined when the provider attached no TMDb id", () => {
+    const without = catalogRowToCandidate("movie", { id: 43, name: "No Match Film" }, null)
+    expect(without.tmdbId).toBeUndefined()
+    const invalid = catalogRowToCandidate("movie", { id: 44, name: "Bad Match Film", tmdb: 0 }, null)
+    expect(invalid.tmdbId).toBeUndefined()
   })
 
   it("never invents a rating or year the provider did not supply", () => {

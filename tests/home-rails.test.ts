@@ -2,6 +2,9 @@
 // Synthetic fixtures only; no live catalogue, no AI key, no EPG fetch,
 // no real IPTV subscription.
 import { describe, it, expect, beforeEach } from "vitest"
+// jsdom ships no types and @types/jsdom is not installed; test-only.
+// @ts-ignore
+import { JSDOM } from "jsdom"
 import {
   bayesianRating,
   confidenceTier,
@@ -12,8 +15,17 @@ import {
   loadHomeRails,
   getCachedHomeRails,
   clearHomeRailsCache,
+  mergeHomePayload,
   HERO_MIN_BAYESIAN,
+  type HomePayload,
+  type HomeRail,
+  type HomeRailItem,
 } from "../src/scripts/lib/home-rails"
+import {
+  recordCouchFocus,
+  restoreCouchFocus,
+  readCouchFocusMemory,
+} from "../src/scripts/lib/couch-focus"
 import { emptyTasteModel, recordFeedback } from "../src/scripts/lib/taste"
 import type {
   DiscoverCandidate,
@@ -675,5 +687,218 @@ describe("loadHomeRails", () => {
     expect(fallback).toEqual(payload)
     const emptyFallback = await loadHomeRails(undefined as never, [])
     expect(emptyFallback).toEqual(payload)
+  })
+})
+
+describe("mergeHomePayload (metadata failure keeps cached content)", () => {
+  function item(partial: Partial<HomeRailItem> & { id: string; title: string }): HomeRailItem {
+    return {
+      key: `${partial.kind ?? "movie"}:${partial.id}`,
+      kind: partial.kind ?? "movie",
+      detailHref: `/movies/detail?id=${partial.id}`,
+      ...partial,
+    }
+  }
+
+  function rail(partial: Partial<HomeRail> & { id: string; title: string }): HomeRail {
+    return { kind: "trending", items: [], ...partial }
+  }
+
+  const cached: HomePayload = {
+    hero: { item: item({ id: "1", title: "Cached Hero" }) },
+    rails: [rail({ id: "trending", title: "Trending", items: [item({ id: "2", title: "T" })] })],
+  }
+
+  it("keeps cached content when the fresh load fails (null)", () => {
+    expect(mergeHomePayload(cached, null)).toBe(cached)
+  })
+
+  it("keeps cached content when the fresh load is empty", () => {
+    expect(mergeHomePayload(cached, { hero: null, rails: [] })).toBe(cached)
+  })
+
+  it("replaces the cache when the fresh load has real content", () => {
+    const fresh: HomePayload = {
+      hero: { item: item({ id: "3", title: "Fresh Hero" }) },
+      rails: [],
+    }
+    expect(mergeHomePayload(cached, fresh)).toBe(fresh)
+  })
+
+  it("returns null when there is nothing cached and nothing fresh", () => {
+    expect(mergeHomePayload(null, null)).toBeNull()
+    expect(mergeHomePayload(null, { hero: null, rails: [] })).toBeNull()
+  })
+})
+
+describe("focus restoration (same rail + card after a detail return)", () => {
+  function setupDom(): { doc: Document; win: Window } {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+        <section data-nylah-rail="continue-watching">
+          <a data-nylah-item data-couch-key="movie:1" href="/movies/detail?id=1">Dune</a>
+          <a data-nylah-item data-couch-key="movie:2" href="/movies/detail?id=2">Arrival</a>
+        </section>
+        <section data-nylah-rail="trending">
+          <a data-nylah-item data-couch-key="movie:3" href="/movies/detail?id=3">Boring</a>
+        </section>
+      </body></html>`,
+      { url: "http://localhost/" },
+    )
+    const win = dom.window as unknown as Window
+    // jsdom reports zero-size rects; the focus layer treats those as
+    // invisible, so give every element a visible box for this test.
+    const elementCtor = (win as unknown as { Element: typeof Element }).Element
+    elementCtor.prototype.getBoundingClientRect = () =>
+      ({ width: 100, height: 100, top: 0, left: 0, right: 100, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect
+    ;(globalThis as Record<string, unknown>).window = win
+    ;(globalThis as Record<string, unknown>).document = win.document
+    ;(globalThis as Record<string, unknown>).sessionStorage = win.sessionStorage
+    ;(globalThis as Record<string, unknown>).getComputedStyle = win.getComputedStyle.bind(win)
+    return { doc: win.document, win }
+  }
+
+  it("restores the same card by stable key after returning from detail", () => {
+    const { doc } = setupDom()
+    recordCouchFocus({ route: "/", rail: "continue-watching", index: 1, key: "movie:2" })
+    expect(readCouchFocusMemory()).toMatchObject({ rail: "continue-watching", key: "movie:2" })
+    const restored = restoreCouchFocus(doc)
+    expect(restored?.getAttribute("data-couch-key")).toBe("movie:2")
+    expect(doc.activeElement?.getAttribute("data-couch-key")).toBe("movie:2")
+  })
+
+  it("falls back to rail + index when the remembered card is gone", () => {
+    const { doc } = setupDom()
+    recordCouchFocus({ route: "/", rail: "trending", index: 0, key: "movie:gone" })
+    const restored = restoreCouchFocus(doc)
+    expect(restored?.getAttribute("data-couch-key")).toBe("movie:3")
+  })
+
+  it("restores nothing for a different route", () => {
+    const { doc } = setupDom()
+    recordCouchFocus({ route: "/discover", rail: "continue-watching", index: 0, key: "movie:1" })
+    expect(restoreCouchFocus(doc)).toBeNull()
+    expect(doc.activeElement).toBe(doc.body)
+  })
+})
+
+describe("vote-count decision — tiered eligibility (integration, 0.6.0)", () => {
+  // No voteCount anywhere in this catalogue: the day-one shape, where
+  // provider rows carry ratings but no counts (see home-rails.ts).
+  // 30+ titles: the dedupe rule (at most 2 rails per title) starves
+  // the later rails on a tiny library, so the fixture is catalogue-
+  // sized — the same reason the main fixture has 36 bulk titles.
+  function tmdbCatalogue(): DiscoverCandidate[] {
+    const generated: DiscoverCandidate[] = []
+    for (let i = 0; i < 30; i++) {
+      generated.push(
+        candidate({
+          id: `tmdb-gen-${i}`,
+          title: `TMDB Title ${i}`,
+          genres: [i % 2 === 0 ? "Drama" : "Comedy"],
+          rating: 7.6 + ((i % 10) / 10),
+          tmdbId: 10000 + i,
+          year: 2022,
+          runtimeMinutes: 90 + ((i * 7) % 60),
+        }),
+      )
+    }
+    return [
+      candidate({
+        id: "matched-epic",
+        title: "Matched Epic",
+        genres: ["Drama"],
+        rating: 8.6,
+        tmdbId: 12345,
+        year: 2023,
+        runtimeMinutes: 140,
+        overview: "An epic matched to TMDb by the provider.",
+      }),
+      candidate({
+        id: "matched-gem",
+        title: "Matched Gem",
+        genres: ["Drama"],
+        rating: 8.1,
+        tmdbId: 23456,
+        year: 2022,
+        runtimeMinutes: 105,
+      }),
+      candidate({
+        id: "unmatched-perfect",
+        title: "Unmatched Perfect",
+        genres: ["Drama"],
+        rating: 10.0,
+        year: 2024,
+        runtimeMinutes: 95,
+      }),
+      ...generated,
+    ]
+  }
+
+  it("shows a credible hero and Hidden Gems from TMDb-matched titles when no vote counts exist", async () => {
+    const data = discoverData({ candidates: tmdbCatalogue() })
+    const payload = await loadHomeRails(data, [])
+    expect(payload.hero?.item.key).toBe("movie:matched-epic")
+    expect(payload.hero?.item.overview).toBe("An epic matched to TMDb by the provider.")
+    // Backdrop falls back to the poster: never a broken hero image.
+    expect(payload.hero?.item.backdropUrl).toBe(payload.hero?.item.posterUrl)
+    const gems = railById(payload, "hidden-gems")
+    expect(gems).toBeDefined()
+    expect(gems?.items.length).toBeGreaterThan(0)
+    // Every gem is Tier 2 (TMDb-matched, no vote count surfaced) —
+    // never the unmatched 10.0, never a fabricated count.
+    for (const item of gems?.items ?? []) {
+      expect(item.rating ?? 0).toBeGreaterThanOrEqual(7.5)
+      expect(item.voteCount).toBeUndefined()
+    }
+    expect(gems?.items.map((item) => item.key)).not.toContain("movie:unmatched-perfect")
+  })
+
+  it("still excludes an unmatched no-vote 10.0 when nothing else qualifies", async () => {
+    const data = discoverData({
+      candidates: [
+        candidate({
+          id: "only-perfect",
+          title: "Only Perfect",
+          genres: ["Drama"],
+          rating: 10.0,
+          year: 2024,
+          runtimeMinutes: 95,
+        }),
+      ],
+    })
+    const payload = await loadHomeRails(data, [])
+    expect(payload.hero).toBeNull()
+    expect(railById(payload, "hidden-gems")).toBeUndefined()
+  })
+
+  it("prefers vote-backed titles over TMDb-matched ones when both exist", async () => {
+    const data = discoverData({
+      candidates: [
+        ...tmdbCatalogue(),
+        candidate({
+          id: "backed-modest",
+          title: "Backed Modest",
+          genres: ["Drama"],
+          rating: 7.2,
+          voteCount: 5000,
+          year: 2023,
+          runtimeMinutes: 120,
+        }),
+      ],
+    })
+    const payload = await loadHomeRails(data, [])
+    // Tier 1 pool is non-empty, so the hero comes from vote-backed
+    // titles even though a TMDb-matched 8.6 exists.
+    expect(payload.hero?.item.key).toBe("movie:backed-modest")
+  })
+
+  it("throws AbortError on an already-aborted signal instead of serving cache", async () => {
+    const { data } = mainData()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(loadHomeRails(data, [], { signal: controller.signal })).rejects.toMatchObject({
+      name: "AbortError",
+    })
   })
 })

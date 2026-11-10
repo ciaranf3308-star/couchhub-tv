@@ -67,7 +67,12 @@ import {
 import {
   bayesianRating,
   hasSufficientSupport,
+  BAYESIAN_PRIOR_MEAN,
 } from "./rating-confidence.ts"
+import {
+  ensureFollowedLoaded,
+  followedProvider,
+} from "@/scripts/lib/followed.ts"
 
 // ---------------------------------------------------------------------------
 // Contract (W3 builds against these — do not rename)
@@ -107,6 +112,8 @@ export interface HomeRailItem {
   isLive?: boolean
   nowTitle?: string
   nextTitle?: string
+  /** Catalogue overview (the hero's description). */
+  overview?: string
 }
 
 export interface HomeRail {
@@ -216,6 +223,10 @@ export interface LoadHomeRailsExtras {
   trending?: HomeTrendingInput[]
   /** Injectable clock (tests); defaults to Date.now(). */
   nowMs?: number
+  /** AbortSignal from the view: loadHomeRails throws AbortError when
+   * it is already aborted, so a superseded load never paints. The
+   * view also checks the signal after each of its own awaits. */
+  signal?: AbortSignal
 }
 
 // ---------------------------------------------------------------------------
@@ -257,15 +268,126 @@ function candidateToItem(
     title: candidate.title,
     year: candidate.year,
     posterUrl: candidate.posterUrl,
-    backdropUrl: candidate.backdropUrl,
+    // No true backdrop art exists in the catalogue pipeline (the
+    // provider rows carry no `backdrop` field, and TMDb enrichment is
+    // per-title on demand, never joined into candidates) — the poster
+    // is the honest fallback, and the hero renders it full-bleed
+    // under the burgundy scrim. Never a broken image.
+    backdropUrl: candidate.backdropUrl ?? candidate.posterUrl,
     rating: candidate.rating,
     voteCount: candidate.voteCount,
     runtimeMinutes: candidate.runtimeMinutes,
+    overview: candidate.overview,
     detailHref,
     playHref:
       candidate.kind === "live" ? detailHref : withAutoplay(detailHref),
     ...overrides,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Vote-count decision (integration, 0.6.0) — tiered eligibility.
+//
+// EVIDENCE (read 2026-11-10, integration):
+//   - Candidates get their rating from the Xtream provider row
+//     (`catalog-mappers.js`: rating = m.rating || m.rating_5based ||
+//     m.vote_average — a TMDb-style average the provider supplies).
+//     The mapped rows carry NO vote_count field, so
+//     `catalogRowToCandidate`'s voteCount is undefined in practice:
+//     nothing in the codebase ever writes vote_count onto a
+//     vod/series row.
+//   - TMDb enrichment (`tmdb-enrich.ts`) is per-title and on demand
+//     (detail pages only), cached 30 days — and its
+//     `TmdbTitleEnrichment` drops vote_count entirely (only
+//     voteAverage survives; `TmdbBundle` does not even declare
+//     vote_count). There is no bulk join of TMDb data into
+//     candidates, and building one would mean per-title network
+//     calls at Home load or a bulk scan of on-demand caches that
+//     only cover titles the user has already opened. FIRST CHOICE
+//     (plumb real vote counts through the rating path) is therefore
+//     NOT cheaply possible — rejected, not deferred silently.
+//   - SECOND CHOICE (implemented here): tiered eligibility. The
+//     mapped rows DO carry the TMDb id the provider itself attached
+//     (`tmdb`, see discover.ts `tmdbId`). A title carrying one is
+//     TMDb-matched by definition, and its provider rating IS TMDb's
+//     vote_average surfaced through the provider — vote-backed in
+//     substance, just with the count unsurfaced. So:
+//       Tier 1 — real vote count (>= minVotes): Bayesian rating, as
+//         before. Vote-backed titles always win when any qualify.
+//       Tier 2 — TMDb-matched (tmdbId present) with a real rating:
+//         the raw provider rating stands in for the Bayesian one.
+//         Used ONLY when no Tier 1 title qualifies for that
+//         selection, so the gates never soften while real counts
+//         exist — and a no-vote 10.0 with no TMDb match still scores
+//         the prior mean (6.5) and never qualifies.
+//     No vote counts are fabricated anywhere: Tier 2 never claims a
+//     count, it only treats a TMDb-matched rating as evidence the
+//     provider's TMDb link already asserts.
+// ---------------------------------------------------------------------------
+
+/** True when the provider itself linked this title to a TMDb id. */
+function isTmdbMatched(candidate: DiscoverCandidate): boolean {
+  return typeof candidate.tmdbId === "number" && candidate.tmdbId > 0
+}
+
+/** Raw provider rating, or undefined when the catalogue has none. */
+function rawRating(candidate: DiscoverCandidate): number | undefined {
+  const rating = candidate.rating
+  if (typeof rating !== "number" || !Number.isFinite(rating) || rating <= 0) {
+    return undefined
+  }
+  return Math.min(rating, 10)
+}
+
+/**
+ * Quality score for ranking: Bayesian when real votes exist, the raw
+ * TMDb-backed rating when the title is TMDb-matched, the prior mean
+ * otherwise ("average until proven otherwise").
+ */
+function tieredQuality(candidate: DiscoverCandidate): number {
+  if (typeof candidate.voteCount === "number" && candidate.voteCount >= 1) {
+    return bayesianRating(candidate.rating, candidate.voteCount)
+  }
+  if (isTmdbMatched(candidate)) {
+    return rawRating(candidate) ?? BAYESIAN_PRIOR_MEAN
+  }
+  return BAYESIAN_PRIOR_MEAN
+}
+
+/**
+ * Quality support for a gate: real votes at the floor, OR a TMDb
+ * match with a real rating (Tier 2 — see the decision note above).
+ */
+function hasTieredSupport(
+  candidate: DiscoverCandidate,
+  minVotes: number,
+): boolean {
+  if (hasSufficientSupport(candidate.voteCount, minVotes)) return true
+  return isTmdbMatched(candidate) && rawRating(candidate) !== undefined
+}
+
+/**
+ * The quality-gated pool for one selection: Tier 1 (vote-backed,
+ * Bayesian) when any title qualifies, else Tier 2 (TMDb-matched,
+ * raw rating). Never both mixed, never softened while real counts
+ * exist — and never an unmatched no-vote title.
+ */
+function qualityPool(
+  candidates: DiscoverCandidate[],
+  minBayesian: number,
+  minVotes: number,
+): DiscoverCandidate[] {
+  const backed = candidates.filter(
+    (c) =>
+      hasSufficientSupport(c.voteCount, minVotes) &&
+      bayesianRating(c.rating, c.voteCount) >= minBayesian,
+  )
+  if (backed.length) return backed
+  return candidates.filter(
+    (c) =>
+      isTmdbMatched(c) &&
+      (rawRating(c) ?? BAYESIAN_PRIOR_MEAN) >= minBayesian,
+  )
 }
 
 /**
@@ -310,10 +432,7 @@ function confidenceAdjustedScore(item: RankedCandidate): number {
     typeof raw === "number" && Number.isFinite(raw) && raw > 0
       ? Math.min(10, raw)
       : 0
-  const bayesianPoints = bayesianRating(
-    item.candidate.rating,
-    item.candidate.voteCount,
-  )
+  const bayesianPoints = tieredQuality(item.candidate)
   return item.score - rawPoints + bayesianPoints
 }
 
@@ -321,8 +440,7 @@ function byAdjustedScore(a: RankedCandidate, b: RankedCandidate): number {
   const scoreDiff = confidenceAdjustedScore(b) - confidenceAdjustedScore(a)
   if (scoreDiff !== 0) return scoreDiff
   const bayesDiff =
-    bayesianRating(b.candidate.rating, b.candidate.voteCount) -
-    bayesianRating(a.candidate.rating, a.candidate.voteCount)
+    tieredQuality(b.candidate) - tieredQuality(a.candidate)
   if (bayesDiff !== 0) return bayesDiff
   return a.candidate.title.localeCompare(b.candidate.title)
 }
@@ -767,24 +885,20 @@ function buildTrending(ctx: BuildContext, railIndex: number): HomeRail | null {
     // order is never the ranking — the most-voted, best-regarded
     // titles lead. Finished, already-watched and dismissed titles
     // stay out: Trending is a personalised Home surface, not history.
-    const pool = ctx.data.candidates
-      .filter((c) => (c.kind === "movie" || c.kind === "series"))
-      .filter((c) => cleanTitle(c.title))
-      .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c)))
-      .filter(
-        (c) =>
-          hasSufficientSupport(c.voteCount, TRENDING_MIN_VOTES) &&
-          bayesianRating(c.rating, c.voteCount) >= TRENDING_MIN_BAYESIAN,
-      )
-      .sort((a, b) => {
-        const votesDiff = (b.voteCount ?? 0) - (a.voteCount ?? 0)
-        if (votesDiff !== 0) return votesDiff
-        const bayesDiff =
-          bayesianRating(b.rating, b.voteCount) -
-          bayesianRating(a.rating, a.voteCount)
-        if (bayesDiff !== 0) return bayesDiff
-        return a.title.localeCompare(b.title)
-      })
+    const pool = qualityPool(
+      ctx.data.candidates
+        .filter((c) => (c.kind === "movie" || c.kind === "series"))
+        .filter((c) => cleanTitle(c.title))
+        .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c))),
+      TRENDING_MIN_BAYESIAN,
+      TRENDING_MIN_VOTES,
+    ).sort((a, b) => {
+      const votesDiff = (b.voteCount ?? 0) - (a.voteCount ?? 0)
+      if (votesDiff !== 0) return votesDiff
+      const bayesDiff = tieredQuality(b) - tieredQuality(a)
+      if (bayesDiff !== 0) return bayesDiff
+      return a.title.localeCompare(b.title)
+    })
     for (const pass of [0, 1]) {
       for (const candidate of pool) {
         if (items.length >= HOME_RAILS_LIMIT) break
@@ -814,27 +928,25 @@ function buildTrending(ctx: BuildContext, railIndex: number): HomeRail | null {
 function buildHiddenGems(ctx: BuildContext, railIndex: number): HomeRail | null {
   // Genuinely worthwhile, less obvious: high confidence-aware quality
   // with real vote support, unwatched, never dismissed. An obscure
-  // 10.0 with no votes is excluded by the support floor — its
-  // Bayesian rating is the prior mean (6.5) and it fails both gates.
-  const pool = ctx.data.candidates
-    .filter((c) => (c.kind === "movie" || c.kind === "series"))
-    .filter((c) => cleanTitle(c.title))
-    .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c)))
-    .filter(
-      (c) =>
-        hasSufficientSupport(c.voteCount, GEM_MIN_VOTES) &&
-        bayesianRating(c.rating, c.voteCount) >= GEM_MIN_BAYESIAN,
-    )
-    .sort((a, b) => {
-      const bayesDiff =
-        bayesianRating(b.rating, b.voteCount) -
-        bayesianRating(a.rating, a.voteCount)
-      if (bayesDiff !== 0) return bayesDiff
-      // Equal proven quality: the less-seen title is the better gem.
-      const votesDiff = (a.voteCount ?? 0) - (b.voteCount ?? 0)
-      if (votesDiff !== 0) return votesDiff
-      return a.title.localeCompare(b.title)
-    })
+  // 10.0 with no votes and no TMDb match is excluded by the support
+  // floor — its tiered quality is the prior mean (6.5) and it fails
+  // both gates (a TMDb-matched title may qualify via Tier 2 instead
+  // — see the vote-count decision note above candidateToItem).
+  const pool = qualityPool(
+    ctx.data.candidates
+      .filter((c) => (c.kind === "movie" || c.kind === "series"))
+      .filter((c) => cleanTitle(c.title))
+      .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c))),
+    GEM_MIN_BAYESIAN,
+    GEM_MIN_VOTES,
+  ).sort((a, b) => {
+    const bayesDiff = tieredQuality(b) - tieredQuality(a)
+    if (bayesDiff !== 0) return bayesDiff
+    // Equal proven quality: the less-seen title is the better gem.
+    const votesDiff = (a.voteCount ?? 0) - (b.voteCount ?? 0)
+    if (votesDiff !== 0) return votesDiff
+    return a.title.localeCompare(b.title)
+  })
   const items: HomeRailItem[] = []
   // Fresh titles first: a gem already starring in Next Obsession does
   // not need to headline here too — the rail should surface new
@@ -995,30 +1107,26 @@ function buildShort(ctx: BuildContext, railIndex: number): HomeRail | null {
   // Verified runtime only: a film with no runtime metadata is never
   // presented as "under two hours". Quality-gated like the other
   // "best of" rails — a no-vote 10.0 cannot lead it.
-  const pool = ctx.data.candidates
-    .filter((c) => c.kind === "movie")
-    .filter((c) => cleanTitle(c.title))
-    .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c)))
-    .filter(
-      (c) =>
-        typeof c.runtimeMinutes === "number" &&
-        c.runtimeMinutes > 0 &&
-        c.runtimeMinutes < SHORT_MAX_RUNTIME_MINUTES,
-    )
-    .filter(
-      (c) =>
-        hasSufficientSupport(c.voteCount, SHORT_MIN_VOTES) &&
-        bayesianRating(c.rating, c.voteCount) >= SHORT_MIN_BAYESIAN,
-    )
-    .sort((a, b) => {
-      const bayesDiff =
-        bayesianRating(b.rating, b.voteCount) -
-        bayesianRating(a.rating, a.voteCount)
-      if (bayesDiff !== 0) return bayesDiff
-      const runtimeDiff = (a.runtimeMinutes ?? 0) - (b.runtimeMinutes ?? 0)
-      if (runtimeDiff !== 0) return runtimeDiff
-      return a.title.localeCompare(b.title)
-    })
+  const pool = qualityPool(
+    ctx.data.candidates
+      .filter((c) => c.kind === "movie")
+      .filter((c) => cleanTitle(c.title))
+      .filter((c) => !ctx.recommendationExcluded.has(candidateKey(c)))
+      .filter(
+        (c) =>
+          typeof c.runtimeMinutes === "number" &&
+          c.runtimeMinutes > 0 &&
+          c.runtimeMinutes < SHORT_MAX_RUNTIME_MINUTES,
+      ),
+    SHORT_MIN_BAYESIAN,
+    SHORT_MIN_VOTES,
+  ).sort((a, b) => {
+    const bayesDiff = tieredQuality(b) - tieredQuality(a)
+    if (bayesDiff !== 0) return bayesDiff
+    const runtimeDiff = (a.runtimeMinutes ?? 0) - (b.runtimeMinutes ?? 0)
+    if (runtimeDiff !== 0) return runtimeDiff
+    return a.title.localeCompare(b.title)
+  })
   const items: HomeRailItem[] = []
   // Fresh titles first (see Hidden Gems): the shortest great films
   // should not all be repeats of earlier rails.
@@ -1089,8 +1197,8 @@ function buildGenreRails(ctx: BuildContext, startIndex: number): HomeRail[] {
       if (ctx.recommendationExcluded.has(candidateKey(candidate))) return false
       const genres = candidate.genres.map((g) => g.toLowerCase())
       if (!genres.some((g) => def.match.some((m) => g.includes(m)))) return false
-      if (bayesianRating(candidate.rating, candidate.voteCount) < minBayesian) return false
-      if (minVotes > 0 && !hasSufficientSupport(candidate.voteCount, minVotes)) return false
+      if (tieredQuality(candidate) < minBayesian) return false
+      if (minVotes > 0 && !hasTieredSupport(candidate, minVotes)) return false
       return true
     })
     if (pool.length < GENRE_RAIL_MIN_ITEMS) continue
@@ -1102,10 +1210,8 @@ function buildGenreRails(ctx: BuildContext, startIndex: number): HomeRail[] {
       0,
     )
     const meanBayesian =
-      pool.reduce(
-        (sum, r) => sum + bayesianRating(r.candidate.rating, r.candidate.voteCount),
-        0,
-      ) / pool.length
+      pool.reduce((sum, r) => sum + tieredQuality(r.candidate), 0) /
+      pool.length
     scored.push({ def, items: pool, score: affinity * 2 + meanBayesian })
   }
   scored.sort((a, b) => {
@@ -1149,9 +1255,12 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
   //     catalogue carries; backdropUrl is used when one exists)
   //   - sane year when the catalogue carries one (mismatched years
   //     and junk metadata are out)
-  //   - credible, confidence-aware quality: Bayesian >= 7.0 with at
-  //     least 100 real votes. A perfect 10.0 with no votes scores the
-  //     prior mean (6.5) and never qualifies.
+  //   - credible, confidence-aware quality: Tier 1 is Bayesian >= 7.0
+  //     with at least 100 real votes; when no title qualifies that
+  //     way, Tier 2 is a TMDb-matched title rated >= 7.0 (see the
+  //     vote-count decision note above candidateToItem). A perfect
+  //     10.0 with no votes and no TMDb match scores the prior mean
+  //     (6.5) and never qualifies.
   //   - not dismissed, not finished, not already-watched. In-progress
   //     titles stay eligible — resuming is strong relevance.
   const heroExcluded = new Set<string>([
@@ -1159,17 +1268,16 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
   ])
   for (const key of ctx.continueWatchingKeys) heroExcluded.delete(key)
 
-  const pool = ctx.data.candidates
-    .filter((c) => (c.kind === "movie" || c.kind === "series"))
-    .filter((c) => cleanTitle(c.title))
-    .filter((c) => !!c.posterUrl)
-    .filter((c) => c.year === undefined || cleanYear(c.year, ctx.nowMs) !== undefined)
-    .filter((c) => !heroExcluded.has(candidateKey(c)))
-    .filter(
-      (c) =>
-        hasSufficientSupport(c.voteCount, HERO_MIN_VOTES) &&
-        bayesianRating(c.rating, c.voteCount) >= HERO_MIN_BAYESIAN,
-    )
+  const pool = qualityPool(
+    ctx.data.candidates
+      .filter((c) => (c.kind === "movie" || c.kind === "series"))
+      .filter((c) => cleanTitle(c.title))
+      .filter((c) => !!c.posterUrl)
+      .filter((c) => c.year === undefined || cleanYear(c.year, ctx.nowMs) !== undefined)
+      .filter((c) => !heroExcluded.has(candidateKey(c))),
+    HERO_MIN_BAYESIAN,
+    HERO_MIN_VOTES,
+  )
   if (!pool.length) return null
 
   // Relevance: the same local ranking, confidence-adjusted.
@@ -1187,9 +1295,7 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
     // decides — best Bayesian first, then most votes. Never catalogue
     // order, never random.
     ordered = [...pool].sort((a, b) => {
-      const bayesDiff =
-        bayesianRating(b.rating, b.voteCount) -
-        bayesianRating(a.rating, a.voteCount)
+      const bayesDiff = tieredQuality(b) - tieredQuality(a)
       if (bayesDiff !== 0) return bayesDiff
       const votesDiff = (b.voteCount ?? 0) - (a.voteCount ?? 0)
       if (votesDiff !== 0) return votesDiff
@@ -1201,12 +1307,12 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
       const rb = rankedByKey.get(candidateKey(b))
       const scoreA =
         (ra ? confidenceAdjustedScore(ra) : 0) +
-        bayesianRating(a.rating, a.voteCount) * 2 +
+        tieredQuality(a) * 2 +
         (a.backdropUrl ? HERO_BACKDROP_BONUS : 0) +
         (ctx.continueWatchingKeys.has(candidateKey(a)) ? HERO_CONTINUE_BONUS : 0)
       const scoreB =
         (rb ? confidenceAdjustedScore(rb) : 0) +
-        bayesianRating(b.rating, b.voteCount) * 2 +
+        tieredQuality(b) * 2 +
         (b.backdropUrl ? HERO_BACKDROP_BONUS : 0) +
         (ctx.continueWatchingKeys.has(candidateKey(b)) ? HERO_CONTINUE_BONUS : 0)
       if (scoreB !== scoreA) return scoreB - scoreA
@@ -1245,11 +1351,32 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
 // Public API
 // ---------------------------------------------------------------------------
 
+/**
+ * Never replace valid cached content with an empty screen. A failed
+ * or empty fresh load keeps the cache; a fresh load with real content
+ * replaces it. (Ported from W3's home-assembly — the view depends on
+ * this exact semantics.)
+ */
+export function mergeHomePayload(
+  cached: HomePayload | null,
+  fresh: HomePayload | null,
+): HomePayload | null {
+  if (!fresh) return cached
+  const freshHasContent = !!fresh.hero || fresh.rails.length > 0
+  if (!freshHasContent) return cached
+  return fresh
+}
+
 export async function loadHomeRails(
   data: DiscoverData,
   followed: FollowedEpisode[],
   extras: LoadHomeRailsExtras = {},
 ): Promise<HomePayload> {
+  // Abort before doing anything: a superseded load never paints.
+  // (Checked again by the view after each of its own awaits.)
+  if (extras.signal?.aborted) {
+    throw new DOMException("Home load aborted", "AbortError")
+  }
   try {
     if (!data || !Array.isArray(data.candidates) || !data.taste) {
       throw new Error("loadHomeRails: invalid DiscoverData")
@@ -1279,9 +1406,27 @@ export async function loadHomeRails(
     moduleCache = payload
     writeStoredPayload(payload)
     return payload
-  } catch {
+  } catch (err) {
+    // An abort is not a metadata failure: let it propagate so the
+    // view can tell "superseded" apart from "refresh failed".
+    if (err instanceof DOMException && err.name === "AbortError") throw err
     // Never throw valid cached content away on a metadata failure:
     // serve the last good payload, or an empty one when there is none.
     return getCachedHomeRails() ?? { hero: null, rails: [] }
+  }
+}
+
+/** Convenience for the view: followed episodes via the registered provider. */
+export async function loadFollowedEpisodes(): Promise<FollowedEpisode[]> {
+  try {
+    await ensureFollowedLoaded()
+  } catch {
+    // Followed store unavailable: new-episodes rail is omitted, the
+    // rest of Home still renders.
+  }
+  try {
+    return followedProvider.getNewEpisodes()
+  } catch {
+    return []
   }
 }

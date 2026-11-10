@@ -47,6 +47,13 @@ export interface DiscoverCandidate {
    * Absent means "no evidence" — never guessed (home-rails treats
    * it as zero support). Added by the Home Production Pass (W2). */
   voteCount?: number
+  /** TMDb id the provider itself attached to this row (mapped from
+   * the row's `tmdb` field). A title carrying one is TMDb-matched by
+   * definition — its provider rating is TMDb's vote_average surfaced
+   * through the provider, so the rating is vote-backed in substance
+   * even though the count itself is unsurfaced (see home-rails.ts,
+   * "Vote-count decision"). Absent means "no TMDb match known". */
+  tmdbId?: number
   genres: string[]
   cast: string[]
   director?: string
@@ -902,6 +909,10 @@ export interface ProviderRow {
   rating?: unknown
   /** TMDB vote count, when the provider/TMDB data carries one (W2). */
   vote_count?: unknown
+  /** TMDb id the provider attached to the row (Xtream `tmdb` /
+   * `tmdb_id`), when one is known. Mapped rows carry it (see
+   * catalog-mappers.js); absent on rows that predate the field. */
+  tmdb?: unknown
   year?: unknown
   logo?: string | null
   stream_icon?: string | null
@@ -934,6 +945,13 @@ function parseRating(value: unknown): number | undefined {
 }
 
 function parseVoteCount(value: unknown): number | undefined {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1) return undefined
+  return Math.floor(n)
+}
+
+/** TMDb id from a provider row — only a real positive id counts. */
+function parseTmdbId(value: unknown): number | undefined {
   const n = Number(value)
   if (!Number.isFinite(n) || n < 1) return undefined
   return Math.floor(n)
@@ -980,6 +998,7 @@ export function catalogRowToCandidate(
     year: parseYear(row.year),
     rating: parseRating(row.rating),
     voteCount: parseVoteCount(row.vote_count),
+    tmdbId: parseTmdbId(row.tmdb),
     genres: genresFromCategory(row.category),
     cast: people?.castNames ?? [],
     director: people?.directorName ?? undefined,
