@@ -178,13 +178,52 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
       RETURN_HOME_HINT,
     ],
   },
-  "livetv-home": {
-    id: "livetv-home",
+  // 0.9.0 Live TV landing (W5): B backs out via `livetv:back`
+  // (gamepad.ts dispatches it; W1's landing owns the back step),
+  // X is the landing's contextual action, Y opens the Guide.
+  // Supersedes the 0.8.0 W6 audit (*2) for this mode — those
+  // buttons were dead in 0.8.0 because no handler consumed the
+  // "home" context; in 0.9.0 W1 implements them.
+  "livetv-landing": {
+    id: "livetv-landing",
     items: [
       { glyph: "dpad", label: "Move" },
       { glyph: "a", label: "Watch" },
+      { glyph: "b", label: "Back" },
+      { glyph: "x", label: "Contextual action" },
+      { glyph: "y", label: "Open Guide" },
+      { glyph: "menu", label: "Options" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  /** @deprecated 0.8.0 name for the landing config — use "livetv-landing". */
+  "livetv-home": {
+    id: "livetv-landing",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Watch" },
+      { glyph: "b", label: "Back" },
+      { glyph: "x", label: "Contextual action" },
+      { glyph: "y", label: "Open Guide" },
+      { glyph: "menu", label: "Options" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  // 0.9.0 Channel Browser (W5/W2): LB/RB step categories, LT/RT
+  // step pages, X toggles the favourite, Y opens search, B returns
+  // to the landing via `livetv:back`.
+  "livetv-browser": {
+    id: "livetv-browser",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Select" },
+      { glyph: "b", label: "Back" },
+      { glyph: "lb", label: "Previous category" },
+      { glyph: "rb", label: "Next category" },
+      { glyph: "lt-rt", label: "Previous / Next page" },
+      { glyph: "x", label: "Favourite" },
       { glyph: "y", label: "Search" },
-      { glyph: "menu", label: "Settings" },
+      { glyph: "menu", label: "Options" },
       RETURN_HOME_HINT,
     ],
   },
@@ -206,6 +245,65 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
     id: "livetv-guide",
     items: [
       { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Select programme" },
+      { glyph: "b", label: "Leave Guide" },
+      { glyph: "lb", label: "Earlier in time" },
+      { glyph: "rb", label: "Later in time" },
+      { glyph: "y", label: "Guide actions" },
+      { glyph: "menu", label: "Guide actions" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  // 0.9.0 Guide sub-modes (W5/W4). The base "livetv-guide" config
+  // above is the grid default (kept byte-identical for the 0.8.0
+  // audit pin); the sub-mode configs add the rows that only make
+  // sense in that sub-mode — Left/Right on the tab row switches
+  // guide views, and LB/RB step days in By Channel mode (time in
+  // grid mode). N (jump to now) is keyboard-only, so the legend
+  // never names it. hintsForView picks by guideMode.
+  "livetv-guide-now": {
+    id: "livetv-guide-now",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "dpad-h", label: "Switch guide view", when: "on tab row" },
+      { glyph: "a", label: "Select programme" },
+      { glyph: "b", label: "Leave Guide" },
+      { glyph: "y", label: "Guide actions" },
+      { glyph: "menu", label: "Guide actions" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  "livetv-guide-tonight": {
+    id: "livetv-guide-tonight",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "dpad-h", label: "Switch guide view", when: "on tab row" },
+      { glyph: "a", label: "Select programme" },
+      { glyph: "b", label: "Leave Guide" },
+      { glyph: "y", label: "Guide actions" },
+      { glyph: "menu", label: "Guide actions" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  "livetv-guide-channel": {
+    id: "livetv-guide-channel",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "dpad-h", label: "Switch guide view", when: "on tab row" },
+      { glyph: "a", label: "Select programme" },
+      { glyph: "b", label: "Leave Guide" },
+      { glyph: "lb", label: "Previous day" },
+      { glyph: "rb", label: "Next day" },
+      { glyph: "y", label: "Guide actions" },
+      { glyph: "menu", label: "Guide actions" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  "livetv-guide-grid": {
+    id: "livetv-guide-grid",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "dpad-h", label: "Switch guide view", when: "on tab row" },
       { glyph: "a", label: "Select programme" },
       { glyph: "b", label: "Leave Guide" },
       { glyph: "lb", label: "Earlier in time" },
@@ -316,11 +414,13 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
   },
 } as const;
 
-export type LivetvMode = "home" | "playback" | "guide";
+export type LivetvMode = "landing" | "browser" | "playback" | "guide";
 
 export interface HintsForViewOptions {
   /** Live TV mode (html[data-livetv-mode]); only read for view "livetv". */
   livetvMode?: string | null;
+  /** Live TV guide sub-mode (html[data-livetv-guide-mode]); only read for the guide. */
+  guideMode?: string | null;
   /** A text field currently owns the controller (gamepad.ts editing branch). */
   editing?: boolean;
   /** Focus is on an on-screen keyboard key ([data-osk]). */
@@ -342,10 +442,18 @@ export function hintsForView(
   if (opts.osk) return hintsForOsk(view);
   const id = (view ?? "").trim();
   if (id === "livetv") {
-    const mode = (opts.livetvMode ?? "home").trim();
+    const mode = (opts.livetvMode ?? "landing").trim();
     if (mode === "playback") return HINT_CONFIGS["livetv-playback"];
-    if (mode === "guide") return HINT_CONFIGS["livetv-guide"];
-    return HINT_CONFIGS["livetv-home"];
+    if (mode === "browser") return HINT_CONFIGS["livetv-browser"];
+    if (mode === "guide") {
+      const guideMode = (opts.guideMode ?? "").trim();
+      if (guideMode === "now") return HINT_CONFIGS["livetv-guide-now"];
+      if (guideMode === "tonight") return HINT_CONFIGS["livetv-guide-tonight"];
+      if (guideMode === "channel") return HINT_CONFIGS["livetv-guide-channel"];
+      if (guideMode === "grid") return HINT_CONFIGS["livetv-guide-grid"];
+      return HINT_CONFIGS["livetv-guide"];
+    }
+    return HINT_CONFIGS["livetv-landing"];
   }
   return HINT_CONFIGS[id] ?? GENERIC_HINTS;
 }

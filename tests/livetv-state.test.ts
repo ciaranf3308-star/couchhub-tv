@@ -3,17 +3,24 @@ import {
   LIVETV_STATE_STORAGE_KEY,
   closeOverlay,
   createLivetvState,
+  enterBrowser,
   enterGuide,
+  enterLanding,
   enterPlayback,
+  exitBrowser,
   exitGuide,
   exitPlaybackToHome,
+  exitPlaybackToLanding,
   guideProgrammeKey,
   highlightChannel,
+  normaliseLivetvMode,
   openOverlay,
+  parseLivetvModeParam,
   parseLivetvState,
   persistLivetvState,
   restoreLivetvState,
   serializeLivetvState,
+  setGuideMode,
   startOfLocalDayMs,
   tuneTo,
 } from "@/scripts/lib/livetv-state";
@@ -43,9 +50,9 @@ function fakeStorage(): Storage {
 }
 
 describe("createLivetvState", () => {
-  it("starts on Home with nothing tuned and the Guide on today", () => {
+  it("starts on the landing with nothing tuned and the Guide on today / On Now", () => {
     const state = createLivetvState(NOW);
-    expect(state.mode).toBe("home");
+    expect(state.mode).toBe("landing");
     expect(state.overlay).toBe("none");
     expect(state.tunedChannelId).toBeNull();
     expect(state.highlightedChannelId).toBeNull();
@@ -54,12 +61,17 @@ describe("createLivetvState", () => {
     expect(state.guideChannelId).toBeNull();
     expect(state.guideProgrammeKey).toBeNull();
     expect(state.returnFocusKey).toBeNull();
+    expect(state.guideMode).toBe("now");
+    expect(state.browserFilter).toBeNull();
+    expect(state.openSearch).toBe(false);
+    expect(state.lastLandingCard).toBeNull();
+    expect(state.guideReturnTo).toBe("landing");
   });
 
   it("never mutates its input: transitions return new objects", () => {
     const before = createLivetvState(NOW);
     const after = enterPlayback(before, "ch-1");
-    expect(before.mode).toBe("home");
+    expect(before.mode).toBe("landing");
     expect(before.tunedChannelId).toBeNull();
     expect(after.mode).toBe("playback");
     expect(after.tunedChannelId).toBe("ch-1");
@@ -73,7 +85,7 @@ describe("highlight vs tuned — the core invariant", () => {
     expect(browsed.highlightedChannelId).toBe("ch-2");
     expect(browsed.tunedChannelId).toBe("ch-1");
     expect(browsed.mode).toBe("playback");
-    // And again from Home with nothing tuned.
+    // And again from the landing with nothing tuned.
     const home = highlightChannel(createLivetvState(NOW), "ch-9");
     expect(home.highlightedChannelId).toBe("ch-9");
     expect(home.tunedChannelId).toBeNull();
@@ -121,16 +133,91 @@ describe("enterPlayback / tuneTo / previous channel", () => {
   });
 });
 
-describe("exitPlaybackToHome", () => {
-  it("returns to Home keeping the tuned channel as last-watched", () => {
-    const state = exitPlaybackToHome(
+describe("exitPlaybackToLanding (+ deprecated exitPlaybackToHome alias)", () => {
+  it("returns to the landing keeping the tuned channel as last-watched", () => {
+    const state = exitPlaybackToLanding(
       tuneTo(enterPlayback(createLivetvState(NOW), "ch-1"), "ch-2"),
     );
-    expect(state.mode).toBe("home");
+    expect(state.mode).toBe("landing");
     expect(state.overlay).toBe("none");
     expect(state.tunedChannelId).toBe("ch-2");
     expect(state.previousChannelId).toBe("ch-1");
     expect(state.highlightedChannelId).toBe("ch-2");
+  });
+
+  it("the deprecated alias behaves identically", () => {
+    const state = exitPlaybackToHome(
+      tuneTo(enterPlayback(createLivetvState(NOW), "ch-1"), "ch-2"),
+    );
+    expect(state.mode).toBe("landing");
+    expect(state.tunedChannelId).toBe("ch-2");
+  });
+});
+
+describe("enterLanding", () => {
+  it("returns to the landing, keeping tuned / highlight / guide position", () => {
+    const guide = enterGuide(enterPlayback(createLivetvState(NOW), "ch-1"), "k");
+    const landed = enterLanding(guide);
+    expect(landed.mode).toBe("landing");
+    expect(landed.overlay).toBe("none");
+    expect(landed.tunedChannelId).toBe("ch-1");
+    expect(landed.guideChannelId).toBe("ch-1");
+    expect(landed.returnFocusKey).toBe("k");
+  });
+});
+
+describe("enterBrowser / exitBrowser", () => {
+  it("enterBrowser opens with a filter + openSearch + return focus key", () => {
+    const state = enterBrowser(
+      enterPlayback(createLivetvState(NOW), "ch-1"),
+      { kind: "category", value: "sports" },
+      true,
+      "livetv:landing:hero",
+    );
+    expect(state.mode).toBe("browser");
+    expect(state.browserFilter).toEqual({ kind: "category", value: "sports" });
+    expect(state.openSearch).toBe(true);
+    expect(state.returnFocusKey).toBe("livetv:landing:hero");
+    expect(state.tunedChannelId).toBe("ch-1");
+  });
+
+  it("enterBrowser with no arguments keeps the current filter / flags", () => {
+    const state = enterBrowser(createLivetvState(NOW));
+    expect(state.mode).toBe("browser");
+    expect(state.browserFilter).toBeNull();
+    expect(state.openSearch).toBe(false);
+  });
+
+  it("enterBrowser with an explicit null filter clears it", () => {
+    const filtered = enterBrowser(createLivetvState(NOW), {
+      kind: "favourites",
+    });
+    const cleared = enterBrowser(filtered, null);
+    expect(cleared.browserFilter).toBeNull();
+  });
+
+  it("exitBrowser returns to the landing and drops the openSearch flag", () => {
+    const state = exitBrowser(
+      enterBrowser(createLivetvState(NOW), { kind: "recents" }, true),
+    );
+    expect(state.mode).toBe("landing");
+    expect(state.openSearch).toBe(false);
+    expect(state.overlay).toBe("none");
+  });
+});
+
+describe("setGuideMode / enterGuide guideMode", () => {
+  it("setGuideMode switches only the sub-mode", () => {
+    const state = setGuideMode(createLivetvState(NOW), "tonight");
+    expect(state.guideMode).toBe("tonight");
+    expect(state.mode).toBe("landing");
+  });
+
+  it("enterGuide with a guideMode switches it; without one it keeps the current", () => {
+    const base = setGuideMode(createLivetvState(NOW), "channel");
+    expect(enterGuide(base).guideMode).toBe("channel");
+    expect(enterGuide(base, null, "tonight").guideMode).toBe("tonight");
+    expect(enterGuide(createLivetvState(NOW)).guideMode).toBe("now");
   });
 });
 
@@ -159,9 +246,9 @@ describe("enterGuide / exitGuide preserve tuned + focus", () => {
   });
 
   it("enterGuide without a focus key keeps the previously recorded one", () => {
-    const guide = enterGuide(createLivetvState(NOW), "home:guide-button");
+    const guide = enterGuide(createLivetvState(NOW), "landing:guide-button");
     const again = enterGuide(guide);
-    expect(again.returnFocusKey).toBe("home:guide-button");
+    expect(again.returnFocusKey).toBe("landing:guide-button");
   });
 
   it("enterGuide with no tuned channel keeps the existing guide anchor", () => {
@@ -169,13 +256,13 @@ describe("enterGuide / exitGuide preserve tuned + focus", () => {
     expect(enterGuide(state).guideChannelId).toBe("ch-4");
   });
 
-  it("exitGuide returns home by default, keeping guide position + focus key", () => {
+  it("exitGuide returns to the landing by default, keeping guide position + focus key", () => {
     const guide = {
       ...enterGuide(enterPlayback(createLivetvState(NOW), "ch-7"), "k"),
       guideProgrammeKey: guideProgrammeKey("ch-7", NOW),
     };
     const back = exitGuide(guide);
-    expect(back.mode).toBe("home");
+    expect(back.mode).toBe("landing");
     expect(back.tunedChannelId).toBe("ch-7");
     expect(back.guideChannelId).toBe("ch-7");
     expect(back.guideProgrammeKey).toBe(guideProgrammeKey("ch-7", NOW));
@@ -186,6 +273,11 @@ describe("enterGuide / exitGuide preserve tuned + focus", () => {
     const guide = enterGuide(enterPlayback(createLivetvState(NOW), "ch-7"));
     expect(exitGuide(guide, "playback").mode).toBe("playback");
     expect(exitGuide(guide, "playback").tunedChannelId).toBe("ch-7");
+  });
+
+  it("exitGuide accepts the legacy \"home\" return target as landing", () => {
+    const guide = enterGuide(enterPlayback(createLivetvState(NOW), "ch-7"));
+    expect(exitGuide(guide, "home").mode).toBe("landing");
   });
 
   it("guide date survives a guide round-trip", () => {
@@ -228,6 +320,59 @@ describe("serialize / parse round-trip", () => {
     expect(parseLivetvState(raw)!.overlay).toBe("none");
   });
 
+  it("never persists the session-only fields (guideMode / filter / flags)", () => {
+    let state = setGuideMode(createLivetvState(NOW), "tonight");
+    state = enterBrowser(state, { kind: "favourites" }, true, "k");
+    const raw = serializeLivetvState(state);
+    expect(raw).not.toContain("tonight");
+    expect(raw).not.toContain("favourites");
+    expect(raw).not.toContain("openSearch");
+    const parsed = parseLivetvState(raw)!;
+    expect(parsed.guideMode).toBe("now");
+    expect(parsed.browserFilter).toBeNull();
+    expect(parsed.openSearch).toBe(false);
+    expect(parsed.lastLandingCard).toBeNull();
+    expect(parsed.guideReturnTo).toBe("landing");
+  });
+
+  it("maps the legacy persisted mode \"home\" to \"landing\"", () => {
+    const parsed = parseLivetvState(
+      JSON.stringify({
+        v: 1,
+        mode: "home",
+        tunedChannelId: "ch-1",
+        previousChannelId: null,
+        guideDateMs: startOfLocalDayMs(NOW),
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.mode).toBe("landing");
+    expect(parsed!.tunedChannelId).toBe("ch-1");
+    expect(parsed!.highlightedChannelId).toBe("ch-1");
+  });
+
+  it("parses the new \"browser\" mode", () => {
+    const parsed = parseLivetvState(
+      JSON.stringify({
+        v: 1,
+        mode: "browser",
+        tunedChannelId: null,
+        previousChannelId: null,
+        guideDateMs: startOfLocalDayMs(NOW),
+      }),
+    );
+    expect(parsed).not.toBeNull();
+    expect(parsed!.mode).toBe("browser");
+  });
+
+  it("normaliseLivetvMode maps \"home\" to \"landing\" and keeps the rest", () => {
+    expect(normaliseLivetvMode("home")).toBe("landing");
+    expect(normaliseLivetvMode("landing")).toBe("landing");
+    expect(normaliseLivetvMode("browser")).toBe("browser");
+    expect(normaliseLivetvMode("playback")).toBe("playback");
+    expect(normaliseLivetvMode("guide")).toBe("guide");
+  });
+
   it("returns null on garbage", () => {
     expect(parseLivetvState("")).toBeNull();
     expect(parseLivetvState("not json")).toBeNull();
@@ -265,9 +410,27 @@ describe("sessionStorage persistence", () => {
 
   it("restore falls back to a fresh default when nothing (or garbage) is stored", () => {
     const storage = fakeStorage();
-    expect(restoreLivetvState(storage).mode).toBe("home");
+    expect(restoreLivetvState(storage).mode).toBe("landing");
     storage.setItem(LIVETV_STATE_STORAGE_KEY, "garbage{{{");
-    expect(restoreLivetvState(storage).mode).toBe("home");
+    expect(restoreLivetvState(storage).mode).toBe("landing");
     expect(restoreLivetvState(storage).tunedChannelId).toBeNull();
+  });
+});
+
+describe("parseLivetvModeParam — shell ?mode= mapping", () => {
+  it("maps guide / browser / playback / landing, with home as the landing alias", () => {
+    expect(parseLivetvModeParam("guide")).toBe("guide");
+    expect(parseLivetvModeParam("browser")).toBe("browser");
+    expect(parseLivetvModeParam("playback")).toBe("playback");
+    expect(parseLivetvModeParam("landing")).toBe("landing");
+    expect(parseLivetvModeParam("home")).toBe("landing");
+  });
+
+  it("returns null for absent / unknown values", () => {
+    expect(parseLivetvModeParam(null)).toBeNull();
+    expect(parseLivetvModeParam(undefined)).toBeNull();
+    expect(parseLivetvModeParam("")).toBeNull();
+    expect(parseLivetvModeParam("nope")).toBeNull();
+    expect(parseLivetvModeParam("HOME")).toBeNull();
   });
 });

@@ -1896,3 +1896,75 @@ html[data-couch] .rs-livetv-channel-card__logo:has(.rs-livetv-channel-card__init
 html[data-couch] .rs-livetv-browser__logo:has(.rs-livetv-browser__initial) .rs-livetv-browser__initial {
   color: var(--rs-focus);
 }
+
+
+/* Live TV 0.9.0 — Shared (W5) ────────────────────────────────────
+   Rules shared by the four Live TV modes (landing / browser /
+   playback / guide). The row components (TvChannelRow /
+   TvProgrammeRow) carry their own scoped styles; this section only
+   holds what must be global: the mode-mount visibility guard and
+   the shared row-list container. Tokens are FROZEN at the 0.8.0
+   burgundy hues (346–351°) — nothing here introduces a new hue. */
+
+/* Mode mounts: the shell toggles [hidden] on the four mounts.
+   Guard the UA [hidden] rule explicitly — a flex/grid display rule
+   on a parent must never resurrect a hidden mode. */
+html[data-couch] #livetv-mode-landing[hidden],
+html[data-couch] #livetv-mode-browser[hidden],
+html[data-couch] #livetv-mode-playback[hidden],
+html[data-couch] #livetv-mode-guide[hidden] {
+  display: none;
+}
+
+/* Shared row list: the container W2 (browser) and W4 (guide) render
+   TvChannelRow / TvProgrammeRow into. Rows separate themselves with
+   subtle dividers — the list adds no gaps, borders or backgrounds,
+   so there are never borders-in-borders. */
+html[data-couch] .rs-tv-row-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ── Mockup 2 fidelity (fullscreen playback, W5 follow-up) ──────────
+   Measured headless at 1920×1080 against the supplied mockup
+   (1000017107_2_aweg.png): the video rendered as an 883px column,
+   the app nav sat over the video, and the legacy status chrome
+   floated mid-screen. The three rules below close those shell-level
+   gaps. The OSD pill and Quick Surf panel themselves are W3-owned
+   (TvOsd / TvQuickSurf / livetv-playback.ts) and are NOT restyled
+   here. */
+
+/* 1. Truly full-bleed video. The 0.7.0 fullscreen rule (above) sets
+   position fixed / inset 0 / width+height 100% / max-height none —
+   but never clears the scoped .player-wrap cap
+   (max-width: calc(46dvh * 16 / 9) = 883px at 1920×1080) or its
+   1rem radius, so playback was an 883×1080 column with rounded
+   corners. This later, same-specificity rule clears both. */
+html[data-couch][data-livetv-mode="playback"] #player-wrap {
+  max-width: none;
+  border-radius: 0;
+}
+
+/* 2. No application chrome over fullscreen video. The 0.8.0 shell
+   already promises "during normal playback ALL application controls
+   are hidden" — the top nav (brand + Home / Live TV / Browse /
+   Followed / Library / Settings) was still rendered over the video.
+   In playback the user navigates with B / Menu, never the nav. */
+html[data-couch][data-livetv-mode="playback"] .rs-topnav {
+  display: none;
+}
+
+/* 3. No legacy status chrome in playback. stream.ts unhides
+   #current (OFF badge + "…" more button) and #current-nownext
+   (Now title + time + progress bar) on tune; both live in the
+   legacy player column, so they floated mid-screen at the right of
+   the (previously narrow) video column. The OSD replaces them in
+   playback. Hiding is visual only — stream.ts keeps updating their
+   text, and the engine still needs the DOM present. */
+html[data-couch][data-livetv-mode="playback"] #current,
+html[data-couch][data-livetv-mode="playback"] #current-nownext {
+  display: none;
+}
