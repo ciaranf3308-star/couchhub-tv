@@ -1,0 +1,117 @@
+---
+// TvChannelCard — Live TV channel card (W1, canonical owner).
+//
+// Props: channel {id, name, displayName?, logo?, chno?}, nowTitle?,
+// nextTitle?, progress?, catchup?, favourite?, size? ("large" |
+// "medium"), focusKey, href?.
+// Renders `article[data-channel-card][data-channel-id][data-focus-key]`
+// with a fitted logo (TvImage, or an initial mark when there is no
+// logo — never a fabricated logo), name, now / up-next lines, a
+// progress bar, a catch-up badge and a favourite mark. Missing
+// optional parts are omitted, never invented.
+//
+// Client-rendered rails (Home, Channel Browser) build the same DOM
+// with buildChannelCardElement() in
+// src/scripts/lib/livetv-cards.ts — same classes, same attributes.
+// If this markup changes, change that builder in the same commit.
+import TvImage from "./TvImage.astro";
+
+interface Props {
+  channel: {
+    id: string | number;
+    name: string;
+    displayName?: string;
+    logo?: string | null;
+    chno?: number | null;
+  };
+  nowTitle?: string;
+  nextTitle?: string;
+  progress?: number;
+  catchup?: boolean;
+  favourite?: boolean;
+  size?: "large" | "medium";
+  focusKey: string;
+  href?: string;
+}
+const {
+  channel,
+  nowTitle,
+  nextTitle,
+  progress,
+  catchup,
+  favourite,
+  size = "medium",
+  focusKey,
+  href,
+} = Astro.props;
+const label = channel.displayName || channel.name || `#${channel.id}`;
+const pct =
+  typeof progress === "number" && Number.isFinite(progress)
+    ? Math.max(0, Math.min(1, progress))
+    : null;
+---
+
+<article
+  class:list={["rs-livetv-channel-card", `rs-livetv-channel-card--${size}`]}
+  data-channel-card
+  data-channel-id={String(channel.id)}
+  data-focus-key={focusKey}
+>
+  {
+    href ? (
+      <a class="rs-livetv-channel-card__link" href={href} data-focus-key={focusKey}>
+        <span class="rs-livetv-channel-card__logo">
+          {channel.logo ? (
+            <TvImage src={channel.logo} alt="" kind="logo" title={label} />
+          ) : (
+            <span class="rs-livetv-channel-card__initial" aria-hidden="true">
+              {label.slice(0, 1)}
+            </span>
+          )}
+        </span>
+        <span class="rs-livetv-channel-card__body">
+          <span class="rs-livetv-channel-card__name">
+            {channel.chno != null && <span class="rs-livetv-channel-card__num">{channel.chno}</span>}
+            {label}
+          </span>
+          {nowTitle && <span class="rs-livetv-channel-card__now">{nowTitle}</span>}
+          {nextTitle && <span class="rs-livetv-channel-card__next">Up next: {nextTitle}</span>}
+        </span>
+        {favourite && <span class="rs-livetv-channel-card__fav" aria-label="Favourite">♥</span>}
+        {catchup && <span class="rs-livetv-channel-card__catchup">Catch-up</span>}
+        {pct !== null && (
+          <span class="rs-livetv-channel-card__progress" aria-hidden="true">
+            <span style={`width: ${Math.round(pct * 100)}%`} />
+          </span>
+        )}
+      </a>
+    ) : (
+      <>
+        <span class="rs-livetv-channel-card__logo">
+          {channel.logo ? (
+            <TvImage src={channel.logo} alt="" kind="logo" title={label} />
+          ) : (
+            <span class="rs-livetv-channel-card__initial" aria-hidden="true">
+              {label.slice(0, 1)}
+            </span>
+          )}
+        </span>
+        <span class="rs-livetv-channel-card__body">
+          <span class="rs-livetv-channel-card__name">
+            {channel.chno != null && <span class="rs-livetv-channel-card__num">{channel.chno}</span>}
+            {label}
+          </span>
+          {nowTitle && <span class="rs-livetv-channel-card__now">{nowTitle}</span>}
+          {nextTitle && <span class="rs-livetv-channel-card__next">Up next: {nextTitle}</span>}
+        </span>
+        {favourite && <span class="rs-livetv-channel-card__fav" aria-label="Favourite">♥</span>}
+        {catchup && <span class="rs-livetv-channel-card__catchup">Catch-up</span>}
+        {pct !== null && (
+          <span class="rs-livetv-channel-card__progress" aria-hidden="true">
+            <span style={`width: ${Math.round(pct * 100)}%`} />
+          </span>
+        )}
+      </>
+    )
+  }
+</article>

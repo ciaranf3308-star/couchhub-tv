@@ -1,0 +1,43 @@
+---
+// TvProgrammeMeta — programme title / time / description (W1, canonical owner).
+//
+// Props: title, startMs, stopMs, desc?, catchup?, live?.
+// Renders title (+ LIVE badge) + time range + progress +
+// description + catch-up badge. Missing optional props are simply
+// omitted, never invented.
+//
+// Client-rendered callers build the same DOM with
+// buildProgrammeMetaElement() in src/scripts/lib/livetv-cards.ts —
+// same classes, same attributes. If this markup changes, change
+// that builder in the same commit.
+import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+
+interface Props {
+  title: string;
+  startMs: number;
+  stopMs: number;
+  desc?: string;
+  catchup?: boolean;
+  live?: boolean;
+}
+const { title, startMs, stopMs, desc, catchup, live } = Astro.props;
+const progress = programmeProgress(startMs, stopMs);
+const range = epgTimeRangeLabel(startMs, stopMs, "en-IE");
+---
+
+<div class="rs-livetv-programme-meta" data-programme-meta>
+  <p class="rs-livetv-programme-meta__title">
+    {live && <span class="rs-livetv-programme-meta__live">LIVE</span>}
+    {title}
+  </p>
+  <p class="rs-livetv-programme-meta__time">{range}</p>
+  {
+    desc && <p class="rs-livetv-programme-meta__desc">{desc}</p>
+  }
+  {
+    catchup && <p class="rs-livetv-programme-meta__catchup">Catch-up available</p>
+  }
+  <span class="rs-livetv-programme-meta__progress" aria-hidden="true">
+    <span style={`width: ${Math.round(progress * 100)}%`} />
+  </span>
+</div>

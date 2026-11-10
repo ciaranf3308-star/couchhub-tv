@@ -25,6 +25,7 @@ const KEY_EXTERNAL_PLAYER_PREF = "xt_external_player_pref"
 const KEY_CLOSE_TO_TRAY = "xt_close_to_tray"
 const KEY_HUB_STRIPS = "xt_hub_strips"
 const KEY_TV_OVERSCAN = "xt_tv_overscan"
+const KEY_LIVETV_RESUME_LAST = "xt_livetv_resume_last"
 const KEY_ANDROID_NATIVE_PLAYER = "xt_android_native_player"
 const KEY_ANDROID_REMEMBERED_PLAYER = "xt_android_remembered_player"
 const KEY_VIDEO_SCALE = "xt_video_scale"
@@ -69,6 +70,7 @@ export const PLAYER_BACKEND_EVENT = "xt:player-backend-changed"
 export const CLOSE_TO_TRAY_EVENT = "xt:close-to-tray-changed"
 export const HUB_STRIPS_EVENT = "xt:hub-strips-changed"
 export const TV_OVERSCAN_EVENT = "xt:tv-overscan-changed"
+export const LIVETV_RESUME_LAST_EVENT = "xt:livetv-resume-last-changed"
 export const ANDROID_NATIVE_PLAYER_EVENT = "xt:android-native-player-changed"
 export const ANDROID_REMEMBERED_PLAYER_EVENT = "xt:android-remembered-player-changed"
 export const VIDEO_SCALE_EVENT = "xt:video-scale-changed"
@@ -408,6 +410,29 @@ export function setTvOverscan(percent) {
     }
     document.dispatchEvent(
       new CustomEvent(TV_OVERSCAN_EVENT, { detail: { value: next } })
+    )
+  }
+}
+
+// Live TV: resume the last watched channel on entering Live TV.
+// Default OFF (stored as "1" when on; missing / anything else is
+// off) — the landing screen stays the default. When ON, entering
+// Live TV goes straight to fullscreen playback of the last channel.
+export function getLivetvResumeLastChannel() {
+  return readLS(KEY_LIVETV_RESUME_LAST, "") === "1"
+}
+
+export function setLivetvResumeLastChannel(on) {
+  const next = !!on
+  try {
+    if (next) localStorage.setItem(KEY_LIVETV_RESUME_LAST, "1")
+    else localStorage.removeItem(KEY_LIVETV_RESUME_LAST)
+  } catch (writeError) {
+    log.error("[xt:settings] localStorage write failed for", KEY_LIVETV_RESUME_LAST, writeError)
+  }
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(
+      new CustomEvent(LIVETV_RESUME_LAST_EVENT, { detail: { value: next } })
     )
   }
 }
