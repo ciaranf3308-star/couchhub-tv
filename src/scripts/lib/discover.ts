@@ -43,12 +43,18 @@ export interface DiscoverCandidate {
   title: string
   year?: number
   rating?: number
+  /** TMDB vote count behind the rating, when the row carries one.
+   * Absent means "no evidence" — never guessed (home-rails treats
+   * it as zero support). Added by the Home Production Pass (W2). */
+  voteCount?: number
   genres: string[]
   cast: string[]
   director?: string
   runtimeMinutes?: number
   overview?: string
   posterUrl?: string
+  /** Backdrop artwork URL, when the row carries one (W2). */
+  backdropUrl?: string
   source: "catalog" | "tmdb" | "epg"
 }
 
@@ -894,10 +900,14 @@ export interface ProviderRow {
   name?: string
   category?: string | null
   rating?: unknown
+  /** TMDB vote count, when the provider/TMDB data carries one (W2). */
+  vote_count?: unknown
   year?: unknown
   logo?: string | null
   stream_icon?: string | null
   cover?: string | null
+  /** Backdrop artwork URL, when the row carries one (W2). */
+  backdrop?: string | null
   plot?: string | null
   added?: number | string | null
   duration_secs?: unknown
@@ -921,6 +931,22 @@ function parseRating(value: unknown): number | undefined {
   const n = parseFloat(String(value))
   if (!Number.isFinite(n) || n <= 0) return undefined
   return Math.min(n, 10)
+}
+
+function parseVoteCount(value: unknown): number | undefined {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1) return undefined
+  return Math.floor(n)
+}
+
+/**
+ * Backdrop URL, only when the row carries a complete URL. A bare
+ * TMDB path ("/abc.jpg") is not a URL — never fabricate the host.
+ */
+function parseBackdropUrl(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined
+  const url = value.trim()
+  return /^https?:\/\//i.test(url) ? url : undefined
 }
 
 function parseRuntimeMinutes(row: ProviderRow): number | undefined {
@@ -953,12 +979,14 @@ export function catalogRowToCandidate(
     title: String(row.name || ""),
     year: parseYear(row.year),
     rating: parseRating(row.rating),
+    voteCount: parseVoteCount(row.vote_count),
     genres: genresFromCategory(row.category),
     cast: people?.castNames ?? [],
     director: people?.directorName ?? undefined,
     runtimeMinutes: parseRuntimeMinutes(row),
     overview: infoPlot || row.plot || undefined,
     posterUrl: row.logo || row.stream_icon || row.cover || undefined,
+    backdropUrl: parseBackdropUrl(row.backdrop),
     source: "catalog",
   }
 }
