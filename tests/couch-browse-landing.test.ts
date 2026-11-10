@@ -83,7 +83,7 @@ function renderBrowseDom(): void {
 }
 
 function sectionHidden(id: string): boolean {
-  return (document.getElementById(id) as HTMLElement).hidden;
+  return Boolean((document.getElementById(id) as HTMLElement).hidden);
 }
 
 function chip(type: BrowseType): HTMLElement {

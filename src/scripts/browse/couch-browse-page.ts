@@ -122,9 +122,13 @@ export function mountBrowsePage(deps: BrowsePageDeps = {}): BrowseType {
   const mountKind =
     deps.mountKind ??
     ((kind: Exclude<BrowseType, "all">, idPrefix: string) => {
-      mountCouchBrowse(browseKindAdapter(kind), {
-        idPrefix,
-      });
+      // Branch, don't pass the browseKindAdapter union straight in:
+      // mountCouchBrowse is generic over one row type, and the union
+      // of the two adapters is not assignable to either instantiation.
+      // (browseKindAdapter above is the same mapping, kept as the
+      // tested single source of truth for which kind mounts where.)
+      if (kind === "movies") mountCouchBrowse(moviesAdapter, { idPrefix });
+      else mountCouchBrowse(seriesAdapter, { idPrefix });
     });
 
   for (const t of BROWSE_TYPES) {
