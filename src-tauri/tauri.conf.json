@@ -47,7 +47,7 @@
     "targets": "all",
     "publisher": "CouchHub",
     "category": "public.app-category.video",
-    "copyright": "© 2026 Nylah Studios — fork of Extreme InfiniTV (© 2025 Ludovico Ferrara), GPL-3.0-or-later",
+    "copyright": "© 2026 NylahBox Studios — fork of Extreme InfiniTV (© 2025 Ludovico Ferrara), GPL-3.0-or-later",
     "createUpdaterArtifacts": true,
     "android": {
       "versionCode": 2019000

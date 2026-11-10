@@ -1,4 +1,4 @@
-# Nylah Studios v0.1 — build the Windows x64 release.
+# NylahBox Studios v0.1 — build the Windows x64 release.
 # Run on Windows from the repo root, with Node 22, pnpm 10, a stable Rust
 # toolchain and the Visual Studio C++ Build Tools installed:
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1
@@ -19,7 +19,7 @@ foreach ($cmd in @('node', 'pnpm', 'cargo')) {
 Write-Host 'Installing dependencies (frozen lockfile)...' -ForegroundColor Cyan
 pnpm install --frozen-lockfile
 
-Write-Host 'Building Nylah Studios (Tauri, Windows x64)...' -ForegroundColor Cyan
+Write-Host 'Building NylahBox Studios (Tauri, Windows x64)...' -ForegroundColor Cyan
 pnpm tauri build
 
 $bundleDir = Join-Path $root 'src-tauri\target\release\bundle'

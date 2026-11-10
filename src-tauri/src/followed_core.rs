@@ -8,7 +8,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Exact name of the Windows Scheduled Task (see docs/followed-series.md).
-pub const SCHEDULED_TASK_NAME: &str = "Nylah Studios Followed Series Check";
+pub const SCHEDULED_TASK_NAME: &str = "NylahBox Studios Followed Series Check";
+
+/// Name used by releases before the NylahBox Studios rename. Existing
+/// installs may still have a task under this name; the ensure/repair flow
+/// in `followed.rs` best-effort deletes it so an install never ends up
+/// running two scheduled checks.
+pub const LEGACY_SCHEDULED_TASK_NAME: &str = "Nylah Studios Followed Series Check";
 
 /// Deep-link target: an opaque provider series id plus an optional S/E episode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

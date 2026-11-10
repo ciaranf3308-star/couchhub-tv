@@ -411,11 +411,11 @@ void initSenderDeviceName()
 export function senderDeviceName(): string {
   if (cachedSenderDeviceName) return cachedSenderDeviceName
   const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : ""
-  if (/Android/i.test(userAgent)) return "Extreme InfiniTV on Android"
-  if (/Windows/i.test(userAgent)) return "Extreme InfiniTV on Windows"
-  if (/Mac OS X|Macintosh/i.test(userAgent)) return "Extreme InfiniTV on macOS"
-  if (/Linux/i.test(userAgent)) return "Extreme InfiniTV on Linux"
-  return "Extreme InfiniTV"
+  if (/Android/i.test(userAgent)) return "NylahBox Studios on Android"
+  if (/Windows/i.test(userAgent)) return "NylahBox Studios on Windows"
+  if (/Mac OS X|Macintosh/i.test(userAgent)) return "NylahBox Studios on macOS"
+  if (/Linux/i.test(userAgent)) return "NylahBox Studios on Linux"
+  return "NylahBox Studios"
 }
 
 /**

@@ -150,7 +150,7 @@
       onclick={() => onCommit?.()}
       aria-label={tr("search.keyboard.search")}
       class="osk-key flex-[2] min-h-11 sm:min-h-12 rounded-lg border border-accent bg-accent
-        text-bg text-base sm:text-lg font-semibold
+        text-white text-base sm:text-lg font-semibold
         hover:brightness-110 focus-visible:brightness-110 outline-none transition-colors">
       {tr("search.keyboard.search")}
     </button>

@@ -313,12 +313,12 @@ fn system_hostname() -> String {
 // Android hostnames are useless (always "localhost"); the JS side supplies the real device name.
 #[cfg(target_os = "android")]
 fn default_receiver_name() -> String {
-    "Extreme InfiniTV".to_string()
+    "NylahBox Studios".to_string()
 }
 
 #[cfg(not(target_os = "android"))]
 fn default_receiver_name() -> String {
-    usable_hostname(&system_hostname()).unwrap_or_else(|| "Extreme InfiniTV".to_string())
+    usable_hostname(&system_hostname()).unwrap_or_else(|| "NylahBox Studios".to_string())
 }
 
 /// Sender-side device-name lookup: the OS hostname, or "" when unusable (Android has no bridge here).
@@ -355,7 +355,7 @@ fn mdns_instance_name(raw: &str) -> String {
     let cleaned: String = raw.chars().filter(|ch| *ch != '.' && !ch.is_control()).collect();
     let trimmed = cleaned.trim();
     if trimmed.is_empty() {
-        "Extreme InfiniTV".to_string()
+        "NylahBox Studios".to_string()
     } else {
         trimmed.chars().take(MDNS_LABEL_MAX_LEN).collect()
     }
@@ -2321,8 +2321,8 @@ mod tests {
 
     #[test]
     fn resolve_device_name_falls_back_when_blank() {
-        assert_eq!(resolve_device_name("   ", "Extreme InfiniTV"), "Extreme InfiniTV");
-        assert_eq!(resolve_device_name("", "Extreme InfiniTV"), "Extreme InfiniTV");
+        assert_eq!(resolve_device_name("   ", "NylahBox Studios"), "NylahBox Studios");
+        assert_eq!(resolve_device_name("", "NylahBox Studios"), "NylahBox Studios");
     }
 
     #[cfg(not(target_os = "android"))]
@@ -2374,9 +2374,9 @@ mod tests {
 
     #[test]
     fn resolve_device_name_trims_and_bounds_to_char_count() {
-        assert_eq!(resolve_device_name("  Living Room TV  ", "Extreme InfiniTV"), "Living Room TV");
+        assert_eq!(resolve_device_name("  Living Room TV  ", "NylahBox Studios"), "Living Room TV");
         let oversized = "\u{00fc}".repeat(receiver_store::MAX_DEVICE_NAME_LEN + 10);
-        let resolved = resolve_device_name(&oversized, "Extreme InfiniTV");
+        let resolved = resolve_device_name(&oversized, "NylahBox Studios");
         assert_eq!(resolved.chars().count(), receiver_store::MAX_DEVICE_NAME_LEN);
     }
 
@@ -2395,9 +2395,9 @@ mod tests {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     #[test]
     fn mdns_instance_name_falls_back_when_blank() {
-        assert_eq!(mdns_instance_name(""), "Extreme InfiniTV");
-        assert_eq!(mdns_instance_name("   "), "Extreme InfiniTV");
-        assert_eq!(mdns_instance_name("..."), "Extreme InfiniTV");
+        assert_eq!(mdns_instance_name(""), "NylahBox Studios");
+        assert_eq!(mdns_instance_name("   "), "NylahBox Studios");
+        assert_eq!(mdns_instance_name("..."), "NylahBox Studios");
     }
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

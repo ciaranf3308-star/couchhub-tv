@@ -1,9 +1,9 @@
-# Nylah Studios v0.1.5
+# NylahBox Studios v0.1.5
 
 A custom, Xbox-controller-first IPTV application for Windows 11, built for
 a MINISFORUM UM790 Pro mini PC connected to a TV. It is the second half of
 the two-app CouchHub system: the [CouchHub launcher](../couchhub/) is the
-lightweight dashboard, and Nylah Studios is the player it launches for
+lightweight dashboard, and NylahBox Studios is the player it launches for
 Live TV, Movies and Series.
 
 > **Build status — read this first:** this project was authored on Linux,
@@ -22,7 +22,7 @@ commit `1efcc1b` (2026-08-31), licensed **GPL-3.0-or-later** (see
 `LICENSE`, retained unchanged). The upstream README is kept at
 [`docs/upstream-readme.md`](docs/upstream-readme.md).
 
-Upstream already provides, and Nylah Studios keeps unchanged:
+Upstream already provides, and NylahBox Studios keeps unchanged:
 
 - Live TV with channel categories, channel list, EPG and catch-up
 - Movies: poster browsing, categories, search, details, playback
@@ -35,11 +35,11 @@ Upstream already provides, and Nylah Studios keeps unchanged:
   cache, catalog warming)
 - Keyboard / D-pad spatial navigation throughout the UI
 
-## What the fork changes (Nylah Studios)
+## What the fork changes (NylahBox Studios)
 
 | Area | Change |
 | --- | --- |
-| Branding | App name, window title and About screen say **Nylah Studios**; Settings → About attributes the fork to Extreme InfiniTV / infinitel8p with the GPL-3.0-or-later notice. Default accent is **burgundy** (Bedroom theme), matching the CouchHub launcher. Upstream's own accent picker still works. |
+| Branding | App name, window title and About screen say **NylahBox Studios**; Settings → About attributes the fork to Extreme InfiniTV / infinitel8p with the GPL-3.0-or-later notice. Default accent is **burgundy** (Bedroom theme), matching the CouchHub launcher. Upstream's own accent picker still works. |
 | Controller | **New** `src/scripts/lib/gamepad.ts`: Xbox controller via the standard Gamepad API — D-pad / left stick navigate, A activates, B goes back, X play/pause, Y fullscreen, LB/RB seek ±10s, LT/RT volume, Menu opens Settings, View+Menu held 2s returns home. Buttons are edge-triggered with 350 ms / 140 ms repeat and a 0.30 stick dead zone; text fields keep keyboard behaviour. It drives the app's existing keyboard/spatial-nav handlers, so no screen was rewritten. |
 | Return home | **New** `src/scripts/lib/return-home.ts`: on View+Menu hold or Ctrl+Alt+Home, pauses video, exits fullscreen and minimises the Tauri window so the CouchHub dashboard can come back. Nothing is closed or force-killed. |
 | Focus | **New** `src/styles/couchhub-tv.css`: a thick accent focus ring while a controller is in use (`.gamepad-active`). |
@@ -67,10 +67,10 @@ In the app, open **Settings → Playlists → Add playlist → Xtream Codes**
 - Username
 - Password
 
-Nylah Studios stores these locally on the mini PC only. Never put them in
+NylahBox Studios stores these locally on the mini PC only. Never put them in
 source, in `config.example.json`, or in a launch argument. The same
 subscription already plays in HotPlayer, which stays installed as the
-fallback — Nylah Studios is an addition, not a replacement.
+fallback — NylahBox Studios is an addition, not a replacement.
 
 ## Prerequisites (Windows build machine)
 
@@ -123,7 +123,7 @@ exercised on hardware yet. They are flagged as untested in
 ## Project structure (fork additions marked ★)
 
 ```
-package.json / src-tauri/tauri.conf.json  # ★ renamed to CouchHub TV 0.1.0 (now Nylah Studios)
+package.json / src-tauri/tauri.conf.json  # ★ renamed to CouchHub TV 0.1.0 (now NylahBox Studios)
 src/scripts/lib/gamepad.ts               # ★ Xbox controller (Gamepad API)
 src/scripts/lib/return-home.ts           # ★ View+Menu / Ctrl+Alt+Home
 src/styles/couchhub-tv.css               # ★ controller focus ring

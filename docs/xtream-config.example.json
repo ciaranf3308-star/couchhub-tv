@@ -1,5 +1,5 @@
 {
-  "_comment": "DOCUMENTATION ONLY \u2014 Nylah Studios does not read this file. It shows the fields you enter in the app under Settings > Playlists > Add playlist > Xtream Codes. Never put real credentials in source control. The password is intentionally empty here.",
+  "_comment": "DOCUMENTATION ONLY \u2014 NylahBox Studios does not read this file. It shows the fields you enter in the app under Settings > Playlists > Add playlist > Xtream Codes. Never put real credentials in source control. The password is intentionally empty here.",
   "epgUrl": "",
   "liveContainer": "m3u8",
   "password": "",

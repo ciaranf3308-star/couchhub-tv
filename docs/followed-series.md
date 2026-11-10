@@ -1,4 +1,4 @@
-# Followed Series — Nylah Studios (CouchHub TV)
+# Followed Series — NylahBox Studios (CouchHub TV)
 
 Follow shows, get told when a new episode lands. Everything here is local:
 subscriptions live in the app's IndexedDB, checks use provider metadata
@@ -95,7 +95,7 @@ running instance instead.
 
 ### Scheduled Task
 
-- **Name:** `Nylah Studios Followed Series Check`
+- **Name:** `NylahBox Studios Followed Series Check`
 - **Trigger:** hourly, every N hours (N = the Settings interval),
   starting now.
 - **Action:** `"<current exe path>" --check-followed`
@@ -112,8 +112,12 @@ running instance instead.
   elevated prompt:
 
   ```
-  schtasks /Delete /TN "Nylah Studios Followed Series Check" /F
+  schtasks /Delete /TN "NylahBox Studios Followed Series Check" /F
   ```
+
+  Pre-rename installs may also carry a `Nylah Studios Followed Series Check`
+  task; the app best-effort deletes that legacy name whenever scheduled
+  checks are enabled, repaired, or turned off, so an install never runs two.
 
 ## Launcher contract — notifications.json
 

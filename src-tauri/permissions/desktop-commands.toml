@@ -6,7 +6,7 @@
 
 [[permission]]
 identifier = "allow-desktop-commands"
-description = "Local-origin access to Extreme InfiniTV's desktop-only commands."
+description = "Local-origin access to NylahBox Studios' desktop-only commands."
 commands.allow = [
     "compositing_state",
     "compositing_set",

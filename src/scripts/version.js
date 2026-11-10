@@ -18,7 +18,7 @@ export async function injectVersion() {
             .querySelector('meta[name="x-app-version"]')
             ?.getAttribute('content')
         if (!tag) return
-        badge.textContent = `Extreme InfiniTV v${tag}`
+        badge.textContent = `NylahBox Studios v${tag}`
     }
 
     try {

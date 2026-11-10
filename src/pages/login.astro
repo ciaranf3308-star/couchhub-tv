@@ -1,11 +1,16 @@
 ---
 import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvLogo from "@/components/couch/TvLogo.astro";
 import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 ---
 
 <CouchLayout pageTitle="Add playlist" view="login">
 	<main
 		class="couch-login mx-auto px-5 sm:px-6 lg:px-8 pb-16 pt-4 lg:pt-6 max-w-480 w-full nylah-art-backdrop nylah-art-backdrop--login">
+
+		<div class="flex justify-center pt-2 pb-6">
+			<TvLogo variant="lockup-image" size="splash" />
+		</div>
 
 		<div>
 

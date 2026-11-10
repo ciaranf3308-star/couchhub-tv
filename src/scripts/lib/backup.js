@@ -614,12 +614,14 @@ export async function importAll(blob) {
 }
 
 /**
- * Suggested filename for downloads, e.g. extreme-infinitv-backup-2026-04-30.json.
+ * Suggested filename for downloads, e.g. nylahbox-backup-2026-04-30.json.
+ * (FORMAT_NAME above is intentionally untouched: it is the restore marker
+ * validated on import, so old backups must keep loading.)
  */
 export function suggestedFilename() {
   const d = new Date()
   const pad = (n) => String(n).padStart(2, "0")
-  return `extreme-infinitv-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`
+  return `nylahbox-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`
 }
 
 export const BACKUP_FORMAT_NAME = FORMAT_NAME

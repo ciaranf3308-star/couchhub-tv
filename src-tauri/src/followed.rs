@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::followed_core::{
     parse_cli_args, parse_command_from_xml, parse_interval_hours_from_xml, valid_interval,
-    validate_notifications_json, DeepLink, SCHEDULED_TASK_NAME,
+    validate_notifications_json, DeepLink, LEGACY_SCHEDULED_TASK_NAME, SCHEDULED_TASK_NAME,
 };
 
 /// Managed launch state, filled once from `std::env::args()` in `run()`.
@@ -226,6 +226,14 @@ fn create_task(exe_path: &str, interval_hours: u32) -> Result<(), String> {
     Err(format!("schtasks /Create failed: {stderr}"))
 }
 
+/// Best-effort removal of the pre-rename task. Ignores every failure:
+/// the legacy task usually does not exist, and a stale duplicate must
+/// never fail enabling, disabling, or repairing the current task.
+#[cfg(windows)]
+fn delete_legacy_task() {
+    let _ = run_schtasks(&["/Delete", "/TN", LEGACY_SCHEDULED_TASK_NAME, "/F"]);
+}
+
 #[cfg(windows)]
 fn delete_task() -> Result<(), String> {
     let output = run_schtasks(&["/Delete", "/TN", SCHEDULED_TASK_NAME, "/F"])?;
@@ -270,6 +278,7 @@ pub fn followed_schedule_set(enabled: bool, interval_hours: u32) -> Result<Sched
     {
         if !enabled {
             delete_task()?;
+            delete_legacy_task();
             return Ok(ScheduleStatus {
                 installed: false,
                 task_name: SCHEDULED_TASK_NAME.to_string(),
@@ -280,6 +289,7 @@ pub fn followed_schedule_set(enabled: bool, interval_hours: u32) -> Result<Sched
         valid_interval(interval_hours)?;
         let exe = current_exe_string()?;
         create_task(&exe, interval_hours)?;
+        delete_legacy_task();
         Ok(ScheduleStatus {
             installed: true,
             task_name: SCHEDULED_TASK_NAME.to_string(),
@@ -307,10 +317,14 @@ pub fn followed_schedule_repair(interval_hours: u32) -> Result<ScheduleStatus, S
             if status.command.as_deref() == Some(expected_command.as_str())
                 && status.interval_hours == Some(interval_hours)
             {
+                // Task is already correct; still drop any pre-rename
+                // duplicate so the install never runs two checks.
+                delete_legacy_task();
                 return Ok(status);
             }
         }
         create_task(&exe, interval_hours)?;
+        delete_legacy_task();
         Ok(ScheduleStatus {
             installed: true,
             task_name: SCHEDULED_TASK_NAME.to_string(),

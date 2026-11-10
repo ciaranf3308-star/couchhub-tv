@@ -1358,7 +1358,7 @@ const view: TvView = {
       if (!active) {
         hero.show({
           eyebrow: t("welcome.eyebrow"),
-          title: "Extreme InfiniTV",
+          title: "NylahBox Studios",
           meta: t("welcome.sub"),
           cta: { href: "/tv/login", label: t("playlist.addCta"), autofocus: true },
         })

@@ -59,8 +59,9 @@ function logPresenceFailure(label, error) {
   log.warn(`[xt:discord] ${label}:`, error)
 }
 
+// No upstream-download button here: never point users at upstream releases.
+// "View on GitHub" stays: it is the GPL source link for this fork's origin.
 const PROMO_BUTTONS = [
-  { label: "Get Extreme InfiniTV", url: "https://github.com/infinitel8p/Extreme-InfiniTV/releases/latest" },
   { label: "View on GitHub", url: "https://github.com/infinitel8p/Extreme-InfiniTV" },
 ]
 
@@ -204,7 +205,7 @@ export async function setIdleRichPresence(opts) {
       details: detailsLine,
       stateText: stateLine,
       largeImage: "logo",
-      largeText: "Extreme InfiniTV",
+      largeText: "NylahBox Studios",
       smallImage: null,
       smallText: null,
       startTimestamp: null,

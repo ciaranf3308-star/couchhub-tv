@@ -536,7 +536,7 @@ function recKey(kind) {
 
 /**
  * @param {string} playlistId
- * @param {"live"|"vod"} kind
+ * @param {"live"|"vod"|"series"} kind
  * @returns {Set<number>}
  */
 export function getFavorites(playlistId, kind) {
@@ -713,7 +713,7 @@ export function getAllGlobalWatchlist() {
 
 /**
  * Sync read of recents. Most-recent first.
- * @param {string} playlistId @param {"live"|"vod"} kind
+ * @param {string} playlistId @param {"live"|"vod"|"series"} kind
  * @returns {RecentEntry[]}
  */
 export function getRecents(playlistId, kind) {
@@ -722,7 +722,7 @@ export function getRecents(playlistId, kind) {
 }
 
 /**
- * @param {string} playlistId @param {"live"|"vod"} kind
+ * @param {string} playlistId @param {"live"|"vod"|"series"} kind
  * @param {number} id @param {string} name @param {string|null} [logo]
  */
 export function pushRecent(playlistId, kind, id, name, logo = null) {

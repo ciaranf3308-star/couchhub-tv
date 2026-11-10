@@ -420,25 +420,25 @@ describe("suggestedBundleFilename", () => {
   it("builds the expected shape from a version and local time", () => {
     const createdAt = new Date(2026, 2, 15, 9, 5, 0)
     const filename = suggestedBundleFilename("1.7.2", createdAt)
-    expect(filename).toBe("extreme-infinitv-diagnostics-1.7.2-20260315-0905.zip")
+    expect(filename).toBe("nylahbox-diagnostics-1.7.2-20260315-0905.zip")
   })
 
   it("pads single-digit month/day/hour/minute in local time", () => {
     const createdAt = new Date(2026, 0, 2, 3, 4, 0)
     const filename = suggestedBundleFilename("2.0.0", createdAt)
-    expect(filename).toBe("extreme-infinitv-diagnostics-2.0.0-20260102-0304.zip")
+    expect(filename).toBe("nylahbox-diagnostics-2.0.0-20260102-0304.zip")
   })
 
   it("falls back to 'unknown' when the version is null", () => {
     const createdAt = new Date(2026, 2, 15, 9, 5, 0)
     const filename = suggestedBundleFilename(null, createdAt)
-    expect(filename).toBe("extreme-infinitv-diagnostics-unknown-20260315-0905.zip")
+    expect(filename).toBe("nylahbox-diagnostics-unknown-20260315-0905.zip")
   })
 
   it("falls back to 'unknown' when the version is blank", () => {
     const createdAt = new Date(2026, 2, 15, 9, 5, 0)
     const filename = suggestedBundleFilename("   ", createdAt)
-    expect(filename).toBe("extreme-infinitv-diagnostics-unknown-20260315-0905.zip")
+    expect(filename).toBe("nylahbox-diagnostics-unknown-20260315-0905.zip")
   })
 })
 

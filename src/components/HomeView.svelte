@@ -240,7 +240,7 @@
         <div class="rs-image rs-image--backdrop is-fallback" data-tv-image data-kind="backdrop">
           <div class="rs-image__fallback" aria-hidden="true">
             <span class="rs-image__fallback-mark">N</span>
-            <span class="rs-image__fallback-title">Nylah Studios</span>
+            <span class="rs-image__fallback-title">NylahBox Studios</span>
           </div>
         </div>
       </div>
@@ -339,7 +339,7 @@
           <div class="rs-image rs-image--backdrop is-fallback" data-tv-image data-kind="backdrop">
             <div class="rs-image__fallback" aria-hidden="true">
               <span class="rs-image__fallback-mark">N</span>
-              <span class="rs-image__fallback-title">Nylah Studios</span>
+              <span class="rs-image__fallback-title">NylahBox Studios</span>
             </div>
           </div>
         </div>

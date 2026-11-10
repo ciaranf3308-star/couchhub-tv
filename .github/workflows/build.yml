@@ -1,4 +1,4 @@
-name: Build Nylah Studios
+name: Build NylahBox Studios
 
 # Windows CI build for the fork. Upstream's release.yml still owns
 # tag-triggered releases; this workflow only verifies that the fork
@@ -69,7 +69,7 @@ jobs:
           FEED_BASE="https://ciaranf3308-star.github.io/couchhub-updates/couchhub-tv"
           FEED_DIR="couchhub-updates/couchhub-tv"
           VERSION="$(jq -r .version package.json)"
-          echo "Publishing Nylah Studios $VERSION to $FEED_BASE"
+          echo "Publishing NylahBox Studios $VERSION to $FEED_BASE"
 
           # Tauri v2's bundler only emits the signed installers (.sig files);
           # it does NOT generate the updater manifest, so update.json is
@@ -111,7 +111,7 @@ jobs:
             --arg date "$PUB_DATE" \
             --arg url "$FEED_BASE/$ENCODED_NAME" \
             --arg sig "$(cat "$NSIS_INSTALLER.sig")" \
-            --arg notes "Nylah Studios $VERSION" \
+            --arg notes "NylahBox Studios $VERSION" \
             '{version: $version, notes: $notes, pub_date: $date, platforms: {"windows-x86_64": {signature: $sig, url: $url}}}' \
             > "$FEED_DIR/update.json"
 
@@ -130,5 +130,5 @@ jobs:
             echo "No changes to publish."
             exit 0
           fi
-          git commit -m "Nylah Studios $VERSION"
+          git commit -m "NylahBox Studios $VERSION"
           git push origin HEAD:main
