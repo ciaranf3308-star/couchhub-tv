@@ -106,7 +106,7 @@ html.xt-theme-switching::view-transition-new(root) {
     }
 }
 
-/* Theme tokens - slate foundation + soft fuchsia accent.*/
+/* Theme tokens - warm wine foundation + soft fuchsia accent.*/
 :root {
     color-scheme: light dark;
 }
@@ -119,17 +119,20 @@ html.xt-theme-switching::view-transition-new(root) {
     --breakpoint-2xl: 96em;     /* 1536px */
 
     /* - surfaces - */
-    --color-bg:        light-dark(oklch(0.925 0.030 var(--xt-tint-hue)), oklch(0.165 0.013 255));
-    --color-surface:   light-dark(oklch(0.97  0.012 var(--xt-tint-hue)), oklch(0.215 0.013 255));
-    --color-surface-2: light-dark(oklch(0.895 0.033 var(--xt-tint-hue)), oklch(0.265 0.013 255));
-    --color-surface-3: light-dark(oklch(0.855 0.036 var(--xt-tint-hue)), oklch(0.32  0.013 255));
-    --color-line:      light-dark(oklch(0.815 0.038 var(--xt-tint-hue)), oklch(0.34  0.013 255));
-    --color-line-soft: light-dark(oklch(0.87  0.034 var(--xt-tint-hue)), oklch(0.27  0.013 255));
+    /* Dark bases are warm wine (hue 350, chroma >= 0.04) — no cold
+       slate anywhere, in any accent. The burgundy preset overrides
+       these with deeper wine / warm beige values below. */
+    --color-bg:        light-dark(oklch(0.925 0.030 var(--xt-tint-hue)), oklch(0.165 0.045 350));
+    --color-surface:   light-dark(oklch(0.97  0.012 var(--xt-tint-hue)), oklch(0.215 0.045 350));
+    --color-surface-2: light-dark(oklch(0.895 0.033 var(--xt-tint-hue)), oklch(0.265 0.05 350));
+    --color-surface-3: light-dark(oklch(0.855 0.036 var(--xt-tint-hue)), oklch(0.32  0.05 350));
+    --color-line:      light-dark(oklch(0.815 0.038 var(--xt-tint-hue)), oklch(0.34  0.045 350));
+    --color-line-soft: light-dark(oklch(0.87  0.034 var(--xt-tint-hue)), oklch(0.27  0.04 350));
 
     /* - foreground - */
-    --color-fg:   light-dark(oklch(0.22  0.030 var(--xt-tint-hue)), oklch(0.97  0.005 250));
-    --color-fg-2: light-dark(oklch(0.4   0.028 var(--xt-tint-hue)), oklch(0.78  0.011 250));
-    --color-fg-3: light-dark(oklch(0.45  0.026 var(--xt-tint-hue)), oklch(0.6   0.011 250));
+    --color-fg:   light-dark(oklch(0.22  0.030 var(--xt-tint-hue)), oklch(0.97  0.008 350));
+    --color-fg-2: light-dark(oklch(0.4   0.028 var(--xt-tint-hue)), oklch(0.78  0.012 350));
+    --color-fg-3: light-dark(oklch(0.45  0.026 var(--xt-tint-hue)), oklch(0.6   0.012 350));
 
     /* - accent: a single soft fuchsia - */
     --color-accent:      light-dark(oklch(0.50 0.20 330), oklch(0.78 0.15 330));
@@ -221,9 +224,8 @@ html.xt-theme-switching::view-transition-new(root) {
     /* Wine-red is mid-tone in both themes, so white text reads on it. */
     --color-on-accent:   white;
     /* Bedroom theme: unlike the other accents, burgundy re-tints the
-       surfaces themselves — the dark surface values are fixed slate
-       hues upstream, so the tint hue alone cannot warm them. Dark is
-       deep wine, light is warm beige. */
+       surfaces themselves — the base dark values are warm wine already,
+       this preset goes deeper wine in dark mode, warm beige in light. */
     --color-bg:        light-dark(oklch(0.93 0.028 75), oklch(0.155 0.045 350));
     --color-surface:   light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350));
     --color-surface-2: light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350));
@@ -251,6 +253,36 @@ html.xt-theme-switching::view-transition-new(root) {
     --nylah-beige:       oklch(0.93 0.028 75);
     --nylah-cream:       oklch(0.97 0.014 75);
     --nylah-gold:        oklch(0.85 0.16 90);
+    /* Translucent brass tint for eyebrows, hairlines and soft accents. */
+    --nylah-gold-soft:   oklch(0.85 0.16 90 / 0.16);
+    /* Shadow colour — the wine-black every layered shadow is cast in. */
+    --nylah-shadow-color: oklch(0.10 0.05 350 / 0.45);
+    /* Display type — Instrument Serif for hero, rail titles, dialog
+       titles and section headings. */
+    --nylah-font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
+    /* Warm surfaces (v0.3.0) — warm beige in light, deep wine in dark. */
+    --nylah-surface-warm:   light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350));
+    --nylah-surface-2-warm: light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350));
+    --nylah-surface-3-warm: light-dark(oklch(0.85 0.036 75), oklch(0.32 0.05 350));
+    /* Warm card gradient — a wine sheen over the card's own surface, so
+       flat fills read as lit material instead of a flat slab. */
+    --nylah-card-gradient: linear-gradient(
+        165deg,
+        color-mix(in oklch, var(--nylah-wine-bright) 7%, transparent) 0%,
+        transparent 45%,
+        color-mix(in oklch, var(--nylah-wine) 7%, transparent) 100%
+    );
+    /* Warm ambient glow for the home hero (used by .nylah-hero::before). */
+    --nylah-hero-glow: radial-gradient(
+        62% 100% at 50% 0%,
+        color-mix(in oklch, var(--color-accent) 14%, transparent) 0%,
+        color-mix(in oklch, var(--color-accent) 5%, transparent) 40%,
+        transparent 75%
+    );
+    /* Layered card shadows + the strong wine focus glow. */
+    --nylah-card-shadow:      0 10px 36px oklch(0.10 0.05 350 / 0.45);
+    --nylah-card-shadow-lift: 0 18px 48px oklch(0.10 0.05 350 / 0.55);
+    --nylah-focus-glow-strong: 0 0 32px 4px var(--nylah-focus-glow);
     /* Focus system — light-dark so the ring reads on both themes. */
     --nylah-focus-ring:  light-dark(oklch(0.45 0.19 350), oklch(0.78 0.18 350));
     --nylah-focus-glow:  light-dark(oklch(0.45 0.19 350 / 0.38), oklch(0.72 0.17 350 / 0.5));
@@ -313,7 +345,7 @@ html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabi
 }
 .nylah-rail__title,
 .nylah-rail .hub-section-head__heading {
-    font-family: var(--font-serif);
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, "Times New Roman", serif);
     font-size: var(--nylah-rail-title, 2rem);
     font-weight: 400;
     letter-spacing: -0.02em;
@@ -365,7 +397,29 @@ html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabi
 }
 .nylah-rail [data-nylah-item]:focus-visible {
     transform: translateY(-2px) scale(1.03);
-    box-shadow: 0 10px 36px -8px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+    box-shadow:
+        var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55)),
+        var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
+}
+/* Home rail rows scroll under the controller / drag — no scrollbar
+   thumb, same as the Continue Watching strip. */
+.nylah-rail [data-rail-row] {
+    scrollbar-width: none;
+}
+.nylah-rail [data-rail-row]::-webkit-scrollbar {
+    display: none;
+}
+/* Rail empty / loading lines are surfaces too: a soft warm card with a
+   serif italic line, never a bare grey sentence. */
+.nylah-rail [data-rail-empty] {
+    background: var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350)));
+    border: 1px solid var(--color-line-soft);
+    border-radius: var(--nylah-card-radius, 1rem);
+    padding: 1.25rem 1.5rem;
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, serif);
+    font-style: italic;
+    font-size: 1.0625rem;
+    color: var(--color-fg-2);
 }
 @media (prefers-reduced-motion: reduce) {
     .nylah-rail [data-nylah-item]:focus-visible {
@@ -427,15 +481,63 @@ html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabi
     }
 }
 
+/* ── Shared card treatment (v0.3.0) ─────────────────────────────
+   The RedSilk card: warm tinted gradient over the card's own surface,
+   1px soft line (from the component's ring), radius 1rem, layered
+   shadow. A focused card lifts + halo — lit, not outlined. The
+   component keeps its own hover/focus ring utilities; this class adds
+   the material and the glow. */
+.nylah-card {
+    background-image: var(--nylah-card-gradient, linear-gradient(
+        165deg,
+        color-mix(in oklch, var(--nylah-wine-bright) 7%, transparent) 0%,
+        transparent 45%,
+        color-mix(in oklch, var(--nylah-wine) 7%, transparent) 100%
+    ));
+    box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+}
+.nylah-card:hover {
+    box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+.nylah-card:focus-visible,
+.nylah-card:focus-within {
+    box-shadow:
+        var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55)),
+        var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
+}
+@media (prefers-reduced-motion: reduce) {
+    .nylah-card:focus-visible,
+    .nylah-card:focus-within {
+        transform: none;
+    }
+}
+
 /* ── Home hero ──────────────────────────────────────────────── */
 .nylah-hero {
+    position: relative;
+    isolation: isolate;
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
     padding: 0.5rem 0.25rem 0;
 }
+/* Warm ambient glow behind the greeting — the hero feels lit from
+   above, like the RedSilk tiles, without touching legibility. */
+.nylah-hero::before {
+    content: "";
+    position: absolute;
+    inset: -2rem -25% auto -25%;
+    height: 20rem;
+    z-index: -1;
+    background: var(--nylah-hero-glow, radial-gradient(
+        62% 100% at 50% 0%,
+        color-mix(in oklch, var(--color-accent) 14%, transparent) 0%,
+        transparent 75%
+    ));
+    pointer-events: none;
+}
 .nylah-hero__title {
-    font-family: var(--font-serif);
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, "Times New Roman", serif);
     font-size: var(--nylah-hero-title, 3rem);
     font-weight: 400;
     letter-spacing: -0.02em;
@@ -451,12 +553,56 @@ html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabi
 /* ── Left nav ─────────────────────────────────────────────────
    Slim rail, big items: taller hit areas, larger glyphs and type,
    and a wine bar on the active item so the current section reads
-   from the couch even with the rail collapsed to icons. */
+   from the couch even with the rail collapsed to icons. The active
+   item also carries the warm card gradient + a soft shadow, and a
+   focused item glows — lit, not outlined. */
 .nylah-nav-item[aria-current="page"] {
-    box-shadow: inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350));
+    background-image: var(--nylah-card-gradient, linear-gradient(
+        165deg,
+        color-mix(in oklch, var(--nylah-wine-bright) 7%, transparent) 0%,
+        transparent 45%,
+        color-mix(in oklch, var(--nylah-wine) 7%, transparent) 100%
+    ));
+    box-shadow:
+        inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
 }
 [dir="rtl"] .nylah-nav-item[aria-current="page"] {
-    box-shadow: inset -3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350));
+    box-shadow:
+        inset -3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+}
+.nylah-nav-item:focus-visible {
+    box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
+}
+.nylah-nav-item[aria-current="page"]:focus-visible {
+    box-shadow:
+        inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
+}
+[dir="rtl"] .nylah-nav-item[aria-current="page"]:focus-visible {
+    box-shadow:
+        inset -3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
+}
+
+/* ── Shell chrome (v0.3.0) ────────────────────────────────────
+   The desktop rail and the title bar get the same warm vertical
+   wash as the RedSilk launcher — deep wine up top fading into the
+   page background — instead of a flat slab. */
+.sidebar-rail {
+    background-image: linear-gradient(
+        180deg,
+        var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+        var(--color-bg) 32%
+    );
+}
+.nylah-titlebar {
+    background-image: linear-gradient(
+        180deg,
+        var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+        var(--color-bg) 100%
+    );
 }
 
 :root[data-accent="lime"] {
@@ -680,7 +826,7 @@ dialog[open]::backdrop {
     inset: 0;
     background: light-dark(
         oklch(0.925 0.030 var(--xt-tint-hue) / 0.5),
-        oklch(0.165 0.013 255 / 0.6)
+        oklch(0.155 0.045 350 / 0.6)
     );
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1138,7 +1284,7 @@ summary.list-none::-webkit-details-marker {
     text-align: center;
 }
 
-/* A quiet decorative grid behind the art - very faint, slate-only. */
+/* A quiet decorative grid behind the art - very faint, warm-tinted. */
 .provider-error::before {
     content: "";
     position: absolute;
@@ -2153,12 +2299,17 @@ html[data-density="comfortable"] :is(#movie-grid, #series-grid) { gap: 1.5rem; }
     max-width: clamp(32rem, 64vw, 64rem);
     padding: clamp(1.5rem, 1rem + 3vw, 4rem) clamp(1.5rem, 1rem + 4vw, 5rem);
     margin-inline: auto;
+    /* First-run hero: warm gradient + lift shadow, the RedSilk card. */
+    box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
 }
 .welcome-eyebrow {
     font-size: clamp(0.6875rem, 0.625rem + 0.15vw, 0.875rem);
     margin-bottom: clamp(1rem, 0.75rem + 0.6vw, 1.75rem);
+    color: var(--color-accent);
 }
 .welcome-heading {
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, "Times New Roman", serif);
+    font-style: italic;
     font-size: clamp(2.5rem, 4vw + 1.5rem, 7rem);
 }
 .welcome-sub {
@@ -2301,9 +2452,10 @@ html[data-density="comfortable"] :is(#movie-grid, #series-grid) { gap: 1.5rem; }
     min-width: 0;
 }
 .hub-section-head__heading {
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, "Times New Roman", serif);
     font-size: clamp(1.25rem, 1vw + 1rem, 1.75rem);
-    font-weight: 700;
-    letter-spacing: -0.025em;
+    font-weight: 400;
+    letter-spacing: -0.02em;
     line-height: 1.1;
     color: var(--color-fg);
 }

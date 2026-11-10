@@ -40,12 +40,12 @@ export function buildRailCardHtml(item: RailItem): string {
   const year = item.year ? ` (${escapeHtml(item.year)})` : ""
   const thumb = item.logo
     ? `<img data-rail-poster src="${escapeHtml(item.logo)}" alt="" loading="lazy" fetchpriority="low" decoding="async" referrerpolicy="no-referrer" width="200" height="300" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />`
-    : `<div class="h-full w-full flex flex-col items-center justify-center gap-2 px-3 text-fg-3 bg-linear-to-br from-surface-2 to-surface-3"><span class="text-2xs text-center truncate max-w-full">${name}</span></div>`
+    : `<div class="h-full w-full flex flex-col items-center justify-center gap-2 px-3 text-fg-3 bg-linear-to-br from-surface-2 to-surface-3"><span class="font-serif text-2xs text-center truncate max-w-full">${name}</span></div>`
   const rating = item.rating
     ? `<span class="absolute bottom-1.5 left-1.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold tabular-nums" aria-label="Rating ${escapeHtml(item.rating)} out of 10">${STAR_SVG}<span>${escapeHtml(item.rating)}</span></span>`
     : ""
   return `<li class="shrink-0 snap-start w-32 sm:w-[9.5rem] lg:w-44">
-    <a href="${href}" data-nylah-item aria-label="${name}${year}" class="group relative block rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line transition-[transform,box-shadow] duration-150 hover:ring-[3px] hover:ring-accent outline-none focus-visible:ring-1 focus-visible:ring-accent hover:transform-[translateY(-2px)] focus-visible:transform-[translateY(-2px)]">
+    <a href="${href}" data-nylah-item aria-label="${name}${year}" class="nylah-card group relative block rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line transition-[transform,box-shadow] duration-150 hover:ring-[3px] hover:ring-accent outline-none focus-visible:ring-1 focus-visible:ring-accent hover:transform-[translateY(-2px)] focus-visible:transform-[translateY(-2px)]">
       <div class="w-full aspect-2-3 overflow-hidden bg-surface-2 relative">${thumb}${rating}</div>
       <div class="px-2 py-2 min-w-0"><div class="truncate text-sm font-medium text-fg">${name}</div></div>
     </a>

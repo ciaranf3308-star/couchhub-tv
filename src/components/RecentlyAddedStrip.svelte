@@ -176,7 +176,7 @@
               logo: entry.logo,
               playlistId: activePlaylistId,
             }}
-            class="ra-card group relative block rounded-xl overflow-hidden
+            class="ra-card nylah-card group relative block rounded-xl overflow-hidden
                    bg-surface-2 ring-1 ring-line
                    transition-[transform,box-shadow] duration-150
                    hover:ring-[3px] hover:ring-accent
@@ -196,7 +196,7 @@
               {:else}
                 <div
                   class="h-full w-full flex items-center justify-center text-center px-3
-                         text-fg-3 text-xs tracking-wide
+                         font-serif text-fg-3 text-xs tracking-wide
                          bg-linear-to-br from-surface-2 to-surface-3">
                   {entry.name}
                 </div>

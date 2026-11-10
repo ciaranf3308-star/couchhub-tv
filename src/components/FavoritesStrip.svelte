@@ -202,7 +202,7 @@
               logo: entry.logo,
               playlistId: activePlaylistId,
             }}
-            class="fav-card group relative block rounded-xl overflow-hidden
+            class="fav-card nylah-card group relative block rounded-xl overflow-hidden
                    bg-surface-2 ring-1 ring-line
                    transition-[transform,box-shadow] duration-150
                    hover:ring-[3px] hover:ring-accent
@@ -247,7 +247,7 @@
                   class="h-full w-full flex flex-col items-center justify-center gap-2 px-3
                          text-fg-3 bg-linear-to-br from-surface-2 to-surface-3">
                   <span class="size-7 opacity-60 inline-flex items-center justify-center" aria-hidden="true">{@html KIND_ICON_SVG[entry.kind]}</span>
-                  <span class="text-2xs text-center truncate max-w-full">{entry.name}</span>
+                  <span class="font-serif text-2xs text-center truncate max-w-full">{entry.name}</span>
                 </div>
               {/if}
 

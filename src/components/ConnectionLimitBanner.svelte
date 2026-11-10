@@ -59,7 +59,7 @@
 {#if warning}
   {@const tint = TINTS[warning.level]}
   <div
-    class="flex flex-col gap-1.5 rounded-lg border px-3 py-2.5 text-xs transition-colors {tint.border} {tint.bg}"
+    class="nylah-conn-banner flex flex-col gap-1.5 rounded-xl border px-3 py-2.5 text-xs transition-colors {tint.border} {tint.bg}"
     role="status"
     aria-live="polite">
     <span class="flex items-center gap-2">
@@ -74,3 +74,11 @@
     </span>
   </div>
 {/if}
+
+<style>
+  /* Card radius + layered wine shadow, so the banner reads as a card
+     rather than a flat strip. The semantic tints (ok/warn/crit) stay. */
+  .nylah-conn-banner {
+    box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+  }
+</style>

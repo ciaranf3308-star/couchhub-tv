@@ -30,8 +30,8 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     />
     <title>{documentTitle}</title>
     <meta name="x-app-version" content={pkg.version} />
-    <meta name="theme-color" content="#f2dff0" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0e1628" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#F6EEE3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1E0F13" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta property="og:title" content="Nylah Studios" />
     <meta property="og:image" content="https://raw.githubusercontent.com/infinitel8p/Extreme-InfiniTV/refs/heads/main/src-tauri/icons/logos/icon-1024.png" />
@@ -429,6 +429,17 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     display: none !important;
   }
 
+  /* Warm ambient wash behind every page — a faint wine glow from the
+     top edge, so the page never reads as a flat slab. The scroll
+     container is the inner div, so the body background stays put. */
+  body {
+    background-image: radial-gradient(
+      80% 46% at 50% 0%,
+      color-mix(in oklch, var(--color-accent) 7%, transparent) 0%,
+      transparent 70%
+    );
+  }
+
   /* TV overscan: shrink the layout in from each viewport edge so
      content stays inside the TV's safe area. Sidebar uses `sticky`
      (not fixed), so body padding cascades through the whole flex
@@ -534,7 +545,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
                xt-app-splash-nebula-breathe-1 5.5s ease-in-out -2.5s infinite alternate;
   }
   .xt-app-splash__nebula--2 {
-    background: radial-gradient(closest-side, color-mix(in oklch, color-mix(in oklch, var(--color-accent) 60%, #7f8cff) 20%, transparent), transparent 90%);
+    background: radial-gradient(closest-side, color-mix(in oklch, color-mix(in oklch, var(--color-accent) 60%, var(--nylah-gold, oklch(0.85 0.16 90))) 20%, transparent), transparent 90%);
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.007' numOctaves='4' seed='29' result='t'/%3E%3CfeColorMatrix in='t' type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.15 -0.06'/%3E%3CfeGaussianBlur stdDeviation='6'/%3E%3C/filter%3E%3Crect width='512' height='512' filter='url(%23n)'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.007' numOctaves='4' seed='29' result='t'/%3E%3CfeColorMatrix in='t' type='matrix' values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1.15 -0.06'/%3E%3CfeGaussianBlur stdDeviation='6'/%3E%3C/filter%3E%3Crect width='512' height='512' filter='url(%23n)'/%3E%3C/svg%3E");
     animation: xt-app-splash-nebula-drift-2 14s cubic-bezier(0.45, 0, 0.55, 1) -8s infinite alternate,
@@ -579,7 +590,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     position: absolute;
     inset: -12%;
     will-change: transform, opacity;
-    background: color-mix(in oklch, var(--color-accent) 30%, #b8bdd4);
+    background: color-mix(in oklch, var(--color-accent) 30%, var(--nylah-cream, oklch(0.97 0.014 75)));
     -webkit-mask-repeat: repeat;
     mask-repeat: repeat;
     -webkit-mask-size: 512px 512px;
@@ -776,8 +787,8 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     from { stroke-dashoffset: 0; }
     to   { stroke-dashoffset: 100; }
   }
-  .xt-app-splash__comet-stop-white-hot     { stop-color: #fff; stop-opacity: 0.95; }
-  .xt-app-splash__comet-stop-white-soft    { stop-color: #fff; stop-opacity: 0.5; }
+  .xt-app-splash__comet-stop-white-hot     { stop-color: white; stop-opacity: 0.95; }
+  .xt-app-splash__comet-stop-white-soft    { stop-color: white; stop-opacity: 0.5; }
   .xt-app-splash__comet-stop-accent-strong { stop-color: var(--color-accent); stop-opacity: 0.75; }
   .xt-app-splash__comet-stop-accent-soft   { stop-color: var(--color-accent); stop-opacity: 0.25; }
   .xt-app-splash__comet-stop-accent-clear  { stop-color: var(--color-accent); stop-opacity: 0; }
@@ -974,7 +985,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   console.log(
     "%c∞ Nylah Studios%c\nFork of Extreme InfiniTV: https://github.com/infinitel8p/Extreme-InfiniTV",
     "color: oklch(0.78 0.15 330); font: 600 1rem/1 ui-sans-serif, system-ui;",
-    "color: oklch(0.6 0.011 250); font: 0.75rem/1.4 ui-sans-serif, system-ui;"
+    "color: oklch(0.6 0.012 350); font: 0.75rem/1.4 ui-sans-serif, system-ui;"
   )
 
   const onLogin = () =>

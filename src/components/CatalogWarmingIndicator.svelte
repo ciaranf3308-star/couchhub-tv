@@ -263,6 +263,14 @@
   /* ─── Strip ───────────────────────────────────────── */
   .warming-strip {
     animation: strip-in 240ms cubic-bezier(0.16, 1, 0.3, 1);
+    /* Warm wash + soft shadow so the strip sits above the page like
+       a card edge, not a flat bar. */
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--nylah-wine-bright) 6%, transparent) 0%,
+      transparent 70%
+    );
+    box-shadow: 0 8px 24px -8px var(--nylah-shadow-color, oklch(0.10 0.05 350 / 0.45));
   }
   @keyframes strip-in {
     from { transform: translateY(-100%); opacity: 0; }
@@ -435,10 +443,11 @@
     to { stroke-dashoffset: 0; }
   }
 
-  /* Right-side progress bar: a thin slate track that fills with fuchsia
-     as the aggregate byte progress climbs. While pending, a soft highlight
-     band sweeps across the filled portion to telegraph that work is still
-     in flight. When all done, the bar locks at 100% and the shimmer stops. */
+  /* Right-side progress bar: a thin warm track that fills with wine
+     as the aggregate byte progress climbs, the highlight band in
+     brass. While pending, a soft highlight band sweeps across the
+     filled portion to telegraph that work is still in flight. When
+     all done, the bar locks at 100% and the shimmer stops. */
   .warming-comet {
     width: 6rem;
     height: 0.25rem;
@@ -455,7 +464,7 @@
     background: linear-gradient(
       90deg,
       var(--color-accent) 0%,
-      color-mix(in oklch, var(--color-accent) 50%, white) 50%,
+      color-mix(in oklch, var(--color-accent) 50%, var(--nylah-gold, oklch(0.85 0.16 90))) 50%,
       var(--color-accent) 100%
     );
     background-size: 220% 100%;

@@ -14,13 +14,13 @@
  * added by gamepad.ts on first controller input and removed on the next
  * mouse click / physical keypress. */
 :root.gamepad-active :focus-visible {
-  outline: 3px solid var(--color-accent, #9c2f42);
+  outline: 3px solid var(--nylah-focus-ring, oklch(0.72 0.17 350));
   outline-offset: 3px;
   border-radius: 6px;
 }
 
 :root.gamepad-active :focus {
-  outline: 3px solid var(--color-accent, #9c2f42);
+  outline: 3px solid var(--nylah-focus-ring, oklch(0.72 0.17 350));
   outline-offset: 3px;
 }
 

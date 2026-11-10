@@ -42,8 +42,10 @@
     gap: 0.5rem;
   }
   .nylah-switcher-label {
-    font-size: 0.875rem;
-    font-weight: 600;
+    font-family: var(--nylah-font-display, "Instrument Serif", Georgia, "Times New Roman", serif);
+    font-size: 1rem;
+    font-weight: 400;
+    letter-spacing: -0.01em;
     color: var(--color-fg);
   }
   .nylah-switcher-choices {
@@ -64,16 +66,26 @@
   }
   .nylah-switcher-choice:hover {
     border-color: var(--color-accent);
+    background: var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350)));
     color: var(--color-fg);
   }
   .nylah-switcher-choice:focus-visible {
     outline: none;
-    box-shadow: 0 0 0 3px var(--color-accent-soft);
+    box-shadow:
+      0 0 0 3px var(--color-accent-soft),
+      var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
   }
   .nylah-switcher-choice[aria-pressed="true"] {
     background: var(--color-accent);
+    /* Warm sheen over the wine so the active profile feels lit. */
+    background-image: linear-gradient(
+      160deg,
+      color-mix(in oklch, white 14%, transparent) 0%,
+      transparent 55%
+    );
     border-color: var(--color-accent);
     color: var(--color-on-accent);
+    box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
   }
   .nylah-switcher-note {
     font-size: 0.8125rem;
