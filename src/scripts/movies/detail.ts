@@ -146,7 +146,7 @@ let trailerUrl = ""
 
 wireDetailBackLink(backLink, "/movies")
 
-// Nylah Studios v0.2.0 (w3): pause overlay — same shared helper as Live TV
+// NylahBox Studios v0.2.0 (w3): pause overlay — same shared helper as Live TV
 // and the series page. Title/subtitle read text already on the page.
 mountPauseOverlay({
   wrap: playerWrap,
@@ -1086,7 +1086,7 @@ function pushMoviePresence() {
     details: movie.name || t("detail.discord.watchingMovie") || "Watching a movie",
     state: movie.year ? `Released ${movie.year}` : "Movie",
     largeImage: movie.logo || "logo",
-    largeText: movie.name || "Extreme InfiniTV",
+    largeText: movie.name || "NylahBox Studios",
     smallImage: "movie",
     smallText: "Movie",
     startTimestamp: Date.now(),
