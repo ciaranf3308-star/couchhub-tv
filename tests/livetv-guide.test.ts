@@ -267,16 +267,12 @@ describe("guideCellViewModel live state", () => {
 });
 
 describe("normaliseCategoryLabel", () => {
-  it("trims + collapses whitespace and maps ALL to All categories", () => {
+  it("re-exports the canonical W1 rule from livetv-data", () => {
     expect(normaliseCategoryLabel("  Movies   &  TV  ")).toBe("Movies & TV");
-    expect(normaliseCategoryLabel("ALL")).toBe("All categories");
-    expect(normaliseCategoryLabel("all")).toBe("All categories");
-    expect(normaliseCategoryLabel("")).toBe("All categories");
-    expect(normaliseCategoryLabel(null)).toBe("All categories");
+    expect(normaliseCategoryLabel("UK | Sports")).toBe("Sports");
+    expect(normaliseCategoryLabel("Movies FHD")).toBe("Movies");
+    expect(normaliseCategoryLabel("")).toBe("Uncategorized");
+    expect(normaliseCategoryLabel(null)).toBe("Uncategorized");
     expect(normaliseCategoryLabel("Documentary")).toBe("Documentary");
-  });
-
-  it("never rewrites a real provider label", () => {
-    expect(normaliseCategoryLabel("UK: Entertainment")).toBe("UK: Entertainment");
   });
 });

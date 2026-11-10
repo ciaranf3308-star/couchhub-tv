@@ -1,8 +1,10 @@
 ---
 // TvPlaybackShell — fullscreen Live TV playback shell (W2).
 //
-// Mounts into W1's `#livetv-mode-playback` mount point. It does NOT
-// own the video: the existing `#player` element / wrap stays owned
+// Mounted by livetv.astro inside W1's `#livetv-mode-playback` mount
+// point (this section carries NO id of its own — the mount div owns
+// `#livetv-mode-playback`, so there is exactly one in the DOM). It
+// does NOT own the video: the existing `#player` element / wrap stays owned
 // by stream.ts + player-runtime.ts (mountPlayer). On mount this
 // shell only *detects* whether a player session is already running
 // (a <video> / video.js / artplayer node inside #player) and never
@@ -31,7 +33,6 @@ import TvEmpty from "./TvEmpty.astro";
 ---
 
 <section
-  id="livetv-mode-playback"
   class="rs-livetv-play-shell"
   data-livetv-playback
   data-tuned-channel-id=""
@@ -96,13 +97,21 @@ import TvEmpty from "./TvEmpty.astro";
     </div>
   </div>
 
-  <!-- Channel Browser placeholder slot (W1 contract). W1's browser
-       mounts `[data-livetv-browser]`; until it does, a
-       `livetv:overlay {overlay:"browser"}` request with no browser
-       mounted shows this note instead of failing silently. -->
-  <div class="rs-livetv-play-browser-note" data-livetv-browser-slot data-hidden="true" hidden>
-    <p>Channel Browser is not mounted yet — it arrives with the Live TV Home integration (W1).</p>
-    <button type="button" class="rs-livetv-play-osd__btn" data-browser-note-action="close" data-focus-key="livetv-browser-note-close">Close</button>
+  <!-- Channel Browser (W1) mounted inside playback (integration
+       0.7.0). The browser instance is mounted lazily by the script
+       below into [data-livetv-play-browser-mount] on first open —
+       same module, same contract as Home's browser, with its own
+       browserId ("playback") so category events don't cross wires.
+       Watch on a row tunes via livetv:tune; highlight never tunes. -->
+  <div
+    class="rs-livetv-play-browser"
+    data-livetv-play-browser
+    data-hidden="true"
+    role="dialog"
+    aria-label="Channel Browser"
+    hidden
+  >
+    <div data-livetv-play-browser-mount></div>
   </div>
 </section>
 
@@ -125,6 +134,7 @@ import TvEmpty from "./TvEmpty.astro";
   } from "@/scripts/lib/livetv-data";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
   import { getFavorites } from "@/scripts/lib/preferences.js";
+  import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
 
   const shell = document.querySelector<HTMLElement>("[data-livetv-playback]");
   if (shell && !shell.dataset.playArmed) {
@@ -155,7 +165,45 @@ import TvEmpty from "./TvEmpty.astro";
     const osd = shell.querySelector<HTMLElement>("[data-livetv-osd]");
     const optionsEl = shell.querySelector<HTMLElement>("[data-livetv-options]");
     const errorEl = shell.querySelector<HTMLElement>("[data-livetv-error]");
-    const browserSlot = shell.querySelector<HTMLElement>("[data-livetv-browser-slot]");
+    const browserEl = shell.querySelector<HTMLElement>("[data-livetv-play-browser]");
+    const browserMount = shell.querySelector<HTMLElement>("[data-livetv-play-browser-mount]");
+    let browserHandle: { destroy: () => void } | null = null;
+    let browserMounting: Promise<unknown> | null = null;
+
+    // Channel Browser inside playback (integration 0.7.0): W1's
+    // mountCachedChannelBrowser, lazily mounted on first open so a
+    // session that never opens the browser pays nothing. The browser
+    // answers `livetv:browser-category` for id "playback" only, so
+    // Home's collection cards never retarget it.
+    const openBrowser = () => {
+      if (!browserEl) return;
+      rememberFocus();
+      browserEl.hidden = false;
+      browserEl.dataset.hidden = "false";
+      if (!browserHandle && !browserMounting && browserMount) {
+        browserMounting = mountCachedChannelBrowser(browserMount, {
+          browserId: "playback",
+          onClose: () => closeBrowser(),
+        }).then((handle) => {
+          browserHandle = handle;
+          browserMounting = null;
+          if (!handle) {
+            browserMount.textContent =
+              "No live playlist connected — add a playlist to browse live channels.";
+          }
+          return handle;
+        });
+      }
+      const search = browserEl.querySelector<HTMLElement>("[data-browser-search]");
+      search?.focus?.({ preventScroll: true });
+    };
+
+    const closeBrowser = () => {
+      if (!browserEl) return;
+      browserEl.hidden = true;
+      browserEl.dataset.hidden = "true";
+      restoreFocus();
+    };
 
     const showOsd = () => {
       window.dispatchEvent(new CustomEvent("couch-osd:show"));
@@ -168,7 +216,7 @@ import TvEmpty from "./TvEmpty.astro";
       const qs = document.querySelector<HTMLElement>("[data-livetv-quicksurf]");
       if (qs && !qs.hidden) return "quicksurf";
       if (optionsEl && !optionsEl.hidden) return "options";
-      if (browserSlot && !browserSlot.hidden) return "browser-note";
+      if (browserEl && !browserEl.hidden) return "browser";
       if (errorEl && !errorEl.hidden) return "error";
       return "none";
     };
@@ -300,6 +348,7 @@ import TvEmpty from "./TvEmpty.astro";
         }
         hideError();
         closeOptions();
+        closeBrowser();
       }
     };
 
@@ -318,6 +367,7 @@ import TvEmpty from "./TvEmpty.astro";
       shell.dataset.tunedChannelId = String(channelId);
       shell.dataset.previousChannelId = previousId !== null ? String(previousId) : "";
       hideError();
+      closeBrowser();
       await ensureData();
       paintOsd();
       showOsd();
@@ -340,16 +390,12 @@ import TvEmpty from "./TvEmpty.astro";
         if (optionsEl?.hidden) openOptions();
       } else if (overlay === "none") {
         closeOptions();
+        closeBrowser();
       } else if (overlay === "browser") {
-        // W1's Channel Browser mounts [data-livetv-browser]. If it
-        // is not on the page yet, show the placeholder slot so the
-        // request fails visibly instead of silently.
-        if (!document.querySelector("[data-livetv-browser]")) {
-          if (browserSlot) {
-            browserSlot.hidden = false;
-            browserSlot.dataset.hidden = "false";
-          }
-        }
+        // W1's Channel Browser, mounted inside this shell on first
+        // open (see openBrowser above). A tune from the browser
+        // closes it via the livetv:tune listener.
+        openBrowser();
       }
     });
 
@@ -374,8 +420,10 @@ import TvEmpty from "./TvEmpty.astro";
       const key = ev.key;
       if (key === "Escape") {
         // B: close overlay first, then return to Live Home.
-        if (overlayOpen() !== "none") {
-          if (overlayOpen() === "options") closeOptions();
+        const open = overlayOpen();
+        if (open !== "none") {
+          if (open === "options") closeOptions();
+          else if (open === "browser") closeBrowser();
           return;
         }
         if (osd && osd.dataset.hidden === "false") {
@@ -421,7 +469,9 @@ import TvEmpty from "./TvEmpty.astro";
       }
     });
 
-    // Options + error + browser-note buttons.
+    // Options + error buttons. (The browser's own Close button is
+    // wired through its onClose -> closeBrowser; Quick Surf handles
+    // its own buttons.)
     shell.addEventListener("click", (ev) => {
       const target = ev.target as HTMLElement | null;
       const keyBtn = target?.closest?.("[data-play-key]") as HTMLElement | null;
@@ -453,11 +503,6 @@ import TvEmpty from "./TvEmpty.astro";
           window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
         }
         return;
-      }
-      const noteBtn = target?.closest?.("[data-browser-note-action]") as HTMLElement | null;
-      if (noteBtn && browserSlot) {
-        browserSlot.hidden = true;
-        browserSlot.dataset.hidden = "true";
       }
     });
 

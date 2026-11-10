@@ -477,6 +477,11 @@ export function mountChannelBrowser(
         opts.onSelect?.(channel);
       }
     } else if (event.key === "Escape") {
+      // Integration 0.7.0: claim the key. Without preventDefault the
+      // playback shell's window-level Escape handler also fires after
+      // onClose hides the browser — B would close the browser AND
+      // drop to Live TV Home in one press.
+      event.preventDefault();
       opts.onClose?.();
     }
   });

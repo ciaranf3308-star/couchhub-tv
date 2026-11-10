@@ -195,8 +195,53 @@ function setNowPlaying(id) {
 window.addEventListener("livetv:tune", (ev) => {
   const channelId = (ev as CustomEvent).detail?.channelId
   if (channelId === undefined || channelId === null) return
-  const channel = all.find((entry) => entry.id === channelId)
-  void play(channelId, channel?.name ?? String(channelId))
+  // Integration 0.7.0: this seam owns the tune — claim the
+  // cancelable event so no fallback navigation fires. Channel ids
+  // arrive as numbers (Home cards, Quick Surf) or strings (the
+  // Guide stringifies); the engine's `all` ids are numbers, so
+  // compare as strings and tune with the channel's canonical id —
+  // otherwise the DRM / header lookups keyed by the numeric id
+  // miss and now-playing tracking breaks.
+  ;(ev as CustomEvent).preventDefault()
+  const channel = all.find((entry) => String(entry.id) === String(channelId))
+  const id = channel ? channel.id : channelId
+  void play(id, channel?.name ?? String(channelId))
+})
+
+// Integration 0.7.0: `livetv:programme` consumer (Guide + Quick
+// Surf dispatch {channelId, startMs} with startMs in DISPLAY time).
+// The player converts display -> UTC with displayedToUtcMs, as the
+// legacy EPG does, resolves the programme window from the cached
+// EPG, and plays catch-up through the existing playCatchup() —
+// same timeshift URL construction, failover and cast routing as
+// every other catch-up path. Where catch-up is not actually
+// playable (stale Guide data, channel without archive) it toasts
+// honestly and plays nothing — never a fake tune, never silent.
+window.addEventListener("livetv:programme", (ev) => {
+  const detail = (ev as CustomEvent).detail ?? {}
+  const channelId = detail.channelId
+  const startDisplayMs = detail.startMs
+  if (channelId === undefined || channelId === null) return
+  if (!Number.isFinite(startDisplayMs)) return
+  const channel = all.find((entry) => String(entry.id) === String(channelId))
+  if (!channel || !activePlaylistId) {
+    toastError(t("stream.toast.channelUnavailable"))
+    return
+  }
+  const startUtcMs = displayedToUtcMs(activePlaylistId, startDisplayMs)
+  const programmeWindow = resolveProgrammeWindowAt(channel, startUtcMs)
+  if (!programmeWindow || !isCatchupPlayable(channel, startUtcMs, Date.now())) {
+    toastError(t("catchup.notAvailable"))
+    return
+  }
+  window.dispatchEvent(
+    new CustomEvent("livetv:mode", { detail: { mode: "playback" } }),
+  )
+  void playCatchup(channel, {
+    startUtcMs: programmeWindow.startUtcMs,
+    stopUtcMs: programmeWindow.stopUtcMs,
+    title: resolveProgrammeTitleAt(channel, startUtcMs) || channel.name || "",
+  })
 })
 
 /** @type {{host:string,port:string,user:string,pass:string}} */
@@ -3715,6 +3760,30 @@ function showPlaybackFailurePanel(ctx, opts = {}) {
       }),
     )
   } catch {}
+
+  // Integration 0.7.0: in Couch playback mode the RedSilk shell owns
+  // the error UI (Retry / Previous / Home over the still-playing
+  // stream, via the livetv:playback-error event above). Painting the
+  // legacy panel underneath it would show two "can't play" messages
+  // at once — the shell's scrim is only 60% opaque — and leave the
+  // legacy panel's buttons focusable behind the shell overlay.
+  // Skip the legacy paint only when the shell is mounted and
+  // visible; the seq/kind state above stays set, so the
+  // auto-diagnostic still suppresses its toast and
+  // hidePlaybackFailurePanel() still resets it. Desktop and
+  // non-playback modes are untouched.
+  // NOTE: this also hides the legacy panel's HEVC-enable / audio-fix
+  // / external-player buttons in Couch playback mode — those are
+  // desktop-chrome actions with no controller-first equivalent in
+  // the shell yet; Retry / Previous / Home keep the user unblocked.
+  const playbackShell = document.querySelector("[data-livetv-playback]")
+  if (
+    playbackShell &&
+    !(playbackShell as HTMLElement).hidden &&
+    document.documentElement.dataset.livetvMode === "playback"
+  ) {
+    return
+  }
 
   const panel = document.createElement("div")
   panel.dataset.playbackFailure = ""

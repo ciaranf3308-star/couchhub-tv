@@ -16,14 +16,19 @@
 //
 // Playback handoff: selecting a channel dispatches cancelable
 // `livetv:tune` {channelId} + `livetv:mode` {mode:"playback"} (see
-// dispatchLivetvTune in livetv-data.ts). W2's playback shell / the
-// engine seam consumes the tune. TRANSITIONAL fallback (remove at
-// integration, once W2's shell owns playback): when nobody consumes
-// the tune event (no preventDefault, no
-// window.__livetvPlaybackClaimed), the shell navigates to
-// /livetv?channel=<id> so the existing engine still tunes via its
-// own deep-link path. A consumer suppresses the fallback by calling
-// preventDefault() on the cancelable tune event.
+// dispatchLivetvTune in livetv-data.ts). The engine seam in
+// stream.ts consumes the tune (and claims it with preventDefault);
+// TvPlaybackShell owns the playback chrome. There is NO ?channel=
+// fallback navigation any more (removed at integration 0.7.0):
+// tuning works purely through the event + shell. The engine still
+// reads ?channel= / ?cstart= / ?cstop= itself on load
+// (maybeAutoplayFromUrl), so deep links from Home cards, Discover
+// and the legacy EPG keep working — they tune on load, and the
+// player-visibility observer below flips the shell to playback.
+//
+// Guide: TvGuideView owns the guide mount; the hero Guide button
+// dispatches `livetv:mode` {mode:"guide"} directly. /epg stays a
+// redirect to /livetv?mode=guide as a bookmark safety net.
 //
 // The old desktop browser chrome is retired: no left-column channel
 // list, no toolbar pills, no EPG mini-panel under the player, no
@@ -48,6 +53,8 @@ import WelcomeCard from "@/components/WelcomeCard.astro";
 import TvEmpty from "@/components/couch/TvEmpty.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
+import TvPlaybackShell from "@/components/couch/TvPlaybackShell.astro";
+import TvGuideView from "@/components/couch/TvGuideView.astro";
 ---
 
 <CouchLayout pageTitle="Live TV" view="livetv">
@@ -205,8 +212,8 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 				</button>
 			</div>
 			<!-- Player DOM the legacy engine (stream.ts) owns. W2's
-			     shell takes over this mount; until then the engine
-			     tunes via its ?channel= deep-link path. -->
+			     shell takes over this mount; the engine tunes via
+			     its livetv:tune seam — never via navigation. -->
 			<div id="player-wrap" class="player-wrap relative aspect-video w-full mx-auto overflow-hidden bg-black flex items-center justify-center shrink-0">
 				<div
 					id="player-empty"
@@ -285,6 +292,12 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 				</div>
 				<div id="list-status" class="px-2.5 text-sm shrink-0" aria-live="polite">No playlist selected.</div>
 			</div>
+
+			<!-- W2's fullscreen playback shell (OSD, Quick Surf,
+			     Channel Browser, options + error overlays). Fixed
+			     overlay; the player DOM above stays owned by the
+			     engine. -->
+			<TvPlaybackShell />
 		</div>
 
 		<!-- ── Mode: Guide (W3's TvGuideView mounts here) ── -->
@@ -298,7 +311,9 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 					‹ Live TV Home
 				</button>
 			</div>
-			<div data-livetv-guide-mount></div>
+			<div data-livetv-guide-mount>
+				<TvGuideView />
+			</div>
 		</div>
 	</div>
 
@@ -557,6 +572,7 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 			buildProgrammeMetaElement,
 		} from "../scripts/lib/livetv-cards.ts";
 		import { getLivetvResumeLastChannel } from "../scripts/lib/app-settings.js";
+		import { restoreLivetvState } from "../scripts/lib/livetv-state.ts";
 
 		// ── Mode shell ──────────────────────────────────────────
 		// Listens for livetv:mode {mode} and shows / hides the three
@@ -588,50 +604,21 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 			btn.addEventListener("click", () => requestLivetvMode("home"));
 		});
 
-		// ── Transitional tune fallback ──────────────────────────
-		// W2's playback shell / engine seam consumes `livetv:tune`
-		// (cancelable). When nobody consumes it, fall back to the
-		// engine's own deep-link path (?channel=) so Watch still
-		// tunes on this branch. Remove at integration, once W2's
-		// shell owns playback. A consumer suppresses this by calling
-		// preventDefault() on the tune event or by setting
-		// window.__livetvPlaybackClaimed = true.
-		window.addEventListener("livetv:tune", (event) => {
-			if (event.defaultPrevented) return;
-			if (window.__livetvPlaybackClaimed === true) return;
-			const channelId = event.detail?.channelId;
-			if (channelId === undefined || channelId === null) return;
-			try {
-				const url = new URL(window.location.href);
-				if (url.searchParams.get("channel") === String(channelId)) return;
-				url.searchParams.set("channel", String(channelId));
-				window.location.href = url.toString();
-			} catch {}
-		});
-
-		// ── Guide fallback ──────────────────────────────────────
-		// W3's TvGuideView mounts into [data-livetv-guide-mount].
-		// Until it does, a Guide request falls back to the full EPG
-		// page instead of showing an empty mount.
-		const guideMount = document.querySelector("[data-livetv-guide-mount]");
+		// ── Guide entry ─────────────────────────────────────────
+		// TvGuideView is mounted (above) and owns the guide mount,
+		// so a Guide request just dispatches the mode — no /epg
+		// fallback navigation any more. /epg itself redirects to
+		// /livetv?mode=guide as a bookmark safety net.
 		document.querySelectorAll("[data-livetv-guide]").forEach((btn) => {
 			btn.addEventListener("click", () => {
 				requestLivetvMode("guide");
-				requestAnimationFrame(() => {
-					if (
-						window.__livetvGuideClaimed !== true &&
-						(!guideMount || !guideMount.childElementCount)
-					) {
-						window.location.href = "/epg";
-					}
-				});
 			});
 		});
 
 		// ── Player visibility ───────────────────────────────────
 		// The engine unhides #player when a stream tunes (deep link
-		// or fallback). Mirror that into the mode shell, and keep the
-		// idle art in sync.
+		// or livetv:tune). Mirror that into the mode shell, and keep
+		// the idle art in sync.
 		const playerEl = document.getElementById("player");
 		const playerEmpty = document.getElementById("player-empty");
 		const syncPlayerVisible = () => {
@@ -714,8 +701,7 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 
 			// Resume setting (default OFF): straight to fullscreen
 			// playback of the last channel. The tune handoff below
-			// handles the actual tune; the fallback navigates when
-			// no playback consumer exists yet.
+			// handles the actual tune (event + shell, no navigation).
 			const params = new URLSearchParams(window.location.search);
 			if (getLivetvResumeLastChannel() && !params.get("channel") && data.recents.length) {
 				dispatchLivetvTune(data.recents[0].id);
@@ -929,16 +915,24 @@ import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 				dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
 			});
 
-		// Initial mode: a ?channel= deep link (or an already-playing
-		// player) opens straight into playback; otherwise Home.
+		// Initial mode: a persisted guide mode (W3's state module)
+		// or ?mode=guide opens straight into the Guide — the Guide
+		// self-activates on the same conditions, and this shell must
+		// not hide its mount underneath it. An already-playing
+		// player opens into playback (covers ?channel= deep links:
+		// the engine tunes on load and unhides #player, and the
+		// observer above flips the shell). Otherwise Home.
 		// (Mode persistence across reloads is W3's state module's
 		// job — this shell never restores playback on its own, or a
 		// reload would land on an idle player.)
 		const initialParams = new URLSearchParams(window.location.search);
 		const initialMode =
-			initialParams.get("channel") || !playerEl?.hasAttribute("hidden")
-				? "playback"
-				: "home";
+			initialParams.get("mode") === "guide" ||
+			restoreLivetvState().mode === "guide"
+				? "guide"
+				: !playerEl?.hasAttribute("hidden")
+					? "playback"
+					: "home";
 		setMode(initialMode);
 		void renderHome();
 

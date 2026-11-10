@@ -1311,27 +1311,34 @@ html[data-couch] .rs-livetv-play-error__actions {
   flex-wrap: wrap;
   gap: 0.75rem;
 }
-html[data-couch] .rs-livetv-play-browser-note {
+/* Channel Browser inside playback (integration 0.7.0): full-screen
+   dark panel over the video, above the OSD (z 36) so the list is
+   usable while a stream plays underneath. The mounted browser
+   (.rs-livetv-browser) is a flex column; the mount point flexes
+   to fill so the virtual list gets a real height. */
+html[data-couch] .rs-livetv-play-browser {
   position: absolute;
-  left: 50%;
-  bottom: 2rem;
-  transform: translateX(-50%);
-  z-index: 37;
-  padding: 1rem 1.5rem;
-  border-radius: 0.75rem;
-  background: rgb(20 10 16 / 0.95);
-  border: 1px solid var(--rs-line);
-  color: var(--rs-text);
-  font-size: 1.125rem;
+  inset: 0;
+  z-index: 36;
   display: flex;
-  gap: 1rem;
-  align-items: center;
+  flex-direction: column;
+  padding: 2.5rem;
+  background: rgb(8 4 7 / 0.97);
+  color: var(--rs-text);
+  overflow: hidden;
 }
-html[data-couch] .rs-livetv-play-browser-note[hidden] {
+html[data-couch] .rs-livetv-play-browser[hidden] {
   display: none;
 }
-html[data-couch] .rs-livetv-play-browser-note p {
-  margin: 0;
+html[data-couch] .rs-livetv-play-browser > [data-livetv-play-browser-mount] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+html[data-couch] .rs-livetv-play-browser .rs-livetv-browser {
+  flex: 1;
+  min-height: 0;
 }
 
 /* ── Merge note (0.7.0 integration) ────────────────────────────── */

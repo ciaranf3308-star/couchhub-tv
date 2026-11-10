@@ -113,7 +113,11 @@
       channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
 
     const readTunedFromShell = () => {
-      const shell = document.querySelector<HTMLElement>("#livetv-mode-playback");
+      // Integration 0.7.0: the tuned/previous ids live on the
+      // playback shell section ([data-livetv-playback]), NOT on the
+      // #livetv-mode-playback mount div (the section no longer
+      // carries that id — exactly one in the DOM).
+      const shell = document.querySelector<HTMLElement>("[data-livetv-playback]");
       const fromShell = shell?.dataset.tunedChannelId;
       if (fromShell !== undefined && fromShell !== "") tunedId = fromShell;
       const fromPrev = shell?.dataset.previousChannelId;

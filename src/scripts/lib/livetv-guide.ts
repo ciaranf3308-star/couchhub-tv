@@ -191,25 +191,13 @@ export function stableGuideSelection(
 }
 
 /**
- * Display-label cleanup for provider category names. Provider data
- * is never modified — this only affects what is shown. Conservative
- * on purpose: trim + collapse whitespace, and the provider "ALL"
- * bucket reads as "All categories". Anything else passes through
- * unchanged, so no channel can be mislabelled by a clever rule.
- *
- * NOTE: W1's `normaliseCategoryLabel` in livetv-data.ts is the
- * canonical version once it lands; this mirrors its contract so the
- * Guide builds standalone, and integration should re-export from
- * there and delete this copy.
+ * Display-label cleanup for provider category names — canonical
+ * version lives in livetv-data.ts (W1); re-exported here so the
+ * Guide keeps a single import surface. Integration 0.7.0 deleted
+ * the narrower local mirror (trim + collapse only, "ALL" →
+ * "All categories") in favour of the canonical rule.
  */
-export function normaliseCategoryLabel(raw: unknown): string {
-  if (typeof raw !== "string") return "All categories";
-  const cleaned = raw.trim().replace(/\s+/g, " ");
-  if (cleaned === "" || cleaned.toUpperCase() === "ALL") {
-    return "All categories";
-  }
-  return cleaned;
-}
+export { normaliseCategoryLabel } from "./livetv-data";
 
 // ── Guide cell view model ───────────────────────────────────────
 
