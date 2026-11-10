@@ -1,9 +1,11 @@
 <!-- RedSilk Discover (W1, Discover CORE). Mounted on /discover.
      Local-only: the catalogue is loaded once at mount, search and ranking
      run in the page, and no network request happens during ordinary
-     controller navigation. The AI ranker is only consulted (via rankWithAI)
-     for natural-language questions when W2's module registered one — with
-     no ranker, local ranking runs. -->
+     controller navigation. The AI ranker (W2) is registered at mount and
+     only consulted (via rankWithAI) for natural-language questions — with
+     no ranker, or on any AI failure, local ranking runs. The followed-series
+     provider (W3) is registered at mount too, feeding the "New Episodes of
+     Followed Shows" row. -->
 <script>
   import { onMount } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -28,8 +30,16 @@
     candidateDetailHref,
     candidateKey,
     MOOD_PRESETS,
+    registerAIRanker,
+    registerFollowedProvider,
   } from "@/scripts/lib/discover.ts"
   import { saveTaste, summarizeTaste } from "@/scripts/lib/taste.ts"
+  // Intelligence Upgrade seams (coordinator wiring): W2's AI ranker and
+  // W3's followed-series provider. The engine (discover.ts) imports
+  // neither — registration lives here, at Discover mount.
+  import { aiRanker } from "@/scripts/lib/ai/ranking.ts"
+  import { initAI } from "@/scripts/lib/ai/init.ts"
+  import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { cachedImg } from "@/scripts/lib/img-cache.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import OnScreenKeyboard from "@/components/OnScreenKeyboard.svelte"
@@ -242,6 +252,16 @@
       }
       playlistId = entry._id
       profileId = getActiveProfileId() ?? SHARED_PROFILE_ID
+      // Register the AI ranker (W2) and followed-series provider (W3) so
+      // natural-language search can rank with the model and the "New
+      // Episodes of Followed Shows" row is live. Best-effort: a failure
+      // here must never break the local engine — with no ranker,
+      // rankWithAI falls back to local ranking, and with no provider the
+      // New Episodes row simply hides.
+      registerAIRanker(aiRanker)
+      await initAI().catch(() => {})
+      await ensureFollowedLoaded().catch(() => {})
+      registerFollowedProvider(followedProvider)
       // Warm the catalogue the way the home page does; Discover then
       // reads the already-loaded cache — no extra network per screen open.
       await warmupActive(playlistId).catch(() => {})
