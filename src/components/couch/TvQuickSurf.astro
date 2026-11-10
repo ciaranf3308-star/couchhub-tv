@@ -1,0 +1,369 @@
+---
+// TvQuickSurf — Quick Surf overlay for fullscreen Live TV playback (W2).
+//
+// Controller-first, INSIDE fullscreen playback (not a page). Up/Down
+// browses ADJACENT channels while the current video KEEPS PLAYING:
+// the highlight and the tuned channel are SEPARATE state — moving
+// the highlight never connects to a stream. A (Enter) tunes to the
+// highlighted channel; B (Escape) dismisses WITHOUT changing
+// channels. A failed tune leaves the current stream playing; the
+// shell's error overlay (not Quick Surf) offers the retry.
+//
+// Opens on `livetv:overlay {overlay:"quicksurf"}` and on ArrowUp /
+// ArrowDown while playback is active with no overlay open. Channel
+// data is cache-only (livetv-data.ts) — no fetch, no invented EPG.
+// The highlighted card is painted by the client script from that
+// cached data, mirroring TvChannelCard's
+// `article[data-channel-card][data-channel-id][data-focus-key]`
+// shape (the card component itself is static Astro markup, so the
+// live highlight is painted into the same shape here).
+---
+
+<section
+  class="rs-livetv-play-quicksurf"
+  data-livetv-quicksurf
+  data-hidden="true"
+  aria-label="Quick Surf"
+  hidden
+>
+  <div class="rs-livetv-play-quicksurf__panel">
+    <p class="rs-livetv-play-quicksurf__eyebrow">Quick Surf — current channel keeps playing</p>
+    <article
+      class="rs-livetv-channel-card rs-livetv-channel-card--large"
+      data-channel-card
+      data-qs-card
+      data-channel-id=""
+      data-focus-key="livetv-quicksurf-card"
+      tabindex="-1"
+    >
+      <span class="rs-livetv-channel-card__logo" data-qs-logo></span>
+      <span class="rs-livetv-channel-card__body">
+        <span class="rs-livetv-channel-card__name">
+          <span class="rs-livetv-channel-card__num" data-qs-chno></span>
+          <span data-qs-name>—</span>
+        </span>
+        <span class="rs-livetv-channel-card__now" data-qs-now></span>
+        <span class="rs-livetv-channel-card__next" data-qs-next></span>
+      </span>
+      <span class="rs-livetv-channel-card__fav" data-qs-fav hidden aria-label="Favourite">♥</span>
+      <span class="rs-livetv-channel-card__progress" aria-hidden="true">
+        <span data-qs-progress style="width: 0%"></span>
+      </span>
+    </article>
+    <p class="rs-livetv-play-quicksurf__desc" data-qs-desc hidden></p>
+    <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
+    <div class="rs-livetv-play-quicksurf__actions">
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="tune" data-focus-key="livetv-quicksurf-tune">Watch (A)</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="previous" data-focus-key="livetv-quicksurf-previous">Previous channel</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="favourite" data-focus-key="livetv-quicksurf-favourite">Favourite</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="programme" data-focus-key="livetv-quicksurf-programme">Programme info</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="browser" data-focus-key="livetv-quicksurf-browser">Channel Browser (Y)</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="guide" data-focus-key="livetv-quicksurf-guide">Full Guide (X)</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="home" data-focus-key="livetv-quicksurf-home">Live TV Home</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="dismiss" data-focus-key="livetv-quicksurf-dismiss">Back (B)</button>
+    </div>
+    <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
+      ↑↓ browse · A watch · B back · ←→ programme info
+    </p>
+  </div>
+</section>
+
+<script>
+  import {
+    stepHighlight,
+    confirmHighlight,
+    previousChannelTarget,
+    toggleFavourite,
+    tuneToChannel,
+    windowPlaybackEngine,
+  } from "@/scripts/lib/livetv-playback";
+  import {
+    loadLivetvChannels,
+    loadLivetvProgrammes,
+    nowNextForChannel,
+    activeLivetvPlaylistId,
+    type LivetvChannel,
+  } from "@/scripts/lib/livetv-data";
+  import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
+  import { getFavorites } from "@/scripts/lib/preferences.js";
+
+  const root = document.querySelector<HTMLElement>("[data-livetv-quicksurf]");
+  if (root && !root.dataset.qsArmed) {
+    root.dataset.qsArmed = "1";
+    let channels: LivetvChannel[] = [];
+    let programmes: Map<string, any> = new Map();
+    let playlistId = "";
+    let tunedId: string | number | null = null;
+    let previousId: string | number | null = null;
+    let highlightedId: string | number | null = null;
+    let category: string | null = null;
+    let open = false;
+    let loaded = false;
+
+    const $ = <T extends Element>(sel: string): T | null =>
+      root.querySelector<T>(sel);
+
+    const surfList = () =>
+      category ? channels.filter((c) => c.category === category) : channels;
+
+    const tunedChannel = () =>
+      channels.find((c) => String(c.id) === String(tunedId)) ?? null;
+
+    const highlightedChannel = () =>
+      channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
+
+    const readTunedFromShell = () => {
+      const shell = document.querySelector<HTMLElement>("#livetv-mode-playback");
+      const fromShell = shell?.dataset.tunedChannelId;
+      if (fromShell !== undefined && fromShell !== "") tunedId = fromShell;
+      const fromPrev = shell?.dataset.previousChannelId;
+      if (fromPrev !== undefined && fromPrev !== "") previousId = fromPrev;
+    };
+
+    const paint = () => {
+      const channel = highlightedChannel();
+      const card = $("[data-qs-card]");
+      if (!channel || !card) return;
+      card.dataset.channelId = String(channel.id);
+      const logo = $("[data-qs-logo]");
+      if (logo) {
+        logo.innerHTML = "";
+        if (channel.logo) {
+          const img = document.createElement("img");
+          img.src = channel.logo;
+          img.alt = "";
+          img.loading = "lazy";
+          logo.appendChild(img);
+        } else {
+          const initial = document.createElement("span");
+          initial.className = "rs-livetv-channel-card__initial";
+          initial.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
+          logo.appendChild(initial);
+        }
+      }
+      const chno = $("[data-qs-chno]");
+      if (chno) chno.textContent = channel.chno != null ? String(channel.chno) : "";
+      const name = $("[data-qs-name]");
+      if (name) name.textContent = channel.displayName || channel.name || `#${channel.id}`;
+      const nn = nowNextForChannel(channel, programmes, playlistId);
+      const nowEl = $("[data-qs-now]");
+      if (nowEl) nowEl.textContent = nn.current?.title ?? "";
+      const nextEl = $("[data-qs-next]");
+      if (nextEl) nextEl.textContent = nn.next?.title ? `Up next: ${nn.next.title}` : "";
+      const progressEl = $("[data-qs-progress]") as HTMLElement | null;
+      if (progressEl && nn.current) {
+        progressEl.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
+      } else if (progressEl) {
+        progressEl.style.width = "0%";
+      }
+      const favEl = $("[data-qs-fav]");
+      if (favEl) {
+        let isFav = false;
+        try {
+          isFav = playlistId ? getFavorites(playlistId, "live").has(Number(channel.id)) : false;
+        } catch {}
+        favEl.hidden = !isFav;
+      }
+      const descEl = $("[data-qs-desc]") as HTMLElement | null;
+      if (descEl) {
+        if (nn.current?.desc) {
+          descEl.textContent = nn.current.desc;
+          descEl.hidden = false;
+        } else {
+          descEl.hidden = true;
+        }
+      }
+      // Category chips (from the catalog, not invented).
+      const catsEl = $("[data-qs-categories]");
+      if (catsEl) {
+        catsEl.innerHTML = "";
+        const cats = Array.from(
+          new Set(channels.map((c) => c.category).filter((c): c is string => !!c)),
+        );
+        const all = document.createElement("button");
+        all.type = "button";
+        all.className = "rs-livetv-play-quicksurf__chip";
+        all.textContent = "All channels";
+        all.setAttribute("aria-pressed", category === null ? "true" : "false");
+        all.addEventListener("click", () => {
+          category = null;
+          highlightedId = tunedId;
+          paint();
+        });
+        catsEl.appendChild(all);
+        for (const cat of cats) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "rs-livetv-play-quicksurf__chip";
+          chip.textContent = cat;
+          chip.setAttribute("aria-pressed", category === cat ? "true" : "false");
+          chip.addEventListener("click", () => {
+            category = cat;
+            const list = surfList();
+            highlightedId = list.length ? list[0].id : tunedId;
+            paint();
+          });
+          catsEl.appendChild(chip);
+        }
+      }
+    };
+
+    const emitOverlay = (overlay: string) => {
+      window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay } }));
+    };
+
+    const show = () => {
+      open = true;
+      root.hidden = false;
+      root.dataset.hidden = "false";
+      emitOverlay("quicksurf");
+      const card = $("[data-qs-card]") as HTMLElement | null;
+      card?.focus?.({ preventScroll: true });
+    };
+
+    const hide = (dispatch = true) => {
+      open = false;
+      root.hidden = true;
+      root.dataset.hidden = "true";
+      if (dispatch) emitOverlay("none");
+    };
+
+    const ensureLoaded = async () => {
+      if (loaded) return;
+      loaded = true;
+      try {
+        playlistId = await activeLivetvPlaylistId();
+        channels = await loadLivetvChannels();
+        programmes = await loadLivetvProgrammes();
+      } catch {
+        channels = [];
+        programmes = new Map();
+      }
+    };
+
+    const openSurf = async () => {
+      await ensureLoaded();
+      readTunedFromShell();
+      // Highlight starts on the tuned channel; browsing from there is
+      // adjacent stepping. Highlighting never tunes.
+      if (highlightedId === null || !channels.some((c) => String(c.id) === String(highlightedId))) {
+        highlightedId = tunedId;
+      }
+      paint();
+      show();
+    };
+
+    const tuneHighlighted = () => {
+      const target = confirmHighlight(highlightedId);
+      if (target === null) return;
+      // A tune, not a highlight move: only now does the engine connect.
+      if (tuneToChannel(windowPlaybackEngine, target)) {
+        previousId = tunedId;
+        tunedId = target;
+        hide();
+      }
+    };
+
+    root.addEventListener("click", async (ev) => {
+      const btn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-action]") as HTMLElement | null;
+      if (!btn) return;
+      const action = btn.dataset.qsAction;
+      if (action === "tune") tuneHighlighted();
+      else if (action === "dismiss") hide();
+      else if (action === "previous") {
+        const target = previousChannelTarget(tunedId, previousId);
+        if (target !== null) {
+          previousId = tunedId;
+          tunedId = target;
+          tuneToChannel(windowPlaybackEngine, target);
+          hide();
+        }
+      } else if (action === "favourite") {
+        const channel = highlightedChannel();
+        if (channel) {
+          await toggleFavourite(playlistId, channel);
+          paint();
+        }
+      } else if (action === "programme") {
+        const channel = highlightedChannel();
+        const nn = channel ? nowNextForChannel(channel, programmes, playlistId) : null;
+        if (channel && nn?.current) {
+          window.dispatchEvent(
+            new CustomEvent("livetv:programme", {
+              detail: { channelId: channel.id, startMs: nn.current.start },
+            }),
+          );
+          emitOverlay("programme");
+        }
+      } else if (action === "browser") {
+        emitOverlay("browser");
+      } else if (action === "guide") {
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+      } else if (action === "home") {
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+      }
+    });
+
+    window.addEventListener("livetv:overlay", (ev) => {
+      const overlay = (ev as CustomEvent).detail?.overlay;
+      if (overlay === "quicksurf" && !open) void openSurf();
+      if (overlay !== "quicksurf" && open) hide(false);
+    });
+
+    window.addEventListener("livetv:tune", (ev) => {
+      const id = (ev as CustomEvent).detail?.channelId;
+      if (id !== undefined && id !== null) {
+        previousId = tunedId;
+        tunedId = id;
+      }
+    });
+
+    window.addEventListener("keydown", (ev) => {
+      const playbackActive =
+        document.documentElement.dataset.livetvMode === "playback";
+      if (!playbackActive) return;
+      if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement) return;
+      if (open) {
+        if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+          ev.preventDefault();
+          const list = surfList();
+          const next = stepHighlight(list, highlightedId, ev.key === "ArrowDown" ? 1 : -1);
+          if (next !== null) {
+            highlightedId = next;
+            paint();
+          }
+        } else if (ev.key === "Enter") {
+          // A on a focused button clicks it; Enter with focus on the
+          // card / panel confirms the highlight.
+          const target = ev.target as HTMLElement | null;
+          if (target && target.closest("button")) return;
+          ev.preventDefault();
+          tuneHighlighted();
+        } else if (ev.key === "Escape") {
+          // B dismisses WITHOUT changing channels — no tune here.
+          ev.preventDefault();
+          hide();
+        } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+          const channel = highlightedChannel();
+          const nn = channel ? nowNextForChannel(channel, programmes, playlistId) : null;
+          if (channel && nn?.current) {
+            ev.preventDefault();
+            window.dispatchEvent(
+              new CustomEvent("livetv:programme", {
+                detail: { channelId: channel.id, startMs: nn.current.start },
+              }),
+            );
+            emitOverlay("programme");
+          }
+        }
+        return;
+      }
+      // Closed: Up/Down opens Quick Surf (highlight starts on the
+      // tuned channel) instead of zapping — browsing never tunes.
+      if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+        ev.preventDefault();
+        void openSurf();
+      }
+    });
+  }
+</script>

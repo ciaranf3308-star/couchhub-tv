@@ -1,39 +1,162 @@
 ---
-// TvOsd — playback OSD shell. Screen workers build Live/VOD controls
-// on this shell (named slots: "info" for title/subtitle, "controls"
-// for transport buttons; default slot for anything else, e.g. a
-// progress bar).
-// Props: autoHideMs? (default 4500 — auto-hide on inactivity).
-// Behaviour: hides ~4–5s after the last activity (pointer, key,
-// focus, gamepad input, or a `couch-osd:show` window event). Focus
-// inside the OSD cancels the hide so keyboard/controller users are
-// never locked out of controls they are tabbing through; hiding
-// resumes once focus leaves. Focus-safe by construction.
+// TvOsd — Live TV lower-third OSD (W2 rewrite).
+//
+// Auto-hiding translucent lower third over fullscreen playback: it
+// covers only the bottom of the video, never the majority of it, and
+// reads over bright AND dark video via a bottom gradient scrim —
+// never a solid panel. It never triggers a stream reconnect: opening
+// or closing it touches no player state.
+//
+// Content: channel logo + name, LIVE indicator, current programme
+// title + time, progress indicator, Up Next, favourite state,
+// controller shortcuts. Transport buttons do NOT reimplement the
+// player: each dispatches the synthetic keydown stream.ts already
+// handles (see couch-livetv-epg.ts OSD action table — `[`/`]`
+// channel down/up, `\` previous, space pause, `m` mute, `f`
+// fullscreen; OSD-owned `g`/`c`/`v`/`h`/Escape are dispatched as
+// `livetv:overlay` / `livetv:mode` window events instead).
+//
+// Props: channel?, nowTitle?, nowStartMs?, nowStopMs?, progress?,
+// nextTitle?, favourite?, autoHideMs? (default 5000 — see
+// OSD_AUTO_HIDE_MS in livetv-playback.ts). The shell updates the
+// text content live via [data-osd-*] hooks; these props are the
+// first paint only. Named slots "info" / "controls" from the old
+// shell are kept for compatibility but the lower third renders its
+// own content first.
+import TvImage from "./TvImage.astro";
+import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+
 interface Props {
+  channel?: {
+    id?: string | number;
+    name?: string;
+    displayName?: string;
+    logo?: string | null;
+    chno?: number | null;
+  };
+  nowTitle?: string;
+  nowStartMs?: number;
+  nowStopMs?: number;
+  progress?: number;
+  nextTitle?: string;
+  favourite?: boolean;
   autoHideMs?: number;
 }
-const { autoHideMs = 4500 } = Astro.props;
+const {
+  channel,
+  nowTitle,
+  nowStartMs,
+  nowStopMs,
+  progress,
+  nextTitle,
+  favourite = false,
+  autoHideMs = 5000,
+} = Astro.props;
+const label = channel ? channel.displayName || channel.name || "" : "";
+const pct =
+  typeof progress === "number" && Number.isFinite(progress)
+    ? Math.max(0, Math.min(1, progress))
+    : nowStartMs !== undefined && nowStopMs !== undefined
+      ? programmeProgress(nowStartMs, nowStopMs)
+      : null;
+const timeLabel =
+  nowStartMs !== undefined && nowStopMs !== undefined
+    ? epgTimeRangeLabel(nowStartMs, nowStopMs, "en-IE")
+    : "";
 ---
 
-<div class="rs-osd" data-couch-osd data-autohide-ms={autoHideMs}>
-  <div class="rs-osd__info">
-    <slot name="info" />
+<div
+  class="rs-livetv-play-osd"
+  data-couch-osd
+  data-livetv-osd
+  data-autohide-ms={autoHideMs}
+  data-hidden="true"
+  role="status"
+  aria-label="Now playing"
+>
+  <div class="rs-livetv-play-osd__row">
+    <span class="rs-livetv-play-osd__logo" data-osd-logo>
+      {
+        channel?.logo ? (
+          <TvImage src={channel.logo} alt="" kind="logo" title={label} />
+        ) : (
+          <span class="rs-livetv-play-osd__initial" aria-hidden="true">
+            {label.slice(0, 1)}
+          </span>
+        )
+      }
+    </span>
+    <span class="rs-livetv-play-osd__main">
+      <span class="rs-livetv-play-osd__channel">
+        {channel?.chno != null && <span data-osd-chno>{channel.chno}</span>}
+        <span data-osd-channel-name>{label}</span>
+        <span class="rs-livetv-play-osd__live" data-osd-live>LIVE</span>
+        {
+          favourite && (
+            <span class="rs-livetv-play-osd__fav" data-osd-fav aria-label="Favourite">
+              ♥
+            </span>
+          )
+        }
+      </span>
+      <span class="rs-livetv-play-osd__now" data-osd-now-title>{nowTitle ?? ""}</span>
+      {
+        timeLabel && (
+          <span class="rs-livetv-play-osd__time" data-osd-now-time>
+            {timeLabel}
+          </span>
+        )
+      }
+      {
+        nextTitle && (
+          <span class="rs-livetv-play-osd__next" data-osd-next-title>
+            Up next: {nextTitle}
+          </span>
+        )
+      }
+      <slot name="info" />
+    </span>
   </div>
-  <slot />
-  <div class="rs-osd__controls">
+  {
+    pct !== null && (
+      <span class="rs-livetv-play-osd__progress" aria-hidden="true">
+        <span data-osd-progress style={`width: ${Math.round(pct * 100)}%`} />
+      </span>
+    )
+  }
+  <div class="rs-livetv-play-osd__controls" data-osd-controls>
     <slot name="controls" />
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key=" " data-focus-key="livetv-osd-pause">⏸ Pause</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="m" data-focus-key="livetv-osd-mute">Mute</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="[" data-focus-key="livetv-osd-ch-down">‹ Ch</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="]" data-focus-key="livetv-osd-ch-up">Ch ›</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="\\" data-focus-key="livetv-osd-prev">Previous</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="f" data-focus-key="livetv-osd-fullscreen">Fullscreen</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="guide" data-focus-key="livetv-osd-guide">Guide</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="browser" data-focus-key="livetv-osd-channels">Channels</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="home" data-focus-key="livetv-osd-home">Live TV Home</button>
   </div>
+  <p class="rs-livetv-play-osd__shortcuts" aria-hidden="true">
+    A confirm · B back · ↑↓ surf · X guide · Y channels · Menu options
+  </p>
+  <slot />
 </div>
 
 <script define:vars={{ autoHideMs }}>
   // One OSD per player wrap; the script is bundled once per page and
-  // arms every [data-couch-osd] on it.
-  const osds = Array.from(document.querySelectorAll("[data-couch-osd]"));
+  // arms every [data-livetv-osd] on it. Auto-hide ~5s after the last
+  // activity (pointer, key, focus, gamepad input as synthetic keys,
+  // or a `couch-osd:show` / `livetv:overlay` window event). Focus
+  // inside the OSD cancels the hide so keyboard/controller users are
+  // never locked out of controls they are tabbing through; hiding
+  // resumes once focus leaves. Showing/hiding never touches the
+  // player — no reconnect, no retune.
+  const osds = Array.from(document.querySelectorAll("[data-livetv-osd]"));
   for (const osd of osds) {
     const el = osd;
     if (el.dataset.osdArmed) continue;
     el.dataset.osdArmed = "1";
-    const delay = Number(el.getAttribute("data-autohide-ms") || autoHideMs) || 4500;
+    const delay = Number(el.getAttribute("data-autohide-ms") || autoHideMs) || 5000;
     let timer = 0;
     const show = () => {
       el.setAttribute("data-hidden", "false");
@@ -41,7 +164,6 @@ const { autoHideMs = 4500 } = Astro.props;
       timer = window.setTimeout(hide, delay);
     };
     const hide = () => {
-      // Never hide under the user's focus.
       if (el.contains(document.activeElement)) {
         timer = window.setTimeout(hide, delay);
         return;
@@ -57,8 +179,41 @@ const { autoHideMs = 4500 } = Astro.props;
       timer = window.setTimeout(hide, delay);
     });
     window.addEventListener("couch-osd:show", onActivity);
-    // Gamepad input arrives as synthetic keyboard events (see
-    // gamepad.ts), so keydown above already covers the controller.
-    show();
+    window.addEventListener("livetv:overlay", (ev) => {
+      if ((ev as CustomEvent).detail?.overlay === "osd") show();
+    });
+    // Transport buttons dispatch the synthetic keydown stream.ts
+    // already handles — the OSD never reimplements tuning/transport.
+    el.addEventListener("click", (ev) => {
+      const btn = (ev.target as HTMLElement | null)?.closest?.(
+        "[data-osd-key],[data-osd-action]",
+      ) as HTMLElement | null;
+      if (!btn || !el.contains(btn)) return;
+      const key = btn.getAttribute("data-osd-key");
+      if (key) {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+        );
+        show();
+        return;
+      }
+      const action = btn.getAttribute("data-osd-action");
+      if (action === "guide") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:mode", { detail: { mode: "guide" } }),
+        );
+      } else if (action === "browser") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }),
+        );
+      } else if (action === "home") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:mode", { detail: { mode: "home" } }),
+        );
+      }
+      show();
+    });
+    // Start hidden: the shell reveals the OSD on tune / activity.
+    el.setAttribute("data-hidden", "true");
   }
 </script>

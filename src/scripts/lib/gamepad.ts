@@ -159,6 +159,18 @@ function inPlayerContext(): boolean {
 // "details" and A stays "play / resume". Only acts when stripping the
 // autoplay param actually changes the destination (movie / series
 // detail links); live channels and plain buttons are left alone.
+// W2: RedSilk fullscreen Live TV playback owns X / Y / Menu while
+// it is the thing on screen (html[data-livetv-mode="playback"]).
+// Without this the generic player branch below would swallow X as
+// play/pause, Y as fullscreen, and Menu as a navigation away to
+// Settings — killing the stream. In playback mode X/Y are dispatched
+// as keys for the playback shell (X guide, Y channel browser) and
+// Menu opens the playback options overlay; View+Menu 2s
+// return-home above is untouched.
+function livetvPlaybackActive(): boolean {
+  return document.documentElement.dataset.livetvMode === "playback";
+}
+
 function openDetailsOfFocused(): void {
   const el = document.activeElement as HTMLElement | null;
   const link = el?.closest?.("a[href]") as HTMLAnchorElement | null;
@@ -531,17 +543,18 @@ export function mountGamepad(): void {
     }
     if (justPressed(BTN_X) && findOpenModal() === null) {
       markGamepadActive();
-      // Player keeps play / pause; browsing opens the card's details.
-      // Suppressed while a modal is open: the page behind the dialog
-      // receives no navigation input at all (v0.2.1).
-      if (inPlayerContext()) togglePlayPause();
+      // W2: in RedSilk Live TV playback X is Full Guide (shell key "x").
+      if (livetvPlaybackActive()) {
+        dispatchKey("x");
+      } else if (inPlayerContext()) togglePlayPause();
       else openDetailsOfFocused();
     }
     if (justPressed(BTN_Y) && findOpenModal() === null) {
       markGamepadActive();
-      // Player keeps the fullscreen toggle; browsing opens search.
-      // Suppressed while a modal is open, as above.
-      if (inPlayerContext()) toggleFullscreen();
+      // W2: in RedSilk Live TV playback Y is Channel Browser (shell key "y").
+      if (livetvPlaybackActive()) {
+        dispatchKey("y");
+      } else if (inPlayerContext()) toggleFullscreen();
       else goSearch();
     }
     if (justPressed(BTN_LB)) {
@@ -566,7 +579,16 @@ export function mountGamepad(): void {
       findOpenModal() === null
     ) {
       markGamepadActive();
-      openSettings();
+      // W2: in RedSilk Live TV playback Menu opens the playback
+      // options overlay instead of navigating to Settings (which
+      // would leave the stream).
+      if (livetvPlaybackActive()) {
+        window.dispatchEvent(
+          new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
+        );
+      } else {
+        openSettings();
+      }
     }
   }
 

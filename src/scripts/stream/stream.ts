@@ -185,6 +185,20 @@ function setNowPlaying(id) {
   }
 }
 
+// W2 seam (RedSilk playback shell): the shell tunes through this
+// window event instead of reimplementing tuning. It calls the
+// existing play() — same URL construction, HLS, failover and
+// catch-up as every other tune path — and never mounts a player.
+// Listened to once at module scope; `all` is read at event time,
+// so tunes dispatched before loadChannels finishes resolve to a
+// name-less play() that still finds the channel once loaded.
+window.addEventListener("livetv:tune", (ev) => {
+  const channelId = (ev as CustomEvent).detail?.channelId
+  if (channelId === undefined || channelId === null) return
+  const channel = all.find((entry) => entry.id === channelId)
+  void play(channelId, channel?.name ?? String(channelId))
+})
+
 /** @type {{host:string,port:string,user:string,pass:string}} */
 let creds = { host: "", port: "", user: "", pass: "" }
 
@@ -3689,6 +3703,18 @@ function showPlaybackFailurePanel(ctx, opts = {}) {
   failurePanelSeq = ctx.seq
   failurePanelReasonKind =
     failure.kind === "hevc" && !failure.codec ? "hevc-likely" : failure.kind
+
+  // W2 seam: tell the RedSilk playback shell the tune failed so it
+  // can show its own retry overlay. The legacy panel below still
+  // paints (unchanged behaviour); the shell's overlay sits over the
+  // still-playing previous stream and offers Retry / Previous / Home.
+  try {
+    window.dispatchEvent(
+      new CustomEvent("livetv:playback-error", {
+        detail: { streamId: ctx.streamId, kind: failurePanelReasonKind },
+      }),
+    )
+  } catch {}
 
   const panel = document.createElement("div")
   panel.dataset.playbackFailure = ""
