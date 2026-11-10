@@ -442,6 +442,8 @@ describe("playback chrome — mockup 2/3 (integration)", () => {
   });
 
   it("keeps the bottom hints legend out of fullscreen playback", () => {
-    expect(css).toContain('[data-livetv-mode="playback"] .rs-livetv-home__legend');
+    // The pill is the layout-level TvButtonHints nav, not the empty
+    // [data-livetv-legend] mount in the Live TV head.
+    expect(css).toContain('[data-livetv-mode="playback"] .rs-button-hints');
   });
 });

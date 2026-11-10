@@ -3480,7 +3480,11 @@ html[data-couch] .rs-livetv-play-topbar__clock {
 
 /* INTEGRATION 0.9.0 — no bottom hints legend over fullscreen
    playback (mockup 2/3): the OSD carries its own hint line, so
-   the app-wide legend pill would double it over the video. */
-html[data-couch][data-livetv-mode="playback"] .rs-livetv-home__legend {
+   the app-wide legend pill would double it over the video. The
+   pill is the layout-level <nav class="rs-button-hints">
+   (TvButtonHints in CouchLayout), NOT the empty
+   [data-livetv-legend] mount in the Live TV head — hiding the
+   mount alone leaves the pill visible. */
+html[data-couch][data-livetv-mode="playback"] .rs-button-hints {
   display: none;
 }
