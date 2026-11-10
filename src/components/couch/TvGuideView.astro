@@ -1,0 +1,1389 @@
+---
+// TvGuideView — the dedicated FULLSCREEN programme Guide (W3, Mode C).
+//
+// Mounts into W1's `#livetv-mode-guide` mount point on livetv.astro
+// (this component's root carries `data-livetv-guide-root`, NOT the
+// mount id, so there is exactly one `#livetv-mode-guide` in the DOM).
+// Replaces the old vertically stacked programme-description list
+// entirely: channel logos/names down the left, time across the top,
+// programmes as blocks positioned by start/end time.
+//
+// Data: cached channels (`readCachedLiveChannels`) + cached EPG
+// (`getProgrammesSync`) — the EPG engine is reused, never rewritten.
+// Both directions are virtualised: rows via `epgRowWindow`, time
+// columns via `epgTimeWindow`; only the selected category's rows are
+// ever built, never all 15,000 channels.
+//
+// Actions dispatch the shared Live TV events — the Guide never plays
+// anything itself:
+//   livetv:tune {channelId} + livetv:mode {mode:"playback"} — watch live
+//   livetv:programme {channelId, startMs} — catch-up replay / restart.
+//     startMs is the DISPLAY time, matching TvQuickSurf's dispatch;
+//     whoever plays it converts with displayedToUtcMs, as epg.ts does.
+//   livetv:mode {mode:"home"|"playback"} — leaving the Guide
+// While active the Guide sets html[data-livetv-mode="guide"] (the
+// same marker pattern TvPlaybackShell uses for "playback") so
+// gamepad.ts routes X / Y / LB / RB / Menu to the Guide instead of
+// Search / seek / Settings.
+// Catch-up is offered ONLY where `catchupActionForProgramme` says so.
+import TvProgrammeMeta from "./TvProgrammeMeta.astro";
+
+interface Props {
+  /** Active playlist id; resolved via getActiveEntry() when omitted. */
+  playlistId?: string;
+}
+const { playlistId = "" } = Astro.props;
+const nowMs = Date.now();
+---
+
+<section
+  class="rs-livetv-guide"
+  data-livetv-guide-root
+  data-playlist-id={playlistId}
+  aria-label="Programme guide"
+  hidden
+>
+  <!-- Toolbar: category, day nav, Jump to Now, back. No permanent
+       sidebar, no competing nav panels — the grid is the screen. -->
+  <div class="rs-livetv-guide__toolbar" role="toolbar" aria-label="Guide controls">
+    <button
+      type="button"
+      class="rs-livetv-guide__toolbtn"
+      data-guide-back
+      aria-label="Back from guide"
+    >
+      ← Back
+    </button>
+    <label class="rs-livetv-guide__catlabel">
+      <span class="rs-livetv-guide__catlabel-text">Category</span>
+      <select
+        class="rs-livetv-guide__select"
+        data-guide-category
+        aria-label="Channel category"
+      >
+        <option value="__all__">All categories</option>
+      </select>
+    </label>
+    <button
+      type="button"
+      class="rs-livetv-guide__toolbtn rs-livetv-guide__toolbtn--square"
+      data-guide-prev-day
+      aria-label="Previous day"
+    >
+      ‹
+    </button>
+    <span
+      class="rs-livetv-guide__daylabel"
+      data-guide-day-label
+      aria-live="polite"
+    >
+      Today
+    </span>
+    <button
+      type="button"
+      class="rs-livetv-guide__toolbtn rs-livetv-guide__toolbtn--square"
+      data-guide-next-day
+      aria-label="Next day"
+    >
+      ›
+    </button>
+    <button
+      type="button"
+      class="rs-livetv-guide__toolbtn"
+      data-guide-now
+    >
+      Now
+    </button>
+    <span class="rs-livetv-guide__hint" data-guide-hint>
+      LB / RB shifts time · N jumps to now
+    </span>
+  </div>
+
+  <!-- Timeline grid: sticky time header + virtualised rows. -->
+  <div
+    class="rs-livetv-guide__scroll"
+    data-guide-scroll
+    tabindex="-1"
+  >
+    <div class="rs-livetv-guide__track" data-guide-track>
+      <div class="rs-livetv-guide__head">
+        <div class="rs-livetv-guide__corner" aria-hidden="true"></div>
+        <div
+          class="rs-livetv-guide__timehead"
+          data-guide-timehead
+          aria-hidden="true"
+        ></div>
+      </div>
+      <div class="rs-livetv-guide__body" data-guide-body></div>
+      <div
+        class="rs-livetv-guide__nowline"
+        data-guide-nowline
+        aria-hidden="true"
+        hidden
+      ></div>
+    </div>
+  </div>
+
+  <!-- Contextual detail for the selected programme. The meta block
+       starts hidden (no fake times) and is filled by the script. -->
+  <div class="rs-livetv-guide__detail" data-guide-detail>
+    <p class="rs-livetv-guide__detail-empty" data-guide-detail-empty>
+      Select a programme in the grid to see details.
+    </p>
+    <div
+      class="rs-livetv-guide__detail-meta"
+      data-guide-detail-meta
+      hidden
+    >
+      <TvProgrammeMeta
+        title="Select a programme"
+        startMs={nowMs}
+        stopMs={nowMs + 3600000}
+        desc="Choose a programme in the grid to see details."
+        catchup
+      />
+    </div>
+    <div class="rs-livetv-guide__actions" data-guide-actions>
+      <button
+        type="button"
+        class="rs-livetv-guide__action"
+        data-guide-action-watch
+        hidden
+      >
+        Watch live
+      </button>
+      <button
+        type="button"
+        class="rs-livetv-guide__action rs-livetv-guide__action--catchup"
+        data-guide-action-catchup
+        hidden
+      >
+        Replay
+      </button>
+    </div>
+  </div>
+
+  <div
+    class="rs-livetv-guide__empty"
+    data-guide-empty
+    role="status"
+    hidden
+  >
+    <p data-guide-empty-text>Loading the programme guide…</p>
+  </div>
+</section>
+
+<style>
+  .rs-livetv-guide {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+    color: var(--rs-text);
+  }
+  .rs-livetv-guide[hidden] {
+    display: none;
+  }
+  .rs-livetv-guide__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+  .rs-livetv-guide__toolbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 3rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-bg-2);
+    color: var(--rs-text);
+    font-family: var(--rs-font-body);
+    font-size: 1.15rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__toolbtn:hover {
+    background: var(--rs-surface-2);
+  }
+  .rs-livetv-guide__toolbtn--square {
+    padding-inline: 0.7rem;
+  }
+  .rs-livetv-guide__toolbtn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .rs-livetv-guide__catlabel {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .rs-livetv-guide__catlabel-text {
+    color: var(--rs-text-2);
+    font-size: 1.15rem;
+    flex-shrink: 0;
+  }
+  .rs-livetv-guide__select {
+    min-height: 3rem;
+    max-width: 20rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-bg-2);
+    color: var(--rs-text);
+    font-family: var(--rs-font-body);
+    font-size: 1.15rem;
+  }
+  .rs-livetv-guide__daylabel {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--rs-text-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-inline: 0.25rem;
+  }
+  .rs-livetv-guide__hint {
+    margin-left: auto;
+    font-size: 1rem;
+    color: var(--rs-text-2);
+  }
+  .rs-livetv-guide__scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg) 18rem);
+    box-shadow: var(--rs-shadow);
+  }
+  .rs-livetv-guide__track {
+    position: relative;
+    min-width: max-content;
+  }
+  .rs-livetv-guide__head {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+  }
+  .rs-livetv-guide__corner {
+    position: sticky;
+    left: 0;
+    z-index: 31;
+    flex-shrink: 0;
+    width: 240px;
+    height: 40px;
+    background: var(--rs-surface);
+    border-right: 1px solid var(--rs-line);
+  }
+  .rs-livetv-guide__timehead {
+    position: relative;
+    flex-shrink: 0;
+    height: 40px;
+  }
+  .rs-livetv-guide__tick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    padding: 0.5rem 0 0 0.5rem;
+    border-left: 1px solid var(--rs-line);
+    font-size: 1.1rem;
+    color: var(--rs-text-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__body {
+    position: relative;
+  }
+  .rs-livetv-guide__row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--rs-line);
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4.75rem;
+  }
+  .rs-livetv-guide__channel {
+    position: sticky;
+    left: 0;
+    z-index: 10;
+    flex-shrink: 0;
+    width: 240px;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--rs-bg-2);
+    border-right: 1px solid var(--rs-line);
+    min-width: 0;
+  }
+  .rs-livetv-guide__channel--focused {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--rs-accent) 14%, transparent),
+      var(--rs-bg-2)
+    );
+    box-shadow: inset 3px 0 0 var(--rs-accent);
+  }
+  .rs-livetv-guide__logo {
+    width: 3rem;
+    height: 3rem;
+    object-fit: contain;
+    flex-shrink: 0;
+    border-radius: 0.5rem;
+    background: var(--rs-surface-2);
+  }
+  .rs-livetv-guide__logo--fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--rs-text);
+  }
+  .rs-livetv-guide__channel-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--rs-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__catchup-dot {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: color-mix(in srgb, var(--rs-accent) 25%, transparent);
+    color: var(--rs-focus);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 50%, transparent);
+  }
+  .rs-livetv-guide__cells {
+    position: relative;
+    flex-shrink: 0;
+  }
+  .rs-livetv-guide__cell {
+    position: absolute;
+    top: 0.375rem;
+    bottom: 0.375rem;
+    min-width: 2px;
+    padding: 0.4rem 0.6rem;
+    border: 1px solid var(--rs-line);
+    border-radius: 0.6rem;
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    font-family: var(--rs-font-body);
+    font-size: 1.1rem;
+    line-height: 1.25;
+    text-align: left;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .rs-livetv-guide__cell-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__cell-time {
+    display: block;
+    font-size: 0.95rem;
+    color: var(--rs-text-2);
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__cell--now {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--rs-accent) 26%, transparent),
+      color-mix(in srgb, var(--rs-focus) 12%, transparent)
+    );
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--rs-accent) 45%, transparent),
+      0 0 1.125rem 0.125rem color-mix(in srgb, var(--rs-accent) 22%, transparent);
+  }
+  .rs-livetv-guide__cell--past {
+    opacity: 0.62;
+  }
+  .rs-livetv-guide__cell--catchup::after {
+    content: "↺";
+    position: absolute;
+    top: 0.2rem;
+    right: 0.45rem;
+    font-size: 1rem;
+    color: var(--rs-focus);
+  }
+  .rs-livetv-guide__cell:focus-visible {
+    z-index: 5;
+    outline: none;
+    box-shadow:
+      0 0 0 2px var(--rs-focus),
+      0 0 2rem 0.25rem var(--rs-focus-glow);
+  }
+  .rs-livetv-guide__cell--selected {
+    box-shadow: 0 0 0 2px var(--rs-focus);
+  }
+  .rs-livetv-guide__nowline {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    z-index: 20;
+    background: var(--rs-accent);
+    box-shadow: 0 0 0.75rem 1px color-mix(in srgb, var(--rs-accent) 60%, transparent);
+    pointer-events: none;
+  }
+  .rs-livetv-guide__detail {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+    box-shadow: var(--rs-shadow);
+    padding: 1rem 1.5rem;
+    min-height: 5.5rem;
+  }
+  .rs-livetv-guide__detail-empty {
+    font-size: 1.2rem;
+    color: var(--rs-text-2);
+  }
+  .rs-livetv-guide__detail-meta {
+    flex: 1;
+    min-width: 0;
+  }
+  .rs-livetv-guide__actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-shrink: 0;
+  }
+  .rs-livetv-guide__action {
+    min-height: 3.25rem;
+    padding: 0.6rem 1.25rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-accent);
+    color: var(--rs-text);
+    font-family: var(--rs-font-body);
+    font-size: 1.2rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .rs-livetv-guide__action--catchup {
+    background: color-mix(in srgb, var(--rs-accent) 25%, transparent);
+    color: var(--rs-focus);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 50%, transparent);
+  }
+  .rs-livetv-guide__empty {
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+    box-shadow: var(--rs-shadow);
+    padding: 1.5rem 2rem;
+    font-size: 1.375rem;
+    color: var(--rs-text-2);
+  }
+  .rs-livetv-guide__empty[hidden] {
+    display: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rs-livetv-guide__cell:focus-visible,
+    .rs-livetv-guide__nowline {
+      box-shadow: none;
+    }
+    .rs-livetv-guide__cell:focus-visible {
+      box-shadow: 0 0 0 2px var(--rs-focus);
+    }
+  }
+</style>
+
+<script>
+  import {
+    enterGuide,
+    exitGuide,
+    guideProgrammeKey,
+    persistLivetvState,
+    restoreLivetvState,
+    startOfLocalDayMs,
+  } from "@/scripts/lib/livetv-state.ts";
+  import { livetvKeyActionForKey } from "@/scripts/lib/livetv-keys.ts";
+  import {
+    GUIDE_DAY_MS,
+    availableGuideDays,
+    guideCellViewModel,
+    jumpToNowWindow,
+    normaliseCategoryLabel,
+    programmesForGuideDay,
+    sanitiseGuideProgrammes,
+    stableGuideSelection,
+  } from "@/scripts/lib/livetv-guide.ts";
+  import {
+    catchupBadgeLabel,
+    epgCellGeometry,
+    epgRowWindow,
+    epgTimeRangeLabel,
+    epgTimeWindow,
+    programmeProgress,
+    programmeState,
+  } from "@/scripts/lib/couch-livetv-epg.ts";
+  import {
+    getProgrammesSync,
+    resolveTvgId,
+    shiftChannelProgrammes,
+    EPG_LOADED_EVENT,
+  } from "@/scripts/lib/epg-data.js";
+  import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.ts";
+  import { getActiveEntry } from "@/scripts/lib/creds.js";
+  import { hydrate as hydrateCache } from "@/scripts/lib/cache.js";
+  import {
+    getChannelEpgOverride,
+    getFavorites,
+    getRecents,
+  } from "@/scripts/lib/preferences.js";
+
+  const PX_PER_HOUR = 200;
+  const ROW_HEIGHT_PX = 76;
+  const CHANNEL_COL_PX = 240;
+  const HOUR_MS = 3600000;
+
+  const root = document.querySelector("[data-livetv-guide-root]");
+  if (root instanceof HTMLElement) {
+    const scrollEl = root.querySelector("[data-guide-scroll]");
+    const trackEl = root.querySelector("[data-guide-track]");
+    const timeheadEl = root.querySelector("[data-guide-timehead]");
+    const bodyEl = root.querySelector("[data-guide-body]");
+    const nowlineEl = root.querySelector("[data-guide-nowline]");
+    const dayLabelEl = root.querySelector("[data-guide-day-label]");
+    const categoryEl = root.querySelector("[data-guide-category]");
+    const emptyEl = root.querySelector("[data-guide-empty]");
+    const emptyTextEl = root.querySelector("[data-guide-empty-text]");
+    const detailEmptyEl = root.querySelector("[data-guide-detail-empty]");
+    const detailMetaEl = root.querySelector("[data-guide-detail-meta]");
+    const watchBtn = root.querySelector("[data-guide-action-watch]");
+    const catchupBtn = root.querySelector("[data-guide-action-catchup]");
+    const prevDayBtn = root.querySelector("[data-guide-prev-day]");
+    const nextDayBtn = root.querySelector("[data-guide-next-day]");
+
+    let liveState = restoreLivetvState();
+    let enteredFrom = "home";
+    let active = false;
+    let playlistId = root.dataset.playlistId || "";
+    /** @type {Array<any>} */
+    let allChannels = [];
+    /** @type {Map<string, any>} channel id (string) -> channel */
+    let channelsById = new Map();
+    /** @type {Map<string, Array<any>>} channel id -> sanitised day programmes */
+    let dayProgrammes = new Map();
+    /** @type {Array<any>} channels in the selected category, in source order */
+    let visibleChannels = [];
+    /** @type {Array<number>} available day starts */
+    let days = [];
+    let category = "__all__";
+    let viewStartMs = jumpToNowWindow(Date.now()).viewStartMs;
+    let selectedKey = liveState.guideProgrammeKey;
+    /** @type {{ channel: any, programme: any } | null} */
+    let selected = null;
+    let renderQueued = false;
+
+    const dayWidthPx = () => (GUIDE_DAY_MS / HOUR_MS) * PX_PER_HOUR;
+    const dayStartMs = () => startOfLocalDayMs(liveState.guideDateMs);
+
+    function dispatch(name, detail) {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+    }
+
+    function showEmpty(text) {
+      if (emptyTextEl) emptyTextEl.textContent = text;
+      if (emptyEl) emptyEl.hidden = false;
+    }
+    function hideEmpty() {
+      if (emptyEl) emptyEl.hidden = true;
+    }
+
+    async function resolvePlaylist() {
+      if (playlistId) return playlistId;
+      try {
+        const entry = await getActiveEntry();
+        if (entry && entry._id) playlistId = String(entry._id);
+      } catch {
+        playlistId = "";
+      }
+      return playlistId;
+    }
+
+    function loadChannels() {
+      allChannels = playlistId ? readCachedLiveChannels(playlistId) : [];
+      channelsById = new Map(
+        allChannels.map((channel) => [String(channel.id), channel]),
+      );
+    }
+
+    function loadProgrammesForDay() {
+      dayProgrammes = new Map();
+      const state = playlistId ? getProgrammesSync(playlistId) : null;
+      const programmes = state && state.programmes instanceof Map ? state.programmes : null;
+      const channelNames = state && state.channelNames instanceof Map ? state.channelNames : null;
+      if (!programmes) return;
+      const overrides = {};
+      for (const channel of allChannels) {
+        try {
+          const override = getChannelEpgOverride(playlistId, channel.id);
+          if (override) overrides[String(channel.id)] = override;
+        } catch {
+          // No override for this channel; resolution falls through.
+        }
+      }
+      for (const channel of allChannels) {
+        const tvgId = resolveTvgId(channel, overrides, programmes, channelNames);
+        if (!tvgId) continue;
+        const raw = programmes.get(String(tvgId).toLowerCase());
+        if (!raw) continue;
+        const shifted = shiftChannelProgrammes(raw, channel.tvgShift);
+        const cleaned = sanitiseGuideProgrammes(String(channel.id), shifted);
+        dayProgrammes.set(
+          String(channel.id),
+          programmesForGuideDay(cleaned, dayStartMs()),
+        );
+      }
+    }
+
+    function rebuildDays() {
+      const byChannel = new Map();
+      const state = playlistId ? getProgrammesSync(playlistId) : null;
+      const programmes = state && state.programmes instanceof Map ? state.programmes : null;
+      const channelNames = state && state.channelNames instanceof Map ? state.channelNames : null;
+      if (programmes) {
+        const overrides = {};
+        for (const channel of allChannels) {
+          try {
+            const override = getChannelEpgOverride(playlistId, channel.id);
+            if (override) overrides[String(channel.id)] = override;
+          } catch {
+            // Ignore.
+          }
+        }
+        for (const channel of allChannels) {
+          const tvgId = resolveTvgId(channel, overrides, programmes, channelNames);
+          if (!tvgId) continue;
+          const raw = programmes.get(String(tvgId).toLowerCase());
+          if (!raw) continue;
+          byChannel.set(
+            String(channel.id),
+            sanitiseGuideProgrammes(
+              String(channel.id),
+              shiftChannelProgrammes(raw, channel.tvgShift),
+            ),
+          );
+        }
+      }
+      days = availableGuideDays(byChannel);
+    }
+
+    function categories() {
+      const seen = new Map();
+      for (const channel of allChannels) {
+        const raw = (channel.category || "").toString();
+        if (!raw.trim()) continue;
+        if (!seen.has(raw)) seen.set(raw, normaliseCategoryLabel(raw));
+      }
+      return [...seen.entries()].map(([value, label]) => ({ value, label }));
+    }
+
+    function applyCategoryFilter() {
+      if (category === "__all__") return allChannels;
+      if (category === "__favorites__") {
+        let favs = new Set();
+        try {
+          favs = getFavorites(playlistId, "live");
+        } catch {
+          favs = new Set();
+        }
+        return allChannels.filter((channel) => favs.has(channel.id));
+      }
+      if (category === "__recents__") {
+        let recents = [];
+        try {
+          recents = getRecents(playlistId, "live");
+        } catch {
+          recents = [];
+        }
+        const byId = new Map(allChannels.map((channel) => [channel.id, channel]));
+        const out = [];
+        for (const recent of recents) {
+          const channel = byId.get(recent.id);
+          if (channel) out.push(channel);
+        }
+        return out;
+      }
+      return allChannels.filter((channel) => (channel.category || "") === category);
+    }
+
+    function rebuildCategoryOptions() {
+      if (!(categoryEl instanceof HTMLSelectElement)) return;
+      const current = categoryEl.value || category;
+      categoryEl.innerHTML = "";
+      const add = (value, label) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        categoryEl.appendChild(option);
+      };
+      add("__all__", "All categories");
+      add("__favorites__", "Favourites");
+      add("__recents__", "Recently watched");
+      for (const { value, label } of categories()) add(value, label);
+      categoryEl.value = [...categoryEl.options].some((o) => o.value === current)
+        ? current
+        : "__all__";
+      category = categoryEl.value;
+    }
+
+    function formatDayLabel(dayMs) {
+      const today = startOfLocalDayMs(Date.now());
+      if (dayMs === today) return "Today";
+      if (dayMs === today + GUIDE_DAY_MS) return "Tomorrow";
+      if (dayMs === today - GUIDE_DAY_MS) return "Yesterday";
+      return new Date(dayMs).toLocaleDateString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+      });
+    }
+
+    function renderTimeHeader() {
+      if (!(timeheadEl instanceof HTMLElement)) return;
+      const start = dayStartMs();
+      timeheadEl.style.width = `${dayWidthPx()}px`;
+      let html = "";
+      for (let hour = 0; hour < 24; hour++) {
+        const tickMs = start + hour * HOUR_MS;
+        const label = new Date(tickMs).toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        });
+        html += `<span class="rs-livetv-guide__tick" style="left:${hour * PX_PER_HOUR}px">${label}</span>`;
+      }
+      timeheadEl.innerHTML = html;
+    }
+
+    function channelHasCatchup(channel) {
+      if (!channel) return false;
+      return Boolean(
+        Number(channel.tvArchive) === 1 || channel.catchup || channel.catchupSource,
+      );
+    }
+
+    function programmeAt(channelId, startMs) {
+      const list = dayProgrammes.get(String(channelId)) || [];
+      return list.find((p) => p.startMs === startMs) || null;
+    }
+
+    function renderRows() {
+      if (!(bodyEl instanceof HTMLElement) || !(scrollEl instanceof HTMLElement)) return;
+      const viewportHeight = scrollEl.clientHeight || 600;
+      const viewportWidth = scrollEl.clientWidth || 1200;
+      const scrollTop = scrollEl.scrollTop;
+      const scrollLeft = scrollEl.scrollLeft;
+      const viewStart = dayStartMs() + (scrollLeft / PX_PER_HOUR) * HOUR_MS;
+      const viewEnd = dayStartMs() + ((scrollLeft + viewportWidth) / PX_PER_HOUR) * HOUR_MS;
+      const windowRows = epgRowWindow({
+        totalRows: visibleChannels.length,
+        rowHeightPx: ROW_HEIGHT_PX,
+        scrollTopPx: scrollTop,
+        viewportHeightPx: viewportHeight,
+      });
+      bodyEl.style.height = `${visibleChannels.length * ROW_HEIGHT_PX}px`;
+      let html = "";
+      for (let row = windowRows.startRow; row <= windowRows.endRow; row++) {
+        const channel = visibleChannels[row];
+        if (!channel) continue;
+        const channelId = String(channel.id);
+        const list = dayProgrammes.get(channelId) || [];
+        const timeWindow = epgTimeWindow({
+          programmes: list,
+          viewStartMs: viewStart,
+          viewEndMs: viewEnd,
+        });
+        const nowMs = Date.now();
+        let cells = "";
+        for (let i = timeWindow.startIndex; i < timeWindow.endIndex; i++) {
+          const programme = list[i];
+          if (!programme) continue;
+          const geom = epgCellGeometry({
+            startMs: programme.startMs,
+            stopMs: programme.stopMs,
+            viewStartMs: dayStartMs(),
+            pxPerHour: PX_PER_HOUR,
+            trackWidthPx: dayWidthPx(),
+          });
+          const vm = guideCellViewModel(programme, channel, nowMs);
+          const key = vm.key;
+          const timeLabel = epgTimeRangeLabel(programme.startMs, programme.stopMs);
+          const classes = [
+            "rs-livetv-guide__cell",
+            vm.state === "now" ? "rs-livetv-guide__cell--now" : "",
+            vm.state === "past" ? "rs-livetv-guide__cell--past" : "",
+            vm.canCatchup ? "rs-livetv-guide__cell--catchup" : "",
+            key === selectedKey ? "rs-livetv-guide__cell--selected" : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const title = programme.title.replace(/"/g, "&quot;");
+          cells +=
+            `<button type="button" class="${classes}" data-guide-cell ` +
+            `data-focus-key="guide:programme:${key}" data-channel-id="${channelId}" ` +
+            `data-start-ms="${programme.startMs}" data-state="${vm.state}" ` +
+            `data-catchup="${vm.catchupAction}" title="${title}" ` +
+            `style="left:${geom.leftPx}px;width:${geom.widthPx}px" aria-label="${title}, ${timeLabel}">` +
+            `<span class="rs-livetv-guide__cell-title">${escapeHtml(programme.title)}</span>` +
+            `<span class="rs-livetv-guide__cell-time">${timeLabel}</span>` +
+            `</button>`;
+        }
+        const logo = channel.logo ? String(channel.logo) : "";
+        const initial = (channel.name || "?").trim().charAt(0).toUpperCase();
+        const channelCell =
+          `<div class="rs-livetv-guide__channel" data-guide-channel="${channelId}">` +
+          (logo
+            ? `<img class="rs-livetv-guide__logo" src="${escapeAttr(logo)}" alt="" loading="lazy" />`
+            : `<span class="rs-livetv-guide__logo rs-livetv-guide__logo--fallback" aria-hidden="true">${escapeHtml(initial)}</span>`) +
+          `<span class="rs-livetv-guide__channel-name">${escapeHtml(channel.displayName || channel.name || "")}</span>` +
+          (channelHasCatchup(channel)
+            ? `<span class="rs-livetv-guide__catchup-dot">Catch-up</span>`
+            : "") +
+          `</div>`;
+        html +=
+          `<div class="rs-livetv-guide__row" style="top:${row * ROW_HEIGHT_PX}px;height:${ROW_HEIGHT_PX}px">` +
+          channelCell +
+          `<div class="rs-livetv-guide__cells" style="width:${dayWidthPx()}px">${cells}</div>` +
+          `</div>`;
+      }
+      bodyEl.innerHTML = html;
+      // Now-line (today only).
+      if (nowlineEl instanceof HTMLElement) {
+        const now = Date.now();
+        const day = dayStartMs();
+        if (now >= day && now < day + GUIDE_DAY_MS) {
+          const x = CHANNEL_COL_PX + ((now - day) / HOUR_MS) * PX_PER_HOUR;
+          nowlineEl.style.left = `${x}px`;
+          nowlineEl.hidden = false;
+        } else {
+          nowlineEl.hidden = true;
+        }
+      }
+      // Focused row highlight follows the focused cell.
+      const focused = bodyEl.querySelector(".rs-livetv-guide__cell:focus-visible");
+      if (focused) markFocusedRow(focused);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/"/g, "&quot;");
+    }
+
+    function markFocusedRow(cell) {
+      const row = cell.closest(".rs-livetv-guide__row");
+      if (!row) return;
+      bodyEl
+        .querySelectorAll(".rs-livetv-guide__channel--focused")
+        .forEach((el) => el.classList.remove("rs-livetv-guide__channel--focused"));
+      const channelCell = row.querySelector(".rs-livetv-guide__channel");
+      if (channelCell) channelCell.classList.add("rs-livetv-guide__channel--focused");
+    }
+
+    function queueRender() {
+      if (renderQueued) return;
+      renderQueued = true;
+      requestAnimationFrame(() => {
+        renderQueued = false;
+        renderRows();
+      });
+    }
+
+    function updateDayControls() {
+      if (dayLabelEl) dayLabelEl.textContent = formatDayLabel(dayStartMs());
+      const idx = days.indexOf(dayStartMs());
+      if (prevDayBtn instanceof HTMLButtonElement) {
+        prevDayBtn.disabled = idx <= 0;
+      }
+      if (nextDayBtn instanceof HTMLButtonElement) {
+        nextDayBtn.disabled = idx === -1 || idx >= days.length - 1;
+      }
+    }
+
+    function selectProgramme(channelId, startMs, { focus = false } = {}) {
+      const programme = programmeAt(channelId, startMs);
+      const channel = channelsById.get(String(channelId)) || null;
+      if (!programme || !channel) {
+        selected = null;
+        return;
+      }
+      selected = { channel, programme };
+      selectedKey = guideProgrammeKey(String(channelId), startMs);
+      liveState = {
+        ...liveState,
+        guideChannelId: String(channelId),
+        guideProgrammeKey: selectedKey,
+      };
+      updateDetail();
+      bodyEl
+        .querySelectorAll(".rs-livetv-guide__cell--selected")
+        .forEach((el) => el.classList.remove("rs-livetv-guide__cell--selected"));
+      const cell = bodyEl.querySelector(
+        `[data-guide-cell][data-channel-id="${CSS.escape(String(channelId))}"][data-start-ms="${startMs}"]`,
+      );
+      if (cell) {
+        cell.classList.add("rs-livetv-guide__cell--selected");
+        markFocusedRow(cell);
+        if (focus) cell.focus({ preventScroll: true });
+      }
+    }
+
+    function updateDetail() {
+      if (!selected) {
+        if (detailEmptyEl) detailEmptyEl.hidden = false;
+        if (detailMetaEl) detailMetaEl.hidden = true;
+        if (watchBtn instanceof HTMLElement) watchBtn.hidden = true;
+        if (catchupBtn instanceof HTMLElement) catchupBtn.hidden = true;
+        return;
+      }
+      const { channel, programme } = selected;
+      const nowMs = Date.now();
+      const vm = guideCellViewModel(programme, channel, nowMs);
+      if (detailEmptyEl) detailEmptyEl.hidden = true;
+      if (detailMetaEl) detailMetaEl.hidden = false;
+      const meta = root.querySelector("[data-programme-meta]");
+      if (meta) {
+        const titleEl = meta.querySelector(".rs-livetv-programme-meta__title");
+        if (titleEl) {
+          titleEl.textContent = "";
+          if (vm.state === "now") {
+            const live = document.createElement("span");
+            live.className = "rs-livetv-programme-meta__live";
+            live.textContent = "LIVE";
+            titleEl.appendChild(live);
+            titleEl.appendChild(document.createTextNode(" "));
+          }
+          titleEl.appendChild(document.createTextNode(programme.title));
+        }
+        const timeEl = meta.querySelector(".rs-livetv-programme-meta__time");
+        if (timeEl) {
+          timeEl.textContent = epgTimeRangeLabel(programme.startMs, programme.stopMs);
+        }
+        const descEl = meta.querySelector(".rs-livetv-programme-meta__desc");
+        if (descEl) {
+          const desc = programme.desc || "";
+          descEl.textContent = desc;
+          descEl.hidden = desc.length === 0;
+        }
+        const catchupEl = meta.querySelector(".rs-livetv-programme-meta__catchup");
+        if (catchupEl) {
+          const label = catchupBadgeLabel(vm.catchupAction);
+          catchupEl.textContent =
+            vm.catchupAction === "watch-from-start"
+              ? "Restart from start available"
+              : "Catch-up available";
+          catchupEl.hidden = label === null;
+        }
+        const progressEl = meta.querySelector(".rs-livetv-programme-meta__progress > span");
+        if (progressEl instanceof HTMLElement) {
+          progressEl.style.width = `${Math.round(programmeProgress(programme.startMs, programme.stopMs, nowMs) * 100)}%`;
+        }
+      }
+      if (watchBtn instanceof HTMLElement) {
+        watchBtn.hidden = !vm.watchLive;
+      }
+      if (catchupBtn instanceof HTMLElement) {
+        catchupBtn.hidden = !vm.canCatchup;
+        catchupBtn.textContent =
+          vm.catchupAction === "replay" ? "Replay" : "Restart from start";
+      }
+    }
+
+    function activateSelected() {
+      if (!selected) return;
+      const { channel, programme } = selected;
+      const vm = guideCellViewModel(programme, channel, Date.now());
+      const channelId = String(channel.id);
+      if (vm.state === "now" && vm.catchupAction !== "watch-from-start") {
+        tuneToChannel(channelId);
+        return;
+      }
+      if (vm.canCatchup) {
+        // Display time, matching TvQuickSurf's livetv:programme
+        // dispatch; the player converts with displayedToUtcMs.
+        dispatch("livetv:programme", { channelId, startMs: programme.startMs });
+        return;
+      }
+      if (vm.state === "now") tuneToChannel(channelId);
+    }
+
+    function tuneToChannel(channelId) {
+      dispatch("livetv:tune", { channelId });
+      dispatch("livetv:mode", { mode: "playback" });
+    }
+
+    function goToDay(dayMs, { jumpNow = false } = {}) {
+      liveState = { ...liveState, guideDateMs: startOfLocalDayMs(dayMs) };
+      persistLivetvState(liveState);
+      loadProgrammesForDay();
+      renderTimeHeader();
+      updateDayControls();
+      if (jumpNow) {
+        const { viewStartMs: start } = jumpToNowWindow(Date.now());
+        viewStartMs = start;
+      }
+      const all = [...dayProgrammes.values()].flat();
+      selectedKey = stableGuideSelection(selectedKey, all, Date.now());
+      renderRows();
+      scrollToViewStart();
+      restoreSelectionFocus();
+    }
+
+    function scrollToViewStart() {
+      if (!(scrollEl instanceof HTMLElement)) return;
+      const day = dayStartMs();
+      scrollEl.scrollLeft = Math.max(
+        0,
+        ((viewStartMs - day) / HOUR_MS) * PX_PER_HOUR,
+      );
+    }
+
+    function restoreSelectionFocus() {
+      if (!selectedKey) return;
+      const [channelId, startRaw] = selectedKey.split("@");
+      const startMs = Number(startRaw);
+      if (!channelId || !Number.isFinite(startMs)) return;
+      selectProgramme(channelId, startMs, { focus: true });
+      const cell = bodyEl.querySelector(
+        `[data-guide-cell][data-channel-id="${CSS.escape(channelId)}"][data-start-ms="${startMs}"]`,
+      );
+      if (cell instanceof HTMLElement) {
+        cell.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    }
+
+    function jumpToNow() {
+      const today = startOfLocalDayMs(Date.now());
+      if (dayStartMs() !== today) {
+        goToDay(today, { jumpNow: true });
+        return;
+      }
+      const { viewStartMs: start } = jumpToNowWindow(Date.now());
+      viewStartMs = start;
+      scrollToViewStart();
+      queueRender();
+      const list = dayProgrammes.get(String(liveState.guideChannelId || "")) || [];
+      const current = list.find(
+        (p) => programmeState(p.startMs, p.stopMs, Date.now()) === "now",
+      );
+      if (current) selectProgramme(current.channelId, current.startMs, { focus: true });
+    }
+
+    function shiftTime(deltaHours) {
+      const day = dayStartMs();
+      const next = viewStartMs + deltaHours * HOUR_MS;
+      const min = day;
+      const max = day + GUIDE_DAY_MS - 6 * HOUR_MS;
+      viewStartMs = Math.max(min, Math.min(max, next));
+      scrollToViewStart();
+      queueRender();
+    }
+
+    function moveFocus(direction) {
+      const activeEl = document.activeElement;
+      if (!(activeEl instanceof HTMLElement)) return false;
+      const cell = activeEl.closest("[data-guide-cell]");
+      if (!cell) return false;
+      const channelId = cell.dataset.channelId || "";
+      const startMs = Number(cell.dataset.startMs);
+      const rowIndex = visibleChannels.findIndex(
+        (c) => String(c.id) === String(channelId),
+      );
+      if (rowIndex === -1) return false;
+      const list = dayProgrammes.get(String(channelId)) || [];
+      const idx = list.findIndex((p) => p.startMs === startMs);
+      let target = null;
+      if (direction === "move-left" && idx > 0) {
+        target = { channelId, startMs: list[idx - 1].startMs };
+      } else if (direction === "move-right" && idx >= 0 && idx < list.length - 1) {
+        target = { channelId, startMs: list[idx + 1].startMs };
+      } else if (direction === "move-up" || direction === "move-down") {
+        const nextRow = direction === "move-up" ? rowIndex - 1 : rowIndex + 1;
+        const nextChannel = visibleChannels[nextRow];
+        if (!nextChannel) return false;
+        const nextList = dayProgrammes.get(String(nextChannel.id)) || [];
+        const sameTime =
+          nextList.find((p) => p.startMs <= startMs && p.stopMs > startMs) ||
+          nextList.find((p) => p.startMs >= startMs) ||
+          nextList[nextList.length - 1];
+        if (sameTime) {
+          target = { channelId: String(nextChannel.id), startMs: sameTime.startMs };
+        }
+      }
+      if (!target) return false;
+      // Make sure the target row + cell are rendered, then focus it.
+      const targetRow = visibleChannels.findIndex(
+        (c) => String(c.id) === String(target.channelId),
+      );
+      if (scrollEl instanceof HTMLElement) {
+        const top = targetRow * ROW_HEIGHT_PX;
+        if (top < scrollEl.scrollTop || top + ROW_HEIGHT_PX > scrollEl.scrollTop + scrollEl.clientHeight) {
+          scrollEl.scrollTop = Math.max(0, top - ROW_HEIGHT_PX);
+        }
+      }
+      renderRows();
+      const el = bodyEl.querySelector(
+        `[data-guide-cell][data-channel-id="${CSS.escape(target.channelId)}"][data-start-ms="${target.startMs}"]`,
+      );
+      if (el instanceof HTMLElement) {
+        el.focus({ preventScroll: true });
+        el.scrollIntoView({ block: "nearest", inline: "nearest" });
+        return true;
+      }
+      return false;
+    }
+
+    function leaveGuide() {
+      const returnTo = enteredFrom === "playback" ? "playback" : "home";
+      liveState = exitGuide(liveState, returnTo);
+      persistLivetvState(liveState);
+      active = false;
+      root.hidden = true;
+      if (document.documentElement.dataset.livetvMode === "guide") {
+        delete document.documentElement.dataset.livetvMode;
+      }
+      dispatch("livetv:mode", { mode: returnTo });
+      const key = liveState.returnFocusKey;
+      if (key) {
+        const target = document.querySelector(
+          `[data-focus-key="${CSS.escape(key)}"]`,
+        );
+        if (target instanceof HTMLElement) {
+          target.focus({ preventScroll: true });
+          return;
+        }
+      }
+      const fallback = document.querySelector(
+        '[data-couch-nav] [data-nylah-item]',
+      );
+      if (fallback instanceof HTMLElement) fallback.focus({ preventScroll: true });
+    }
+
+    async function activate() {
+      if (active) return;
+      const persisted = restoreLivetvState();
+      enteredFrom = persisted.mode === "playback" ? "playback" : "home";
+      const invokerKey =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement.getAttribute("data-focus-key")
+          : null;
+      liveState = enterGuide(persisted, invokerKey);
+      persistLivetvState(liveState);
+      active = true;
+      root.hidden = false;
+      // Mode marker for gamepad.ts (same pattern as the playback
+      // shell's "playback"): routes X / Y / LB / RB / Menu to the
+      // Guide while it is on screen. TvPlaybackShell only clears the
+      // marker when it reads "playback", so neither side clobbers
+      // the other.
+      document.documentElement.dataset.livetvMode = "guide";
+      await resolvePlaylist();
+      if (!playlistId) {
+        showEmpty("No playlist selected — open Live TV first to pick a playlist.");
+        return;
+      }
+      try {
+        await hydrateCache(playlistId, "live");
+      } catch {
+        // Cache hydration is best-effort; cached rows may already exist.
+      }
+      loadChannels();
+      if (allChannels.length === 0) {
+        showEmpty("No channels cached yet — open Live TV first so the channel list loads.");
+        return;
+      }
+      hideEmpty();
+      rebuildCategoryOptions();
+      rebuildDays();
+      loadProgrammesForDay();
+      visibleChannels = applyCategoryFilter();
+      renderTimeHeader();
+      updateDayControls();
+      const all = [...dayProgrammes.values()].flat();
+      selectedKey =
+        stableGuideSelection(
+          liveState.guideProgrammeKey || selectedKey,
+          all,
+          Date.now(),
+        ) || selectedKey;
+      if (selectedKey) {
+        const [channelId, startRaw] = selectedKey.split("@");
+        selectProgramme(channelId, Number(startRaw));
+      }
+      renderRows();
+      scrollToViewStart();
+      restoreSelectionFocus();
+    }
+
+    function deactivate() {
+      if (!active) return;
+      active = false;
+      root.hidden = true;
+      if (document.documentElement.dataset.livetvMode === "guide") {
+        delete document.documentElement.dataset.livetvMode;
+      }
+    }
+
+    // ── Events ────────────────────────────────────────────────
+    root.addEventListener("focusin", (event) => {
+      const cell = event.target.closest("[data-guide-cell]");
+      if (!(cell instanceof HTMLElement)) return;
+      selectProgramme(cell.dataset.channelId || "", Number(cell.dataset.startMs));
+    });
+    root.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const cell = target.closest("[data-guide-cell]");
+      if (cell instanceof HTMLElement) {
+        selectProgramme(cell.dataset.channelId || "", Number(cell.dataset.startMs));
+        activateSelected();
+        return;
+      }
+      if (target.closest("[data-guide-back]")) {
+        leaveGuide();
+        return;
+      }
+      if (target.closest("[data-guide-now]")) {
+        jumpToNow();
+        return;
+      }
+      if (target.closest("[data-guide-prev-day]")) {
+        const idx = days.indexOf(dayStartMs());
+        if (idx > 0) goToDay(days[idx - 1]);
+        return;
+      }
+      if (target.closest("[data-guide-next-day]")) {
+        const idx = days.indexOf(dayStartMs());
+        if (idx >= 0 && idx < days.length - 1) goToDay(days[idx + 1]);
+        return;
+      }
+      if (target.closest("[data-guide-action-watch]") && selected) {
+        tuneToChannel(String(selected.channel.id));
+        return;
+      }
+      if (target.closest("[data-guide-action-catchup]") && selected) {
+        dispatch("livetv:programme", {
+          channelId: String(selected.channel.id),
+          startMs: selected.programme.startMs,
+        });
+      }
+    });
+    if (categoryEl instanceof HTMLSelectElement) {
+      categoryEl.addEventListener("change", () => {
+        category = categoryEl.value;
+        visibleChannels = applyCategoryFilter();
+        if (scrollEl instanceof HTMLElement) scrollEl.scrollTop = 0;
+        loadProgrammesForDay();
+        renderRows();
+      });
+    }
+    if (scrollEl instanceof HTMLElement) {
+      scrollEl.addEventListener("scroll", queueRender, { passive: true });
+    }
+    root.addEventListener("keydown", (event) => {
+      const action = livetvKeyActionForKey("guide", event.key);
+      if (!action) return;
+      const cell = document.activeElement?.closest?.("[data-guide-cell]");
+      if (action === "back") {
+        event.preventDefault();
+        leaveGuide();
+        return;
+      }
+      if (action === "jump-to-now") {
+        event.preventDefault();
+        jumpToNow();
+        return;
+      }
+      if (action === "time-prev") {
+        event.preventDefault();
+        shiftTime(-6);
+        return;
+      }
+      if (action === "time-next") {
+        event.preventDefault();
+        shiftTime(6);
+        return;
+      }
+      if (action === "guide-actions") {
+        event.preventDefault();
+        if (categoryEl instanceof HTMLElement) categoryEl.focus();
+        return;
+      }
+      if (action.startsWith("move-")) {
+        if (!cell) return;
+        event.preventDefault();
+        moveFocus(action);
+      }
+      // "select" falls through to the native button click (Enter/Space).
+    });
+    window.addEventListener("livetv:mode", (event) => {
+      const mode = event.detail?.mode;
+      if (mode === "guide") {
+        void activate();
+      } else if (mode === "home" || mode === "playback") {
+        deactivate();
+      }
+    });
+    document.addEventListener(EPG_LOADED_EVENT, () => {
+      if (!active) return;
+      const previous = selectedKey;
+      rebuildDays();
+      loadProgrammesForDay();
+      visibleChannels = applyCategoryFilter();
+      const all = [...dayProgrammes.values()].flat();
+      selectedKey = stableGuideSelection(previous, all, Date.now());
+      if (selectedKey) {
+        const [channelId, startRaw] = selectedKey.split("@");
+        selectProgramme(channelId, Number(startRaw));
+      }
+      renderRows();
+    });
+
+    // Deep link / reload: ?mode=guide or a persisted guide mode.
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("mode") === "guide" || restoreLivetvState().mode === "guide") {
+      void activate();
+    } else {
+      // Pre-warm the guide data so first activation is instant.
+      void resolvePlaylist().then(() => {
+        if (!playlistId) return;
+        loadChannels();
+      });
+    }
+  }
+</script>

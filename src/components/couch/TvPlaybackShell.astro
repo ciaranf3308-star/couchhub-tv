@@ -1,0 +1,480 @@
+---
+// TvPlaybackShell — fullscreen Live TV playback shell (W2).
+//
+// Mounts into W1's `#livetv-mode-playback` mount point. It does NOT
+// own the video: the existing `#player` element / wrap stays owned
+// by stream.ts + player-runtime.ts (mountPlayer). On mount this
+// shell only *detects* whether a player session is already running
+// (a <video> / video.js / artplayer node inside #player) and never
+// re-initialises it — switching home ↔ playback never restarts the
+// stream. Video fills the screen while this shell is active via the
+// `html[data-livetv-mode="playback"] #player-wrap` rule in
+// couch.css: no permanent burgundy panel, borders, or page chrome
+// around it. During normal playback ALL application controls are
+// hidden; mouse movement or a relevant controller button reveals
+// the OSD (TvOsd, auto-hiding lower third).
+//
+// Events (shared contracts): listens for `livetv:tune
+// {channelId}`, `livetv:mode {mode}`, `livetv:overlay {overlay}`,
+// `livetv:playback-error {streamId, kind}` (dispatched by the
+// stream.ts seam). Tunes go through the engine seam only — this
+// shell never builds a stream URL.
+//
+// Error state: on `livetv:playback-error` the shell shows a
+// polished overlay (TvEmpty) with Retry / Previous channel /
+// Live TV Home. A failed tune leaves the previous working stream
+// playing where possible — the overlay sits over the still-playing
+// video, it never blanks the player.
+import TvOsd from "./TvOsd.astro";
+import TvQuickSurf from "./TvQuickSurf.astro";
+import TvEmpty from "./TvEmpty.astro";
+---
+
+<section
+  id="livetv-mode-playback"
+  class="rs-livetv-play-shell"
+  data-livetv-playback
+  data-tuned-channel-id=""
+  data-previous-channel-id=""
+  data-player-session="unknown"
+  data-hidden="true"
+  hidden
+  aria-label="Live TV playback"
+>
+  <TvOsd />
+  <TvQuickSurf />
+
+  <!-- Options overlay (Menu). Transport lives in the engine; these
+       buttons dispatch the same synthetic keys / events as the OSD. -->
+  <div
+    class="rs-livetv-play-options"
+    data-livetv-options
+    data-hidden="true"
+    role="dialog"
+    aria-label="Playback options"
+    hidden
+  >
+    <div class="rs-livetv-play-options__panel">
+      <h2 class="rs-livetv-play-options__title">Playback options</h2>
+      <p class="rs-livetv-play-options__note">
+        Live TV has no seek. Audio and subtitle tracks are chosen on
+        the player control bar for the current stream.
+      </p>
+      <div class="rs-livetv-play-options__actions">
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-key=" " data-focus-key="livetv-options-pause">Pause / resume</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-key="m" data-focus-key="livetv-options-mute">Mute / unmute</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-key="f" data-focus-key="livetv-options-fullscreen">Fullscreen</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="guide" data-focus-key="livetv-options-guide">Full Guide (X)</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="browser" data-focus-key="livetv-options-browser">Channel Browser (Y)</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="home" data-focus-key="livetv-options-home">Live TV Home</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="close" data-focus-key="livetv-options-close">Close (B)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stream-failure overlay. Sits over the still-playing previous
+       stream where one exists; never blanks the player. -->
+  <div
+    class="rs-livetv-play-error"
+    data-livetv-error
+    data-error-key=""
+    data-hidden="true"
+    role="alert"
+    hidden
+  >
+    <div class="rs-livetv-play-error__panel">
+      <TvEmpty
+        title="This channel isn't playing right now"
+        message="Your previous channel keeps playing underneath. Try this channel again, or go back to it."
+        art="player"
+      />
+      <div class="rs-livetv-play-error__actions">
+        <button type="button" class="rs-livetv-play-osd__btn" data-error-action="retry" data-focus-key="livetv-error-retry">Retry channel</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-error-action="previous" data-focus-key="livetv-error-previous">Previous channel</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-error-action="home" data-focus-key="livetv-error-home">Live TV Home</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Channel Browser placeholder slot (W1 contract). W1's browser
+       mounts `[data-livetv-browser]`; until it does, a
+       `livetv:overlay {overlay:"browser"}` request with no browser
+       mounted shows this note instead of failing silently. -->
+  <div class="rs-livetv-play-browser-note" data-livetv-browser-slot data-hidden="true" hidden>
+    <p>Channel Browser is not mounted yet — it arrives with the Live TV Home integration (W1).</p>
+    <button type="button" class="rs-livetv-play-osd__btn" data-browser-note-action="close" data-focus-key="livetv-browser-note-close">Close</button>
+  </div>
+</section>
+
+<script>
+  import {
+    OSD_AUTO_HIDE_MS,
+    errorKeyForFailureKind,
+    previousChannelTarget,
+    retryTarget,
+    streamToKeepOnFailure,
+    tuneToChannel,
+    windowPlaybackEngine,
+  } from "@/scripts/lib/livetv-playback";
+  import {
+    loadLivetvChannels,
+    loadLivetvProgrammes,
+    nowNextForChannel,
+    activeLivetvPlaylistId,
+    type LivetvChannel,
+  } from "@/scripts/lib/livetv-data";
+  import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
+  import { getFavorites } from "@/scripts/lib/preferences.js";
+
+  const shell = document.querySelector<HTMLElement>("[data-livetv-playback]");
+  if (shell && !shell.dataset.playArmed) {
+    shell.dataset.playArmed = "1";
+    let channels: LivetvChannel[] = [];
+    let programmes: Map<string, any> = new Map();
+    let playlistId = "";
+    let dataLoaded = false;
+    let tunedId: string | number | null = null;
+    let previousId: string | number | null = null;
+    let lastWorkingId: string | number | null = null;
+    let failedId: string | number | null = null;
+    let returnFocusKey: string | null = null;
+
+    // Detect (never create) the player session: if stream.ts already
+    // mounted a player inside #player, mode switches must not
+    // restart it. This shell never calls mountPlayer.
+    const detectSession = () => {
+      const player = document.querySelector("#player");
+      const running = !!player?.querySelector(
+        "video, .video-js, .art-video-player, .artplayer, .shaka-video-container",
+      );
+      shell.dataset.playerSession = running ? "running" : "none";
+      return running;
+    };
+    detectSession();
+
+    const osd = shell.querySelector<HTMLElement>("[data-livetv-osd]");
+    const optionsEl = shell.querySelector<HTMLElement>("[data-livetv-options]");
+    const errorEl = shell.querySelector<HTMLElement>("[data-livetv-error]");
+    const browserSlot = shell.querySelector<HTMLElement>("[data-livetv-browser-slot]");
+
+    const showOsd = () => {
+      window.dispatchEvent(new CustomEvent("couch-osd:show"));
+    };
+
+    const isPlaybackActive = () =>
+      document.documentElement.dataset.livetvMode === "playback";
+
+    const overlayOpen = () => {
+      const qs = document.querySelector<HTMLElement>("[data-livetv-quicksurf]");
+      if (qs && !qs.hidden) return "quicksurf";
+      if (optionsEl && !optionsEl.hidden) return "options";
+      if (browserSlot && !browserSlot.hidden) return "browser-note";
+      if (errorEl && !errorEl.hidden) return "error";
+      return "none";
+    };
+
+    const closeOptions = () => {
+      if (!optionsEl) return;
+      optionsEl.hidden = true;
+      optionsEl.dataset.hidden = "true";
+      restoreFocus();
+    };
+
+    const openOptions = () => {
+      if (!optionsEl) return;
+      rememberFocus();
+      optionsEl.hidden = false;
+      optionsEl.dataset.hidden = "false";
+      window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }));
+      const first = optionsEl.querySelector<HTMLElement>("[data-focus-key]");
+      first?.focus?.({ preventScroll: true });
+    };
+
+    const rememberFocus = () => {
+      const active = document.activeElement as HTMLElement | null;
+      returnFocusKey = active?.dataset?.focusKey ?? null;
+    };
+
+    const restoreFocus = () => {
+      if (!returnFocusKey) return;
+      const el = document.querySelector<HTMLElement>(
+        `[data-focus-key="${returnFocusKey}"]`,
+      );
+      el?.focus?.({ preventScroll: true });
+      returnFocusKey = null;
+    };
+
+    const ensureData = async () => {
+      if (dataLoaded) return;
+      dataLoaded = true;
+      try {
+        playlistId = await activeLivetvPlaylistId();
+        channels = await loadLivetvChannels();
+        programmes = await loadLivetvProgrammes();
+      } catch {
+        channels = [];
+        programmes = new Map();
+      }
+    };
+
+    const paintOsd = () => {
+      if (!osd) return;
+      const channel = channels.find((c) => String(c.id) === String(tunedId)) ?? null;
+      const setText = (sel: string, text: string) => {
+        const el = osd.querySelector<HTMLElement>(sel);
+        if (el) el.textContent = text;
+      };
+      setText("[data-osd-channel-name]", channel ? channel.displayName || channel.name || "" : "");
+      setText("[data-osd-chno]", channel?.chno != null ? String(channel.chno) : "");
+      let isFav = false;
+      try {
+        isFav = !!playlistId && !!channel && getFavorites(playlistId, "live").has(Number(channel.id));
+      } catch {}
+      const favEl = osd.querySelector<HTMLElement>("[data-osd-fav]");
+      if (favEl) favEl.hidden = !isFav;
+      if (channel) {
+        const nn = nowNextForChannel(channel, programmes, playlistId);
+        setText("[data-osd-now-title]", nn.current?.title ?? "");
+        const timeEl = osd.querySelector<HTMLElement>("[data-osd-now-time]");
+        if (timeEl && nn.current) {
+          const fmt = (ms: number) =>
+            new Date(ms).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" });
+          timeEl.textContent = `${fmt(nn.current.start)}–${fmt(nn.current.stop)}`;
+        } else if (timeEl) {
+          timeEl.textContent = "";
+        }
+        setText("[data-osd-next-title]", nn.next?.title ? `Up next: ${nn.next.title}` : "");
+        const bar = osd.querySelector<HTMLElement>("[data-osd-progress]");
+        if (bar && nn.current) {
+          bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
+        }
+        const logoSlot = osd.querySelector<HTMLElement>("[data-osd-logo]");
+        if (logoSlot && channel.logo) {
+          logoSlot.innerHTML = "";
+          const img = document.createElement("img");
+          img.src = channel.logo;
+          img.alt = "";
+          logoSlot.appendChild(img);
+        }
+      } else {
+        setText("[data-osd-now-title]", "");
+        setText("[data-osd-next-title]", "");
+      }
+    };
+
+    const showError = (streamId: string | number | null, kind: string | null) => {
+      if (!errorEl) return;
+      failedId = streamId;
+      errorEl.dataset.errorKey = errorKeyForFailureKind(kind);
+      errorEl.hidden = false;
+      errorEl.dataset.hidden = "false";
+      const retryBtn = errorEl.querySelector<HTMLElement>("[data-error-action='retry']");
+      // No retry target (nothing ever played) -> hide Retry, Home is the way out.
+      if (retryBtn) retryBtn.hidden = retryTarget(failedId, lastWorkingId) === null;
+      const prevBtn = errorEl.querySelector<HTMLElement>("[data-error-action='previous']");
+      if (prevBtn) prevBtn.hidden = previousChannelTarget(tunedId, previousId) === null;
+      retryBtn?.focus?.({ preventScroll: true });
+    };
+
+    const hideError = () => {
+      if (!errorEl) return;
+      errorEl.hidden = true;
+      errorEl.dataset.hidden = "true";
+    };
+
+    const setMode = (mode: string) => {
+      if (mode === "playback") {
+        shell.hidden = false;
+        shell.dataset.hidden = "false";
+        document.documentElement.dataset.livetvMode = "playback";
+        detectSession();
+        void ensureData().then(() => {
+          paintOsd();
+          showOsd();
+        });
+      } else {
+        shell.hidden = true;
+        shell.dataset.hidden = "true";
+        if (document.documentElement.dataset.livetvMode === "playback") {
+          delete document.documentElement.dataset.livetvMode;
+        }
+        hideError();
+        closeOptions();
+      }
+    };
+
+    // ── Events ──────────────────────────────────────────────────
+    window.addEventListener("livetv:mode", (ev) => {
+      setMode((ev as CustomEvent).detail?.mode ?? "home");
+    });
+
+    window.addEventListener("livetv:tune", async (ev) => {
+      const channelId = (ev as CustomEvent).detail?.channelId;
+      if (channelId === undefined || channelId === null) return;
+      if (tunedId !== null && String(tunedId) !== String(channelId)) {
+        previousId = tunedId;
+      }
+      tunedId = channelId;
+      shell.dataset.tunedChannelId = String(channelId);
+      shell.dataset.previousChannelId = previousId !== null ? String(previousId) : "";
+      hideError();
+      await ensureData();
+      paintOsd();
+      showOsd();
+    });
+
+    window.addEventListener("livetv:playback-error", (ev) => {
+      const detail = (ev as CustomEvent).detail ?? {};
+      // Keep the previous working stream: it stays tuned underneath
+      // the error overlay; only a failed tune of the *current*
+      // channel leaves nothing to keep.
+      const keep = streamToKeepOnFailure(detail.streamId ?? null, tunedId);
+      if (keep !== null) lastWorkingId = keep;
+      else if (tunedId !== null && detail.streamId === tunedId) lastWorkingId = null;
+      showError(detail.streamId ?? null, detail.kind ?? null);
+    });
+
+    window.addEventListener("livetv:overlay", (ev) => {
+      const overlay = (ev as CustomEvent).detail?.overlay;
+      if (overlay === "options") {
+        if (optionsEl?.hidden) openOptions();
+      } else if (overlay === "none") {
+        closeOptions();
+      } else if (overlay === "browser") {
+        // W1's Channel Browser mounts [data-livetv-browser]. If it
+        // is not on the page yet, show the placeholder slot so the
+        // request fails visibly instead of silently.
+        if (!document.querySelector("[data-livetv-browser]")) {
+          if (browserSlot) {
+            browserSlot.hidden = false;
+            browserSlot.dataset.hidden = "false";
+          }
+        }
+      }
+    });
+
+    // Mouse movement reveals the OSD; the OSD hides itself after
+    // OSD_AUTO_HIDE_MS of inactivity.
+    let lastMouseShow = 0;
+    window.addEventListener("pointermove", () => {
+      if (!isPlaybackActive()) return;
+      const now = Date.now();
+      if (now - lastMouseShow < 500) return;
+      lastMouseShow = now;
+      showOsd();
+    }, { passive: true });
+
+    // Controller / keyboard in the playback context. Gamepad buttons
+    // arrive as synthetic keys (gamepad.ts); View+Menu 2s
+    // return-home is untouched (owned by gamepad.ts).
+    window.addEventListener("keydown", (ev) => {
+      if (!isPlaybackActive()) return;
+      if (ev.defaultPrevented) return; // an overlay already handled it
+      if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement) return;
+      const key = ev.key;
+      if (key === "Escape") {
+        // B: close overlay first, then return to Live Home.
+        if (overlayOpen() !== "none") {
+          if (overlayOpen() === "options") closeOptions();
+          return;
+        }
+        if (osd && osd.dataset.hidden === "false") {
+          osd.dataset.hidden = "true";
+          return;
+        }
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        return;
+      }
+      if (key === "Enter") {
+        // A with nothing focused / no overlay: reveal the OSD.
+        const target = ev.target as HTMLElement | null;
+        if (target && target.closest("button, a, [data-livetv-quicksurf], [data-livetv-options]")) return;
+        if (overlayOpen() === "none") {
+          ev.preventDefault();
+          showOsd();
+        }
+        return;
+      }
+      if (key === "x" || key === "X") {
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        return;
+      }
+      if (key === "y" || key === "Y") {
+        window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
+        return;
+      }
+      if (key === "g" || key === "G") {
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        return;
+      }
+      if (key === "c" || key === "C") {
+        window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
+        return;
+      }
+      if (key === "v" || key === "V") {
+        // Favourites live in the Channel Browser (W1); open it.
+        window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
+        return;
+      }
+      if (key === "h" || key === "H") {
+        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+      }
+    });
+
+    // Options + error + browser-note buttons.
+    shell.addEventListener("click", (ev) => {
+      const target = ev.target as HTMLElement | null;
+      const keyBtn = target?.closest?.("[data-play-key]") as HTMLElement | null;
+      if (keyBtn) {
+        document.dispatchEvent(
+          new KeyboardEvent("keydown", { key: keyBtn.dataset.playKey ?? "", bubbles: true, cancelable: true }),
+        );
+        return;
+      }
+      const actionBtn = target?.closest?.("[data-play-action]") as HTMLElement | null;
+      if (actionBtn) {
+        const action = actionBtn.dataset.playAction;
+        if (action === "guide") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        else if (action === "browser") window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
+        else if (action === "home") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        else if (action === "close") closeOptions();
+        return;
+      }
+      const errorBtn = target?.closest?.("[data-error-action]") as HTMLElement | null;
+      if (errorBtn) {
+        const action = errorBtn.dataset.errorAction;
+        if (action === "retry") {
+          const targetId = retryTarget(failedId, lastWorkingId);
+          if (targetId !== null) tuneToChannel(windowPlaybackEngine, targetId);
+        } else if (action === "previous") {
+          const prev = previousChannelTarget(tunedId, previousId);
+          if (prev !== null) tuneToChannel(windowPlaybackEngine, prev);
+        } else if (action === "home") {
+          window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        }
+        return;
+      }
+      const noteBtn = target?.closest?.("[data-browser-note-action]") as HTMLElement | null;
+      if (noteBtn && browserSlot) {
+        browserSlot.hidden = true;
+        browserSlot.dataset.hidden = "true";
+      }
+    });
+
+    // Restore focus when returning from playback (couch-focus key
+    // carried in sessionStorage by the W3 state module when present).
+    try {
+      const raw = sessionStorage.getItem("redsilk:livetv:state");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.returnFocusKey) {
+        document
+          .querySelector<HTMLElement>(`[data-focus-key="${parsed.returnFocusKey}"]`)
+          ?.focus?.({ preventScroll: true });
+      }
+    } catch {}
+
+    // Keep the named constant referenced so the auto-hide value stays
+    // a single source of truth with TvOsd.
+    void OSD_AUTO_HIDE_MS;
+  }
+</script>

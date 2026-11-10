@@ -1,0 +1,37 @@
+---
+// TvProgrammeMeta — programme title / time / description (W1 contract, local copy).
+//
+// NOTE (W2): W1's canonical file was not on this branch when W2 was
+// built; this is a local copy to the EXACT contract props. Integration
+// keeps W1's canonical version and deletes this duplicate.
+import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+
+interface Props {
+  title: string;
+  startMs: number;
+  stopMs: number;
+  desc?: string;
+  catchup?: boolean;
+  live?: boolean;
+}
+const { title, startMs, stopMs, desc, catchup, live } = Astro.props;
+const progress = programmeProgress(startMs, stopMs);
+const range = epgTimeRangeLabel(startMs, stopMs, "en-IE");
+---
+
+<div class="rs-livetv-programme-meta" data-programme-meta>
+  <p class="rs-livetv-programme-meta__title">
+    {live && <span class="rs-livetv-programme-meta__live">LIVE</span>}
+    {title}
+  </p>
+  <p class="rs-livetv-programme-meta__time">{range}</p>
+  {
+    desc && <p class="rs-livetv-programme-meta__desc">{desc}</p>
+  }
+  {
+    catchup && <p class="rs-livetv-programme-meta__catchup">Catch-up available</p>
+  }
+  <span class="rs-livetv-programme-meta__progress" aria-hidden="true">
+    <span style={`width: ${Math.round(progress * 100)}%`} />
+  </span>
+</div>

@@ -159,6 +159,32 @@ function inPlayerContext(): boolean {
 // "details" and A stays "play / resume". Only acts when stripping the
 // autoplay param actually changes the destination (movie / series
 // detail links); live channels and plain buttons are left alone.
+// W2: RedSilk fullscreen Live TV playback owns X / Y / Menu while
+// it is the thing on screen (html[data-livetv-mode="playback"]).
+// Without this the generic player branch below would swallow X as
+// play/pause, Y as fullscreen, and Menu as a navigation away to
+// Settings — killing the stream. In playback mode X/Y are dispatched
+// as keys for the playback shell (X guide, Y channel browser) and
+// Menu opens the playback options overlay; View+Menu 2s
+// return-home above is untouched.
+function livetvPlaybackActive(): boolean {
+  return document.documentElement.dataset.livetvMode === "playback";
+}
+
+// W3: the full programme Guide owns X / Y / LB / RB / Menu while it
+// is the thing on screen (html[data-livetv-mode="guide"], set by
+// TvGuideView on activation). Without this the generic branches below
+// would swallow Y as a navigation to Search, LB/RB as a 10s seek and
+// Menu as a navigation to Settings — none of which the Guide wants.
+// In guide mode the buttons are dispatched as keys for the Guide's
+// own keydown handler (Y guide actions, LB/RB time nav, Menu guide
+// actions); X is deliberately swallowed (unmapped in the Guide, per
+// the livetv-keys.ts table). View+Menu 2s return-home above is
+// untouched.
+function livetvGuideActive(): boolean {
+  return document.documentElement.dataset.livetvMode === "guide";
+}
+
 function openDetailsOfFocused(): void {
   const el = document.activeElement as HTMLElement | null;
   const link = el?.closest?.("a[href]") as HTMLAnchorElement | null;
@@ -531,26 +557,35 @@ export function mountGamepad(): void {
     }
     if (justPressed(BTN_X) && findOpenModal() === null) {
       markGamepadActive();
-      // Player keeps play / pause; browsing opens the card's details.
-      // Suppressed while a modal is open: the page behind the dialog
-      // receives no navigation input at all (v0.2.1).
-      if (inPlayerContext()) togglePlayPause();
+      // W3: X is unmapped in the Guide — swallow it.
+      if (livetvGuideActive()) {
+        // No-op by design.
+      } else if (livetvPlaybackActive()) {
+        dispatchKey("x");
+      } else if (inPlayerContext()) togglePlayPause();
       else openDetailsOfFocused();
     }
     if (justPressed(BTN_Y) && findOpenModal() === null) {
       markGamepadActive();
-      // Player keeps the fullscreen toggle; browsing opens search.
-      // Suppressed while a modal is open, as above.
-      if (inPlayerContext()) toggleFullscreen();
+      // W3: in the Guide Y is guide actions (Guide key "y").
+      if (livetvGuideActive()) {
+        dispatchKey("y");
+      } else if (livetvPlaybackActive()) {
+        dispatchKey("y");
+      } else if (inPlayerContext()) toggleFullscreen();
       else goSearch();
     }
     if (justPressed(BTN_LB)) {
       markGamepadActive();
-      seekBy(-10);
+      // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
+      if (livetvGuideActive()) dispatchKey("PageUp");
+      else seekBy(-10);
     }
     if (justPressed(BTN_RB)) {
       markGamepadActive();
-      seekBy(10);
+      // W3: in the Guide RB shifts time later (Guide key "PageDown").
+      if (livetvGuideActive()) dispatchKey("PageDown");
+      else seekBy(10);
     }
     if (justPressed(BTN_LT)) {
       markGamepadActive();
@@ -566,7 +601,19 @@ export function mountGamepad(): void {
       findOpenModal() === null
     ) {
       markGamepadActive();
-      openSettings();
+      // W3: in the Guide Menu is guide actions (Guide key "ContextMenu").
+      if (livetvGuideActive()) {
+        dispatchKey("ContextMenu");
+      } else if (livetvPlaybackActive()) {
+        // W2: in RedSilk Live TV playback Menu opens the playback
+        // options overlay instead of navigating to Settings (which
+        // would leave the stream).
+        window.dispatchEvent(
+          new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
+        );
+      } else {
+        openSettings();
+      }
     }
   }
 

@@ -148,6 +148,73 @@ export function epgRowWindow(input: EpgRowWindowInput): GridWindow {
   });
 }
 
+// ── EPG time-column windowing (horizontal virtualisation) ───────
+
+export interface EpgTimeWindowInput {
+  /**
+   * Programmes of ONE channel row, sorted by start ascending
+   * (sanitiseGuideProgrammes in livetv-guide.ts guarantees this).
+   * Only `startMs` / `stopMs` are read.
+   */
+  programmes: ReadonlyArray<{ startMs: number; stopMs: number }>;
+  /** Left edge of the visible time window (ms epoch). */
+  viewStartMs: number;
+  /** Right edge of the visible time window (ms epoch). */
+  viewEndMs: number;
+  /** Extra programmes rendered either side of the window. Default 1. */
+  overscanItems?: number;
+}
+
+export interface EpgTimeWindow {
+  /** First rendered programme index (inclusive). */
+  startIndex: number;
+  /** Last rendered programme index (exclusive). */
+  endIndex: number;
+  /** Total programmes in the row. */
+  total: number;
+}
+
+/**
+ * Which programmes of a row to render for a visible time window.
+ * Binary search (the row is sorted by start): the first programme
+ * whose stop is after the window's left edge, through the last whose
+ * start is before the window's right edge, plus overscan. A row with
+ * a thousand programmes across a day only ever builds the handful
+ * overlapping the visible 6-hour window — the horizontal partner of
+ * epgRowWindow's vertical windowing.
+ */
+export function epgTimeWindow(input: EpgTimeWindowInput): EpgTimeWindow {
+  const list = input.programmes;
+  const total = list.length;
+  if (total === 0 || !(input.viewEndMs > input.viewStartMs)) {
+    return { startIndex: 0, endIndex: 0, total };
+  }
+  const overscan = Math.max(0, Math.floor(input.overscanItems ?? 1));
+  // First index with stopMs > viewStartMs.
+  let lo = 0;
+  let hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (list[mid]!.stopMs <= input.viewStartMs) lo = mid + 1;
+    else hi = mid;
+  }
+  const first = lo;
+  // First index with startMs >= viewEndMs.
+  lo = first;
+  hi = total;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (list[mid]!.startMs < input.viewEndMs) lo = mid + 1;
+    else hi = mid;
+  }
+  const last = lo;
+  return {
+    startIndex: Math.max(0, first - overscan),
+    endIndex: Math.min(total, last + overscan),
+    total,
+  };
+}
+
 // ── Channel selection ───────────────────────────────────────────
 
 export interface ChannelIdentity {
@@ -231,6 +298,19 @@ export function catchupActionForProgramme(
   if (state === "past") return "replay";
   if (state === "now") return "watch-from-start";
   return "none";
+}
+
+/**
+ * Display badge for a catch-up action. "replay" -> "Catch-up",
+ * "watch-from-start" -> "Restart", anything else -> null (no badge:
+ * never show a catch-up badge where no catch-up exists).
+ */
+export function catchupBadgeLabel(
+  action: CatchupAction,
+): "Catch-up" | "Restart" | null {
+  if (action === "replay") return "Catch-up";
+  if (action === "watch-from-start") return "Restart";
+  return null;
 }
 
 // ── Live OSD action table ───────────────────────────────────────
