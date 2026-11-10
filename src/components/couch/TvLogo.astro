@@ -1,0 +1,144 @@
+---
+// TvLogo — NylahBox Studios brand lockup (W6 branding).
+//
+// The wordmark is LIVE TEXT ("NylahBox Studios"), never baked into an
+// image, so the spelling is guaranteed at every size. The pixel-art mark
+// is the transparent PNG at /brand/nylahbox-mark.png (burgundy retro TV,
+// glowing rose play triangle).
+//
+// Props:
+//   variant: "lockup" (default — mark + live-text wordmark)
+//            | "mark" (mark image only)
+//            | "wordmark" (live text only)
+//            | "lockup-image" (baked PNG lockup, /brand/nylahbox-lockup.png
+//            — dark-background splash/login use only; the wordmark in it
+//            was visually verified as "NylahBox Studios").
+//   size: "nav" (default — top nav, matches .rs-brand 28px)
+//         | "splash" (splash / login, large)
+//         | "about" (Settings About) | "loader" (loading screens).
+//   class: extra class on the wrapper.
+interface Props {
+  variant?: "mark" | "lockup" | "wordmark" | "lockup-image";
+  size?: "nav" | "splash" | "about" | "loader";
+  class?: string;
+}
+const { variant = "lockup", size = "nav", class: className } = Astro.props;
+const markSrc = "/brand/nylahbox-mark.png";
+const lockupSrc = "/brand/nylahbox-lockup.png";
+---
+
+{
+  variant === "mark" ? (
+    <img
+      class={`tv-logo__mark ${className ?? ""}`}
+      data-tv-logo-size={size}
+      src={markSrc}
+      alt="NylahBox Studios"
+      decoding="async"
+    />
+  ) : variant === "wordmark" ? (
+    <span class={`tv-logo__word ${className ?? ""}`} data-tv-logo-size={size}>
+      NylahBox <em>Studios</em>
+    </span>
+  ) : variant === "lockup-image" ? (
+    <img
+      class={`tv-logo__lockup-img ${className ?? ""}`}
+      data-tv-logo-size={size}
+      src={lockupSrc}
+      alt="NylahBox Studios"
+      decoding="async"
+    />
+  ) : (
+    <span class={`tv-logo ${className ?? ""}`} data-tv-logo-size={size}>
+      <img
+        class="tv-logo__mark"
+        src={markSrc}
+        alt=""
+        aria-hidden="true"
+        decoding="async"
+      />
+      <span class="tv-logo__word">
+        NylahBox <em>Studios</em>
+      </span>
+    </span>
+  )
+}
+
+<style>
+  .tv-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6em;
+    font-family: var(--rs-font-display, Georgia, "Times New Roman", serif);
+    line-height: 1;
+    color: inherit;
+    white-space: nowrap;
+  }
+  .tv-logo__mark {
+    width: auto;
+    image-rendering: pixelated;
+    flex: none;
+  }
+  .tv-logo__word {
+    font-family: var(--rs-font-display, Georgia, "Times New Roman", serif);
+    line-height: 1;
+    white-space: nowrap;
+    color: inherit;
+  }
+  .tv-logo__word em {
+    font-style: normal;
+    color: var(--rs-focus, #e5a6bd);
+  }
+  .tv-logo__lockup-img {
+    width: auto;
+    max-width: 100%;
+  }
+  /* nav — matches .rs-brand (28px display type) */
+  [data-tv-logo-size="nav"] .tv-logo__mark,
+  .tv-logo__mark[data-tv-logo-size="nav"] {
+    height: 2rem;
+  }
+  [data-tv-logo-size="nav"].tv-logo__word,
+  [data-tv-logo-size="nav"] .tv-logo__word {
+    font-size: 1.75rem;
+  }
+  .tv-logo__lockup-img[data-tv-logo-size="nav"] {
+    height: 2rem;
+  }
+  /* splash / login — large */
+  [data-tv-logo-size="splash"] .tv-logo__mark,
+  .tv-logo__mark[data-tv-logo-size="splash"] {
+    height: 7rem;
+  }
+  [data-tv-logo-size="splash"].tv-logo__word,
+  [data-tv-logo-size="splash"] .tv-logo__word {
+    font-size: 3.75rem;
+  }
+  .tv-logo__lockup-img[data-tv-logo-size="splash"] {
+    height: 7rem;
+  }
+  /* Settings About */
+  [data-tv-logo-size="about"] .tv-logo__mark,
+  .tv-logo__mark[data-tv-logo-size="about"] {
+    height: 3.5rem;
+  }
+  [data-tv-logo-size="about"].tv-logo__word,
+  [data-tv-logo-size="about"] .tv-logo__word {
+    font-size: 2.25rem;
+  }
+  .tv-logo__lockup-img[data-tv-logo-size="about"] {
+    height: 3.5rem;
+  }
+  /* loader */
+  [data-tv-logo-size="loader"] .tv-logo__mark,
+  .tv-logo__mark[data-tv-logo-size="loader"] {
+    height: 4.5rem;
+  }
+  [data-tv-logo-size="loader"].tv-logo__word,
+  [data-tv-logo-size="loader"] .tv-logo__word {
+    font-size: 2.5rem;
+  }
+  .tv-logo__lockup-img[data-tv-logo-size="loader"] {
+    height: 4.5rem;
+  }
+</style>

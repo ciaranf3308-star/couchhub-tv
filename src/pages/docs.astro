@@ -23,6 +23,19 @@ import Layout from "@/layouts/Layout.astro"
     ></iframe>
   </main>
 
+  <!-- W6 branding — GPL attribution (the only user-facing place the
+       upstream name appears). NylahBox Studios is a fork of upstream
+       Extreme InfiniTV; the GPL requires this credit to stay. -->
+  <footer class="xt-docs-legal">
+    <p>
+      NylahBox Studios is based on
+      <a href="https://github.com/infinitel8p/Extreme-InfiniTV" target="_blank" rel="noopener">Extreme InfiniTV</a>
+      by infinitel8p (Ludovico Ferrara), &copy; 2025, licensed under the
+      <a href="https://www.gnu.org/licenses/gpl-3.0.html" target="_blank" rel="noopener">GNU General Public License v3.0 or later</a>.
+      No IPTV subscription is included.
+    </p>
+  </footer>
+
   <script is:inline>
     (() => {
       const DOCS_BASE = "https://infinitel8p.github.io/Extreme-InfiniTV"
@@ -103,6 +116,17 @@ import Layout from "@/layouts/Layout.astro"
 <style>
   #xt-docs-frame {
     color-scheme: light dark;
+  }
+  .xt-docs-legal {
+    padding: 0.75rem 1rem 1rem;
+    border-top: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--fg-3, #8a7a82);
+  }
+  .xt-docs-legal a {
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
   .xt-docs-skeleton {
     animation: xt-docs-skeleton-pulse 1.6s ease-in-out infinite;
