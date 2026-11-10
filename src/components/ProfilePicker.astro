@@ -16,6 +16,7 @@
 ---
 <div
   data-profile-picker
+  data-nylah-dialog
   hidden
   class="nylah-picker-overlay"
   role="dialog"
@@ -167,10 +168,24 @@
     observeSharedActivity,
     SHOW_PROFILE_PICKER_EVENT,
   } from "@/scripts/lib/profiles.ts"
+  import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 
   const overlay = document.querySelector<HTMLElement>("[data-profile-picker]")
   if (overlay) {
     const DISMISSED_KEY = "nylah_profile_picker_dismissed_v1"
+
+    // Trap keyboard + gamepad navigation inside the picker while it is
+    // open (v0.2.1): registers a self-only spatial-nav section for the
+    // picker's buttons and suspends the page behind it. Without this,
+    // arrows move focus through the home rails behind the overlay —
+    // the picker is a plain <div>, not a <dialog>, so nothing else
+    // traps it. The gamepad layer (gamepad.ts) additionally refuses
+    // to run its rail model while any modal is open.
+    const pickerNav = attachPopoverSpatialNav({
+      id: "nylah-profile-picker-section",
+      selector: "[data-profile-picker] button:not([disabled])",
+      defaultElement: "[data-profile-picker] [data-profile-pick]",
+    })
 
     function dismissedThisSession() {
       try {
@@ -182,6 +197,7 @@
 
     function show(focusFirst) {
       overlay.hidden = false
+      pickerNav.open()
       if (focusFirst) {
         const first = overlay.querySelector<HTMLElement>("[data-profile-pick]")
         if (first) first.focus()
@@ -189,6 +205,7 @@
     }
 
     function hide() {
+      pickerNav.close()
       overlay.hidden = true
     }
 

@@ -1,6 +1,7 @@
 // Keyboard-shortcut help overlay. Press `?` (Shift+/) anywhere to open it.
 
 import { t } from "@/scripts/lib/i18n.js"
+import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 
 const DIALOG_ID = "xt-keyboard-help"
 
@@ -143,6 +144,13 @@ function buildDialog(): HTMLDialogElement {
     "</div>"
 
   document.body.appendChild(dlg)
+
+  // Trap keyboard + gamepad navigation inside the help dialog while it
+  // is open (v0.2.1): same leak as the profile picker — without a
+  // registered section, arrows move focus through the page behind it.
+  attachDialogSpatialNav(dlg, {
+    defaultElement: `#${DIALOG_ID} [data-close]`,
+  })
 
   dlg.addEventListener("click", (event) => {
     const target = event.target as HTMLElement

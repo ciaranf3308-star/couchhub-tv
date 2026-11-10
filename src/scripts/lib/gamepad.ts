@@ -39,11 +39,22 @@
 //   - While a text field is focused, navigation keys are left to the
 //     field (only B / View+Menu keep working, so the user can always
 //     blur out and return home).
+//   - While a modal dialog is open, directions / A / B belong to the
+//     dialog only (see modalFocusTarget below); X / Y / Menu do
+//     nothing, so the page behind the dialog receives no navigation
+//     input at all. Seek / volume keep working — they are media
+//     controls, not navigation — and View+Menu return-home stays
+//     available as the global escape hatch.
 //   - The poll loop runs on requestAnimationFrame and stops entirely
 //     while the window is hidden, so a minimised/hidden app costs nothing.
 //   - No double activation: synthetic keyboard events are only produced
 //     from gamepad edges, and physical keyboard events take their own
 //     path — one press, one action, from either device.
+
+import {
+  findOpenModal,
+  firstFocusableInModal,
+} from "@/scripts/lib/dialog-spatial-nav.js";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -98,6 +109,13 @@ function currentVideo(): HTMLVideoElement | null {
 }
 
 function activateFocused(): void {
+  // While a modal is open, A must never activate something behind
+  // it: pull stray focus into the dialog instead.
+  const pull = modalFocusTarget();
+  if (pull) {
+    pull.focus({ preventScroll: true });
+    return;
+  }
   const el = document.activeElement as HTMLElement | null;
   if (!el || el === document.body) {
     dispatchKey("Enter");
@@ -164,6 +182,29 @@ function openDetailsOfFocused(): void {
 function goSearch(): void {
   if (window.location.pathname === "/search") return;
   window.location.assign("/search");
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Modal dialogs own navigation while open (v0.2.1).
+//
+// The rail model below must never run while a modal is open: it would
+// carry focus into the page behind the dialog. Spatial navigation is
+// restricted to the dialog's own section (see dialog-spatial-nav.ts),
+// so arrows dispatched while a dialog is open stay inside it — for
+// keyboard and for gamepad alike. modalFocusTarget() is the testable
+// half of that contract: when a modal is open and focus is outside it,
+// it names the element focus must be pulled to instead; it returns
+// null when navigation may proceed normally (no modal open, or focus
+// already inside the open modal).
+// ──────────────────────────────────────────────────────────────────────
+
+/** Element focus must be pulled to when a modal is open and focus is outside it, else null. */
+export function modalFocusTarget(): HTMLElement | null {
+  const modal = findOpenModal();
+  if (!modal) return null;
+  const active = document.activeElement as HTMLElement | null;
+  if (active && modal.contains(active)) return null;
+  return firstFocusableInModal(modal);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -372,6 +413,21 @@ export function mountGamepad(): void {
 
   function move(dir: Direction): void {
     markGamepadActive();
+    // A modal dialog owns all navigation while it is open (v0.2.1):
+    // never run the rail model — it would carry focus into the page
+    // behind the dialog. If focus never landed in the dialog (or
+    // escaped it), pull it onto the dialog's first item and consume
+    // the press; otherwise the arrow goes to spatial navigation,
+    // which is restricted to the dialog's own section.
+    if (findOpenModal()) {
+      const pull = modalFocusTarget();
+      if (pull) {
+        pull.focus({ preventScroll: true });
+        return;
+      }
+      dispatchKey(ARROW_KEY[dir]);
+      return;
+    }
     // Home rails get the rail-aware model; everything else falls
     // through to plain arrow keys into spatial navigation.
     if (handleRailDirection(dir)) return;
@@ -473,15 +529,18 @@ export function mountGamepad(): void {
       markGamepadActive();
       dispatchKey("Escape");
     }
-    if (justPressed(BTN_X)) {
+    if (justPressed(BTN_X) && findOpenModal() === null) {
       markGamepadActive();
       // Player keeps play / pause; browsing opens the card's details.
+      // Suppressed while a modal is open: the page behind the dialog
+      // receives no navigation input at all (v0.2.1).
       if (inPlayerContext()) togglePlayPause();
       else openDetailsOfFocused();
     }
-    if (justPressed(BTN_Y)) {
+    if (justPressed(BTN_Y) && findOpenModal() === null) {
       markGamepadActive();
       // Player keeps the fullscreen toggle; browsing opens search.
+      // Suppressed while a modal is open, as above.
       if (inPlayerContext()) toggleFullscreen();
       else goSearch();
     }
@@ -501,7 +560,11 @@ export function mountGamepad(): void {
       markGamepadActive();
       adjustVolume(0.1);
     }
-    if (justPressed(BTN_MENU) && !menuPressedWithView) {
+    if (
+      justPressed(BTN_MENU) &&
+      !menuPressedWithView &&
+      findOpenModal() === null
+    ) {
       markGamepadActive();
       openSettings();
     }
