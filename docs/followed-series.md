@@ -64,8 +64,8 @@ The TV exe accepts:
 Examples:
 
 ```
-"C:\Program Files\Nylah Studios\couchhub-tv.exe" --open-series 42
-"C:\Program Files\Nylah Studios\couchhub-tv.exe" --open-series 42 --episode 2:3
+"%LOCALAPPDATA%\CouchHub TV\couchhub-tv.exe" --open-series 42
+"%LOCALAPPDATA%\CouchHub TV\couchhub-tv.exe" --open-series 42 --episode 2:3
 ```
 
 - `seriesId` is the opaque provider series id. `--episode` is optional;
