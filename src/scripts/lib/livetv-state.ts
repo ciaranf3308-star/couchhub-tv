@@ -1,10 +1,11 @@
-// RedSilk Couch — Live TV state model (W3, canonical owner).
+// RedSilk Couch — Live TV state model (W5, canonical owner, 0.9.0).
 //
-// ONE coherent model for the Live TV Home / playback / Guide modes.
-// Pure and DOM-free: every transition takes a state and returns a NEW
-// state (inputs are never mutated), so the model is fully unit-testable
-// and W1 (Home) / W2 (playback) / W3 (Guide) all code against this
-// exact API instead of each keeping their own copy of "which channel".
+// ONE coherent model for the Live TV landing / browser / playback /
+// Guide modes. Pure and DOM-free: every transition takes a state and
+// returns a NEW state (inputs are never mutated), so the model is
+// fully unit-testable and W1 (Landing) / W2 (Browser) / W3
+// (Playback+Quick Surf) / W4 (Guide) all code against this exact API
+// instead of each keeping their own copy of "which channel".
 //
 // The distinction the whole model exists to enforce:
 //
@@ -14,12 +15,65 @@
 //     watched). Tuning is always an explicit act (enterPlayback /
 //     tuneTo) and always records `previousChannelId` first.
 //
+// Modes (0.9.0): "landing" | "browser" | "playback" | "guide".
+// The legacy mode name "home" is an alias for "landing" wherever a
+// mode is ACCEPTED (setMode in the shell, requestLivetvMode,
+// parseLivetvState) — it is never stored: state.mode is always one
+// of the four canonical modes.
+//
 // Persistence (sessionStorage key `redsilk:livetv:state`) keeps only
-// mode + tuned + previous + guide date. The overlay is NEVER
-// persisted: reopening the app must never restore a stale OSD /
-// browser / programme dialog on top of the Home screen.
+// mode + tuned + previous + guide date, exactly as before.
+// guideMode / browserFilter / openSearch / lastLandingCard /
+// guideReturnTo are session-only and are NOT persisted. The overlay
+// is NEVER persisted: reopening the app must never restore a stale
+// OSD / browser / programme dialog on top of the landing screen.
 
-export type LivetvMode = "home" | "playback" | "guide";
+export type LivetvMode = "landing" | "browser" | "playback" | "guide";
+
+/** Legacy mode name, accepted wherever a mode is accepted. */
+export type LivetvModeInput = LivetvMode | "home";
+
+/** Guide sub-mode (RTÉ Guide-style tabs): On Now / Tonight / By Channel / grid. */
+export type GuideMode = "now" | "tonight" | "channel" | "grid";
+
+/** What the Channel Browser is filtered to when it opens. */
+export interface LivetvBrowserFilter {
+  kind: "all" | "favourites" | "recents" | "category";
+  value?: string;
+}
+
+/** Normalise a mode input: legacy "home" → "landing". */
+export function normaliseLivetvMode(mode: LivetvModeInput): LivetvMode {
+  return mode === "home" ? "landing" : mode;
+}
+
+/**
+ * `?mode=` URL param → canonical mode, or null when the param is
+ * absent / unknown. Mapping: guide→guide, browser→browser,
+ * landing/home→landing, playback→playback. The shell (livetv.astro)
+ * uses this for its initial mode; unknown values fall through to
+ * the persisted / playing / landing default.
+ */
+export function parseLivetvModeParam(
+  value: string | null | undefined,
+): LivetvMode | null {
+  if (value === "guide") return "guide";
+  if (value === "browser") return "browser";
+  if (value === "playback") return "playback";
+  if (value === "landing" || value === "home") return "landing";
+  return null;
+}
+
+/** True for any canonical mode or the legacy "home" alias. */
+export function isLivetvMode(value: unknown): value is LivetvModeInput {
+  return (
+    value === "landing" ||
+    value === "browser" ||
+    value === "playback" ||
+    value === "guide" ||
+    value === "home"
+  );
+}
 
 export type LivetvOverlay =
   | "none"
@@ -43,6 +97,16 @@ export interface LivetvState {
   guideProgrammeKey: string | null;
   /** data-focus-key to restore when leaving the Guide / an overlay. */
   returnFocusKey: string | null;
+  /** Guide sub-mode (On Now / Tonight / By Channel / grid). Session-only. */
+  guideMode: GuideMode;
+  /** Browser filter applied when the browser opens. Session-only. */
+  browserFilter: LivetvBrowserFilter | null;
+  /** Entry flag: open the browser with search focused. Session-only. */
+  openSearch: boolean;
+  /** data-focus-key of the last selected landing card. Session-only. */
+  lastLandingCard: string | null;
+  /** Mode to return to on exitGuide. Session-only. */
+  guideReturnTo: LivetvMode;
 }
 
 /** sessionStorage key. Overlay is never written under it. */
@@ -63,10 +127,10 @@ export function guideProgrammeKey(
   return `${channelId}@${startMs}`;
 }
 
-/** Fresh default state: Home, nothing tuned, Guide on today. */
+/** Fresh default state: landing, nothing tuned, Guide on today / On Now. */
 export function createLivetvState(nowMs: number = Date.now()): LivetvState {
   return {
-    mode: "home",
+    mode: "landing",
     overlay: "none",
     tunedChannelId: null,
     highlightedChannelId: null,
@@ -75,11 +139,30 @@ export function createLivetvState(nowMs: number = Date.now()): LivetvState {
     guideChannelId: null,
     guideProgrammeKey: null,
     returnFocusKey: null,
+    guideMode: "now",
+    browserFilter: null,
+    openSearch: false,
+    lastLandingCard: null,
+    guideReturnTo: "landing",
   };
 }
 
 function isValidMode(value: unknown): value is LivetvMode {
-  return value === "home" || value === "playback" || value === "guide";
+  return (
+    value === "landing" ||
+    value === "browser" ||
+    value === "playback" ||
+    value === "guide"
+  );
+}
+
+function isValidGuideMode(value: unknown): value is GuideMode {
+  return (
+    value === "now" ||
+    value === "tonight" ||
+    value === "channel" ||
+    value === "grid"
+  );
 }
 
 function isValidOverlay(value: unknown): value is LivetvOverlay {
@@ -121,12 +204,65 @@ export function enterPlayback(
 }
 
 /**
- * Leave playback for Live TV Home. The tuned channel is KEPT as the
- * last-watched channel (it is still the "active stream" for resume /
- * previous-channel), only the mode and overlay change.
+ * Leave playback for the Live TV landing. The tuned channel is KEPT
+ * as the last-watched channel (it is still the "active stream" for
+ * resume / previous-channel), only the mode and overlay change.
  */
-export function exitPlaybackToHome(state: LivetvState): LivetvState {
-  return { ...state, mode: "home", overlay: "none" };
+export function exitPlaybackToLanding(state: LivetvState): LivetvState {
+  return { ...state, mode: "landing", overlay: "none" };
+}
+
+/**
+ * @deprecated Renamed in 0.9.0: use `exitPlaybackToLanding`. Kept so
+ * existing callers (W3's playback shell) keep working unchanged.
+ */
+export const exitPlaybackToHome: typeof exitPlaybackToLanding =
+  exitPlaybackToLanding;
+
+/**
+ * Enter the landing screen. Mode + overlay only — the tuned channel,
+ * highlight and Guide position are kept, so Resume / What's On Now
+ * still know what was playing.
+ */
+export function enterLanding(state: LivetvState): LivetvState {
+  return { ...state, mode: "landing", overlay: "none" };
+}
+
+/**
+ * Enter the Channel Browser. `filter` selects what the browser
+ * shows (all / favourites / recents / one category); `openSearch`
+ * opens it with search focused; `returnFocusKey` remembers the
+ * landing card to restore focus to on exit. Omitted arguments keep
+ * the current values (a null filter clears the filter).
+ */
+export function enterBrowser(
+  state: LivetvState,
+  filter?: LivetvBrowserFilter | null,
+  openSearch?: boolean,
+  returnFocusKey?: string | null,
+): LivetvState {
+  return {
+    ...state,
+    mode: "browser",
+    overlay: "none",
+    browserFilter: filter !== undefined ? filter : state.browserFilter,
+    openSearch: openSearch !== undefined ? openSearch : state.openSearch,
+    returnFocusKey:
+      returnFocusKey !== undefined ? returnFocusKey : state.returnFocusKey,
+  };
+}
+
+/** Leave the Channel Browser for the landing screen. */
+export function exitBrowser(state: LivetvState): LivetvState {
+  return { ...state, mode: "landing", overlay: "none", openSearch: false };
+}
+
+/** Switch the Guide sub-mode (On Now / Tonight / By Channel / grid). */
+export function setGuideMode(
+  state: LivetvState,
+  guideMode: GuideMode,
+): LivetvState {
+  return { ...state, guideMode };
 }
 
 /**
@@ -181,11 +317,14 @@ export function closeOverlay(state: LivetvState): LivetvState {
  * one) and `returnFocusKey` remembers where focus goes back to on
  * exit. Pass the focus key of the element that opened the Guide
  * (e.g. the Guide button / playing channel card); when omitted the
- * previously recorded key is kept.
+ * previously recorded key is kept. `guideMode` switches the
+ * sub-mode; when omitted the current sub-mode is kept (defaulting
+ * to "now" when the state somehow has none).
  */
 export function enterGuide(
   state: LivetvState,
   returnFocusKey?: string | null,
+  guideMode?: GuideMode,
 ): LivetvState {
   return {
     ...state,
@@ -197,22 +336,24 @@ export function enterGuide(
     guideDateMs: Number.isFinite(state.guideDateMs)
       ? state.guideDateMs
       : startOfLocalDayMs(Date.now()),
+    guideMode:
+      guideMode ?? (isValidGuideMode(state.guideMode) ? state.guideMode : "now"),
   };
 }
 
 /**
  * Leave the Guide. `returnTo` is the mode the Guide was entered
- * from — "home" by default; callers that opened the Guide from
+ * from — "landing" by default; callers that opened the Guide from
  * fullscreen playback pass "playback". Guide position
- * (`guideChannelId` / `guideProgrammeKey` / `guideDateMs`) is kept
- * so re-entering restores it, and `returnFocusKey` is kept for the
- * caller to focus on exit.
+ * (`guideChannelId` / `guideProgrammeKey` / `guideDateMs` /
+ * `guideMode`) is kept so re-entering restores it, and
+ * `returnFocusKey` is kept for the caller to focus on exit.
  */
 export function exitGuide(
   state: LivetvState,
-  returnTo: LivetvMode = "home",
+  returnTo: LivetvModeInput = "landing",
 ): LivetvState {
-  return { ...state, mode: returnTo, overlay: "none" };
+  return { ...state, mode: normaliseLivetvMode(returnTo), overlay: "none" };
 }
 
 /** Persisted shape: mode + tuned + previous + guide date ONLY. */
@@ -239,8 +380,11 @@ export function serializeLivetvState(state: LivetvState): string {
 /**
  * Parse a serialised state. Returns null on ANY garbage: unparseable
  * JSON, wrong shape, unknown mode, non-string ids, non-finite guide
- * date. A parsed state always starts with overlay "none" and the
- * highlight / guide anchor on the tuned channel.
+ * date. The legacy persisted mode "home" maps to "landing". A parsed
+ * state always starts with overlay "none" and the highlight / guide
+ * anchor on the tuned channel; the session-only fields
+ * (guideMode / browserFilter / openSearch / lastLandingCard /
+ * guideReturnTo) take their defaults.
  */
 export function parseLivetvState(raw: unknown): LivetvState | null {
   if (typeof raw !== "string" || raw.length === 0) return null;
@@ -253,7 +397,7 @@ export function parseLivetvState(raw: unknown): LivetvState | null {
   if (typeof parsed !== "object" || parsed === null) return null;
   const record = parsed as Record<string, unknown>;
   if (record["v"] !== 1) return null;
-  if (!isValidMode(record["mode"])) return null;
+  if (!isLivetvMode(record["mode"])) return null;
   if (
     record["tunedChannelId"] !== null &&
     typeof record["tunedChannelId"] !== "string"
@@ -273,8 +417,9 @@ export function parseLivetvState(raw: unknown): LivetvState | null {
     return null;
   }
   const tuned = asId(record["tunedChannelId"]);
+  const mode = normaliseLivetvMode(record["mode"]);
   return {
-    mode: record["mode"],
+    mode,
     overlay: "none",
     tunedChannelId: tuned,
     highlightedChannelId: tuned,
@@ -283,6 +428,11 @@ export function parseLivetvState(raw: unknown): LivetvState | null {
     guideChannelId: tuned,
     guideProgrammeKey: null,
     returnFocusKey: null,
+    guideMode: "now",
+    browserFilter: null,
+    openSearch: false,
+    lastLandingCard: null,
+    guideReturnTo: "landing",
   };
 }
 
@@ -326,4 +476,4 @@ export function restoreLivetvState(
 }
 
 /** Re-exported so callers can validate a raw overlay value. */
-export { isValidOverlay };
+export { isValidOverlay, isValidGuideMode, isValidMode };

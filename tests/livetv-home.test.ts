@@ -170,13 +170,35 @@ describe("mode-shell event contract", () => {
     window.removeEventListener("livetv:tune", consumer);
   });
 
-  it("requestLivetvMode fires livetv:mode for home / guide", () => {
+  it("requestLivetvMode fires livetv:mode; legacy \"home\" maps to \"landing\"", () => {
     const seen: string[] = [];
     const listener = (event: Event) => seen.push((event as CustomEvent).detail.mode);
     window.addEventListener("livetv:mode", listener);
     requestLivetvMode("guide");
     requestLivetvMode("home");
-    expect(seen).toEqual(["guide", "home"]);
+    requestLivetvMode("browser", {
+      browserFilter: { kind: "favourites" },
+      openSearch: true,
+    });
+    expect(seen).toEqual(["guide", "landing", "browser"]);
+    window.removeEventListener("livetv:mode", listener);
+  });
+
+  it("requestLivetvMode carries the browser / guide detail on livetv:mode", () => {
+    let detail: unknown = null;
+    const listener = (event: Event) => {
+      detail = (event as CustomEvent).detail;
+    };
+    window.addEventListener("livetv:mode", listener);
+    requestLivetvMode("guide", { guideMode: "tonight" });
+    expect(detail).toEqual({ mode: "guide", guideMode: "tonight" });
+    requestLivetvMode("browser", {
+      browserFilter: { kind: "category", value: "sports" },
+    });
+    expect(detail).toEqual({
+      mode: "browser",
+      browserFilter: { kind: "category", value: "sports" },
+    });
     window.removeEventListener("livetv:mode", listener);
   });
 });

@@ -1896,3 +1896,34 @@ html[data-couch] .rs-livetv-channel-card__logo:has(.rs-livetv-channel-card__init
 html[data-couch] .rs-livetv-browser__logo:has(.rs-livetv-browser__initial) .rs-livetv-browser__initial {
   color: var(--rs-focus);
 }
+
+
+/* Live TV 0.9.0 — Shared (W5) ────────────────────────────────────
+   Rules shared by the four Live TV modes (landing / browser /
+   playback / guide). The row components (TvChannelRow /
+   TvProgrammeRow) carry their own scoped styles; this section only
+   holds what must be global: the mode-mount visibility guard and
+   the shared row-list container. Tokens are FROZEN at the 0.8.0
+   burgundy hues (346–351°) — nothing here introduces a new hue. */
+
+/* Mode mounts: the shell toggles [hidden] on the four mounts.
+   Guard the UA [hidden] rule explicitly — a flex/grid display rule
+   on a parent must never resurrect a hidden mode. */
+html[data-couch] #livetv-mode-landing[hidden],
+html[data-couch] #livetv-mode-browser[hidden],
+html[data-couch] #livetv-mode-playback[hidden],
+html[data-couch] #livetv-mode-guide[hidden] {
+  display: none;
+}
+
+/* Shared row list: the container W2 (browser) and W4 (guide) render
+   TvChannelRow / TvProgrammeRow into. Rows separate themselves with
+   subtle dividers — the list adds no gaps, borders or backgrounds,
+   so there are never borders-in-borders. */
+html[data-couch] .rs-tv-row-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

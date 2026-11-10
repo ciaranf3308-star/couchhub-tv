@@ -1,0 +1,206 @@
+// TvChannelRow — ONE shared presentational channel row (W5, 0.9.0).
+//
+// Used by W2 (Channel Browser) and W4 (Guide On Now). Presentational
+// only: no fetching, no tuning, no focus management — the caller
+// owns selection and keyboard/gamepad handling. Logo via TvImage
+// (branded fallback, never a broken-image icon); name; now/next
+// lines from real EPG only (omitted when there is no programme);
+// progress bar for the live programme. Rows are separated by subtle
+// dividers, never borders-in-borders; imagery is bounded.
+import TvImage from "./TvImage.astro";
+import { formatTimeRange } from "@/scripts/lib/now-next.ts";
+import type { LivetvChannel, LivetvNowNextProgramme } from "@/scripts/lib/livetv-data.ts";
+
+interface Props {
+  channel: LivetvChannel;
+  nowProgramme?: LivetvNowNextProgramme | null;
+  nextProgramme?: LivetvNowNextProgramme | null;
+  selected?: boolean;
+  focused?: boolean;
+}
+const {
+  channel,
+  nowProgramme = null,
+  nextProgramme = null,
+  selected = false,
+  focused = false,
+} = Astro.props;
+const name = channel.displayName || channel.name;
+const progress =
+  nowProgramme?.progress != null
+    ? Math.max(0, Math.min(1, nowProgramme.progress))
+    : null;
+---
+
+<div
+  class={`rs-tv-channel-row${selected ? " is-selected" : ""}${focused ? " is-focused" : ""}`}
+  data-tv-channel-row
+  data-channel-id={String(channel.id)}
+  data-selected={selected ? "true" : "false"}
+  data-focused={focused ? "true" : "false"}
+>
+  <div class="rs-tv-channel-row__logo">
+    <TvImage
+      src={channel.logo ?? undefined}
+      kind="logo"
+      media="channel"
+      title={name}
+      alt=""
+    />
+  </div>
+  <div class="rs-tv-channel-row__body">
+    <p class="rs-tv-channel-row__name">{name}</p>
+    {
+      nowProgramme ? (
+        <p class="rs-tv-channel-row__now">
+          <span class="rs-tv-channel-row__eyebrow">Now</span>
+          <span class="rs-tv-channel-row__title">{nowProgramme.title}</span>
+          <span class="rs-tv-channel-row__time">
+            {formatTimeRange(nowProgramme.start, nowProgramme.stop)}
+          </span>
+        </p>
+      ) : (
+        <p class="rs-tv-channel-row__now rs-tv-channel-row__now--live">
+          <span class="rs-tv-channel-row__eyebrow">Live</span>
+        </p>
+      )
+    }
+    {
+      nextProgramme && (
+        <p class="rs-tv-channel-row__next">
+          <span class="rs-tv-channel-row__eyebrow">Next</span>
+          <span class="rs-tv-channel-row__title">{nextProgramme.title}</span>
+          <span class="rs-tv-channel-row__time">
+            {formatTimeRange(nextProgramme.start, nextProgramme.stop)}
+          </span>
+        </p>
+      )
+    }
+    {
+      progress !== null && (
+        <div
+          class="rs-tv-channel-row__progress"
+          role="progressbar"
+          aria-valuenow={Math.round(progress * 100)}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-label={`Progress of ${nowProgramme?.title ?? name}`}
+        >
+          <div
+            class="rs-tv-channel-row__progress-fill"
+            style={`width: ${Math.round(progress * 100)}%`}
+          />
+        </div>
+      )
+    }
+  </div>
+  {
+    channel.favourite && (
+      <span class="rs-tv-channel-row__fav" aria-label="Favourite">
+        ★
+      </span>
+    )
+  }
+</div>
+
+<style>
+  /* Row, not a card: no border, no background box — the divider
+     below separates rows. The caller (browser list / guide list)
+     owns spacing and the selected/focused treatment. */
+  .rs-tv-channel-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.875rem 0.25rem;
+    border-bottom: 1px solid var(--rs-line-soft);
+  }
+  .rs-tv-channel-row:last-child {
+    border-bottom: none;
+  }
+  .rs-tv-channel-row.is-selected {
+    background: color-mix(in srgb, var(--rs-accent) 10%, transparent);
+    border-radius: 0.75rem;
+    padding-inline: 0.75rem;
+  }
+  .rs-tv-channel-row.is-focused {
+    outline: 2px solid var(--rs-focus);
+    outline-offset: 2px;
+    border-radius: 0.75rem;
+  }
+  .rs-tv-channel-row__logo {
+    flex-shrink: 0;
+    width: 5.5rem;
+    height: 3.25rem;
+    overflow: hidden;
+    border-radius: 0.5rem;
+  }
+  .rs-tv-channel-row__logo :global(.rs-image) {
+    width: 100%;
+    height: 100%;
+  }
+  .rs-tv-channel-row__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+    min-width: 0;
+    flex: 1;
+  }
+  .rs-tv-channel-row__name {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--rs-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-tv-channel-row__now,
+  .rs-tv-channel-row__next {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    min-width: 0;
+    font-size: 1rem;
+    line-height: 1.35;
+    color: var(--rs-text-2);
+  }
+  .rs-tv-channel-row__eyebrow {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--rs-accent);
+  }
+  .rs-tv-channel-row__title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--rs-text);
+  }
+  .rs-tv-channel-row__time {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    color: var(--rs-text-2);
+  }
+  .rs-tv-channel-row__progress {
+    height: 0.25rem;
+    margin-top: 0.375rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
+    overflow: hidden;
+  }
+  .rs-tv-channel-row__progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+  }
+  .rs-tv-channel-row__fav {
+    flex-shrink: 0;
+    font-size: 1.25rem;
+    color: var(--rs-accent);
+  }
+</style>

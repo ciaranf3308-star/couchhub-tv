@@ -99,7 +99,13 @@ const initial: HintConfig = hintsForView(view);
         !editing &&
         !!(document.activeElement as HTMLElement | null)?.closest?.("[data-osk]");
       const mode = document.documentElement.dataset.livetvMode ?? null;
-      const config = hintsForView(view, { livetvMode: mode, editing, osk });
+      // 0.9.0 (W5): the shell mirrors the guide sub-mode to
+      // html[data-livetv-guide-mode] when a `livetv:mode` detail
+      // carries it, so the legend shows the per-sub-mode rows
+      // (day nav in By Channel, time nav in grid). Unset → the
+      // base guide config.
+      const guideMode = document.documentElement.dataset.livetvGuideMode ?? null;
+      const config = hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
       // Hide while a dialog owns input; in Live TV playback hide
       // while the OSD / an overlay is up (it names its own keys).
       const hidden =
@@ -116,7 +122,7 @@ const initial: HintConfig = hintsForView(view);
     const modeObserver = new MutationObserver(render);
     modeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-livetv-mode"],
+      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode"],
     });
     const domObserver = new MutationObserver(render);
     domObserver.observe(document.body, {

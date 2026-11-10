@@ -1,18 +1,22 @@
 ---
-// Live TV — RedSilk Couch rebuild (W1: Home + Channel Browser).
+// Live TV — RedSilk Couch rebuild (0.9.0: Landing + Browser + Playback + Guide).
 //
-// The Live TV Home landing + mode shell. NO auto-start stream on
-// open: the landing screen is the default. Three mode mount points:
+// The Live TV landing + mode shell. NO auto-start stream on
+// open: the landing screen is the default. Four mode mount points:
 //
-//   #livetv-mode-home     — this file's Home (hero, rails, collections, browser)
-//   #livetv-mode-playback — W2's TvPlaybackShell mounts here
-//   #livetv-mode-guide    — W3's TvGuideView mounts here
+//   #livetv-mode-landing  — W1's TvLiveLanding mounts here
+//   #livetv-mode-browser  — W2's TvChannelBrowser mounts here
+//   #livetv-mode-playback — W3's TvPlaybackShell mounts here
+//   #livetv-mode-guide    — W4's TvGuideView mounts here
 //
 // Mode switching is the shared window-event contract: the shell
-// listens for `livetv:mode` {mode} and shows / hides mount points,
-// sets html[data-livetv-mode] (the gamepad layer reads it), and
-// NEVER re-initialises the player session — the player DOM stays
-// mounted across switches.
+// listens for `livetv:mode` {mode, browserFilter?, guideMode?,
+// openSearch?} and shows / hides mount points, sets
+// html[data-livetv-mode] (the gamepad layer reads it), and NEVER
+// re-initialises the player session — the player DOM stays mounted
+// across switches. The legacy mode name "home" is an alias for
+// "landing" wherever a mode is accepted (setMode, requestLivetvMode,
+// parseLivetvState) and is never stored.
 //
 // Playback handoff: selecting a channel dispatches cancelable
 // `livetv:tune` {channelId} + `livetv:mode` {mode:"playback"} (see
@@ -103,8 +107,8 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			/>
 		</div>
 
-		<!-- ── Mode: Home ── -->
-		<div id="livetv-mode-home" data-livetv-mode="home">
+		<!-- ── Mode: Landing (W1's TvLiveLanding mounts here) ── -->
+		<div id="livetv-mode-landing" data-livetv-mode="landing">
 			<!-- (A) Resume Watching hero -->
 			<section
 				id="livetv-resume"
@@ -221,7 +225,37 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			</section>
 		</div>
 
-		<!-- ── Mode: Playback (W2's TvPlaybackShell mounts here) ── -->
+		<!-- ── Mode: Browser (W2's TvChannelBrowser mounts here) ──
+		     The component's initialCategoryId / initialFocusId
+		     props are server-rendered (no values known at SSR, so
+		     they start unset); the mode detail ALSO arrives as
+		     data attributes on this mount div (set by setMode from
+		     the `livetv:mode` detail) so W2 can read either:
+		     data-initial-category / data-initial-focus /
+		     data-browser-filter-kind / data-browser-filter-value /
+		     data-open-search. -->
+		<div
+			id="livetv-mode-browser"
+			data-livetv-mode="browser"
+			data-initial-category=""
+			data-initial-focus=""
+			data-browser-filter-kind=""
+			data-browser-filter-value=""
+			data-open-search="false"
+			hidden>
+			<div class="rs-livetv-home__playback-bar">
+				<button
+					type="button"
+					class="rs-hero__action rs-hero__action--secondary"
+					data-livetv-home
+					data-nylah-item>
+					‹ Live TV
+				</button>
+			</div>
+			<TvChannelBrowser browserId="browser-mode" />
+		</div>
+
+		<!-- ── Mode: Playback (W3's TvPlaybackShell mounts here) ── -->
 		<div id="livetv-mode-playback" data-livetv-mode="playback" hidden>
 			<div class="rs-livetv-home__playback-bar">
 				<button
@@ -339,7 +373,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 	</div>
 
 	<style>
-		html[data-first-run="true"] #livetv-mode-home { display: none; }
+		html[data-first-run="true"] #livetv-mode-landing { display: none; }
 		html[data-first-run="true"] #livetv-welcome { display: flex; }
 		html[data-first-run="true"] .rs-livetv-home__head { display: none; }
 		html[data-first-run="true"] #livetv-provider-empty { display: none; }
@@ -630,38 +664,74 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			buildProgrammeMetaElement,
 		} from "../scripts/lib/livetv-cards.ts";
 		import { getLivetvResumeLastChannel } from "../scripts/lib/app-settings.js";
-		import { restoreLivetvState } from "../scripts/lib/livetv-state.ts";
+		import { restoreLivetvState, parseLivetvModeParam } from "../scripts/lib/livetv-state.ts";
 		import { EPG_LOADED_EVENT } from "../scripts/lib/epg-data.js";
 		import { CACHE_REVALIDATED_EVENT } from "../scripts/lib/cache.js";
 
-		// ── Mode shell ──────────────────────────────────────────
-		// Listens for livetv:mode {mode} and shows / hides the three
-		// mount points. The player DOM is never re-created: switching
-		// modes only toggles visibility, so the tuned session
-		// survives. html[data-livetv-mode] is the gamepad layer's
-		// playback signal (W2) and the CSS hook for mode chrome.
+		// ── Mode shell (0.9.0: four modes + "home" alias) ─────────
+		// Listens for livetv:mode {mode, browserFilter?, guideMode?,
+		// openSearch?} and shows / hides the four mount points.
+		// The player DOM is never re-created: switching modes only
+		// toggles visibility, so the tuned session survives.
+		// html[data-livetv-mode] is the gamepad layer's context
+		// signal (W5) and the CSS hook for mode chrome. The legacy
+		// mode name "home" maps to "landing" here, in
+		// requestLivetvMode and in parseLivetvState — it is never
+		// stored. Browser detail is ALSO mirrored onto data
+		// attributes on #livetv-mode-browser so W2's browser can
+		// read either the event detail or the mount div; guide
+		// sub-mode is mirrored to html[data-livetv-guide-mode] for
+		// the button-hint legend.
 		const modeMounts = {
-			home: document.getElementById("livetv-mode-home"),
+			landing: document.getElementById("livetv-mode-landing"),
+			browser: document.getElementById("livetv-mode-browser"),
 			playback: document.getElementById("livetv-mode-playback"),
 			guide: document.getElementById("livetv-mode-guide"),
 		};
-		let currentMode = "home";
-		const setMode = (mode) => {
-			if (mode !== "home" && mode !== "playback" && mode !== "guide") return;
+		const browserMount = modeMounts.browser;
+		let currentMode = "landing";
+		const setMode = (mode, detail) => {
+			if (mode === "home") mode = "landing";
+			if (
+				mode !== "landing" &&
+				mode !== "browser" &&
+				mode !== "playback" &&
+				mode !== "guide"
+			)
+				return;
 			currentMode = mode;
 			for (const [key, mount] of Object.entries(modeMounts)) {
 				if (!mount) continue;
 				mount.toggleAttribute("hidden", key !== mode);
 			}
 			document.documentElement.dataset.livetvMode = mode;
+			if (detail && typeof detail === "object") {
+				if (mode === "browser" && browserMount) {
+					const filter = detail.browserFilter;
+					browserMount.dataset.initialCategory =
+						filter?.kind === "category" ? String(filter.value ?? "") : "";
+					browserMount.dataset.initialFocus =
+						detail.initialFocusId != null ? String(detail.initialFocusId) : "";
+					browserMount.dataset.browserFilterKind = filter?.kind ?? "";
+					browserMount.dataset.browserFilterValue =
+						filter?.value != null ? String(filter.value) : "";
+					browserMount.dataset.openSearch =
+						detail.openSearch === true ? "true" : "false";
+				}
+				if (mode === "guide" && detail.guideMode) {
+					document.documentElement.dataset.livetvGuideMode =
+						String(detail.guideMode);
+				}
+			}
 		};
 		window.addEventListener("livetv:mode", (event) => {
-			setMode(event.detail?.mode);
+			const detail = event.detail ?? {};
+			setMode(detail.mode, detail);
 		});
 
-		// Back-to-Home buttons (playback + guide mounts).
+		// Back-to-Landing buttons (browser + playback + guide mounts).
 		document.querySelectorAll("[data-livetv-home]").forEach((btn) => {
-			btn.addEventListener("click", () => requestLivetvMode("home"));
+			btn.addEventListener("click", () => requestLivetvMode("landing"));
 		});
 
 		// ── Guide entry ─────────────────────────────────────────
@@ -686,7 +756,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			if (playerEmpty) {
 				playerEmpty.style.display = playing ? "none" : "";
 			}
-			if (playing && currentMode === "home") setMode("playback");
+			if (playing && currentMode === "landing") setMode("playback");
 		};
 		if (playerEl) {
 			syncPlayerVisible();
@@ -1024,7 +1094,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		// Card select (rails): explicit Watch only — a click on a
 		// card tunes, focus/hover never does.
 		document
-			.getElementById("livetv-mode-home")
+			.getElementById("livetv-mode-landing")
 			?.addEventListener("click", (event) => {
 				const target = event.target;
 				const card = target?.closest?.("[data-channel-card]");
@@ -1035,7 +1105,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 				dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
 			});
 		document
-			.getElementById("livetv-mode-home")
+			.getElementById("livetv-mode-landing")
 			?.addEventListener("keydown", (event) => {
 				if (event.key !== "Enter" && event.key !== " ") return;
 				const target = event.target;
@@ -1047,24 +1117,27 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 				dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
 			});
 
-		// Initial mode: a persisted guide mode (W3's state module)
-		// or ?mode=guide opens straight into the Guide — the Guide
-		// self-activates on the same conditions, and this shell must
-		// not hide its mount underneath it. An already-playing
-		// player opens into playback (covers ?channel= deep links:
-		// the engine tunes on load and unhides #player, and the
-		// observer above flips the shell). Otherwise Home.
-		// (Mode persistence across reloads is W3's state module's
-		// job — this shell never restores playback on its own, or a
-		// reload would land on an idle player.)
+		// Initial mode (0.9.0): ?mode= mapping — guide→guide,
+		// browser→browser, landing/home→landing, playback→
+		// playback. A persisted guide mode (W3's state module) also
+		// opens straight into the Guide — the Guide self-activates
+		// on the same conditions, and this shell must not hide its
+		// mount underneath it. An already-playing player opens into
+		// playback (covers ?channel= deep links: the engine tunes
+		// on load and unhides #player, and the observer above flips
+		// the shell). Otherwise landing. (Mode persistence across
+		// reloads is the state module's job — this shell never
+		// restores playback on its own, or a reload would land on
+		// an idle player.)
 		const initialParams = new URLSearchParams(window.location.search);
+		const modeFromParam = parseLivetvModeParam(initialParams.get("mode"));
 		const initialMode =
-			initialParams.get("mode") === "guide" ||
-			restoreLivetvState().mode === "guide"
+			modeFromParam ??
+			(restoreLivetvState().mode === "guide"
 				? "guide"
 				: !playerEl?.hasAttribute("hidden")
 					? "playback"
-					: "home";
+					: "landing");
 		setMode(initialMode);
 		void renderHome();
 
