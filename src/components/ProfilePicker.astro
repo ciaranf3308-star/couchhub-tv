@@ -30,15 +30,15 @@
 
     <div class="nylah-picker-choices">
       <button type="button" class="nylah-picker-choice" data-profile-pick="ciaran">
-        <span class="nylah-picker-avatar" style="--profile-color: oklch(0.45 0.19 350)">C</span>
+        <span class="nylah-picker-avatar" style="--profile-color: var(--nylah-wine, var(--color-accent)); --profile-ink: var(--nylah-cream, var(--color-bg))">C</span>
         <span class="nylah-picker-name">Ciaran</span>
       </button>
       <button type="button" class="nylah-picker-choice" data-profile-pick="aisling">
-        <span class="nylah-picker-avatar" style="--profile-color: oklch(0.55 0.12 75)">A</span>
+        <span class="nylah-picker-avatar" style="--profile-color: var(--nylah-gold, var(--color-accent)); --profile-ink: var(--nylah-wine-deep, var(--color-bg))">A</span>
         <span class="nylah-picker-name">Aisling</span>
       </button>
       <button type="button" class="nylah-picker-choice" data-profile-pick="shared">
-        <span class="nylah-picker-avatar" style="--profile-color: var(--color-fg-3)">H</span>
+        <span class="nylah-picker-avatar" style="--profile-color: var(--color-fg-3); --profile-ink: var(--color-bg)">H</span>
         <span class="nylah-picker-name">Everyone</span>
         <span class="nylah-picker-note">Shared household</span>
       </button>
@@ -59,7 +59,8 @@
     align-items: center;
     justify-content: center;
     padding: 1.5rem;
-    background: color-mix(in srgb, var(--color-bg) 72%, transparent);
+    /* RedSilk: a wine scrim, not a neutral grey wash, behind the card. */
+    background: color-mix(in oklch, var(--nylah-wine-deep, var(--color-bg)) 72%, transparent);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
@@ -69,11 +70,13 @@
   .nylah-picker-card {
     width: min(100%, 34rem);
     text-align: center;
-    background: var(--color-surface);
+    background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
     border: 1px solid var(--color-line);
-    border-radius: 1.25rem;
+    border-radius: var(--nylah-card-radius, 1rem);
     padding: 2rem 1.5rem 1.5rem;
-    box-shadow: 0 24px 64px rgb(0 0 0 / 0.45);
+    box-shadow:
+      var(--nylah-card-shadow, 0 24px 64px var(--nylah-focus-halo)),
+      0 24px 64px -16px var(--nylah-focus-glow);
   }
   .nylah-picker-title {
     font-family: var(--font-serif);
@@ -105,9 +108,9 @@
     gap: 0.5rem;
     padding: 1.25rem 0.75rem;
     min-height: 7.5rem;
-    background: var(--color-surface-2);
+    background: linear-gradient(165deg, var(--color-surface-2), var(--color-surface));
     border: 1px solid var(--color-line);
-    border-radius: 1rem;
+    border-radius: var(--nylah-card-radius, 1rem);
     color: var(--color-fg);
     cursor: pointer;
     transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
@@ -115,11 +118,15 @@
   .nylah-picker-choice:hover {
     transform: translateY(-2px);
     border-color: var(--color-accent);
+    box-shadow: 0 10px 28px -12px var(--nylah-focus-glow);
   }
   .nylah-picker-choice:focus-visible {
     outline: none;
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px var(--color-accent-soft);
+    border-color: var(--nylah-focus-ring, var(--color-accent));
+    box-shadow:
+      0 0 0 3px var(--nylah-focus-halo),
+      0 0 28px 2px var(--nylah-focus-glow);
+    transform: translateY(-2px);
   }
   .nylah-picker-avatar {
     display: flex;
@@ -129,10 +136,11 @@
     height: 3.5rem;
     border-radius: 9999px;
     background: var(--profile-color);
-    color: white;
+    color: var(--profile-ink, white);
     font-family: var(--font-serif);
     font-size: 1.75rem;
     line-height: 1;
+    box-shadow: 0 6px 18px -6px var(--nylah-focus-glow);
   }
   .nylah-picker-name {
     font-size: 1.125rem;
@@ -156,7 +164,9 @@
   .nylah-picker-later:focus-visible {
     color: var(--color-fg);
     outline: none;
-    box-shadow: 0 0 0 2px var(--color-accent-soft);
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-halo),
+      0 0 14px var(--nylah-focus-glow);
   }
 </style>
 

@@ -34,10 +34,11 @@ function ensureDialog(): HTMLDialogElement | null {
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(32rem,calc(100vw-2rem))] max-h-[min(85dvh,40rem)]",
     "open:flex flex-col overflow-hidden",
-    "backdrop:bg-black/60",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
   document.body.appendChild(node)
   dlg = node
@@ -74,15 +75,15 @@ export function openTvDevicePicker(
         <header class="flex items-start gap-3.5 shrink-0 px-3">
           <span class="icon-mark icon-mark--lg" aria-hidden="true">${ICON_DEVICE_TV}</span>
           <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-            <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold leading-tight tracking-tight"></h2>
+            <h2 id="${DIALOG_ID}-title" class="font-serif text-lg leading-tight tracking-tight"></h2>
             ${subtitleHtml}
           </div>
-          <button type="button" data-role="close" class="ms-auto shrink-0 min-h-11 min-w-11 grid place-items-center rounded-xl text-fg-3 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2">${ICON_X}</button>
+          <button type="button" data-role="close" class="ms-auto shrink-0 min-h-11 min-w-11 grid place-items-center rounded-xl text-fg-3 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)]">${ICON_X}</button>
         </header>
         <ul data-role="list" class="flex flex-col gap-1 overflow-y-auto min-h-0 list-none m-0 p-0"></ul>
         <div data-role="scan-line" class="flex items-center gap-3 shrink-0 px-3 min-h-11">
           <span data-role="scan-status" class="flex items-center gap-2 min-w-0 text-sm text-fg-3"></span>
-          <button type="button" data-role="rescan-btn" class="hidden shrink-0 ms-auto inline-flex items-center min-h-11 px-2.5 -me-2.5 rounded-xl text-sm text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2"></button>
+          <button type="button" data-role="rescan-btn" class="hidden shrink-0 ms-auto inline-flex items-center min-h-11 px-2.5 -me-2.5 rounded-xl text-sm text-fg-2 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)]"></button>
         </div>
         <p data-role="empty-hint" class="hidden shrink-0 px-3 text-sm text-fg-3"></p>
         <div data-role="add-section" class="flex flex-col gap-3 shrink-0 px-3">
@@ -159,7 +160,7 @@ export function openTvDevicePicker(
     }
 
     const ROW_BTN_CLASS =
-      "xt-picker-row flex-1 min-w-0 flex items-center gap-3.5 min-h-11 px-3 py-2.5 rounded-xl text-left hover:bg-surface-2 focus-visible:bg-surface-2 active:scale-[0.98]"
+      "xt-picker-row flex-1 min-w-0 flex items-center gap-3.5 min-h-11 px-3 py-2.5 rounded-xl text-left hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)] active:scale-[0.98]"
 
     /** Appends a muted " +N" hint to a host:port label when more addresses are known. */
     function appendHostsHint(hostPortEl: HTMLElement, hosts: string[] | undefined): void {
@@ -239,7 +240,7 @@ export function openTvDevicePicker(
       forgetBtn.dataset.role = "forget-btn"
       forgetBtn.dataset.id = device.id
       forgetBtn.className =
-        "shrink-0 min-h-11 min-w-11 grid place-items-center rounded-xl text-fg-3 hover:bg-surface-2 hover:text-bad focus-visible:bg-surface-2"
+        "shrink-0 min-h-11 min-w-11 grid place-items-center rounded-xl text-fg-3 hover:bg-surface-2 hover:text-bad focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-bad"
       forgetBtn.setAttribute("aria-label", t("cast.picker.forget"))
       forgetBtn.innerHTML = ICON_TRASH
       row.appendChild(forgetBtn)

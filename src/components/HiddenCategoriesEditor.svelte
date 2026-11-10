@@ -94,7 +94,7 @@
                 <button
                   type="button"
                   onclick={() => unhide(kind, name)}
-                  class="inline-flex items-center gap-1.5 min-h-9 pointer-coarse:min-h-11 rounded-lg border border-line bg-surface-2 hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:border-accent text-fg px-3 text-xs transition-colors outline-none"
+                  class="inline-flex items-center gap-1.5 min-h-9 pointer-coarse:min-h-11 rounded-lg border border-line bg-surface-2 hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)] text-fg px-3 text-xs transition-colors outline-none"
                   aria-label={tr("settings.hiddenCategories.unhideAria", { name })}
                   title={tr("settings.hiddenCategories.clickToUnhide")}>
                   <span class="truncate max-w-[16rem]">{name}</span>

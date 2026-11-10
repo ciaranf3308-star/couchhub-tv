@@ -56,7 +56,8 @@ function fieldRow(label: string, control: string, hint = ""): string {
 
 const INPUT_CLASS =
   "w-full min-h-11 rounded-lg border border-line bg-bg px-3 py-2 text-sm text-fg outline-none " +
-  "focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent"
+  "focus-visible:border-accent focus-visible:ring-1 focus-visible:ring-accent " +
+  "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
 
 export function openChannelEditDialog(init: ChannelEditInit): Promise<ChannelEditResult> {
   const { playlistId, channel, isM3U } = init
@@ -84,10 +85,11 @@ export function openChannelEditDialog(init: ChannelEditInit): Promise<ChannelEdi
     // UA `margin: auto` on <dialog>, so without `fixed inset-0 m-auto` it pins to
     // the top-left, and without the dvh height cap it overflows the viewport.
     dialog.className = [
-      "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+      "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
       "w-[min(32rem,calc(100vw-2rem))] max-h-[min(80dvh,40rem)]",
       "open:flex flex-col overflow-hidden",
-      "backdrop:bg-black/60",
+      "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+      "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
     ].join(" ")
     dialog.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
 
@@ -110,7 +112,7 @@ export function openChannelEditDialog(init: ChannelEditInit): Promise<ChannelEdi
             <span class="text-eyebrow font-semibold uppercase tracking-wide text-fg-3">
               ${escapeHtml(t("channelEdit.title") || "Edit channel")}
             </span>
-            <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold leading-tight tracking-tight break-words">
+            <h2 id="${DIALOG_ID}-title" class="font-serif text-lg leading-tight tracking-tight break-words">
               ${escapeHtml(providerName)}
             </h2>
             <p class="text-sm text-fg-3 leading-relaxed">
@@ -147,7 +149,7 @@ export function openChannelEditDialog(init: ChannelEditInit): Promise<ChannelEdi
                placeholder="${escapeHtml(channel?.chno != null ? String(channel.chno) : "")}" inputmode="numeric" />`
           )}
           <label class="flex items-start gap-3 min-h-11">
-            <input type="checkbox" data-role="hidden" class="mt-1 size-4 accent-accent" ${hidden ? "checked" : ""} />
+            <input type="checkbox" data-role="hidden" class="mt-1 size-4 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" ${hidden ? "checked" : ""} />
             <span class="flex flex-col gap-0.5">
               <span class="text-sm font-medium text-fg-2">${escapeHtml(t("channelEdit.hideLabel") || "Hide this channel")}</span>
               <span class="text-xs text-fg-3 leading-relaxed">${escapeHtml(

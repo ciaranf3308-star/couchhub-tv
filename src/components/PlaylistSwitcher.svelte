@@ -210,7 +210,7 @@
     title="Switch playlist"
     data-i18n-attr="title:playlist.switch"
     onclick={onTriggerClick}
-    class="flex w-full min-w-0 items-center gap-2.5 px-1 rail-expanded:px-2.5 py-2.5 min-h-11 rounded-xl border border-line bg-surface text-sm font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
+    class="flex w-full min-w-0 items-center gap-2.5 px-1 rail-expanded:px-2.5 py-2.5 min-h-11 rounded-xl border border-line bg-linear-to-b from-surface to-surface-2 text-sm font-medium text-fg transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]
       justify-center rail-expanded:justify-between">
     <span class="flex items-center gap-2.5 min-w-0">
       <span
@@ -243,7 +243,7 @@
     hidden={!isOpen}
     class="ps-popover
       max-h-[min(70dvh,32rem)]
-      rounded-t-xl border border-line border-b-0 bg-surface text-fg
+      rounded-t-xl border border-line border-b-0 bg-linear-to-b from-surface to-surface-2 text-fg
       overflow-hidden">
     <div
       bind:this={listEl}
@@ -260,7 +260,7 @@
           onclick={onRefresh}
           class="flex flex-1 min-w-0 items-center justify-center gap-1.5 px-2 py-3 text-sm font-medium text-fg-2 whitespace-nowrap
             hover:text-fg hover:bg-surface-2
-            focus-visible:text-fg focus-visible:bg-surface-2
+            focus-visible:text-fg focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent
             min-h-11 transition-colors outline-none border-r border-line">
           <IconRefresh aria-hidden="true" class="h-4 w-4 shrink-0" />
           <span data-i18n="common.refresh" class="truncate">Refresh</span>
@@ -270,7 +270,7 @@
         href="/login"
         class="flex flex-1 min-w-0 items-center justify-center gap-1.5 px-2 py-3 text-sm font-medium text-fg whitespace-nowrap
           hover:bg-surface-2
-          focus-visible:bg-surface-2
+          focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent
           min-h-11 transition-colors">
         <IconPlus aria-hidden="true" class="h-4 w-4 text-accent shrink-0" />
         <span data-i18n="playlist.add" class="truncate">Add playlist</span>
@@ -288,6 +288,8 @@
     left: 0;
     right: 0;
     z-index: 50;
+    /* RedSilk: the open popover lifts on a wine shadow. */
+    box-shadow: var(--nylah-card-shadow, 0 18px 48px var(--nylah-focus-halo));
   }
   :global(#ps-trigger[aria-expanded="true"] .ps-chevron) {
     transform: rotate(180deg);

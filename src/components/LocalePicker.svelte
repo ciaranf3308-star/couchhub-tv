@@ -50,3 +50,15 @@
     <option value={locale.code}>{locale.nativeName} ({locale.code})</option>
   {/each}
 </select>
+
+<style>
+  /* RedSilk: the language select focuses with a wine glow, matching the
+     other selects on the Settings page (this island sits outside the
+     page's scoped styles, so the rule lives here). */
+  select.field-input:focus {
+    border-color: var(--nylah-focus-ring, var(--color-accent));
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-halo),
+      0 0 18px var(--nylah-focus-glow);
+  }
+</style>

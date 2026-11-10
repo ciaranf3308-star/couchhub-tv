@@ -33,10 +33,11 @@ function ensureDialog(): HTMLDialogElement | null {
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(26rem,calc(100vw-2rem))] max-h-[min(80dvh,32rem)]",
     "open:flex flex-col overflow-hidden",
-    "backdrop:bg-black/60",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
   document.body.appendChild(node)
   dlg = node
@@ -48,7 +49,7 @@ function headerHtml(subtitle: string): string {
     <header class="flex items-start gap-3.5 shrink-0 px-3">
       <span class="icon-mark icon-mark--lg" aria-hidden="true">${ICON_PLAYLIST_ADD}</span>
       <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-        <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold leading-tight tracking-tight">${escapeHtml(t("addToCustom.dialogTitle"))}</h2>
+        <h2 id="${DIALOG_ID}-title" class="font-serif text-lg leading-tight tracking-tight">${escapeHtml(t("addToCustom.dialogTitle"))}</h2>
         ${subtitle ? `<p class="text-sm text-fg-3 leading-relaxed truncate">${escapeHtml(subtitle)}</p>` : ""}
       </div>
     </header>
@@ -63,7 +64,7 @@ function renderList(subtitle: string, entries: CustomEntryLite[]): string {
           type="button"
           data-role="entry-btn"
           data-id="${escapeHtml(entry._id)}"
-          class="xt-picker-row flex items-center w-full text-left gap-3 px-3 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent active:scale-[0.98]"
+          class="xt-picker-row flex items-center w-full text-left gap-3 px-3 py-2.5 rounded-xl border border-line bg-surface hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)] active:scale-[0.98]"
         >
           <span class="text-sm truncate">${escapeHtml(entry.title)}</span>
         </button>
@@ -78,7 +79,7 @@ function renderList(subtitle: string, entries: CustomEntryLite[]): string {
         <button
           type="button"
           data-role="new-playlist-btn"
-          class="xt-picker-row flex items-center w-full text-left gap-3 px-3 py-2.5 rounded-xl border border-dashed border-line bg-surface hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent active:scale-[0.98]"
+          class="xt-picker-row flex items-center w-full text-left gap-3 px-3 py-2.5 rounded-xl border border-dashed border-line bg-surface hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)] active:scale-[0.98]"
         >
           <span class="text-sm font-medium text-accent">${escapeHtml(t("addToCustom.newPlaylistRow"))}</span>
         </button>

@@ -554,6 +554,77 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	</main>
 </Layout>
 
+<style>
+  /* ── Nylah Studios RedSilk treatment (scoped to this page) ─────────
+     Warm gradients, serif display title (via the shared route-hero),
+     wine focus glow on inputs / tabs / primary action. Layout,
+     navigation and behavior are untouched. */
+  /* Method picker: warm gradient shell with layered wine depth. */
+  [role="tablist"] {
+    background: linear-gradient(180deg, var(--color-surface), var(--color-surface-2));
+    box-shadow:
+      inset 0 1px 0 0 color-mix(in oklch, var(--color-accent) 12%, transparent),
+      0 10px 30px -14px var(--nylah-focus-halo);
+  }
+  /* The selected tab is lit wine, not just tinted. */
+  [role="tab"].bg-accent-soft {
+    box-shadow: 0 0 16px var(--nylah-focus-glow);
+  }
+  [role="tab"]:focus-visible {
+    outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+    outline-offset: 1px;
+    box-shadow: 0 0 16px var(--nylah-focus-glow);
+  }
+  /* Inputs + selects: focus is a wine glow, not a bare ring. */
+  .field-input:focus {
+    border-color: var(--nylah-focus-ring, var(--color-accent));
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-halo),
+      0 0 18px var(--nylah-focus-glow);
+  }
+  /* Native checkboxes: a visible wine halo on focus. */
+  input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+    outline-offset: 2px;
+    box-shadow: 0 0 12px var(--nylah-focus-glow);
+  }
+  /* Collapsible cards (mirrors / EPG / advanced): warm gradient + depth. */
+  details.group {
+    background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
+    box-shadow: 0 10px 30px -14px var(--nylah-focus-halo);
+  }
+  /* Primary action ("Save and continue") is wine, like the launcher's
+     primary button — a gradient with a warm glow, not the inverse
+     fg/bg fill used elsewhere. */
+  .btn-primary {
+    background: linear-gradient(
+      135deg,
+      var(--nylah-wine-bright, var(--color-accent)),
+      var(--color-accent)
+    );
+    color: var(--color-on-accent);
+    box-shadow: 0 8px 24px -8px var(--nylah-focus-glow);
+  }
+  .btn-primary:not([disabled]):hover,
+  .btn-primary:not([disabled]):focus-visible {
+    opacity: 1;
+    box-shadow:
+      0 8px 24px -8px var(--nylah-focus-glow),
+      0 0 20px var(--nylah-focus-glow);
+  }
+  /* Accent swatches: the checked swatch glows wine. */
+  .accent-btn[aria-checked="true"] {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-halo),
+      0 0 18px var(--nylah-focus-glow);
+  }
+  /* Status box (info / active / expired / error / busy): a soft wine
+     depth under the palette the script paints. */
+  #status {
+    box-shadow: 0 8px 24px -12px var(--nylah-focus-halo);
+  }
+</style>
+
 <script>
 	import {
 		addEntry,
@@ -1086,7 +1157,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	let mode = "xtream";
 
 	const ACTIVE_TAB =
-		"bg-accent-soft text-accent ring-1 ring-accent/30";
+		"bg-accent-soft text-accent ring-1 ring-accent/30 shadow-[0_0_16px_var(--nylah-focus-glow)]";
 	const IDLE_TAB = "text-fg-2 hover:text-fg";
 
 	function setMode(next) {

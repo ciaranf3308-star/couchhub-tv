@@ -74,11 +74,12 @@ function buildDialog(
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
   node.className = [
-    "fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0",
+    "fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0",
     "w-[min(40rem,calc(100vw-2rem))] max-h-[85vh]",
     "open:flex flex-col overflow-hidden",
     "icon-mark-host",
-    "backdrop:bg-black/70",
+    "shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)]",
+    "backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]",
   ].join(" ")
 
   const header = document.createElement("div")
@@ -87,13 +88,13 @@ function buildDialog(
   header.innerHTML = `
     <span class="icon-mark icon-mark--sparkle mt-0.5">${ICON_SPARKLES}</span>
     <div class="flex flex-col gap-1 flex-1 min-w-0">
-      <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold"></h2>
+      <h2 id="${DIALOG_ID}-title" class="font-serif text-lg"></h2>
       <p data-role="subtitle" class="text-sm text-fg-2"></p>
     </div>
     <button
       data-role="close-x"
       type="button"
-      class="shrink-0 -mt-1 -mr-1 rounded-lg p-2 text-fg-3 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent">
+      class="shrink-0 -mt-1 -mr-1 rounded-lg p-2 text-fg-3 hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)]">
       ${CLOSE_ICON}
     </button>
   `
@@ -136,7 +137,7 @@ function buildDialog(
     const heading = document.createElement("div")
     heading.className = "flex items-baseline gap-3 flex-wrap"
     const tag = document.createElement("span")
-    tag.className = "font-semibold text-sm tabular-nums"
+    tag.className = "font-serif text-base tabular-nums"
     tag.textContent = release.name || release.tagName
     heading.appendChild(tag)
     const dateText = formatDate(release.publishedAt)
@@ -168,7 +169,8 @@ function buildDialog(
   gotItBtn.className =
     "rounded-xl px-4 py-2 text-sm font-semibold bg-accent text-bg " +
     "hover:opacity-90 focus-visible:opacity-90 focus-visible:outline-none " +
-    "focus-visible:ring-1 focus-visible:ring-accent"
+    "focus-visible:ring-2 focus-visible:ring-accent " +
+    "focus-visible:shadow-[0_0_20px_var(--nylah-focus-glow)]"
   gotItBtn.textContent = t("whatsNew.gotIt")
   footer.appendChild(gotItBtn)
 

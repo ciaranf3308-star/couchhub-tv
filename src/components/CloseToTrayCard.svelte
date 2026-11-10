@@ -73,3 +73,19 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* RedSilk: the selected segment is lit wine, not just a flat tint. */
+  .settings-seg > .btn[aria-checked="true"] {
+    background: linear-gradient(
+      180deg,
+      var(--color-accent-soft),
+      color-mix(in oklch, var(--color-accent) 22%, transparent)
+    );
+    border-color: var(--color-accent);
+    box-shadow: 0 0 16px var(--nylah-focus-glow);
+  }
+  .settings-seg > .btn:focus-visible {
+    box-shadow: 0 0 18px var(--nylah-focus-glow);
+  }
+</style>
