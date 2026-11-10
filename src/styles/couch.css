@@ -72,14 +72,28 @@ html[data-couch] {
   font-size: clamp(12px, calc(min(100vw / 120, 100vh / 67.5)), 32px);
   color-scheme: dark;
 
-  /* Canonical RedSilk Couch tokens — exact directive values. */
-  --rs-bg: #160d14;
-  --rs-bg-2: #24131e;
-  --rs-surface: #35202d;
-  --rs-accent: #a84365;
-  --rs-focus: #e5a6bd;
-  --rs-text: #f7f1f3;
-  --rs-text-2: #bfa9b5;
+  /* Canonical RedSilk Couch tokens — exact directive values.
+   *
+   * BURGUNDY, not purple (W4 visual-identity audit): every token sits
+   * in the wine hue family, HSL hue 344–352°, red-dominant with blue
+   * only just above green. The pre-audit values read purple on the
+   * projector because their hues were 313–329° (magenta/purple) — the
+   * hex looked burgundy-ish on paper but rendered purple, and the
+   * hardcoded scrims rgb(10 5 8)/rgb(8 4 7) were hue 315–324° too.
+   * tests/couch-visual-identity.test.ts asserts this hue family for
+   * every colour literal in this file, so it cannot silently regress.
+   * --rs-ink / --rs-panel are the scrim + overlay-panel bases: use
+   * them (or color-mix off the tokens) instead of hardcoding rgb()
+   * blacks, which is how the purple scrims crept in. */
+  --rs-bg: #170a0c;
+  --rs-bg-2: #281015;
+  --rs-surface: #3c1a21;
+  --rs-accent: #a83a54;
+  --rs-focus: #eaa9b8;
+  --rs-text: #f8f1f2;
+  --rs-text-2: #c4abb1;
+  --rs-ink: #0d0406; /* hue 347° — scrim/overlay black, never rgb(8 4 7) */
+  --rs-panel: #1f0a0f; /* hue 346° — overlay panel base, never rgb(20 10 16) */
 
   /* Derived (from the tokens above, never invented hues). */
   --rs-line: color-mix(in srgb, var(--rs-text) 14%, transparent);
@@ -102,6 +116,32 @@ html[data-couch] {
   --rs-card-title-size: 1.25rem; /* 20px — poster card title */
   --rs-description-size: 1.375rem; /* 22px — descriptions / body copy */
   --rs-meta-size: 1.125rem; /* 18px — secondary metadata */
+}
+
+/* Upstream leak guard (W4): global.css defaults the accent to soft
+ * fuchsia (oklch hue 330) and --xt-tint-hue to 330, and the playlist /
+ * settings accent picker can set data-accent to blue/violet on the
+ * root — any Couch surface that consumes --color-* (OSK, reused
+ * Svelte pieces, Tailwind utilities) would then render purple/blue.
+ * The Couch TV identity is RedSilk burgundy, so pin the upstream
+ * tokens to the burgundy preset's dark branch (oklch hue 350) here.
+ * Selector is :root[data-couch] — same specificity as global.css's
+ * :root[data-accent="…"] rules, and couch.css loads after global.css,
+ * so this wins by cascade order. The desktop UI (no data-couch) is
+ * untouched; the user's accent choice still applies there. */
+:root[data-couch] {
+  --xt-tint-hue: 350;
+  --color-accent: oklch(0.72 0.17 350);
+  --color-accent-soft: oklch(0.72 0.17 350 / 0.18);
+  --color-bg: oklch(0.155 0.045 350);
+  --color-surface: oklch(0.21 0.045 350);
+  --color-surface-2: oklch(0.26 0.05 350);
+  --color-surface-3: oklch(0.32 0.05 350);
+  --color-line: oklch(0.36 0.045 350);
+  --color-line-soft: oklch(0.28 0.04 350);
+  --color-fg: oklch(0.96 0.008 350);
+  --color-fg-2: oklch(0.78 0.012 350);
+  --color-fg-3: oklch(0.62 0.012 350);
 }
 
 /* ── Shell ─────────────────────────────────────────────────────── */
@@ -343,6 +383,15 @@ html[data-couch] .rs-image--logo img {
   object-fit: contain; /* channel logos are NEVER stretched */
   padding: 0.75rem;
 }
+/* Branded fallback art (W4 visual identity): any title/channel without
+   an image gets an intentional stand-in, never a grey box or a
+   broken-image icon. Burgundy gradient + a warm accent glow + an
+   initials medallion in Manrope, the type label ("Movie · No artwork"
+   etc., from couch-image.ts) and the title. Per kind the medallion
+   and label scale: poster (default), backdrop/hero (large), logo
+   (compact channel tile), thumb (episode). The gradient is built
+   only from --rs-* tokens (hue 344–352°), so the fallback can never
+   read purple. */
 html[data-couch] .rs-image__fallback {
   display: none;
   position: absolute;
@@ -350,10 +399,13 @@ html[data-couch] .rs-image__fallback {
   align-items: center;
   justify-content: center;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.625rem;
   padding: 1rem;
   text-align: center;
-  background: linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 70%, var(--rs-bg) 100%);
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+  box-shadow: inset 0 0 0 1px var(--rs-line-soft);
 }
 html[data-couch] .rs-image.is-fallback .rs-image__fallback {
   display: flex;
@@ -361,24 +413,66 @@ html[data-couch] .rs-image.is-fallback .rs-image__fallback {
 html[data-couch] .rs-image.is-fallback img {
   display: none; /* a broken image icon must never render */
 }
+/* Initials medallion: a ringed burgundy disc, not a bare letter. */
 html[data-couch] .rs-image__fallback-mark {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 50%;
   font-family: var(--rs-font-display);
-  font-size: 2.5rem;
+  font-size: 1.625rem;
   font-weight: 800;
   line-height: 1;
   color: var(--rs-focus);
+  background: linear-gradient(160deg, var(--rs-accent) 0%, var(--rs-bg-2) 100%);
+  border: 1px solid color-mix(in srgb, var(--rs-accent) 55%, transparent);
+  box-shadow: 0 0.375rem 1.25rem rgb(0 0 0 / 0.45);
 }
 html[data-couch] .rs-image--backdrop .rs-image__fallback-mark {
-  font-size: 3.5rem;
+  width: 4.5rem;
+  height: 4.5rem;
+  font-size: 2.25rem;
+}
+html[data-couch] .rs-image--logo .rs-image__fallback-mark {
+  width: 2.5rem;
+  height: 2.5rem;
+  font-size: 1.25rem;
+}
+html[data-couch] .rs-image--thumb .rs-image__fallback-mark {
+  width: 2.75rem;
+  height: 2.75rem;
+  font-size: 1.375rem;
+}
+html[data-couch] .rs-image__fallback-kind {
+  font-family: var(--rs-font-display);
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-image--backdrop .rs-image__fallback-kind {
+  font-size: 1rem;
 }
 html[data-couch] .rs-image__fallback-title {
   font-size: var(--rs-meta-size); /* 18px */
+  font-weight: 600;
   line-height: 1.3;
-  color: var(--rs-text-2);
+  color: var(--rs-text);
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+/* Hero backdrop fallback: the hero already renders the title as its
+   H1 next to the backdrop, so the fallback's own title line would
+   duplicate it — the medallion + kind label carry the hero fallback. */
+html[data-couch] .rs-hero__backdrop .rs-image.is-fallback .rs-image__fallback-title {
+  display: none;
+}
+html[data-couch] .rs-hero__backdrop .rs-image.is-fallback .rs-image__fallback {
+  gap: 0.875rem;
 }
 
 /* ── Cards (TvCard) ────────────────────────────────────────────── */
@@ -453,7 +547,7 @@ html[data-couch] .rs-card__detail {
   bottom: 0;
   z-index: 1;
   padding: 1.75rem 0.875rem 0.625rem;
-  background: linear-gradient(0deg, rgb(10 5 8 / 0.88) 0%, transparent 100%);
+  background: linear-gradient(0deg, rgb(13 4 6 / 0.88) 0%, transparent 100%);
   color: var(--rs-text);
   font-size: var(--rs-meta-size); /* 18px */
   line-height: 1.35;
@@ -671,7 +765,7 @@ html[data-couch] .rs-dialog {
   box-shadow: var(--rs-shadow-lift);
 }
 html[data-couch] .rs-dialog::backdrop {
-  background: rgb(10 5 8 / 0.72);
+  background: rgb(13 4 6 / 0.72);
 }
 html[data-couch] .rs-dialog__inner {
   display: flex;
@@ -823,7 +917,7 @@ html[data-couch] .rs-osd {
   flex-direction: column;
   gap: 0.75rem;
   padding: 1.5rem 2rem 1.75rem;
-  background: linear-gradient(0deg, rgb(10 5 8 / 0.88) 0%, rgb(10 5 8 / 0.45) 70%, transparent 100%);
+  background: linear-gradient(0deg, rgb(13 4 6 / 0.88) 0%, rgb(13 4 6 / 0.45) 70%, transparent 100%);
   color: var(--rs-text);
   opacity: 1;
   transition: opacity 200ms ease;
@@ -947,7 +1041,7 @@ html[data-couch] .rs-livetv-play-osd {
   gap: 0.625rem;
   max-height: 34vh;
   padding: 2.5rem 2.5rem 1.5rem;
-  background: linear-gradient(0deg, rgb(8 4 7 / 0.92) 0%, rgb(8 4 7 / 0.55) 55%, transparent 100%);
+  background: linear-gradient(0deg, rgb(13 4 6 / 0.92) 0%, rgb(13 4 6 / 0.55) 55%, transparent 100%);
   color: var(--rs-text);
   opacity: 1;
   transition: opacity 200ms ease;
@@ -981,7 +1075,7 @@ html[data-couch] .rs-livetv-play-osd__logo img {
 html[data-couch] .rs-livetv-play-osd__initial {
   font-size: 2.5rem;
   font-weight: 800;
-  color: #3a1526;
+  color: #42101d;
 }
 html[data-couch] .rs-livetv-play-osd__main {
   display: flex;
@@ -1079,7 +1173,7 @@ html[data-couch] .rs-livetv-play-quicksurf {
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: rgb(8 4 7 / 0.45);
+  background: rgb(13 4 6 / 0.45);
 }
 html[data-couch] .rs-livetv-play-quicksurf[hidden] {
   display: none;
@@ -1091,7 +1185,7 @@ html[data-couch] .rs-livetv-play-quicksurf__panel {
   gap: 1rem;
   padding: 1.75rem 2rem;
   border-radius: 1rem;
-  background: rgb(20 10 16 / 0.92);
+  background: rgb(31 10 15 / 0.92);
   border: 1px solid var(--rs-line);
   color: var(--rs-text);
 }
@@ -1176,7 +1270,7 @@ html[data-couch] .rs-livetv-channel-card__logo img {
 html[data-couch] .rs-livetv-channel-card__initial {
   font-size: 2rem;
   font-weight: 800;
-  color: #3a1526;
+  color: #42101d;
 }
 html[data-couch] .rs-livetv-channel-card__body {
   display: flex;
@@ -1277,7 +1371,7 @@ html[data-couch] .rs-livetv-play-error {
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: rgb(8 4 7 / 0.6);
+  background: rgb(13 4 6 / 0.6);
 }
 html[data-couch] .rs-livetv-play-options[hidden],
 html[data-couch] .rs-livetv-play-error[hidden] {
@@ -1291,7 +1385,7 @@ html[data-couch] .rs-livetv-play-error__panel {
   gap: 1rem;
   padding: 1.75rem 2rem;
   border-radius: 1rem;
-  background: rgb(20 10 16 / 0.95);
+  background: rgb(31 10 15 / 0.95);
   border: 1px solid var(--rs-line);
   color: var(--rs-text);
 }
@@ -1323,7 +1417,7 @@ html[data-couch] .rs-livetv-play-browser {
   display: flex;
   flex-direction: column;
   padding: 2.5rem;
-  background: rgb(8 4 7 / 0.97);
+  background: rgb(13 4 6 / 0.97);
   color: var(--rs-text);
   overflow: hidden;
 }
@@ -1752,3 +1846,29 @@ html[data-couch] .rs-livetv-browser-host__loading {
   padding: 1rem;
 }
 
+
+/* ── Channel-logo fallbacks (W4 visual identity) ───────────────── */
+/* Channel logos that arrive WITHOUT an image never go through
+   TvImage: TvChannelCard / the OSD / Quick Surf / the Channel
+   Browser render a bare initial span instead. The real-logo chips
+   are white (dark logos need the contrast), but a lone initial on
+   white reads generic — so when a chip contains an initial instead
+   of an <img>, :has() swaps it to the same burgundy fallback art
+   TvImage uses: gradient + glow + light initial. Real logos are
+   untouched (no initial inside, rule does not match). The Guide's
+   own fallback span (TvGuideView.astro, scoped) already sits on
+   --rs-surface-2, which follows the new tokens. */
+html[data-couch] .rs-livetv-play-osd__logo:has(.rs-livetv-play-osd__initial),
+html[data-couch] .rs-livetv-channel-card__logo:has(.rs-livetv-channel-card__initial),
+html[data-couch] .rs-livetv-browser__logo:has(.rs-livetv-browser__initial) {
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+  border-color: var(--rs-line-soft);
+  box-shadow: inset 0 0 0 1px var(--rs-line-soft);
+}
+html[data-couch] .rs-livetv-play-osd__logo:has(.rs-livetv-play-osd__initial) .rs-livetv-play-osd__initial,
+html[data-couch] .rs-livetv-channel-card__logo:has(.rs-livetv-channel-card__initial) .rs-livetv-channel-card__initial,
+html[data-couch] .rs-livetv-browser__logo:has(.rs-livetv-browser__initial) .rs-livetv-browser__initial {
+  color: var(--rs-focus);
+}
