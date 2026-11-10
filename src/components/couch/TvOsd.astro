@@ -1,0 +1,64 @@
+---
+// TvOsd — playback OSD shell. Screen workers build Live/VOD controls
+// on this shell (named slots: "info" for title/subtitle, "controls"
+// for transport buttons; default slot for anything else, e.g. a
+// progress bar).
+// Props: autoHideMs? (default 4500 — auto-hide on inactivity).
+// Behaviour: hides ~4–5s after the last activity (pointer, key,
+// focus, gamepad input, or a `couch-osd:show` window event). Focus
+// inside the OSD cancels the hide so keyboard/controller users are
+// never locked out of controls they are tabbing through; hiding
+// resumes once focus leaves. Focus-safe by construction.
+interface Props {
+  autoHideMs?: number;
+}
+const { autoHideMs = 4500 } = Astro.props;
+---
+
+<div class="rs-osd" data-couch-osd data-autohide-ms={autoHideMs}>
+  <div class="rs-osd__info">
+    <slot name="info" />
+  </div>
+  <slot />
+  <div class="rs-osd__controls">
+    <slot name="controls" />
+  </div>
+</div>
+
+<script define:vars={{ autoHideMs }}>
+  // One OSD per player wrap; the script is bundled once per page and
+  // arms every [data-couch-osd] on it.
+  const osds = Array.from(document.querySelectorAll("[data-couch-osd]"));
+  for (const osd of osds) {
+    const el = osd;
+    if (el.dataset.osdArmed) continue;
+    el.dataset.osdArmed = "1";
+    const delay = Number(el.getAttribute("data-autohide-ms") || autoHideMs) || 4500;
+    let timer = 0;
+    const show = () => {
+      el.setAttribute("data-hidden", "false");
+      window.clearTimeout(timer);
+      timer = window.setTimeout(hide, delay);
+    };
+    const hide = () => {
+      // Never hide under the user's focus.
+      if (el.contains(document.activeElement)) {
+        timer = window.setTimeout(hide, delay);
+        return;
+      }
+      el.setAttribute("data-hidden", "true");
+    };
+    const onActivity = () => show();
+    for (const evt of ["pointermove", "pointerdown", "keydown", "focusin"]) {
+      el.addEventListener(evt, onActivity, { passive: true });
+    }
+    el.addEventListener("focusout", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(hide, delay);
+    });
+    window.addEventListener("couch-osd:show", onActivity);
+    // Gamepad input arrives as synthetic keyboard events (see
+    // gamepad.ts), so keydown above already covers the controller.
+    show();
+  }
+</script>

@@ -1,0 +1,71 @@
+---
+// TvCard — the Couch catalogue card.
+// Props: title, subtitle?, meta?, image?, imageAlt?, kind
+// ('poster' 2:3 | 'landscape' 16:9 | 'channel' logo FITTED),
+// progress? (0..1 watched fraction), badge?, href?, itemKey?
+// (stable key for per-route focus memory — prefer a catalogue id).
+// Focus: scale ~1.05 + elevation + focus ring, transform-only so
+// neighbours never reflow. Channel logos use object-fit: contain
+// (see couch.css) — never stretched.
+import TvImage from "./TvImage.astro";
+
+export type TvCardKind = "poster" | "landscape" | "channel";
+
+interface Props {
+  title: string;
+  subtitle?: string;
+  meta?: string;
+  image?: string;
+  imageAlt?: string;
+  kind?: TvCardKind;
+  progress?: number;
+  badge?: string;
+  href?: string;
+  itemKey?: string;
+}
+const {
+  title,
+  subtitle,
+  meta,
+  image,
+  imageAlt,
+  kind = "poster",
+  progress,
+  badge,
+  href,
+  itemKey,
+} = Astro.props;
+const imageKind = kind === "poster" ? "poster" : kind === "channel" ? "logo" : "backdrop";
+const pct =
+  typeof progress === "number" && Number.isFinite(progress)
+    ? Math.max(0, Math.min(1, progress))
+    : null;
+const Tag = href ? "a" : "div";
+---
+
+<Tag
+  class={`rs-card rs-card--${kind}`}
+  data-nylah-item
+  data-couch-key={itemKey}
+  href={href}
+  tabindex={href ? undefined : 0}
+  role={href ? undefined : "button"}
+  aria-label={title}
+>
+  <span class="rs-card__media">
+    <TvImage src={image} alt={imageAlt ?? title} kind={imageKind} title={title} />
+    {badge && <span class="rs-card__badge">{badge}</span>}
+    {
+      pct !== null && pct > 0 && (
+        <span class="rs-card__progress" aria-hidden="true">
+          <span class="rs-card__progress-fill" style={`width: ${Math.round(pct * 100)}%`} />
+        </span>
+      )
+    }
+  </span>
+  <span class="rs-card__body">
+    <span class="rs-card__title">{title}</span>
+    {subtitle && <span class="rs-card__subtitle">{subtitle}</span>}
+    {meta && <span class="rs-card__meta">{meta}</span>}
+  </span>
+</Tag>

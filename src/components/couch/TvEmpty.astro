@@ -1,0 +1,35 @@
+---
+// TvEmpty — empty / error state, all dark RedSilk.
+// Props: title, message?, art? ('library' | 'search' | 'player' —
+// original curated art from public/art/), actionLabel?, actionHref?
+import TvImage from "./TvImage.astro";
+
+interface Props {
+  title: string;
+  message?: string;
+  art?: "library" | "search" | "player";
+  actionLabel?: string;
+  actionHref?: string;
+}
+const { title, message, art, actionLabel, actionHref } = Astro.props;
+const artSrc = art ? `/art/empty-${art}.jpg` : undefined;
+---
+
+<div class="rs-empty" role="status">
+  {
+    artSrc && (
+      <div class="rs-empty__art">
+        <TvImage src={artSrc} alt="" kind="backdrop" title={title} />
+      </div>
+    )
+  }
+  <h2 class="rs-empty__title">{title}</h2>
+  {message && <p class="rs-empty__message">{message}</p>}
+  {
+    actionLabel && actionHref && (
+      <a class="rs-empty__action" data-nylah-item href={actionHref}>
+        {actionLabel}
+      </a>
+    )
+  }
+</div>
