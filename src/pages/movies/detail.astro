@@ -1,376 +1,194 @@
 ---
-import Layout from "@/layouts/Layout.astro"
-import {
-  IconChevronLeft,
-  IconPlayerPlay,
-  IconDownload,
-  IconRotate,
-  IconBookmark,
-  IconBrandYoutube,
-  IconPictureInPicture,
-  IconExternalLink,
-  IconDeviceTv,
-  IconAspectRatio,
-  IconClockEdit,
-  IconChartBar,
-  IconActivityHeartbeat,
-  IconX,
-} from "@tabler/icons-svelte"
+ // Couch Movie detail — full-width backdrop layout (NOT a pop-up).
+// Painted client-side by src/scripts/movies/couch-detail.ts from
+// `get_vod_info` + the cached catalogue row: backdrop, title, plot,
+// year/runtime/genres/rating, Play/Resume, Favourite, Watch Later,
+// Trailer, cast, and More Like This. Playback mounts the shared
+// engine (mountPlayer) with the TvOsd Couch controls; B / Escape
+// while playing returns to this detail page, never to Home.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
+import TvOsd from "@/components/couch/TvOsd.astro";
 ---
 
-<Layout pageTitle="Movie">
-  <main class="flex-1 min-w-0 min-h-0 overflow-y-auto overflow-x-hidden custom-scroll">
-    <div
-      class="relative w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12 flex flex-col gap-5 isolate">
+<CouchLayout pageTitle="Movie" activeNav="movies" view="movies-detail">
+  <a class="rs-hero__action rs-hero__action--secondary" href="/movies">
+    ‹ Movies
+  </a>
 
-      <div data-modal-ambient id="movie-detail-ambient" aria-hidden="true"></div>
-
-      <div class="relative z-10 flex flex-col gap-5">
-
-        <a
-          href="/movies"
-          id="movie-detail-back"
-          aria-label="Back to Movies"
-          data-i18n-attr="aria-label:page.movies.title"
-          class="dt-enter dt-stagger-0 self-start inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 min-h-11 text-sm text-fg-2
-                 hover:bg-surface-2 focus-visible:bg-surface-2 outline-none transition-colors">
-          <IconChevronLeft aria-hidden="true" stroke={2} class="size-4" />
-          <span data-i18n="page.movies.title">Movies</span>
-        </a>
-
-        <div class="dt-enter dt-stagger-1 flex flex-col gap-1">
-          <div data-detail-skeleton class="flex flex-col gap-2 py-0.5">
-            <div class="skel rounded-lg h-8 w-2/5"></div>
-            <div class="flex gap-2">
-              <div class="skel rounded-full h-4 w-14"></div>
-              <div class="skel rounded-full h-4 w-20"></div>
-            </div>
-          </div>
-          <h1
-            id="movie-detail-title"
-            hidden
-            class="font-serif font-semibold tracking-[-0.02em] leading-tight text-3xl sm:text-4xl lg:text-5xl">
-          </h1>
-          <div
-            id="movie-detail-meta"
-            hidden
-            class="detail-meta text-sm text-fg-3 tabular-nums">
-          </div>
-          <div
-            id="movie-detail-langs"
-            hidden
-            aria-label="Available languages"
-            data-i18n-attr="aria-label:detail.lang.title"
-            class="flex flex-wrap gap-1.5">
-          </div>
-        </div>
-
-        <!-- Hero: poster (default) or player (after Play). -->
-        <div class="w-full">
-          <div
-            id="movie-detail-poster"
-            class="dt-hero skel aspect-2/3 sm:aspect-video w-full mx-auto overflow-hidden rounded-xl bg-surface-2 ring-1 ring-line
-                   max-h-[60dvh] max-w-[calc(60dvh*2/3)] sm:max-w-[calc(60dvh*16/9)]"
-            style="view-transition-name: active-poster;">
-          </div>
-          <div
-            id="movie-detail-player-wrap"
-            class="hidden relative aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line
-                   max-h-[60dvh] max-w-[calc(60dvh*16/9)]">
-            <video
-              id="movie-player"
-              class="video-js vjs-default-skin vjs-big-play-centered h-full w-full"
-              controls
-              hidden
-              playsinline></video>
-          </div>
-          <div
-            id="movie-detail-trailer-wrap"
-            class="hidden relative aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line
-                   max-h-[60dvh] max-w-[calc(60dvh*16/9)]">
-            <iframe
-              id="movie-detail-trailer-frame"
-              class="h-full w-full border-0"
-              allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-              allowfullscreen></iframe>
-            <div class="absolute top-2 right-2 z-10 flex gap-1.5">
-              <button
-                id="movie-detail-trailer-external"
-                type="button"
-                class="grid place-items-center min-h-11 min-w-11 rounded-lg bg-black/60 text-white
-                       hover:bg-black/80 focus-visible:bg-black/80 focus-visible:ring-2 focus-visible:ring-accent"
-                data-i18n-attr="aria-label:detail.trailer.openYoutube;title:detail.trailer.openYoutube">
-                <IconBrandYoutube aria-hidden="true" stroke={2} class="size-5" />
-              </button>
-              <button
-                id="movie-detail-trailer-close"
-                type="button"
-                class="grid place-items-center min-h-11 min-w-11 rounded-lg bg-black/60 text-white
-                       hover:bg-black/80 focus-visible:bg-black/80 focus-visible:ring-2 focus-visible:ring-accent"
-                data-i18n-attr="aria-label:common.close;title:common.close">
-                <IconX aria-hidden="true" stroke={2} class="size-5" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Action buttons -->
-        <div class="dt-enter dt-stagger-2 flex flex-wrap justify-center items-center gap-2">
-          <button
-            id="movie-detail-play"
-            type="button"
-            class="dt-play-breath flex flex-col items-center justify-center gap-0 rounded-xl bg-accent text-bg
-                   px-6 py-3 text-base font-semibold min-w-52 min-h-14
-                   hover:opacity-90 focus-visible:opacity-90
-                   focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-                   active:scale-[0.97] transition duration-150">
-            <span class="inline-flex items-center gap-2 leading-none">
-              <IconPlayerPlay aria-hidden="true" stroke={2} class="btn-icon" />
-              <span id="movie-detail-play-label">Play</span>
-            </span>
-            <span
-              id="movie-detail-play-sub"
-              class="text-xs font-normal opacity-80 tabular-nums leading-tight mt-0.5 empty:hidden"></span>
-          </button>
-          <button
-            id="movie-detail-restart"
-            type="button"
-            hidden
-            aria-label="Start from the beginning"
-            data-i18n-attr="aria-label:detail.action.startOver"
-            class="btn">
-            <IconRotate aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="detail.action.startOver">Start over</span>
-          </button>
-          <button
-            id="movie-detail-fav"
-            type="button"
-            class="btn">
-            Add to favorites
-          </button>
-          <button
-            id="movie-detail-watch"
-            type="button"
-            aria-pressed="false"
-            class="btn">
-            <IconBookmark aria-hidden="true" stroke={2} class="btn-icon" />
-            <span id="movie-detail-watch-label">Watch later</span>
-          </button>
-          <button
-            id="movie-detail-pip"
-            type="button"
-            hidden
-            aria-label="Picture-in-Picture"
-            data-i18n-attr="aria-label:detail.action.pip"
-            class="btn">
-            <IconPictureInPicture aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="detail.action.pip">Picture-in-Picture</span>
-          </button>
-          <button
-            id="movie-detail-scale"
-            type="button"
-            hidden
-            aria-label="Display mode"
-            data-i18n-attr="aria-label:stream.scale.button"
-            class="btn">
-            <IconAspectRatio aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="stream.scale.button">Display mode</span>
-          </button>
-          <button
-            id="movie-detail-stats"
-            type="button"
-            hidden
-            aria-pressed="false"
-            aria-label="Playback stats"
-            data-i18n-attr="aria-label:player.stats.title"
-            class="btn">
-            <IconChartBar aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="player.stats.title">Playback stats</span>
-          </button>
-          <button
-            id="movie-detail-health"
-            type="button"
-            hidden
-            aria-label="Stream health log"
-            data-i18n-attr="aria-label:stream.health.menu"
-            class="btn">
-            <IconActivityHeartbeat aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="stream.health.menu">Stream health log</span>
-          </button>
-          <button
-            id="movie-subtitle-delay-btn"
-            type="button"
-            hidden
-            aria-label="Subtitle delay"
-            data-i18n-attr="aria-label:detail.subtitleDelay"
-            class="btn">
-            <IconClockEdit aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="detail.subtitleDelay">Subtitle delay</span>
-          </button>
-          <button
-            id="movie-detail-open-external"
-            type="button"
-            hidden
-            class="btn">
-            <IconExternalLink aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-label></span>
-          </button>
-          <button
-            id="movie-detail-play-tv"
-            type="button"
-            hidden
-            class="btn">
-            <IconDeviceTv aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="cast.menu.playOnTv">Play on TV</span>
-          </button>
-          <button
-            id="movie-detail-trailer"
-            type="button"
-            hidden
-            aria-pressed="false"
-            class="btn aria-pressed:bg-accent-soft aria-pressed:text-fg aria-pressed:border-accent">
-            <IconBrandYoutube aria-hidden="true" stroke={2} class="btn-icon" />
-            <span data-i18n="detail.action.trailer">Trailer</span>
-          </button>
-          <button
-            id="movie-detail-download"
-            type="button"
-            hidden
-            class="btn">
-            <IconDownload aria-hidden="true" stroke={2} class="btn-icon" />
-            <span id="movie-detail-download-label">Download</span>
-          </button>
-        </div>
-
-        <div class="dt-enter dt-stagger-3 flex flex-col lg:flex-row lg:items-start gap-4 lg:gap-8">
-          <div class="flex flex-col gap-2 min-w-0 lg:max-w-3xl lg:flex-1">
-            <div
-              id="movie-detail-tagline"
-              hidden
-              class="text-base text-fg-3">
-            </div>
-            <div data-detail-skeleton class="flex flex-col gap-2">
-              <div class="skel rounded h-3.5 w-full"></div>
-              <div class="skel rounded h-3.5 w-11/12"></div>
-              <div class="skel rounded h-3.5 w-2/3"></div>
-            </div>
-            <div
-              id="movie-detail-plot"
-              hidden
-              class="text-base text-fg-2 leading-relaxed">
-            </div>
-          </div>
-
-          <aside class="hidden lg:flex flex-col gap-3 lg:w-72 lg:shrink-0 lg:border-l lg:border-line lg:pl-6">
-            <div
-              id="movie-detail-director"
-              hidden
-              class="text-sm text-fg-3">
-            </div>
-            <div
-              id="movie-detail-fact-genre"
-              hidden
-              class="flex items-center justify-between gap-3 text-sm">
-              <span class="text-fg-3" data-i18n="detail.section.genre">Genre</span>
-              <span data-role="fact-value" class="text-fg text-right truncate"></span>
-            </div>
-            <div
-              id="movie-detail-fact-rating"
-              hidden
-              class="flex items-center justify-between gap-3 text-sm">
-              <span class="text-fg-3" data-i18n="detail.section.rating">Rating</span>
-              <span data-role="fact-value" class="text-fg text-right truncate"></span>
-            </div>
-            <div id="movie-detail-provider-people" hidden class="flex flex-col gap-1.5 text-sm">
-              <span class="text-fg-3" data-i18n="detail.cast">Cast</span>
-              <div id="movie-detail-provider-people-list" class="flex flex-wrap gap-1.5"></div>
-            </div>
-          </aside>
-        </div>
-
-        <section id="movie-detail-cast" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.cast">Cast</h2>
-          <div
-            id="movie-detail-cast-list"
-            class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
-          </div>
-        </section>
-
-        <section id="movie-detail-similar" hidden class="dt-enter flex flex-col gap-3">
-          <h2 class="font-serif text-2xl tracking-[-0.02em]" data-i18n="detail.similar">Similar titles</h2>
-          <div
-            id="movie-detail-similar-list"
-            class="flex gap-3 overflow-x-auto custom-scroll snap-x snap-mandatory -mx-2 px-2 py-1">
-          </div>
-        </section>
-
+  <section id="movie-detail-hero" class="rs-hero" hidden aria-label="Movie">
+    <div id="movie-detail-backdrop" class="rs-hero__backdrop" aria-hidden="true"></div>
+    <div class="rs-hero__scrim" aria-hidden="true"></div>
+    <div class="rs-hero__content">
+      <h1 id="movie-detail-title" class="rs-hero-title"></h1>
+      <p id="movie-detail-meta" class="rs-hero__meta"></p>
+      <p id="movie-detail-plot" class="rs-hero__description"></p>
+      <div class="rs-hero__actions">
+        <button id="movie-detail-play" type="button" class="rs-hero__action">
+          ▶ <span id="movie-detail-play-label">Play</span>
+          <span id="movie-detail-play-sub" class="rs-hero__meta"></span>
+        </button>
+        <button
+          id="movie-detail-fav"
+          type="button"
+          class="rs-hero__action rs-hero__action--secondary"
+          aria-pressed="false"
+        >
+          ☆ Favourite
+        </button>
+        <button
+          id="movie-detail-watch"
+          type="button"
+          class="rs-hero__action rs-hero__action--secondary"
+          aria-pressed="false"
+        >
+          + Watch Later
+        </button>
+        <button
+          id="movie-detail-trailer"
+          type="button"
+          class="rs-hero__action rs-hero__action--secondary"
+          hidden
+        >
+          ▶ Trailer
+        </button>
       </div>
     </div>
-  </main>
+  </section>
 
-  <style>
-    /* Nylah Studios v0.3.0 (w7) — RedSilk detail treatment: wine tokens,
-       warm gradients, strong focus glow. The poster, title and action
-       buttons are in this template, so plain scoped selectors match them;
-       runtime-injected rows (cast, episodes) need :global(). */
-    #movie-detail-poster {
-      box-shadow:
-        0 0 0 1px var(--color-line),
-        var(--nylah-card-shadow-lift, 0 24px 64px -24px var(--nylah-focus-glow));
-    }
-    /* Hero wraps: same depth treatment, video black stays black. */
-    #movie-detail-player-wrap,
-    #movie-detail-trailer-wrap {
-      box-shadow:
-        0 0 0 1px var(--color-line),
-        var(--nylah-card-shadow, 0 18px 48px -16px var(--nylah-focus-glow));
-    }
-    /* Play is the hero action: wine gradient + strong wine glow. */
-    #movie-detail-play {
-      background: linear-gradient(180deg, var(--nylah-wine, var(--color-accent)), var(--nylah-wine-deep, var(--color-accent)));
-      box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
-    }
-    /* Controller-first focus glow on every action button. */
-    .btn:focus-visible {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        0 0 24px 4px var(--nylah-focus-glow, var(--color-accent-soft));
-    }
-    #movie-detail-play:focus-visible {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        var(--nylah-focus-glow-strong, 0 0 32px 6px var(--nylah-focus-glow));
-    }
-    /* Cast cards are injected by detail-chrome.ts: a focused card glows. */
-    :global(#movie-detail-cast-list a:focus-visible) {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
-    }
-    :global(#movie-detail-similar-list a:focus-visible) {
-      box-shadow:
-        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
-    }
-    @media (prefers-reduced-motion: reduce) {
-      #movie-detail-poster,
-      .btn:focus-visible,
-      #movie-detail-play:focus-visible,
-      :global(#movie-detail-cast-list a:focus-visible),
-      :global(#movie-detail-similar-list a:focus-visible) {
-        box-shadow: none;
-      }
-      .btn:focus-visible,
-      #movie-detail-play:focus-visible,
-      :global(#movie-detail-cast-list a:focus-visible),
-      :global(#movie-detail-similar-list a:focus-visible) {
-        box-shadow: 0 0 0 2px var(--nylah-focus-ring, var(--color-accent));
-      }
-    }
-  </style>
+  <p id="movie-detail-status" class="rs-meta" role="status"></p>
+
+  <div id="movie-detail-poster-wrap" class="rs-detail-media" hidden>
+    <div id="movie-detail-poster" class="rs-detail-poster" aria-hidden="true"></div>
+  </div>
+
+  <div
+    id="movie-detail-player-wrap"
+    class="rs-detail-player"
+    hidden
+  >
+    <video id="movie-player" playsinline></video>
+    <TvOsd autoHideMs={4500}>
+      <h3 slot="info" class="rs-osd__title" id="movie-osd-title"></h3>
+      <p slot="info" class="rs-osd__subtitle" id="movie-osd-subtitle"></p>
+      <div class="rs-osd__timeline">
+        <input
+          id="movie-osd-timeline"
+          type="range"
+          min="0"
+          max="1"
+          value="0"
+          step="1"
+          aria-label="Seek"
+        />
+        <span id="movie-osd-time" class="rs-meta">0:00</span>
+      </div>
+      <button slot="controls" id="movie-osd-back10" type="button" class="rs-osd__btn">−10s</button>
+      <button slot="controls" id="movie-osd-play-pause" type="button" class="rs-osd__btn">▶ Play</button>
+      <button slot="controls" id="movie-osd-fwd10" type="button" class="rs-osd__btn">+10s</button>
+      <button slot="controls" id="movie-osd-subtitles" type="button" class="rs-osd__btn" hidden>Subtitles</button>
+      <span slot="controls" id="movie-osd-subtitles-list" class="rs-osd__tracklist"></span>
+      <button slot="controls" id="movie-osd-audio" type="button" class="rs-osd__btn" hidden>Audio</button>
+      <span slot="controls" id="movie-osd-audio-list" class="rs-osd__tracklist"></span>
+      <button slot="controls" id="movie-osd-fullscreen" type="button" class="rs-osd__btn">⛶ Fullscreen</button>
+      <button slot="controls" id="movie-osd-back" type="button" class="rs-osd__btn">‹ Back</button>
+    </TvOsd>
+  </div>
+
+  <section id="movie-detail-cast" class="rs-detail-section" hidden>
+    <h2 class="rs-section-title">Cast</h2>
+    <div id="movie-detail-cast-list" class="rs-detail-chips"></div>
+  </section>
+
+  <section id="movie-detail-similar" class="rs-rail" hidden aria-label="More like this">
+    <div class="rs-rail__head">
+      <h2 class="rs-section-title">More Like This</h2>
+    </div>
+    <div id="movie-detail-similar-list" class="rs-rail__row"></div>
+  </section>
+
+  <TvDialog id="movie-trailer-dialog" title="Trailer">
+    <iframe
+      id="movie-detail-trailer-frame"
+      title="Trailer"
+      allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+      allowfullscreen></iframe>
+  </TvDialog>
 
   <script>
-    import "@/scripts/movies/detail.ts"
-    import "@/scripts/updater-startup.js"
+    import "@/scripts/movies/couch-detail.ts";
   </script>
-</Layout>
+
+  <style>
+    .rs-detail-media {
+      display: flex;
+      justify-content: center;
+    }
+    .rs-detail-poster {
+      width: min(22rem, 80vw);
+      aspect-ratio: 2 / 3;
+      border-radius: 1rem;
+      overflow: hidden;
+      background: var(--rs-surface);
+      display: grid;
+      place-items: center;
+      color: var(--rs-text-2);
+      font-family: var(--rs-font-display);
+      font-size: 1.5rem;
+      text-align: center;
+      padding: 1rem;
+    }
+    .rs-detail-poster img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .rs-detail-player {
+      position: relative;
+      aspect-ratio: 16 / 9;
+      border-radius: 1.25rem;
+      overflow: hidden;
+      background: #000;
+    }
+    .rs-detail-player video {
+      width: 100%;
+      height: 100%;
+    }
+    .rs-osd__timeline {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+    }
+    .rs-osd__timeline input[type="range"] {
+      flex: 1;
+      accent-color: var(--rs-accent);
+      min-height: 2rem;
+    }
+    .rs-osd__tracklist {
+      display: inline-flex;
+      gap: 0.5rem;
+    }
+    .rs-detail-section {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .rs-detail-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .rs-detail-chips .rs-meta {
+      background: var(--rs-surface);
+      border: 1px solid var(--rs-line);
+      border-radius: 999px;
+      padding: 0.5rem 1rem;
+    }
+    #movie-detail-trailer-frame {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 0;
+    }
+  </style>
+</CouchLayout>

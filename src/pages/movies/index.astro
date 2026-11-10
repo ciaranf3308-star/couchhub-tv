@@ -1,190 +1,197 @@
 ---
-import Layout from "@/layouts/Layout.astro";
-import SearchInput from "@/components/SearchInput.astro";
-import SortMenu from "@/components/SortMenu.astro";
-import CategoryPickerDialog from "@/components/CategoryPickerDialog.astro";
-import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@tabler/icons-svelte";
+ // Couch Movies — cinematic browsing on the W1 shared UI system.
+// The catalogue loads client-side (Xtream provider) via
+// src/scripts/movies/couch-index.ts: rails (Continue Watching,
+// Featured, Recently Added, Recommended, Favourites, Watch Later),
+// genre chips, year/rating/sort controls, search + on-screen keyboard,
+// and a windowed grid (computeVisibleWindow) for large catalogues.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
+import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
+import TvSkeleton from "@/components/couch/TvSkeleton.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
+import { MOVIE_SORT_MODES } from "@/scripts/movies/couch-movies.ts";
+import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
 
-<Layout pageTitle="Movies">
-	<main
-		class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 md:landscape:pt-6 pb-6
-			flex flex-col gap-4 flex-1 min-h-0">
+<CouchLayout pageTitle="Movies" activeNav="movies" view="movies">
+  <header class="rs-browse-head">
+    <h1 class="rs-page-title">Movies</h1>
+    <p class="rs-meta">
+      <span id="couch-browse-hero-count">—</span>
+      <span aria-hidden="true"> · </span>
+      <span id="couch-browse-status">Loading…</span>
+    </p>
+  </header>
 
-		<header class="route-hero shrink-0">
-			<h1 data-i18n="page.movies.title" class="route-hero__title">Movies</h1>
-			<div class="route-hero__meta">
-				<span><strong id="movie-hero-count">-</strong> <span data-i18n="list.inCatalogue">in catalogue</span></span>
-				<span class="route-hero__meta-divider" aria-hidden="true"></span>
-				<span id="movie-hero-cat" class="truncate min-w-0">All categories</span>
-			</div>
-		</header>
+  <section class="rs-browse-toolbar" aria-label="Browse controls">
+    <div class="rs-browse-search">
+      <label class="rs-browse-label" for="couch-browse-search">Search movies</label>
+      <input
+        id="couch-browse-search"
+        type="search"
+        placeholder="Search movies…"
+        autocomplete="off"
+      />
+      <button
+        id="couch-search-open"
+        type="button"
+        class="rs-hero__action rs-hero__action--secondary"
+        data-couch-dialog-open="couch-search-dialog"
+      >
+        ⌨ On-screen keyboard
+      </button>
+    </div>
 
-		<!-- Toolbar: category + search -->
-		<section class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center shrink-0">
-			<button
-				id="movie-category-picker-trigger"
-				type="button"
-				aria-haspopup="dialog"
-				aria-controls="movie-category-picker-dialog"
-				class="browse-toolbar-btn rounded-xl border border-line bg-surface px-3.5 py-2 min-h-11 text-sm flex items-center gap-2 text-left
-					sm:w-60 lg:w-72 shrink-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<span data-i18n="list.category" class="text-fg-3 shrink-0">Category</span>
-				<span
-					id="movie-category-picker-label"
-					data-i18n="list.allCategories"
-					class="text-fg truncate flex-1">All categories</span>
-				<IconChevronDown
-					aria-hidden="true"
-					stroke={2}
-					class="size-4 text-fg-3 shrink-0"
-				/>
-			</button>
+    <div class="rs-browse-selects">
+      <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
+      <select id="couch-browse-sort">
+        {
+          MOVIE_SORT_MODES.map((mode) => (
+            <option value={mode.value}>{mode.label}</option>
+          ))
+        }
+      </select>
+      <label class="rs-browse-label" for="couch-browse-year">Decade</label>
+      <select id="couch-browse-year">
+        <option value="">Any decade</option>
+        {
+          YEAR_ORDER.map((year) => (
+            <option value={year}>{year}</option>
+          ))
+        }
+      </select>
+      <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
+      <select id="couch-browse-rating">
+        {
+          RATING_OPTIONS.map((min) => (
+            <option value={min}>
+              {min === 0 ? "Any rating" : `${min}+`}
+            </option>
+          ))
+        }
+      </select>
+    </div>
+  </section>
 
-			<div class="flex-1 sm:basis-64 min-w-56">
-				<SearchInput
-					id="movie-search"
-					label="Search movies"
-					placeholder="Search movies…"
-					labelKey="list.searchMovies"
-					placeholderKey="list.searchMoviesPlaceholder"
-				/>
-			</div>
+  <div
+    id="couch-browse-tabs"
+    class="rs-browse-tabs"
+    role="group"
+    aria-label="Movie lists"
+  >
+  </div>
 
-			<div class="flex gap-2 sm:ml-auto shrink-0">
-				<SortMenu
-					id="movie-sort"
-					label="View"
-					labelKey="list.view"
-					widthClass="flex-1 sm:flex-none sm:w-44"
-					options={[
-						{ value: "default", label: "Default", key: "sort.default" },
-						{ value: "added", label: "Recently added", key: "sort.recentlyAdded" },
-						{ value: "rating", label: "Rating", key: "sort.rating" },
-						{ value: "year-desc", label: "Newest first", key: "sort.yearDesc" },
-						{ value: "year-asc", label: "Oldest first", key: "sort.yearAsc" },
-						{ value: "az", label: "A-Z", key: "sort.az" },
-					]}
-					selects={[
-						{ id: "movie-lang", label: "Language", labelKey: "list.langFilter.label" },
-					]}
-					toggles={[
-						{ id: "movie-group-langs", label: "Group languages", key: "list.groupLangs", ariaKey: "list.groupLangs.aria" },
-						{ id: "movie-hide-watched", label: "Hide watched", key: "list.hideWatched", ariaKey: "list.hideWatched.aria" },
-					]}
-				>
-					<IconAdjustmentsHorizontal slot="icon" aria-hidden="true" stroke={2} class="size-4 text-fg-3 shrink-0" />
-				</SortMenu>
+  <div
+    id="couch-browse-genres"
+    class="rs-browse-genres"
+    role="group"
+    aria-label="Filter by genre"
+  >
+  </div>
 
-				<button
-					id="movie-surprise"
-					type="button"
-					data-i18n-attr="aria-label:surprise.buttonAria;title:surprise.buttonAria"
-					aria-label="Surprise me with a random title"
-					title="Surprise me with a random title"
-					class="browse-toolbar-btn rounded-xl border border-line bg-surface min-h-11 text-sm shrink-0
-						flex items-center justify-center w-11 px-0 gap-0 xl:w-auto xl:px-3.5 xl:gap-2
-						hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-					<IconDice5 aria-hidden="true" stroke={2} class="size-4 text-fg-3 shrink-0" />
-					<span data-i18n="surprise.button" class="hidden xl:inline">Surprise me</span>
-				</button>
-			</div>
-		</section>
+  <div id="couch-browse-rails"></div>
 
-		<!-- Browse filters: year decade + minimum rating chips, rendered by
-		     browse-filters.ts (genre lives in the category picker above). -->
-		<div id="movie-browse-filters" class="shrink-0"></div>
+  <div id="couch-browse-skeleton">
+    <TvSkeleton kind="poster" count={12} />
+  </div>
 
-		<!-- Active person filter -->
-		<div id="movie-person-filter-row" hidden class="flex items-center gap-2 shrink-0 px-1">
-			<span
-				class="inline-flex items-center gap-1.5 rounded-full border border-accent bg-accent-soft
-					px-3 py-1 min-h-8 text-sm text-fg">
-				<span id="movie-person-filter-label"></span>
-				<button
-					id="movie-person-filter-clear"
-					type="button"
-					data-i18n-attr="aria-label:list.personFilterAria;title:list.personFilterAria"
-					aria-label="Remove person filter"
-					title="Remove person filter"
-					class="rounded-full outline-none hover:text-accent focus-visible:text-accent
-						focus-visible:ring-1 focus-visible:ring-accent -mr-1 p-0.5">
-					<IconX aria-hidden="true" stroke={2} class="size-3.5" />
-				</button>
-			</span>
-		</div>
+  <div id="couch-browse-empty" hidden>
+    <TvEmpty
+      title="No movies yet"
+      message="This playlist has no movies."
+      art="library"
+      actionLabel="Open Settings"
+      actionHref="/settings"
+    />
+  </div>
 
-		<!-- Status row -->
-		<div
-			id="movie-list-status"
-			data-i18n="list.noPlaylistSelected"
-			class="px-1 text-xs text-fg-3 tabular-nums shrink-0">
-			No playlist selected.
-		</div>
+  <div id="couch-browse-error" hidden role="alert">
+    <p class="rs-body-text" data-role="error-message"></p>
+    <p>
+      <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
+        Check Settings
+      </a>
+    </p>
+  </div>
 
-		<!-- Poster grid. -->
-		<section
-			id="movie-grid"
-			class="flex-1 min-h-0 overflow-auto custom-scroll
-				grid gap-3 sm:gap-4
-				grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]
-				sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]
-				lg:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]
-				auto-rows-min content-start
-				p-2 pb-4">
-			<!-- Cards rendered by movies.js -->
-		</section>
+  <div
+    id="couch-browse-grid"
+    class="rs-grid"
+    data-couch-grid
+    aria-label="All movies"
+    hidden
+  >
+  </div>
 
-		<!-- Categories popover -->
-		<CategoryPickerDialog idPrefix="movie-category-picker" />
-	</main>
+  <TvDialog id="couch-search-dialog" title="Search movies">
+    <TvKeyboard client:load placeholder="Type a movie title…" />
+    <p class="rs-meta">Type to filter the grid. The keyboard closes with B / Escape.</p>
+  </TvDialog>
 
-	<script>
-		import "@/scripts/movies/movies.ts";
-		import "@/scripts/updater-startup.js";
-	</script>
+  <script>
+    import "@/scripts/movies/couch-index.ts";
+  </script>
 
-	<style>
-		/* Nylah Studios v0.3.0 (w7) — RedSilk browse treatment. Layout,
-		   navigation and behavior unchanged; surfaces only. */
-		.route-hero__title {
-			font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
-		}
-		/* Toolbar buttons: warm gradient, layered shadow, wine focus glow. */
-		.browse-toolbar-btn {
-			background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
-			box-shadow: var(--nylah-card-shadow, 0 8px 24px -12px var(--nylah-focus-glow));
-		}
-		.browse-toolbar-btn:hover,
-		.browse-toolbar-btn:focus-visible {
-			border-color: var(--nylah-focus-ring, var(--color-accent));
-			box-shadow:
-				0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
-				0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
-		}
-		/* Grid empty state is rendered by movies.ts into #movie-grid — the
-		   :global() hook lets this scoped block grade it: a warm panel with
-		   a serif line instead of a bare grey sentence. */
-		:global(#movie-grid > .col-span-full) {
-			background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
-			border: 1px solid var(--color-line);
-			border-radius: 1rem;
-			box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-			padding: 2.5rem 1.25rem;
-			font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
-			font-size: 1.0625rem;
-			color: var(--color-fg-2);
-		}
-		/* Loading skeletons (renderPosterSkeletons in grid-view.ts): depth
-		   under the shimmer wave. */
-		:global(#movie-grid [data-skeleton]) {
-			box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-		}
-		@media (prefers-reduced-motion: reduce) {
-			.browse-toolbar-btn {
-				box-shadow: none;
-			}
-		}
-	</style>
-</Layout>
+  <style>
+    .rs-browse-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .rs-browse-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: end;
+    }
+    .rs-browse-search {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+      flex: 1 1 32rem;
+    }
+    .rs-browse-search input {
+      flex: 1 1 16rem;
+      min-height: 3rem;
+      padding: 0.5rem 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.25rem;
+    }
+    .rs-browse-selects {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .rs-browse-selects select {
+      min-height: 3rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.125rem;
+    }
+    .rs-browse-label {
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    .rs-browse-tabs,
+    .rs-browse-genres {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .rs-browse-tabs .rs-hero__action[aria-pressed="true"],
+    .rs-browse-genres .rs-hero__action[aria-pressed="true"] {
+      background: var(--rs-accent);
+      border-color: var(--rs-focus);
+      color: #fff;
+    }
+  </style>
+</CouchLayout>

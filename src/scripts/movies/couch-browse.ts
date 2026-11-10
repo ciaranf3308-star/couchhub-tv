@@ -1,0 +1,445 @@
+// Couch browse controller (W4) — shared by the Movies and Series
+// Couch index pages.
+//
+// The two pages share one DOM contract (see the .astro templates) and
+// one controller; each screen supplies a small kind adapter (row
+// mapping, rails, card views, filtering). The controller owns:
+//   - catalogue load state (loading skeleton -> rails + grid / empty /
+//     error), via loadCouchCatalog,
+//   - rails (Continue Watching, Recently Added, Recommended, Favourites,
+//     Watch Later — only the non-empty ones render),
+//   - list tabs (All / Continue / Recent / Favourites / Watch Later),
+//   - genre chips, year + rating selects, sort select, search input +
+//     on-screen keyboard dialog,
+//   - the full catalogue grid, windowed with computeVisibleWindow +
+//     gridColumnsForWidth so a 10,000-title catalogue never builds
+//     10,000 card nodes. The focused card is pinned into the window
+//     so windowing never steals focus.
+//
+// DOM contract (ids the .astro templates provide):
+//   couch-browse-status, couch-browse-hero-count, couch-browse-tabs,
+//   couch-browse-genres, couch-browse-year, couch-browse-rating,
+//   couch-browse-sort, couch-browse-search, couch-search-open,
+//   couch-browse-rails, couch-browse-grid, couch-browse-skeleton,
+//   couch-browse-empty, couch-browse-error.
+
+import { computeVisibleWindow, gridColumnsForWidth } from "@/scripts/lib/couch-grid.ts";
+import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
+import { buildCouchCard, type CouchCardView } from "@/scripts/movies/couch-cards.ts";
+import { loadCouchCatalog, type CouchCatalogSpec } from "@/scripts/movies/couch-catalog.ts";
+import { debounce } from "@/scripts/lib/debounce.ts";
+import { initI18n } from "@/scripts/lib/i18n.js";
+import { log } from "@/scripts/lib/log.js";
+import type { GenreId } from "@/scripts/lib/genres.ts";
+
+export type CouchBrowseList =
+  | "all"
+  | "continue"
+  | "recent"
+  | "favorites"
+  | "watchlater";
+
+export interface CouchBrowseFilter {
+  query: string;
+  genre: GenreId | "";
+  year: string;
+  minRating: number;
+  sort: string;
+  list: CouchBrowseList;
+}
+
+export interface CouchRail<T> {
+  id: string;
+  title: string;
+  rows: T[];
+}
+
+export interface CouchBrowseAdapter<T> {
+  /** "vod" | "series" — cache kind + log tag. */
+  kind: "vod" | "series";
+  spec: CouchCatalogSpec<T>;
+  /** Tabs shown for this kind (series adds nothing; kept for symmetry). */
+  lists: Array<{ value: CouchBrowseList; label: string }>;
+  /** Rails above the grid, in order. Only non-empty rails render. */
+  rails: (rows: T[], playlistId: string) => CouchRail<T>[];
+  /** Genre chips present in this catalogue. */
+  genres: (rows: T[]) => Array<{ id: GenreId; label: string; count: number }>;
+  /** Apply the current filter (query/genre/year/rating/list). */
+  applyFilter: (rows: T[], filter: CouchBrowseFilter, playlistId: string) => T[];
+  /** Display sort for the grid (receives the whole filter — the "recent"
+   *  list sorts newest-first regardless of the sort select). */
+  applySort: (rows: T[], filter: CouchBrowseFilter) => T[];
+  /** Card view for one row. */
+  cardView: (row: T, playlistId: string) => CouchCardView;
+  /** Stable key for one row (matches cardView's itemKey). */
+  rowKey: (row: T) => string;
+  /** Optional per-card enrichment after the element is built (e.g.
+   *  resolving a series' season count into its meta line). */
+  decorateCard?: (card: HTMLElement, row: T, playlistId: string) => void;
+  /** Detail route for one row. */
+  detailHref: (row: T) => string;
+  /** Human count label for the hero, e.g. "1,240 movies". */
+  countLabel: (count: number) => string;
+  emptyTitle: string;
+  emptyMessage: string;
+}
+
+const RAIL_LIMIT = 12;
+const MIN_CARD_WIDTH = 200;
+const GRID_GAP = 20;
+const ROW_HEIGHT_FALLBACK = 430;
+
+function $(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
+
+export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
+  const statusEl = $("couch-browse-status");
+  const heroCountEl = $("couch-browse-hero-count");
+  const tabsEl = $("couch-browse-tabs");
+  const genresEl = $("couch-browse-genres");
+  const yearEl = $("couch-browse-year") as HTMLSelectElement | null;
+  const ratingEl = $("couch-browse-rating") as HTMLSelectElement | null;
+  const sortEl = $("couch-browse-sort") as HTMLSelectElement | null;
+  const searchEl = $("couch-browse-search") as HTMLInputElement | null;
+  const railsEl = $("couch-browse-rails");
+  const gridEl = $("couch-browse-grid");
+  const skeletonEl = $("couch-browse-skeleton");
+  const emptyEl = $("couch-browse-empty");
+  const errorEl = $("couch-browse-error");
+
+  let all: T[] = [];
+  let filtered: T[] = [];
+  let playlistId = "";
+  let playlistTitle = "";
+  let loaded = false;
+  let rowHeight = ROW_HEIGHT_FALLBACK;
+  let columns = 6;
+  let renderRaf = 0;
+
+  const filter: CouchBrowseFilter = {
+    query: "",
+    genre: "",
+    year: "",
+    minRating: 0,
+    sort: "default",
+    list: "all",
+  };
+
+  const setVisible = (el: HTMLElement | null, visible: boolean) => {
+    if (el) el.hidden = !visible;
+  };
+
+  const makeCard = (row: T): HTMLElement => {
+    const view = adapter.cardView(row, playlistId);
+    const card = buildCouchCard({ ...view, href: adapter.detailHref(row) }, false);
+    adapter.decorateCard?.(card, row, playlistId);
+    return card;
+  };
+
+  // --- Rails -------------------------------------------------------------
+  const renderRails = () => {
+    if (!railsEl) return;
+    railsEl.replaceChildren();
+    if (!loaded || filter.query || filter.genre || filter.year || filter.minRating > 0 || filter.list !== "all") {
+      return;
+    }
+    for (const rail of adapter.rails(all, playlistId)) {
+      const rows = rail.rows.slice(0, RAIL_LIMIT);
+      if (!rows.length) continue;
+      const section = document.createElement("section");
+      section.className = "rs-rail";
+      section.setAttribute("data-nylah-rail", rail.id);
+      section.setAttribute("aria-label", rail.title);
+      const head = document.createElement("div");
+      head.className = "rs-rail__head";
+      const h2 = document.createElement("h2");
+      h2.className = "rs-section-title";
+      h2.textContent = rail.title;
+      head.appendChild(h2);
+      section.appendChild(head);
+      const rowEl = document.createElement("div");
+      rowEl.className = "rs-rail__row";
+      for (const row of rows) {
+        rowEl.appendChild(makeCard(row));
+      }
+      section.appendChild(rowEl);
+      railsEl.appendChild(section);
+    }
+    try {
+      (window as any).SpatialNavigation?.makeFocusable?.();
+    } catch {}
+  };
+
+  // --- Virtualised grid --------------------------------------------------
+  const measureRowHeight = () => {
+    if (!gridEl) return;
+    const card = gridEl.querySelector(".rs-card") as HTMLElement | null;
+    if (card) {
+      const h = card.getBoundingClientRect().height + GRID_GAP;
+      if (h > 100 && h < 1200) rowHeight = h;
+    }
+  };
+
+  const renderGridWindow = () => {
+    if (!gridEl) return;
+    const total = filtered.length;
+    if (total === 0) {
+      gridEl.replaceChildren();
+      return;
+    }
+    const gridTop = gridEl.getBoundingClientRect().top + window.scrollY;
+    const scrollTop = Math.max(0, window.scrollY - gridTop + 80);
+    const viewportHeight = window.innerHeight + 400;
+    columns = Math.max(
+      1,
+      gridColumnsForWidth(gridEl.clientWidth || window.innerWidth, MIN_CARD_WIDTH, GRID_GAP),
+    );
+    let win = computeVisibleWindow({
+      total,
+      columns,
+      rowHeight,
+      scrollTop,
+      viewportHeight,
+    });
+    // Pin the focused card into the window so windowing never removes
+    // the node that holds focus.
+    const active = document.activeElement as HTMLElement | null;
+    const focusedKey = active?.closest?.("[data-couch-key]")?.getAttribute("data-couch-key");
+    if (focusedKey) {
+      const idx = filtered.findIndex((row) => adapter.rowKey(row) === focusedKey);
+      if (idx >= 0 && (idx < win.startIndex || idx >= win.endIndex)) {
+        const row = Math.floor(idx / columns);
+        const startRow = Math.max(0, row - 1);
+        const endRow = Math.min(Math.ceil(total / columns) - 1, row + 2);
+        win = {
+          startIndex: startRow * columns,
+          endIndex: Math.min(total, (endRow + 1) * columns),
+          startRow,
+          endRow,
+          topSpacer: startRow * rowHeight,
+          bottomSpacer: (Math.ceil(total / columns) - 1 - endRow) * rowHeight,
+          totalRows: Math.ceil(total / columns),
+        };
+      }
+    }
+    const frag = document.createDocumentFragment();
+    if (win.topSpacer > 0) {
+      const top = document.createElement("div");
+      top.setAttribute("aria-hidden", "true");
+      top.style.height = `${win.topSpacer}px`;
+      top.style.gridColumn = "1 / -1";
+      frag.appendChild(top);
+    }
+    for (let i = win.startIndex; i < win.endIndex; i++) {
+      frag.appendChild(makeCard(filtered[i]));
+    }
+    if (win.bottomSpacer > 0) {
+      const bottom = document.createElement("div");
+      bottom.setAttribute("aria-hidden", "true");
+      bottom.style.height = `${win.bottomSpacer}px`;
+      bottom.style.gridColumn = "1 / -1";
+      frag.appendChild(bottom);
+    }
+    const hadFocus = gridEl.contains(document.activeElement);
+    gridEl.replaceChildren(frag);
+    gridEl.style.setProperty("--rs-grid-cols", String(columns));
+    measureRowHeight();
+    try {
+      (window as any).SpatialNavigation?.makeFocusable?.();
+    } catch {}
+    if (hadFocus) {
+      restoreCouchFocus();
+    }
+  };
+
+  const scheduleGridRender = () => {
+    if (renderRaf) return;
+    renderRaf = requestAnimationFrame(() => {
+      renderRaf = 0;
+      renderGridWindow();
+    });
+  };
+
+  // --- Filter bar ----------------------------------------------------------
+  const renderTabs = () => {
+    if (!tabsEl) return;
+    tabsEl.replaceChildren();
+    for (const list of adapter.lists) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "rs-hero__action rs-hero__action--secondary";
+      btn.textContent = list.label;
+      btn.setAttribute("aria-pressed", filter.list === list.value ? "true" : "false");
+      btn.addEventListener("click", () => {
+        filter.list = list.value;
+        renderTabs();
+        applyFilterAndRender();
+      });
+      tabsEl.appendChild(btn);
+    }
+  };
+
+  const renderGenres = () => {
+    if (!genresEl) return;
+    genresEl.replaceChildren();
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "rs-hero__action rs-hero__action--secondary";
+    allBtn.textContent = "All genres";
+    allBtn.setAttribute("aria-pressed", filter.genre === "" ? "true" : "false");
+    allBtn.addEventListener("click", () => {
+      filter.genre = "";
+      renderGenres();
+      applyFilterAndRender();
+    });
+    genresEl.appendChild(allBtn);
+    for (const genre of adapter.genres(all)) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "rs-hero__action rs-hero__action--secondary";
+      btn.textContent = `${genre.label} (${genre.count})`;
+      btn.setAttribute("aria-pressed", filter.genre === genre.id ? "true" : "false");
+      btn.addEventListener("click", () => {
+        filter.genre = filter.genre === genre.id ? "" : genre.id;
+        renderGenres();
+        applyFilterAndRender();
+      });
+      genresEl.appendChild(btn);
+    }
+  };
+
+  const applyFilterAndRender = () => {
+    const base = adapter.applyFilter(all, filter, playlistId);
+    filtered = adapter.applySort(base, filter);
+    if (heroCountEl) heroCountEl.textContent = adapter.countLabel(filtered.length);
+    if (statusEl) {
+      statusEl.textContent =
+        filtered.length === 0
+          ? "Nothing matches these filters."
+          : `${filtered.length.toLocaleString()} of ${all.length.toLocaleString()} titles`;
+    }
+    setVisible(emptyEl, filtered.length === 0 && loaded);
+    setVisible(gridEl, filtered.length > 0);
+    renderRails();
+    if (gridEl) gridEl.scrollTop = 0;
+    window.scrollTo({ top: 0 });
+    renderGridWindow();
+  };
+
+  const debouncedSearch = debounce(() => {
+    filter.query = searchEl?.value || "";
+    applyFilterAndRender();
+  }, 160);
+
+  searchEl?.addEventListener("input", debouncedSearch);
+  yearEl?.addEventListener("change", () => {
+    filter.year = yearEl.value;
+    applyFilterAndRender();
+  });
+  ratingEl?.addEventListener("change", () => {
+    filter.minRating = Number(ratingEl.value) || 0;
+    applyFilterAndRender();
+  });
+  sortEl?.addEventListener("change", () => {
+    filter.sort = sortEl.value;
+    applyFilterAndRender();
+  });
+  window.addEventListener("scroll", scheduleGridRender, { passive: true });
+  window.addEventListener("resize", scheduleGridRender);
+  window.addEventListener("couch-keyboard:input", (ev) => {
+    const value = (ev as CustomEvent).detail?.value ?? "";
+    if (searchEl) searchEl.value = value;
+    filter.query = value;
+    applyFilterAndRender();
+  });
+
+  // --- Load ---------------------------------------------------------------
+  const showError = (message: string) => {
+    setVisible(skeletonEl, false);
+    setVisible(emptyEl, false);
+    setVisible(gridEl, false);
+    if (errorEl) {
+      errorEl.hidden = false;
+      const msg = errorEl.querySelector("[data-role='error-message']");
+      if (msg) msg.textContent = message;
+    }
+    if (statusEl) statusEl.textContent = message;
+  };
+
+  const boot = async () => {
+    await initI18n().catch(() => {});
+    renderTabs();
+    setVisible(skeletonEl, true);
+    setVisible(emptyEl, false);
+    setVisible(errorEl, false);
+    if (statusEl) statusEl.textContent = "Loading…";
+    let result;
+    try {
+      result = await loadCouchCatalog(adapter.spec);
+    } catch (err) {
+      log.error(`[xt:couch-${adapter.kind}] browse boot failed:`, err);
+      showError("Could not load the catalogue. Check the provider connection in Settings.");
+      return;
+    }
+    if (!result) {
+      loaded = true;
+      setVisible(skeletonEl, false);
+      setVisible(emptyEl, true);
+      if (statusEl) statusEl.textContent = "No playlist selected.";
+      if (emptyEl) {
+        const title = emptyEl.querySelector(
+          "[data-role='empty-title'], .rs-empty__title",
+        );
+        if (title) title.textContent = "No playlist yet";
+        const msg = emptyEl.querySelector(
+          "[data-role='empty-message'], .rs-empty__message",
+        );
+        if (msg) msg.textContent = "Add a playlist in Settings to browse your library.";
+      }
+      return;
+    }
+    if (result.loadError) {
+      showError(
+        `Could not reach ${result.playlistTitle || "the provider"}. Showing nothing rather than stale data — retry from Settings.`,
+      );
+      return;
+    }
+    all = result.rows;
+    playlistId = result.playlistId;
+    playlistTitle = result.playlistTitle;
+    loaded = true;
+    setVisible(skeletonEl, false);
+    setVisible(errorEl, false);
+    if (all.length === 0) {
+      setVisible(emptyEl, true);
+      if (emptyEl) {
+        const title = emptyEl.querySelector(
+          "[data-role='empty-title'], .rs-empty__title",
+        );
+        if (title) title.textContent = adapter.emptyTitle;
+        const msg = emptyEl.querySelector(
+          "[data-role='empty-message'], .rs-empty__message",
+        );
+        if (msg) msg.textContent = adapter.emptyMessage;
+      }
+      if (statusEl) statusEl.textContent = "This library is empty.";
+      if (heroCountEl) heroCountEl.textContent = adapter.countLabel(0);
+      return;
+    }
+    renderGenres();
+    applyFilterAndRender();
+    // Focus memory: after the first paint, restore where the viewer was.
+    restoreCouchFocus();
+  };
+
+  document.addEventListener("xt:active-changed", () => {
+    loaded = false;
+    all = [];
+    filtered = [];
+    playlistId = "";
+    void boot();
+  });
+
+  void boot();
+}
