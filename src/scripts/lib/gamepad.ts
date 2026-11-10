@@ -55,6 +55,7 @@ import {
   findOpenModal,
   firstFocusableInModal,
 } from "@/scripts/lib/dialog-spatial-nav.js";
+import { dispatchLivetvBack } from "@/scripts/lib/livetv-keys.ts";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -159,6 +160,32 @@ function inPlayerContext(): boolean {
 // "details" and A stays "play / resume". Only acts when stripping the
 // autoplay param actually changes the destination (movie / series
 // detail links); live channels and plain buttons are left alone.
+// W5 (0.9.0): the Live TV context the shell is showing, from
+// html[data-livetv-mode] (set by livetv.astro's setMode). Legacy
+// "home" reads as "landing". Null off the Live TV page (or before
+// the shell sets the attribute) — the generic branches below then
+// apply. The mode components own their back step via the
+// `livetv:back` event (see the B branch in pollLoop); this helper
+// only names the context.
+type LivetvContext = "landing" | "browser" | "playback" | "guide";
+
+function livetvContext(): LivetvContext | null {
+  const mode = document.documentElement.dataset.livetvMode;
+  if (mode === "landing" || mode === "home") return "landing";
+  if (mode === "browser" || mode === "playback" || mode === "guide") {
+    return mode;
+  }
+  return null;
+}
+
+function livetvLandingActive(): boolean {
+  return livetvContext() === "landing";
+}
+
+function livetvBrowserActive(): boolean {
+  return livetvContext() === "browser";
+}
+
 // W2: RedSilk fullscreen Live TV playback owns X / Y / Menu while
 // it is the thing on screen (html[data-livetv-mode="playback"]).
 // Without this the generic player branch below would swallow X as
@@ -168,7 +195,7 @@ function inPlayerContext(): boolean {
 // Menu opens the playback options overlay; View+Menu 2s
 // return-home above is untouched.
 function livetvPlaybackActive(): boolean {
-  return document.documentElement.dataset.livetvMode === "playback";
+  return livetvContext() === "playback";
 }
 
 // W3: the full programme Guide owns X / Y / LB / RB / Menu while it
@@ -182,7 +209,7 @@ function livetvPlaybackActive(): boolean {
 // the livetv-keys.ts table). View+Menu 2s return-home above is
 // untouched.
 function livetvGuideActive(): boolean {
-  return document.documentElement.dataset.livetvMode === "guide";
+  return livetvContext() === "guide";
 }
 
 function openDetailsOfFocused(): void {
@@ -553,7 +580,24 @@ export function mountGamepad(): void {
     }
     if (justPressed(BTN_B)) {
       markGamepadActive();
-      dispatchKey("Escape");
+      // W5 (0.9.0): B resolves to "back" in every Live TV context
+      // (livetv-keys.ts). The gamepad dispatches `livetv:back`
+      // {context} and the mode component listening for it
+      // implements its own back step — landing backs out of the
+      // landing, the browser returns to the landing, playback
+      // closes its overlay first and then returns, the Guide
+      // returns to the mode it was entered from. The gamepad does
+      // NOT also dispatch a synthetic Escape here: a mode's back
+      // step must run exactly once, and keyboard Escape keeps its
+      // own keydown path (the mode components' existing handlers).
+      // While a modal dialog is open the dialog still owns B, so
+      // Escape goes to it as before.
+      const liveContext = livetvContext();
+      if (liveContext && findOpenModal() === null) {
+        dispatchLivetvBack(window, liveContext);
+      } else {
+        dispatchKey("Escape");
+      }
     }
     if (justPressed(BTN_X) && findOpenModal() === null) {
       markGamepadActive();
@@ -561,6 +605,11 @@ export function mountGamepad(): void {
       if (livetvGuideActive()) {
         // No-op by design.
       } else if (livetvPlaybackActive()) {
+        dispatchKey("x");
+      } else if (livetvLandingActive() || livetvBrowserActive()) {
+        // W5 (0.9.0): landing X = contextual, browser X =
+        // toggle-favourite — both as keys for the mode's own
+        // keydown handler (livetv-keys.ts keyboard table).
         dispatchKey("x");
       } else if (inPlayerContext()) togglePlayPause();
       else openDetailsOfFocused();
@@ -572,28 +621,43 @@ export function mountGamepad(): void {
         dispatchKey("y");
       } else if (livetvPlaybackActive()) {
         dispatchKey("y");
+      } else if (livetvLandingActive() || livetvBrowserActive()) {
+        // W5 (0.9.0): landing Y = open Guide, browser Y = open
+        // search — both as keys for the mode's own keydown handler.
+        dispatchKey("y");
       } else if (inPlayerContext()) toggleFullscreen();
       else goSearch();
     }
     if (justPressed(BTN_LB)) {
       markGamepadActive();
       // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
+      // W5: in the Browser LB steps to the previous category ("[").
       if (livetvGuideActive()) dispatchKey("PageUp");
+      else if (livetvBrowserActive()) dispatchKey("[");
       else seekBy(-10);
     }
     if (justPressed(BTN_RB)) {
       markGamepadActive();
       // W3: in the Guide RB shifts time later (Guide key "PageDown").
+      // W5: in the Browser RB steps to the next category ("]").
       if (livetvGuideActive()) dispatchKey("PageDown");
+      else if (livetvBrowserActive()) dispatchKey("]");
       else seekBy(10);
     }
     if (justPressed(BTN_LT)) {
       markGamepadActive();
-      adjustVolume(-0.1);
+      // W5 (0.9.0): triggers ARE plumbed (buttons 6/7, analog value
+      // > 0.5 counts as pressed). In the Browser LT steps to the
+      // previous page (PageUp); elsewhere it stays volume down.
+      if (livetvBrowserActive()) dispatchKey("PageUp");
+      else adjustVolume(-0.1);
     }
     if (justPressed(BTN_RT)) {
       markGamepadActive();
-      adjustVolume(0.1);
+      // W5 (0.9.0): in the Browser RT steps to the next page
+      // (PageDown); elsewhere it stays volume up.
+      if (livetvBrowserActive()) dispatchKey("PageDown");
+      else adjustVolume(0.1);
     }
     if (
       justPressed(BTN_MENU) &&
@@ -611,6 +675,10 @@ export function mountGamepad(): void {
         window.dispatchEvent(
           new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
         );
+      } else if (livetvLandingActive() || livetvBrowserActive()) {
+        // W5 (0.9.0): landing / browser Menu = open options, as
+        // the "m" key for the mode's own keydown handler.
+        dispatchKey("m");
       } else {
         openSettings();
       }

@@ -67,24 +67,95 @@ describe("Home — X Details works here (rails carry ?autoplay)", () => {
   });
 });
 
-describe("Live TV Home — runtime mapping, not the livetv-keys table", () => {
-  it("Move / Watch / Search / Settings / Home — no X, no B", () => {
-    const config = HINT_CONFIGS["livetv-home"];
-    expect(glyphsOf(config)).toEqual(["dpad", "a", "y", "menu", "view-menu"]);
+describe("Live TV landing — 0.9.0: B backs via livetv:back, X is contextual, Y opens the Guide", () => {
+  it("Move / Watch / Back / Contextual / Guide / Options / Home", () => {
+    const config = HINT_CONFIGS["livetv-landing"];
+    expect(glyphsOf(config)).toEqual([
+      "dpad",
+      "a",
+      "b",
+      "x",
+      "y",
+      "menu",
+      "view-menu",
+    ]);
     expect(labelsOf(config)).toEqual([
       "Move",
       "Watch",
-      "Search",
-      "Settings",
+      "Back",
+      "Contextual action",
+      "Open Guide",
+      "Options",
       "Return home",
     ]);
-    // X is a no-op (channel cards carry no ?autoplay link) and B has
-    // no home-mode handler — livetv-keys.ts claims contextual/Guide/
-    // Options, but no production code consumes the "home" context.
-    expect(configHasGlyph(config, "x")).toBe(false);
-    expect(configHasGlyph(config, "b")).toBe(false);
     expect(configHasGlyph(config, "lb")).toBe(false);
     expect(configHasGlyph(config, "rb")).toBe(false);
+  });
+
+  it("the legacy \"livetv-home\" key is the same landing config", () => {
+    expect(HINT_CONFIGS["livetv-home"].id).toBe("livetv-landing");
+    expect(glyphsOf(HINT_CONFIGS["livetv-home"])).toEqual(
+      glyphsOf(HINT_CONFIGS["livetv-landing"]),
+    );
+  });
+});
+
+describe("Live TV browser — 0.9.0: A Watch, LB/RB categories, LT/RT pages, X favourite, Y search", () => {
+  it("Move / Watch / Back / categories / pages / Favourite / Search / Options / Home", () => {
+    const config = HINT_CONFIGS["livetv-browser"];
+    expect(glyphsOf(config)).toEqual([
+      "dpad",
+      "a",
+      "b",
+      "lb",
+      "rb",
+      "lt-rt",
+      "x",
+      "y",
+      "menu",
+      "view-menu",
+    ]);
+    expect(labelsOf(config)).toEqual([
+      "Move",
+      "Watch",
+      "Back",
+      "Previous category",
+      "Next category",
+      "Previous / Next page",
+      "Favourite",
+      "Search",
+      "Options",
+      "Return home",
+    ]);
+  });
+});
+
+describe("Guide sub-modes — 0.9.0: day nav in By Channel, time nav in grid", () => {
+  it("By Channel shows Previous/Next day; grid shows Earlier/Later in time", () => {
+    expect(configHasGlyph(HINT_CONFIGS["livetv-guide-channel"], "lb")).toBe(true);
+    expect(labelsOf(HINT_CONFIGS["livetv-guide-channel"])).toContain("Previous day");
+    expect(labelsOf(HINT_CONFIGS["livetv-guide-channel"])).toContain("Next day");
+    expect(labelsOf(HINT_CONFIGS["livetv-guide-grid"])).toContain("Earlier in time");
+    expect(labelsOf(HINT_CONFIGS["livetv-guide-grid"])).toContain("Later in time");
+  });
+
+  it("On Now / Tonight show no LB/RB rows (no day or time stepping there)", () => {
+    expect(configHasGlyph(HINT_CONFIGS["livetv-guide-now"], "lb")).toBe(false);
+    expect(configHasGlyph(HINT_CONFIGS["livetv-guide-now"], "rb")).toBe(false);
+    expect(configHasGlyph(HINT_CONFIGS["livetv-guide-tonight"], "lb")).toBe(false);
+    expect(configHasGlyph(HINT_CONFIGS["livetv-guide-tonight"], "rb")).toBe(false);
+  });
+
+  it("no sub-mode config hints X — it stays swallowed in the Guide", () => {
+    for (const id of [
+      "livetv-guide",
+      "livetv-guide-now",
+      "livetv-guide-tonight",
+      "livetv-guide-channel",
+      "livetv-guide-grid",
+    ] as const) {
+      expect(configHasGlyph(HINT_CONFIGS[id], "x")).toBe(false);
+    }
   });
 });
 
@@ -277,11 +348,31 @@ describe("editing + fallback", () => {
 
 describe("hintsForView resolver", () => {
   it("Live TV resolves through its mode", () => {
-    expect(hintsForView("livetv").id).toBe("livetv-home");
-    expect(hintsForView("livetv", { livetvMode: "home" }).id).toBe("livetv-home");
+    expect(hintsForView("livetv").id).toBe("livetv-landing");
+    expect(hintsForView("livetv", { livetvMode: "landing" }).id).toBe("livetv-landing");
+    expect(hintsForView("livetv", { livetvMode: "home" }).id).toBe("livetv-landing");
+    expect(hintsForView("livetv", { livetvMode: "browser" }).id).toBe("livetv-browser");
     expect(hintsForView("livetv", { livetvMode: "playback" }).id).toBe("livetv-playback");
     expect(hintsForView("livetv", { livetvMode: "guide" }).id).toBe("livetv-guide");
-    expect(hintsForView("livetv", { livetvMode: "bogus" }).id).toBe("livetv-home");
+    expect(hintsForView("livetv", { livetvMode: "bogus" }).id).toBe("livetv-landing");
+  });
+
+  it("Guide resolves through its sub-mode", () => {
+    expect(
+      hintsForView("livetv", { livetvMode: "guide", guideMode: "now" }).id,
+    ).toBe("livetv-guide-now");
+    expect(
+      hintsForView("livetv", { livetvMode: "guide", guideMode: "tonight" }).id,
+    ).toBe("livetv-guide-tonight");
+    expect(
+      hintsForView("livetv", { livetvMode: "guide", guideMode: "channel" }).id,
+    ).toBe("livetv-guide-channel");
+    expect(
+      hintsForView("livetv", { livetvMode: "guide", guideMode: "grid" }).id,
+    ).toBe("livetv-guide-grid");
+    expect(
+      hintsForView("livetv", { livetvMode: "guide", guideMode: "bogus" }).id,
+    ).toBe("livetv-guide");
   });
 
   it("plain views resolve directly; unknown views fall back to generic", () => {

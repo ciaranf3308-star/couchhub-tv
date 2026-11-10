@@ -1,0 +1,122 @@
+---
+// TvProgrammeRow — the shared Live TV programme row (0.9.0).
+//
+// ONE component for every Now/Next programme row in the app: the
+// Guide's Now & Next table (mockup 3) and the OSD's programme
+// display. Built to mockup 3: a three-column row — channel logo,
+// Now (title, time range, thin progress bar), Next (title, time
+// range) — generous vertical rhythm, no boxes around the cells; the
+// row itself is the unit, and the highlighted row carries a red
+// tint + red border across all columns.
+//
+// Artwork treatment: the channel cell is the bare logo lockup
+// (contained, bounded, no chip — exactly as the guide mockup shows
+// real broadcaster logos); with no logo it falls back to a dark
+// tile with the channel initial. Programme titles/times are never
+// invented — empty where the EPG has nothing.
+//
+// Props: channel {logo, name/displayName} (omit the column with
+// showChannel={false} — the OSD, which already shows the channel
+// beside the row), nowTitle, nowStartMs/nowStopMs (or progress),
+// nextTitle, nextStartMs/nextStopMs, nextLabel (e.g. "Up Next" —
+// the Guide's column header already says Next, so it omits it),
+// highlighted. Live hooks ([data-programme-*]) are the painting
+// contract for the shell: it updates text/progress in place.
+import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+
+interface Props {
+  channel?: {
+    name?: string;
+    displayName?: string;
+    logo?: string | null;
+  } | null;
+  showChannel?: boolean;
+  nowTitle?: string | null;
+  nowStartMs?: number | null;
+  nowStopMs?: number | null;
+  progress?: number | null;
+  nextTitle?: string | null;
+  nextStartMs?: number | null;
+  nextStopMs?: number | null;
+  nextLabel?: string | null;
+  highlighted?: boolean;
+}
+const {
+  channel = null,
+  showChannel = true,
+  nowTitle = null,
+  nowStartMs = null,
+  nowStopMs = null,
+  progress = null,
+  nextTitle = null,
+  nextStartMs = null,
+  nextStopMs = null,
+  nextLabel = null,
+  highlighted = false,
+} = Astro.props;
+const channelLabel = channel ? channel.displayName || channel.name || "" : "";
+const pct =
+  typeof progress === "number" && Number.isFinite(progress)
+    ? Math.max(0, Math.min(1, progress))
+    : nowStartMs !== null && nowStopMs !== null
+      ? programmeProgress(nowStartMs, nowStopMs)
+      : null;
+const nowTimeLabel =
+  nowStartMs !== null && nowStopMs !== null
+    ? epgTimeRangeLabel(nowStartMs, nowStopMs, "en-IE")
+    : "";
+const nextTimeLabel =
+  nextStartMs !== null && nextStopMs !== null
+    ? epgTimeRangeLabel(nextStartMs, nextStopMs, "en-IE")
+    : "";
+---
+
+<div
+  class={`rs-programme-row${highlighted ? " rs-programme-row--highlighted" : ""}${showChannel ? "" : " rs-programme-row--no-channel"}`}
+  data-programme-row
+>
+  {
+    showChannel && (
+      <span class="rs-programme-row__channel" data-programme-channel>
+        <span class="rs-programme-row__logo" data-programme-logo>
+          {channel?.logo ? (
+            <img src={channel.logo} alt="" loading="lazy" decoding="async" data-programme-logo-img />
+          ) : (
+            <span class="rs-programme-row__initial" data-programme-initial aria-hidden="true">
+              {channelLabel.slice(0, 1)}
+            </span>
+          )}
+        </span>
+      </span>
+    )
+  }
+  <span class="rs-programme-row__now" data-programme-now>
+    <span class="rs-programme-row__title" data-programme-now-title>
+      {nowTitle ?? ""}
+    </span>
+    <span class="rs-programme-row__time" data-programme-now-time>
+      {nowTimeLabel}
+    </span>
+    <span class="rs-programme-row__progress" aria-hidden="true">
+      <span
+        data-programme-progress
+        style={`width: ${pct !== null ? Math.round(pct * 100) : 0}%`}
+      />
+    </span>
+  </span>
+  <span class="rs-programme-row__next" data-programme-next>
+    {
+      nextLabel && (
+        <span class="rs-programme-row__next-label" data-programme-next-label>
+          {nextLabel}
+        </span>
+      )
+    }
+    <span class="rs-programme-row__title" data-programme-next-title>
+      {nextTitle ?? ""}
+    </span>
+    <span class="rs-programme-row__time" data-programme-next-time>
+      {nextTimeLabel}
+    </span>
+  </span>
+</div>

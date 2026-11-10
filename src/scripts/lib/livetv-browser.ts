@@ -1,9 +1,13 @@
-// RedSilk Couch — Channel Browser (W1, canonical owner).
+// RedSilk Couch — Channel Browser (W1 engine, 0.9.0 W2 rebuild).
 //
-// The virtualised long list used from Live TV Home AND from
-// playback (W2 mounts it inside the playback shell as Quick Surf's
-// "all channels" view via mountChannelBrowser /
-// mountCachedChannelBrowser — same module, same contract).
+// The virtualised long list used from Live TV Home, from playback
+// (W2 mounts it inside the playback shell as Quick Surf's "all
+// channels" view via mountChannelBrowser /
+// mountCachedChannelBrowser — same module, same contract) and,
+// since 0.9.0, as the dedicated Channel Browser utility screen
+// (TvChannelBrowser with screenMode; the shell mounts it as the
+// "browser" mode and enters it via `livetv:mode`
+// {mode:"browser", browserFilter?, openSearch?}).
 //
 // Rules:
 //   - Virtualised with computeVisibleWindow: a 15,000-channel list
@@ -11,15 +15,35 @@
 //     15,000 DOM nodes. One row is BROWSER_ROW_HEIGHT px, always.
 //   - Highlight NEVER starts playback. Clicking / arrowing onto a
 //     row only highlights it (aria-selected + onHighlight). A tune
-//     happens only through the explicit Watch action (Watch button,
-//     Enter, double-click) via onSelect.
+//     happens only through the explicit Watch action (Watch Live in
+//     the contextual panel, Enter, double-click) via onSelect.
 //   - Search is debounced (150ms) and matches the channels' cached
 //     normalised names — no re-normalising per keystroke.
 //   - Category switching is instant (pure filter, no fetch).
 //   - Focus returns to the last highlighted channel: pass
 //     initialFocusId, or keep the handle and call highlightChannel.
+//   - The row is a 4-column utility row (Ch. / Channel / Now /
+//     Next, mockup 1000017108_1_hcjs.png) with a compact contextual
+//     panel on the right (≤ ~32% width) for the highlighted channel.
+//     No rectangles-in-rectangles: hierarchy comes from spacing,
+//     typography and hairline separators, never nested boxes.
+//   - B / Escape ("back") is owned here through two paths that
+//     converge on handleBack(): the `livetv:back` window event
+//     {context:"browser"} (W5's gamepad contract — B/Escape resolve
+//     to "back" and dispatch it) and the Escape key itself. In
+//     order: search open → close search; else onClose (the screen
+//     instance exits to landing; the playback instance closes its
+//     overlay). A 250ms coalescing window guards against the
+//     gamepad layer dispatching both paths for one press.
+//   - Keyboard seam for the gamepad layer (W5 owns gamepad.ts /
+//     livetv-keys.ts): LB/RB prev/next category = "[" / "]",
+//     LT/RT page jump = PageUp / PageDown, X favourite = "x",
+//     Y search = "y". This module handles those keys; the gamepad
+//     layer synthesises them when the browser is the active
+//     context.
 import { computeVisibleWindow } from "./couch-grid";
 import { programmeProgress } from "./couch-livetv-epg";
+import { formatTimeRange } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
 import { CACHE_REVALIDATED_EVENT } from "./cache.js";
 import { EPG_LOADED_EVENT, getProgrammesSync } from "./epg-data.js";
@@ -29,6 +53,7 @@ import {
   loadLivetvHomeData,
   nowNextForChannel,
   readActivePlaylistId,
+  requestLivetvMode,
   searchChannels,
   type LivetvChannel,
   type LivetvNowNext,
@@ -38,6 +63,9 @@ import {
 export const BROWSER_ROW_HEIGHT = 76;
 /** Search debounce (ms). */
 export const BROWSER_SEARCH_DEBOUNCE_MS = 150;
+/** Back actions closer together than this are one press (the gamepad
+ *  layer may dispatch both `livetv:back` and Escape for a single B). */
+export const BROWSER_BACK_COALESCE_MS = 250;
 
 export type BrowserSort = "source" | "az" | "za" | "category";
 
@@ -53,6 +81,35 @@ export interface BrowserFilter {
 export const BROWSER_CATEGORY_ALL = "all";
 export const BROWSER_CATEGORY_FAVOURITES = "favourites";
 export const BROWSER_CATEGORY_RECENTS = "recents";
+
+/**
+ * Entry filter carried on `livetv:mode` {mode:"browser",
+ * browserFilter} (and on the mount's data attributes — see
+ * TvChannelBrowser). "category" names a provider group id
+ * (groupChannels), e.g. "irish-uk" / "sports".
+ */
+export interface BrowserEntryFilter {
+  kind: "all" | "favourites" | "recents" | "category";
+  value?: string;
+}
+
+/** Pure: map an entry filter onto a BrowserFilter category id. */
+export function browserFilterFromEntry(
+  entry: BrowserEntryFilter | null | undefined,
+): string {
+  if (!entry) return BROWSER_CATEGORY_ALL;
+  switch (entry.kind) {
+    case "favourites":
+      return BROWSER_CATEGORY_FAVOURITES;
+    case "recents":
+      return BROWSER_CATEGORY_RECENTS;
+    case "category":
+      return entry.value ? entry.value : BROWSER_CATEGORY_ALL;
+    case "all":
+    default:
+      return BROWSER_CATEGORY_ALL;
+  }
+}
 
 /**
  * Pure: filter + sort one browser view. Category "favourites"
@@ -110,27 +167,28 @@ export interface BrowserCategory {
   count: number;
 }
 
-/** Category buttons for a channel set: All, Favourites, Recently watched, then groups. */
+/**
+ * Category buttons for a channel set, in the 0.9.0 selector order:
+ * Favourites, Recents, then provider groups (Irish & UK first,
+ * All Channels last — groupChannels' order). Favourites / Recents
+ * are ALWAYS present, even at count 0, so they stay immediately
+ * reachable as entry points; selecting an empty one shows the
+ * empty state instead of hiding the destination.
+ */
 export function browserCategories(
   channels: readonly LivetvChannel[],
   recentIds?: ReadonlyArray<string | number> | null,
 ): BrowserCategory[] {
   const groups = groupChannels(channels);
-  const cats: BrowserCategory[] = [
-    { id: BROWSER_CATEGORY_ALL, label: "All Channels", count: channels.length },
-  ];
   const favCount = channels.filter((c) => c.favourite).length;
-  if (favCount > 0) {
-    cats.push({ id: BROWSER_CATEGORY_FAVOURITES, label: "Favourites", count: favCount });
-  }
   const recentCount = (recentIds ?? []).filter((id) =>
     channels.some((c) => String(c.id) === String(id)),
   ).length;
-  if (recentCount > 0) {
-    cats.push({ id: BROWSER_CATEGORY_RECENTS, label: "Recently watched", count: recentCount });
-  }
+  const cats: BrowserCategory[] = [
+    { id: BROWSER_CATEGORY_FAVOURITES, label: "Favourites", count: favCount },
+    { id: BROWSER_CATEGORY_RECENTS, label: "Recents", count: recentCount },
+  ];
   for (const group of groups) {
-    if (group.id === BROWSER_CATEGORY_ALL) continue;
     cats.push({ id: group.id, label: group.label, count: group.channels.length });
   }
   return cats;
@@ -155,6 +213,34 @@ export interface ChannelBrowserOptions {
   onClose?: () => void;
   /** Label for the search field. */
   searchLabel?: string;
+  /**
+   * 0.9.0 screen instance: listen for `livetv:mode`
+   * {mode:"browser", browserFilter?, openSearch?} and apply the
+   * entry. Only the dedicated Channel Browser screen sets this —
+   * the Home inline browser and the playback overlay must NOT
+   * follow mode entries.
+   */
+  acceptModeEntry?: boolean;
+  /**
+   * Highlight the first visible channel on mount (and whenever the
+   * list becomes non-empty with nothing highlighted), so the
+   * contextual panel is populated from the first paint. Screen
+   * instances set this; Home / playback keep the old behaviour
+   * (no highlight until the user moves).
+   */
+  autoHighlightFirst?: boolean;
+  /**
+   * Favourite toggle for the highlighted channel (X). Defaults to
+   * persisting through preferences.js for opts.playlistId and
+   * updating the row in place. Receives the channel and returns
+   * the new favourite state (null when there is nothing to
+   * persist against).
+   */
+  onToggleFavourite?: (
+    channel: LivetvChannel,
+  ) => boolean | null | Promise<boolean | null>;
+  /** View Guide action from the contextual panel. Defaults to `livetv:mode` {mode:"guide"}. */
+  onViewGuide?: (channel: LivetvChannel) => void;
 }
 
 export interface ChannelBrowserHandle {
@@ -163,6 +249,17 @@ export interface ChannelBrowserHandle {
   getHighlightedId(): string | number | null;
   highlightChannel(id: string | number | null, opts?: { focus?: boolean }): void;
   focusChannel(id: string | number): void;
+  /** Apply a `livetv:mode` browser entry (filter + optional search open). */
+  applyEntry(entry: BrowserEntryFilter | null | undefined, opts?: { openSearch?: boolean }): void;
+  openSearch(): void;
+  /** Close search (clear + blur). Returns true when search was open. */
+  closeSearch(): boolean;
+  isSearchOpen(): boolean;
+  getCategoryId(): string;
+  getVisibleChannels(): LivetvChannel[];
+  cycleCategory(delta: number): void;
+  jumpPage(delta: number): void;
+  toggleFavouriteHighlighted(): Promise<boolean | null>;
   destroy(): void;
 }
 
@@ -175,11 +272,19 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  const node = target as HTMLElement | null;
+  if (!node || typeof node.tagName !== "string") return false;
+  const tag = node.tagName.toLowerCase();
+  return tag === "input" || tag === "textarea" || tag === "select" || node.isContentEditable === true;
+}
+
 /**
  * Mount the Channel Browser into `root`. The root is owned by the
  * browser until destroy() — it replaces the root's children.
  * W2 mounts this inside playback via the same call; Home mounts it
- * in its "All Channels" section.
+ * in its "All Channels" section; the 0.9.0 screen mounts it via
+ * TvChannelBrowser with acceptModeEntry + autoHighlightFirst.
  */
 export function mountChannelBrowser(
   root: HTMLElement,
@@ -193,17 +298,46 @@ export function mountChannelBrowser(
     opts.initialFocusId ?? null;
   let destroyed = false;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastBackAt = 0;
 
   root.replaceChildren();
   root.classList.add("rs-livetv-browser");
   root.setAttribute("data-livetv-browser", "");
+  if (opts.acceptModeEntry) root.setAttribute("data-browser-screen", "");
 
-  // ── Toolbar: search + sort + close ──
+  // ── Layout: main column (toolbar / categories / head / list /
+  //    status) + compact contextual panel on the right ──
+  const layout = el("div", "rs-livetv-browser__layout");
+  root.appendChild(layout);
+  const main = el("div", "rs-livetv-browser__main");
+  layout.appendChild(main);
+  const detail = el("aside", "rs-livetv-browser__detail");
+  detail.setAttribute("data-browser-detail", "");
+  detail.setAttribute("aria-label", "Selected channel");
+  layout.appendChild(detail);
+
+  // ── Screen title (screen mode only — mockup 1): the shell's
+  //    generic "Live TV" head is hidden in browser mode, so the
+  //    browser carries its own title + live channel count.
+  let subtitleEl: HTMLElement | null = null;
+  if (opts.acceptModeEntry) {
+    const titleBlock = el("div", "rs-livetv-browser__title");
+    const titleText = el("h2", "rs-livetv-browser__title-text");
+    titleText.textContent = "Channel Browser";
+    titleBlock.appendChild(titleText);
+    subtitleEl = el("p", "rs-livetv-browser__subtitle");
+    subtitleEl.setAttribute("data-browser-subtitle", "");
+    subtitleEl.textContent = "Browse and watch live TV";
+    titleBlock.appendChild(subtitleEl);
+    main.appendChild(titleBlock);
+  }
+
+  // ── Toolbar: search (top-right) + sort + close ──
   const toolbar = el("div", "rs-livetv-browser__toolbar");
   const search = el("input", "rs-livetv-browser__search") as HTMLInputElement;
   search.type = "search";
-  search.placeholder = "Search channels…";
-  search.setAttribute("aria-label", opts.searchLabel ?? "Search channels");
+  search.placeholder = "Search channels or programmes";
+  search.setAttribute("aria-label", opts.searchLabel ?? "Search channels or programmes");
   search.setAttribute("data-browser-search", "");
   toolbar.appendChild(search);
   const sortSelect = el("select", "rs-livetv-browser__sort") as HTMLSelectElement;
@@ -230,14 +364,24 @@ export function mountChannelBrowser(
     close.addEventListener("click", () => opts.onClose?.());
     toolbar.appendChild(close);
   }
-  root.appendChild(toolbar);
+  main.appendChild(toolbar);
 
-  // ── Categories ──
+  // ── Categories: one clean selector row, horizontally scrollable ──
   const categoriesEl = el("div", "rs-livetv-browser__categories");
   categoriesEl.setAttribute("data-browser-categories", "");
   categoriesEl.setAttribute("role", "tablist");
   categoriesEl.setAttribute("aria-label", "Channel categories");
-  root.appendChild(categoriesEl);
+  main.appendChild(categoriesEl);
+
+  // ── Column header (shares the row grid) ──
+  const head = el("div", "rs-livetv-browser__head");
+  head.setAttribute("aria-hidden", "true");
+  for (const label of ["Ch.", "Channel", "Now", "Next"]) {
+    const cell = el("span", "rs-livetv-browser__head-cell");
+    cell.textContent = label;
+    head.appendChild(cell);
+  }
+  main.appendChild(head);
 
   // ── Virtual list ──
   const listEl = el("div", "rs-livetv-browser__list");
@@ -251,12 +395,12 @@ export function mountChannelBrowser(
   viewport.setAttribute("data-browser-viewport", "");
   listEl.appendChild(spacer);
   listEl.appendChild(viewport);
-  root.appendChild(listEl);
+  main.appendChild(listEl);
 
   const statusEl = el("p", "rs-livetv-browser__status");
   statusEl.setAttribute("data-browser-status", "");
   statusEl.setAttribute("aria-live", "polite");
-  root.appendChild(statusEl);
+  main.appendChild(statusEl);
 
   const visible = (): LivetvChannel[] =>
     applyBrowserFilter(channels, {
@@ -269,6 +413,33 @@ export function mountChannelBrowser(
   const channelById = (id: string | number | null | undefined): LivetvChannel | undefined =>
     id == null ? undefined : channels.find((c) => String(c.id) === String(id));
 
+  /** Logo image or branded initial fallback (shared by rows + panel). */
+  function logoContent(channel: LivetvChannel): HTMLElement {
+    const wrap = el("span", "rs-livetv-browser__logo-inner");
+    if (channel.logo) {
+      const img = el("img") as HTMLImageElement;
+      img.src = channel.logo;
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.addEventListener("error", () => {
+        img.remove();
+        wrap.appendChild(logoFallback(channel));
+      });
+      wrap.appendChild(img);
+    } else {
+      wrap.appendChild(logoFallback(channel));
+    }
+    return wrap;
+  }
+
+  function logoFallback(channel: LivetvChannel): HTMLElement {
+    const mark = el("span", "rs-livetv-browser__initial");
+    mark.setAttribute("aria-hidden", "true");
+    mark.textContent = fallbackMarkFor("logo", channel.displayName || channel.name);
+    return mark;
+  }
+
   function rowElement(channel: LivetvChannel): HTMLElement {
     const row = el("div", "rs-livetv-browser__row");
     row.setAttribute("data-browser-row", "");
@@ -279,82 +450,172 @@ export function mountChannelBrowser(
     if (String(channel.id) === String(highlightedId)) {
       row.classList.add("is-highlighted");
     }
-    const logo = el("span", "rs-livetv-browser__logo");
-    const logoFallback = () => {
-      // Branded fallback from the shared couch-image helper (W7
-      // consumes it — the "N" brand mark for logos; the channel
-      // name sits beside the logo in every row).
-      const mark = el("span", "rs-livetv-browser__initial");
-      mark.setAttribute("aria-hidden", "true");
-      mark.textContent = fallbackMarkFor("logo", channel.displayName || channel.name);
-      return mark;
-    };
-    if (channel.logo) {
-      const img = el("img") as HTMLImageElement;
-      img.src = channel.logo;
-      img.alt = "";
-      img.loading = "lazy";
-      img.decoding = "async";
-      img.addEventListener("error", () => {
-        img.remove();
-        logo.appendChild(logoFallback());
-      });
-      logo.appendChild(img);
-    } else {
-      logo.appendChild(logoFallback());
-    }
-    row.appendChild(logo);
 
-    const body = el("div", "rs-livetv-browser__body");
+    const num = el("span", "rs-livetv-browser__num");
+    num.textContent = channel.chno != null ? String(channel.chno) : "";
+    row.appendChild(num);
+
+    const channelCell = el("span", "rs-livetv-browser__channel");
+    const logo = el("span", "rs-livetv-browser__logo");
+    logo.appendChild(logoContent(channel));
+    channelCell.appendChild(logo);
     const name = el("span", "rs-livetv-browser__name");
-    if (channel.chno != null) {
-      const num = el("span", "rs-livetv-browser__num");
-      num.textContent = String(channel.chno);
-      name.appendChild(num);
+    name.textContent = channel.displayName || channel.name;
+    channelCell.appendChild(name);
+    if (channel.favourite) {
+      const fav = el("span", "rs-livetv-browser__fav");
+      fav.setAttribute("aria-label", "Favourite");
+      fav.textContent = "♥";
+      channelCell.appendChild(fav);
     }
-    name.appendChild(document.createTextNode(channel.displayName || channel.name));
-    body.appendChild(name);
+    row.appendChild(channelCell);
+
     const nn = opts.nowNextFor?.(channel) ?? null;
+    const nowCell = el("span", "rs-livetv-browser__now-cell");
     if (nn?.current) {
+      const time = el("span", "rs-livetv-browser__time");
+      time.textContent = formatTimeRange(nn.current.start, nn.current.stop);
+      nowCell.appendChild(time);
       const now = el("span", "rs-livetv-browser__now");
       now.textContent = nn.current.title;
-      body.appendChild(now);
+      nowCell.appendChild(now);
       const bar = el("span", "rs-livetv-browser__progress");
       bar.setAttribute("aria-hidden", "true");
       const fill = el("span");
       fill.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
       bar.appendChild(fill);
-      body.appendChild(bar);
+      nowCell.appendChild(bar);
     } else if (nn?.next) {
-      const next = el("span", "rs-livetv-browser__next");
-      next.textContent = `Next: ${nn.next.title}`;
-      body.appendChild(next);
+      const time = el("span", "rs-livetv-browser__time");
+      time.textContent = `Next ${formatTimeRange(nn.next.start, nn.next.stop)}`;
+      nowCell.appendChild(time);
+      const next = el("span", "rs-livetv-browser__now rs-livetv-browser__now--muted");
+      next.textContent = nn.next.title;
+      nowCell.appendChild(next);
+    } else {
+      const none = el("span", "rs-livetv-browser__now rs-livetv-browser__now--muted");
+      none.textContent = "—";
+      nowCell.appendChild(none);
     }
-    row.appendChild(body);
+    row.appendChild(nowCell);
 
-    if (channel.favourite) {
-      const fav = el("span", "rs-livetv-browser__fav");
-      fav.setAttribute("aria-label", "Favourite");
-      fav.textContent = "♥";
-      row.appendChild(fav);
+    const nextCell = el("span", "rs-livetv-browser__next-cell");
+    if (nn?.next) {
+      const time = el("span", "rs-livetv-browser__time");
+      time.textContent = formatTimeRange(nn.next.start, nn.next.stop);
+      nextCell.appendChild(time);
+      const next = el("span", "rs-livetv-browser__next");
+      next.textContent = nn.next.title;
+      nextCell.appendChild(next);
+    } else {
+      const none = el("span", "rs-livetv-browser__next rs-livetv-browser__next--muted");
+      none.textContent = "—";
+      nextCell.appendChild(none);
+    }
+    row.appendChild(nextCell);
+
+    return row;
+  }
+
+  /** Compact contextual panel for the highlighted channel. */
+  function renderDetail(): void {
+    const channel = channelById(highlightedId);
+    detail.replaceChildren();
+    if (!channel) {
+      const empty = el("p", "rs-livetv-browser__detail-empty");
+      empty.textContent = "Select a channel to see what's on.";
+      detail.appendChild(empty);
+      return;
+    }
+    const brand = el("div", "rs-livetv-browser__detail-brand");
+    const logo = el("span", "rs-livetv-browser__detail-logo");
+    logo.appendChild(logoContent(channel));
+    brand.appendChild(logo);
+    const titles = el("div", "rs-livetv-browser__detail-titles");
+    const name = el("span", "rs-livetv-browser__detail-name");
+    name.textContent = channel.displayName || channel.name;
+    titles.appendChild(name);
+    if (channel.chno != null) {
+      const chno = el("span", "rs-livetv-browser__detail-chno");
+      chno.textContent = `Ch. ${channel.chno}`;
+      titles.appendChild(chno);
+    }
+    brand.appendChild(titles);
+    detail.appendChild(brand);
+
+    const nn = opts.nowNextFor?.(channel) ?? null;
+    if (nn?.current) {
+      const nowBlock = el("div", "rs-livetv-browser__detail-now");
+      const label = el("span", "rs-livetv-browser__detail-label");
+      label.textContent = `● Now (${formatTimeRange(nn.current.start, nn.current.stop)})`;
+      nowBlock.appendChild(label);
+      const title = el("span", "rs-livetv-browser__detail-title");
+      title.textContent = nn.current.title;
+      nowBlock.appendChild(title);
+      if (nn.current.desc) {
+        const desc = el("span", "rs-livetv-browser__detail-desc");
+        desc.textContent = nn.current.desc;
+        nowBlock.appendChild(desc);
+      }
+      const bar = el("span", "rs-livetv-browser__progress");
+      bar.setAttribute("aria-hidden", "true");
+      const fill = el("span");
+      fill.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
+      bar.appendChild(fill);
+      nowBlock.appendChild(bar);
+      detail.appendChild(nowBlock);
+    }
+    if (nn?.next) {
+      const nextBlock = el("div", "rs-livetv-browser__detail-next");
+      const label = el("span", "rs-livetv-browser__detail-label");
+      label.textContent = `Next (${formatTimeRange(nn.next.start, nn.next.stop)})`;
+      nextBlock.appendChild(label);
+      const title = el("span", "rs-livetv-browser__detail-title");
+      title.textContent = nn.next.title;
+      nextBlock.appendChild(title);
+      detail.appendChild(nextBlock);
+    }
+    if (!nn?.current && !nn?.next) {
+      const none = el("p", "rs-livetv-browser__detail-empty");
+      none.textContent = "No programme information for this channel yet.";
+      detail.appendChild(none);
     }
     if (channel.catchup) {
-      const badge = el("span", "rs-livetv-browser__catchup");
-      badge.textContent = "Catch-up";
-      row.appendChild(badge);
+      const catchup = el("span", "rs-livetv-browser__detail-catchup");
+      catchup.textContent = "Catch-up available";
+      detail.appendChild(catchup);
     }
-    const watch = el("button", "rs-livetv-browser__watch") as HTMLButtonElement;
+
+    const actions = el("div", "rs-livetv-browser__detail-actions");
+    const watch = el("button", "rs-livetv-browser__watch-live") as HTMLButtonElement;
     watch.type = "button";
-    watch.textContent = "Watch";
-    watch.setAttribute("data-browser-watch", "");
+    watch.setAttribute("data-browser-watch-live", "");
     watch.setAttribute("data-channel-id", String(channel.id));
-    row.appendChild(watch);
-    return row;
+    watch.textContent = "▶ Watch Live";
+    actions.appendChild(watch);
+    const favBtn = el("button", "rs-livetv-browser__favourite") as HTMLButtonElement;
+    favBtn.type = "button";
+    favBtn.setAttribute("data-browser-favourite", "");
+    favBtn.setAttribute("data-channel-id", String(channel.id));
+    favBtn.setAttribute("aria-pressed", String(!!channel.favourite));
+    favBtn.textContent = channel.favourite ? "♥ Favourited" : "♡ Favourite";
+    actions.appendChild(favBtn);
+    const guide = el("button", "rs-livetv-browser__guide") as HTMLButtonElement;
+    guide.type = "button";
+    guide.setAttribute("data-browser-guide", "");
+    guide.setAttribute("data-channel-id", String(channel.id));
+    guide.textContent = "View Guide";
+    actions.appendChild(guide);
+    detail.appendChild(actions);
   }
 
   function render(): void {
     if (destroyed) return;
     const list = visible();
+    if (opts.autoHighlightFirst && highlightedId == null && list.length > 0) {
+      highlightedId = list[0]!.id;
+      opts.onHighlight?.(list[0]!);
+    }
     const rowHeight = BROWSER_ROW_HEIGHT;
     spacer.style.height = `${list.length * rowHeight}px`;
     const win = computeVisibleWindow({
@@ -375,11 +636,25 @@ export function mountChannelBrowser(
       list.length === 0
         ? query
           ? `No channels match “${query}”.`
-          : "No channels in this category."
+          : categoryId === BROWSER_CATEGORY_FAVOURITES
+            ? "No favourite channels yet — press X on a channel to add one."
+            : categoryId === BROWSER_CATEGORY_RECENTS
+              ? "Nothing watched yet — channels you watch will appear here."
+              : "No channels in this category."
         : `${list.length.toLocaleString()} channel${list.length === 1 ? "" : "s"}`;
+    if (subtitleEl) {
+      const total = channels.length;
+      subtitleEl.textContent =
+        total > 0
+          ? `Browse and watch live TV • ${total.toLocaleString()} channel${total === 1 ? "" : "s"}`
+          : "Browse and watch live TV";
+    }
+    renderDetail();
   }
 
   function renderCategories(): void {
+    const activeCategory = document.activeElement as HTMLElement | null;
+    const focusedCategoryId = activeCategory?.closest?.("[data-browser-category]")?.getAttribute("data-browser-category");
     const cats = browserCategories(channels, opts.recentIds ?? null);
     categoriesEl.replaceChildren();
     for (const cat of cats) {
@@ -388,8 +663,10 @@ export function mountChannelBrowser(
       btn.setAttribute("data-browser-category", cat.id);
       btn.setAttribute("role", "tab");
       btn.setAttribute("aria-selected", String(cat.id === categoryId));
+      btn.setAttribute("aria-label", `${cat.label}, ${cat.count} channel${cat.count === 1 ? "" : "s"}`);
+      btn.title = `${cat.label} (${cat.count})`;
       if (cat.id === categoryId) btn.classList.add("is-active");
-      btn.textContent = `${cat.label} (${cat.count})`;
+      btn.textContent = cat.label;
       btn.addEventListener("click", () => {
         categoryId = cat.id;
         renderCategories();
@@ -398,6 +675,32 @@ export function mountChannelBrowser(
       });
       categoriesEl.appendChild(btn);
     }
+    // Focus never resets on a data refresh: if focus was on a
+    // category button, return it to the same category.
+    if (focusedCategoryId) {
+      const next = categoriesEl.querySelector<HTMLElement>(
+        `[data-browser-category="${CSS.escape(focusedCategoryId)}"]`,
+      );
+      next?.focus({ preventScroll: true });
+    }
+  }
+
+  function setCategory(next: string): void {
+    const known = browserCategories(channels, opts.recentIds ?? null).some(
+      (cat) => cat.id === next,
+    );
+    categoryId = known ? next : BROWSER_CATEGORY_ALL;
+    renderCategories();
+    listEl.scrollTop = 0;
+    render();
+  }
+
+  function cycleCategory(delta: number): void {
+    const cats = browserCategories(channels, opts.recentIds ?? null);
+    if (cats.length === 0) return;
+    const current = cats.findIndex((cat) => cat.id === categoryId);
+    const next = cats[(current < 0 ? 0 : current + delta + cats.length) % cats.length];
+    if (next) setCategory(next.id);
   }
 
   function highlight(id: string | number | null, focusRow = false): void {
@@ -423,6 +726,103 @@ export function mountChannelBrowser(
     render();
   }
 
+  function jumpPage(delta: number): void {
+    const list = visible();
+    if (!list.length) return;
+    const pageSize = Math.max(
+      1,
+      Math.floor((listEl.clientHeight || 600) / BROWSER_ROW_HEIGHT),
+    );
+    const currentIndex = list.findIndex((c) => String(c.id) === String(highlightedId));
+    const base = currentIndex < 0 ? (delta > 0 ? -pageSize : pageSize) : currentIndex;
+    const nextIndex = Math.max(0, Math.min(list.length - 1, base + delta * pageSize));
+    const channel = list[nextIndex];
+    if (!channel) return;
+    highlight(channel.id);
+    scrollToId(channel.id);
+  }
+
+  function isSearchOpen(): boolean {
+    return document.activeElement === search || query !== "";
+  }
+
+  function openSearch(): void {
+    search.focus({ preventScroll: true });
+    root.classList.add("is-search-open");
+  }
+
+  function closeSearch(): boolean {
+    const wasOpen = isSearchOpen();
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+    query = "";
+    search.value = "";
+    search.blur();
+    root.classList.remove("is-search-open");
+    listEl.scrollTop = 0;
+    render();
+    return wasOpen;
+  }
+
+  function applyEntry(
+    entry: BrowserEntryFilter | null | undefined,
+    entryOpts?: { openSearch?: boolean },
+  ): void {
+    setCategory(browserFilterFromEntry(entry));
+    if (entryOpts?.openSearch) openSearch();
+  }
+
+  /** Back (B / Escape), in directive order: close search, else exit. */
+  function handleBack(): void {
+    const now = Date.now();
+    if (now - lastBackAt < BROWSER_BACK_COALESCE_MS) return;
+    lastBackAt = now;
+    if (isSearchOpen()) {
+      closeSearch();
+      return;
+    }
+    opts.onClose?.();
+  }
+
+  async function toggleFavourite(channel: LivetvChannel): Promise<boolean | null> {
+    if (opts.onToggleFavourite) return opts.onToggleFavourite(channel);
+    if (!opts.playlistId) return null;
+    try {
+      const { toggleFavorite } = await import("./preferences.js");
+      const next = toggleFavorite(opts.playlistId, "live", channel.id as number, {
+        name: channel.displayName || channel.name || "",
+        logo: channel.logo ?? null,
+      }) as boolean | null;
+      if (next != null) {
+        // Update the row in place now; the
+        // `xt:favorites-changed` refresh re-loads the catalogue
+        // and confirms it.
+        channel.favourite = next;
+        render();
+      }
+      return next;
+    } catch {
+      return null;
+    }
+  }
+
+  async function toggleFavouriteHighlighted(): Promise<boolean | null> {
+    const channel = channelById(highlightedId);
+    if (!channel) return null;
+    return toggleFavourite(channel);
+  }
+
+  function viewGuide(channel: LivetvChannel): void {
+    if (opts.onViewGuide) {
+      opts.onViewGuide(channel);
+      return;
+    }
+    // Unified on the shared helper (integration): same event + shape.
+    requestLivetvMode("guide");
+  }
+
   // ── Events ──
   search.addEventListener("input", () => {
     if (searchTimer) clearTimeout(searchTimer);
@@ -432,6 +832,18 @@ export function mountChannelBrowser(
       render();
     }, BROWSER_SEARCH_DEBOUNCE_MS);
   });
+  search.addEventListener("focus", () => root.classList.add("is-search-open"));
+  search.addEventListener("blur", () => {
+    if (query === "") root.classList.remove("is-search-open");
+  });
+  search.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      // Typing in search: B / Esc closes search, never exits.
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearch();
+    }
+  });
   sortSelect.addEventListener("change", () => {
     sort = sortSelect.value as BrowserSort;
     listEl.scrollTop = 0;
@@ -440,19 +852,11 @@ export function mountChannelBrowser(
   listEl.addEventListener("scroll", () => render(), { passive: true });
   viewport.addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
-    const watchBtn = target?.closest?.("[data-browser-watch]") as HTMLElement | null;
     const row = target?.closest?.("[data-browser-row]") as HTMLElement | null;
     if (!row) return;
-    const id = row.getAttribute("data-channel-id");
-    const channel = id == null ? undefined : channelById(id);
+    const channel = channelById(row.getAttribute("data-channel-id"));
     if (!channel) return;
-    if (watchBtn) {
-      // Explicit Watch action — the only click path that may tune.
-      highlight(channel.id);
-      opts.onSelect?.(channel);
-      return;
-    }
-    // Any other click on the row only highlights. Never tunes.
+    // Any click on a row only highlights. Never tunes.
     highlight(channel.id);
   });
   viewport.addEventListener("dblclick", (event) => {
@@ -465,13 +869,45 @@ export function mountChannelBrowser(
       opts.onSelect?.(channel);
     }
   });
-  listEl.addEventListener("keydown", (event) => {
+  detail.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    const channel = channelById(highlightedId);
+    if (!channel) return;
+    if (target?.closest?.("[data-browser-watch-live]")) {
+      // Explicit Watch action — the only click path that may tune.
+      opts.onSelect?.(channel);
+      return;
+    }
+    if (target?.closest?.("[data-browser-favourite]")) {
+      void toggleFavourite(channel);
+      return;
+    }
+    if (target?.closest?.("[data-browser-guide]")) {
+      viewGuide(channel);
+    }
+  });
+
+  // One keyboard handler for the whole browser, on window: the
+  // gamepad layer dispatches synthesised keys to
+  // document.activeElement, which is usually <body> when nothing
+  // holds focus — a list-level listener would never see them.
+  // Gated on visibility (a hidden ancestor means another mode owns
+  // input) and on the target being inside this browser or <body>.
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (destroyed || !root.isConnected || root.closest("[hidden]")) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      target !== document.body &&
+      !(target instanceof Node && root.contains(target))
+    ) {
+      return;
+    }
+    if (isEditableTarget(target)) return;
     const list = visible();
-    if (!list.length) return;
     const currentIndex = list.findIndex((c) => String(c.id) === String(highlightedId));
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const delta = event.key === "ArrowDown" ? 1 : -1;
+    const move = (delta: number) => {
+      if (!list.length) return;
       const next =
         currentIndex < 0
           ? delta > 0
@@ -482,38 +918,104 @@ export function mountChannelBrowser(
       if (!channel) return;
       highlight(channel.id);
       scrollToId(channel.id);
-    } else if (event.key === "Enter") {
-      const channel = channelById(highlightedId);
-      if (channel) {
+    };
+    switch (event.key) {
+      case "ArrowDown":
         event.preventDefault();
-        opts.onSelect?.(channel);
+        move(1);
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        move(-1);
+        return;
+      case "Enter":
+      case " ": {
+        const channel = channelById(highlightedId);
+        if (channel) {
+          event.preventDefault();
+          opts.onSelect?.(channel);
+        }
+        return;
       }
-    } else if (event.key === "Escape") {
-      // Integration 0.7.0: claim the key. Without preventDefault the
-      // playback shell's window-level Escape handler also fires after
-      // onClose hides the browser — B would close the browser AND
-      // drop to Live TV Home in one press.
-      event.preventDefault();
-      opts.onClose?.();
+      case "Escape":
+        // Claim the key: without preventDefault the playback
+        // shell's window-level Escape handler also fires after
+        // onClose hides the browser — B would close the browser
+        // AND drop a mode in one press.
+        event.preventDefault();
+        handleBack();
+        return;
+      case "PageDown":
+        event.preventDefault();
+        jumpPage(1);
+        return;
+      case "PageUp":
+        event.preventDefault();
+        jumpPage(-1);
+        return;
+      case "[":
+        event.preventDefault();
+        cycleCategory(-1);
+        return;
+      case "]":
+        event.preventDefault();
+        cycleCategory(1);
+        return;
+      default:
+        break;
     }
-  });
+    const lower = event.key.toLowerCase();
+    if (lower === "x") {
+      event.preventDefault();
+      void toggleFavouriteHighlighted();
+    } else if (lower === "y") {
+      event.preventDefault();
+      openSearch();
+    }
+  };
+  window.addEventListener("keydown", onKeyDown);
 
   // Collection cards (Home) switch this browser's category:
   // `livetv:browser-category` {browserId?, categoryId}. An event
   // naming another browser id is ignored, so the playback instance
   // never follows a Home tap.
   const onBrowserCategory = (event: Event) => {
+    if (destroyed) return;
     const detail = (event as CustomEvent).detail as
       | { browserId?: string; categoryId?: string }
       | undefined;
     if (!detail?.categoryId) return;
     if (detail.browserId && opts.browserId && detail.browserId !== opts.browserId) return;
-    categoryId = detail.categoryId;
-    renderCategories();
-    listEl.scrollTop = 0;
-    render();
+    setCategory(detail.categoryId);
   };
   window.addEventListener("livetv:browser-category", onBrowserCategory);
+
+  // 0.9.0 screen entry: `livetv:mode` {mode:"browser",
+  // browserFilter?, openSearch?}. Only the screen instance listens
+  // (acceptModeEntry) — the Home inline browser and the playback
+  // overlay never follow mode entries.
+  const onMode = (event: Event) => {
+    if (destroyed) return;
+    const detail = (event as CustomEvent).detail as
+      | { mode?: string; browserFilter?: BrowserEntryFilter; openSearch?: boolean }
+      | undefined;
+    if (!detail || detail.mode !== "browser") return;
+    applyEntry(detail.browserFilter, { openSearch: detail.openSearch });
+  };
+  if (opts.acceptModeEntry) window.addEventListener("livetv:mode", onMode);
+
+  // B / Escape resolved to "back" by the gamepad layer (W5):
+  // `livetv:back` {context:"browser"}.
+  const onBack = (event: Event) => {
+    if (destroyed) return;
+    const detail = (event as CustomEvent).detail as
+      | { context?: string }
+      | undefined;
+    if (detail?.context && detail.context !== "browser") return;
+    if (!root.isConnected || root.closest("[hidden]")) return;
+    handleBack();
+  };
+  window.addEventListener("livetv:back", onBack);
 
   renderCategories();
   render();
@@ -522,9 +1024,14 @@ export function mountChannelBrowser(
   return {
     root,
     setChannels(next: LivetvChannel[]): void {
+      // Preserve selection + scroll position across a data
+      // refresh: never reset focus when new data lands.
+      const savedScrollTop = listEl.scrollTop;
       channels = [...next];
       if (highlightedId != null && !channelById(highlightedId)) highlightedId = null;
       renderCategories();
+      render();
+      listEl.scrollTop = savedScrollTop;
       render();
     },
     getHighlightedId(): string | number | null {
@@ -538,13 +1045,30 @@ export function mountChannelBrowser(
       scrollToId(id);
       highlight(id, true);
     },
+    applyEntry,
+    openSearch,
+    closeSearch,
+    isSearchOpen,
+    getCategoryId(): string {
+      return categoryId;
+    },
+    getVisibleChannels(): LivetvChannel[] {
+      return visible();
+    },
+    cycleCategory,
+    jumpPage,
+    toggleFavouriteHighlighted,
     destroy(): void {
       destroyed = true;
       if (searchTimer) clearTimeout(searchTimer);
+      window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("livetv:browser-category", onBrowserCategory);
+      window.removeEventListener("livetv:mode", onMode);
+      window.removeEventListener("livetv:back", onBack);
       root.replaceChildren();
       root.classList.remove("rs-livetv-browser");
       root.removeAttribute("data-livetv-browser");
+      root.removeAttribute("data-browser-screen");
     },
   };
 }
@@ -560,6 +1084,12 @@ export interface CachedBrowserOptions {
   initialFocusId?: string | number | null;
   sort?: BrowserSort;
   searchLabel?: string;
+  /** 0.9.0 screen instance: follow `livetv:mode` browser entries. */
+  acceptModeEntry?: boolean;
+  /** Highlight the first visible channel on mount. */
+  autoHighlightFirst?: boolean;
+  onToggleFavourite?: ChannelBrowserOptions["onToggleFavourite"];
+  onViewGuide?: (channel: LivetvChannel) => void;
 }
 
 /**
@@ -603,6 +1133,10 @@ export async function mountCachedChannelBrowser(
     onHighlight: opts.onHighlight,
     onClose: opts.onClose,
     searchLabel: opts.searchLabel,
+    acceptModeEntry: opts.acceptModeEntry,
+    autoHighlightFirst: opts.autoHighlightFirst,
+    onToggleFavourite: opts.onToggleFavourite,
+    onViewGuide: opts.onViewGuide,
   });
   const refresh = async () => {
     const next = await loadLivetvHomeData(playlistId);

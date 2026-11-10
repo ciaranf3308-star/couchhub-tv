@@ -199,6 +199,183 @@ export function stableGuideSelection(
  */
 export { normaliseCategoryLabel } from "./livetv-data";
 
+// ── Guide modes (Live TV 0.9.0) ──────────────────────────────────
+//
+// The timeline grid is no longer the Guide's default — it is the
+// secondary "Full Guide" tab. The shared state model is expected to
+// gain `guideMode` (W5 owns livetv-state.ts); until it lands, the
+// Guide keeps a local guideMode of exactly this shape and reads
+// `detail.guideMode` off `livetv:mode` events, so the seam is one
+// field, not a second model.
+
+export type GuideMode = "now" | "tonight" | "channel" | "grid";
+
+export const DEFAULT_GUIDE_MODE: GuideMode = "now";
+
+export const GUIDE_MODES: ReadonlyArray<GuideMode> = [
+  "now",
+  "tonight",
+  "channel",
+  "grid",
+];
+
+export const GUIDE_MODE_TABS: ReadonlyArray<{
+  id: GuideMode;
+  label: string;
+}> = [
+  { id: "now", label: "On Now" },
+  { id: "tonight", label: "Tonight" },
+  { id: "channel", label: "By Channel" },
+  { id: "grid", label: "Full Guide" },
+];
+
+/** True for exactly the four contracted mode ids. */
+export function isGuideMode(value: unknown): value is GuideMode {
+  return (
+    value === "now" ||
+    value === "tonight" ||
+    value === "channel" ||
+    value === "grid"
+  );
+}
+
+/**
+ * Read a guide mode off a `livetv:mode` event detail (or any unknown
+ * value): a valid mode passes through, anything else falls back to
+ * `fallback` (default "now"). Never throws, never invents a mode.
+ */
+export function parseGuideMode(
+  value: unknown,
+  fallback: GuideMode = DEFAULT_GUIDE_MODE,
+): GuideMode {
+  return isGuideMode(value) ? value : fallback;
+}
+
+// ── On Now rows ──────────────────────────────────────────────────
+
+export interface GuideNowRow {
+  channelId: string;
+  /** Programme on now (null when the channel has no EPG now — such
+   *  channels never produce a row; see nowNextRows). */
+  current: GuideProgramme;
+  /** Next programme, or null when the EPG ends after the current one. */
+  next: GuideProgramme | null;
+  /** Fraction of the current programme elapsed, 0..1. */
+  progress: number;
+}
+
+/**
+ * On Now rows: one per channel that genuinely has a programme on
+ * air at `nowMs`, each with its next programme. Channels with no
+ * current programme are omitted — an On Now list must never show a
+ * channel with nothing on. Rows are ordered by current programme
+ * start, then channel id (stable, deterministic).
+ */
+export function nowNextRows(
+  programmesByChannel: ReadonlyMap<string, ReadonlyArray<GuideProgramme>>,
+  nowMs: number = Date.now(),
+): GuideNowRow[] {
+  const rows: GuideNowRow[] = [];
+  for (const [channelId, programmes] of programmesByChannel) {
+    if (!programmes || programmes.length === 0) continue;
+    let current: GuideProgramme | null = null;
+    let next: GuideProgramme | null = null;
+    for (const programme of programmes) {
+      if (programmeState(programme.startMs, programme.stopMs, nowMs) === "now") {
+        current = programme;
+      } else if (
+        programme.startMs > nowMs &&
+        (next === null || programme.startMs < next.startMs)
+      ) {
+        next = programme;
+      }
+    }
+    if (!current) continue;
+    rows.push({
+      channelId,
+      current,
+      next,
+      progress: programmeProgress(current.startMs, current.stopMs, nowMs),
+    });
+  }
+  rows.sort(
+    (a, b) =>
+      a.current.startMs - b.current.startMs ||
+      a.channelId.localeCompare(b.channelId),
+  );
+  return rows;
+}
+
+// ── By Channel day navigation ────────────────────────────────────
+
+/** Day-offset bounds for By Channel LB/RB navigation (days from today). */
+export const GUIDE_DAY_OFFSET_MIN = -GUIDE_MAX_PAST_DAYS;
+export const GUIDE_DAY_OFFSET_MAX = GUIDE_MAX_FUTURE_DAYS;
+
+/** Clamp a day offset to [-7, +14]. Out-of-range input never escapes. */
+export function clampGuideDayOffset(offset: number): number {
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(
+    GUIDE_DAY_OFFSET_MIN,
+    Math.min(GUIDE_DAY_OFFSET_MAX, Math.trunc(offset)),
+  );
+}
+
+/** Whole-day offset of `dayStartMs` from today (local midnights). */
+export function guideDayOffset(
+  dayStartMs: number,
+  nowMs: number = Date.now(),
+): number {
+  return Math.round(
+    (startOfLocalDayMs(dayStartMs) - startOfLocalDayMs(nowMs)) / GUIDE_DAY_MS,
+  );
+}
+
+/** Local-midnight ms `offset` days from today, clamped to [-7, +14]. */
+export function guideDayForOffset(
+  offset: number,
+  nowMs: number = Date.now(),
+): number {
+  return startOfLocalDayMs(nowMs) + clampGuideDayOffset(offset) * GUIDE_DAY_MS;
+}
+
+// ── Guide search ─────────────────────────────────────────────────
+
+/**
+ * Filter On Now / Tonight / By Channel rows by a free-text query
+ * over channel name + programme title + description. Empty query
+ * returns the list untouched. Substring, case-insensitive — only
+ * real metadata is searched, nothing is invented to match.
+ */
+export function filterGuideRows<T extends {
+  channelName: string;
+  programmeTitle: string;
+  programmeDesc?: string;
+}>(rows: ReadonlyArray<T>, query: string): T[] {
+  const needle = query.trim().toLowerCase();
+  if (needle.length === 0) return [...rows];
+  return rows.filter((row) =>
+    `${row.channelName} ${row.programmeTitle} ${row.programmeDesc ?? ""}`
+      .toLowerCase()
+      .includes(needle),
+  );
+}
+
+// ── Guide exit ───────────────────────────────────────────────────
+
+/**
+ * The mode the Guide returns to on B: "playback" when it was entered
+ * from fullscreen playback, "home" otherwise. The shared state
+ * tracks the entry mode (enterGuide records the caller's mode);
+ * until W5 wires `guideMode`/`returnTo` into the state model, the
+ * Guide passes its own `enteredFrom` ("home" | "playback") here.
+ */
+export function guideReturnMode(
+  enteredFrom: string | null | undefined,
+): "home" | "playback" {
+  return enteredFrom === "playback" ? "playback" : "home";
+}
+
 // ── Guide cell view model ───────────────────────────────────────
 
 export interface GuideCellViewModel {

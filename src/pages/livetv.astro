@@ -1,18 +1,22 @@
 ---
-// Live TV — RedSilk Couch rebuild (W1: Home + Channel Browser).
+// Live TV — RedSilk Couch rebuild (0.9.0: Landing + Browser + Playback + Guide).
 //
-// The Live TV Home landing + mode shell. NO auto-start stream on
-// open: the landing screen is the default. Three mode mount points:
+// The Live TV landing + mode shell. NO auto-start stream on
+// open: the landing screen is the default. Four mode mount points:
 //
-//   #livetv-mode-home     — this file's Home (hero, rails, collections, browser)
-//   #livetv-mode-playback — W2's TvPlaybackShell mounts here
-//   #livetv-mode-guide    — W3's TvGuideView mounts here
+//   #livetv-mode-landing  — W1's TvLiveLanding mounts here
+//   #livetv-mode-browser  — W2's TvChannelBrowser mounts here
+//   #livetv-mode-playback — W3's TvPlaybackShell mounts here
+//   #livetv-mode-guide    — W4's TvGuideView mounts here
 //
 // Mode switching is the shared window-event contract: the shell
-// listens for `livetv:mode` {mode} and shows / hides mount points,
-// sets html[data-livetv-mode] (the gamepad layer reads it), and
-// NEVER re-initialises the player session — the player DOM stays
-// mounted across switches.
+// listens for `livetv:mode` {mode, browserFilter?, guideMode?,
+// openSearch?} and shows / hides mount points, sets
+// html[data-livetv-mode] (the gamepad layer reads it), and NEVER
+// re-initialises the player session — the player DOM stays mounted
+// across switches. The legacy mode name "home" is an alias for
+// "landing" wherever a mode is accepted (setMode, requestLivetvMode,
+// parseLivetvState) and is never stored.
 //
 // Playback handoff: selecting a channel dispatches cancelable
 // `livetv:tune` {channelId} + `livetv:mode` {mode:"playback"} (see
@@ -52,6 +56,7 @@ import CouchLayout from "@/layouts/CouchLayout.astro";
 import WelcomeCard from "@/components/WelcomeCard.astro";
 import TvEmpty from "@/components/couch/TvEmpty.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
+import TvLiveLanding from "@/components/couch/TvLiveLanding.astro";
 import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 import TvPlaybackShell from "@/components/couch/TvPlaybackShell.astro";
 import TvGuideView from "@/components/couch/TvGuideView.astro";
@@ -103,125 +108,45 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			/>
 		</div>
 
-		<!-- ── Mode: Home ── -->
-		<div id="livetv-mode-home" data-livetv-mode="home">
-			<!-- (A) Resume Watching hero -->
-			<section
-				id="livetv-resume"
-				class="rs-livetv-home-hero"
-				data-livetv-resume
-				aria-label="Resume watching"
-				hidden>
-				<div class="rs-livetv-home-hero__logo" data-hero-logo></div>
-				<div class="rs-livetv-home-hero__body">
-					<p class="rs-livetv-home-hero__eyebrow" data-hero-eyebrow>Resume Watching</p>
-					<h2 class="rs-livetv-home-hero__title" data-hero-title></h2>
-					<div data-hero-programme></div>
-					<p class="rs-livetv-home-hero__next" data-hero-next hidden></p>
-					<div class="rs-livetv-home-hero__actions">
-						<button
-							type="button"
-							class="rs-hero__action rs-hero__action--primary"
-							data-hero-watch
-							data-nylah-item>
-							Watch Live
-						</button>
-						<button
-							type="button"
-							class="rs-hero__action rs-hero__action--secondary"
-							data-livetv-guide
-							data-nylah-item>
-							Guide
-						</button>
-					</div>
-				</div>
-			</section>
-			<div id="livetv-resume-skeleton" class="rs-livetv-home-hero" aria-hidden="true">
-				<TvSkeleton kind="hero" />
-			</div>
-
-			<!-- (B) Favourite Channels -->
-			<section
-				class="rs-rail"
-				data-livetv-rail="favourites"
-				data-nylah-rail="livetv-favourites"
-				aria-label="Favourite channels"
-				hidden>
-				<div class="rs-rail__head">
-					<h2 class="rs-section-title">Favourite Channels</h2>
-				</div>
-				<div class="rs-rail__row" data-rail-row></div>
-			</section>
-
-			<!-- (C) Recently Watched -->
-			<section
-				class="rs-rail"
-				data-livetv-rail="recents"
-				data-nylah-rail="livetv-recents"
-				aria-label="Recently watched"
-				hidden>
-				<div class="rs-rail__head">
-					<h2 class="rs-section-title">Recently Watched</h2>
-				</div>
-				<div class="rs-rail__row" data-rail-row></div>
-			</section>
-
-			<!-- (D) What's On Now -->
-			<section
-				class="rs-rail"
-				data-livetv-rail="whats-on-now"
-				data-nylah-rail="livetv-whats-on-now"
-				aria-label="What's on now"
-				hidden>
-				<div class="rs-rail__head">
-					<h2 class="rs-section-title">What's On Now</h2>
-				</div>
-				<div class="rs-rail__row" data-rail-row></div>
-			</section>
-
-			<!-- (E) Channel Collections -->
-			<section
-				id="livetv-collections"
-				class="rs-livetv-home-collections"
-				data-livetv-collections
-				aria-label="Channel collections"
-				hidden>
-				<div class="rs-rail__head">
-					<h2 class="rs-section-title">Browse Channels</h2>
-				</div>
-				<div class="rs-livetv-home-collections__grid" data-collections-grid></div>
-			</section>
-
-			<!-- Channel Browser — collapsed by default (W7): the
-			     15,000-row logo list must not be the first paint.
-			     Hero + rails + large collection cards lead; the
-			     browser opens on demand or when a collection card
-			     picks a category. The browser stays mounted while
-			     collapsed, so category switching and focus restore
-			     keep working. -->
-			<section
-				id="livetv-browser-section"
-				class="rs-livetv-home-browser"
-				aria-label="All channels">
-				<div class="rs-rail__head rs-livetv-home-browser__head">
-					<h2 class="rs-section-title">All Channels</h2>
-					<button
-						type="button"
-						class="rs-hero__action rs-hero__action--secondary"
-						data-livetv-browser-toggle
-						data-nylah-item
-						aria-expanded="false"
-						aria-controls="livetv-browser-body">
-						Browse all channels
-					</button>
-				</div>
-				<div id="livetv-browser-body" data-livetv-browser-body hidden>
-					<TvChannelBrowser />
-				</div>
-			</section>
+		<!-- ── Mode: Landing (W1's TvLiveLanding mounts here) ── -->
+		<div id="livetv-mode-landing" data-livetv-mode="landing">
+			<!-- 0.9.0: the 0.7.0 Home interior (hero / rails /
+			     collections / All Channels section) is REPLACED by
+			     W1's TvLiveLanding — nothing of it stays mounted. -->
+			<TvLiveLanding />
 		</div>
 
-		<!-- ── Mode: Playback (W2's TvPlaybackShell mounts here) ── -->
+		<!-- ── Mode: Browser (W2's TvChannelBrowser mounts here) ──
+		     The component's initialCategoryId / initialFocusId
+		     props are server-rendered (no values known at SSR, so
+		     they start unset); the mode detail ALSO arrives as
+		     data attributes on this mount div (set by setMode from
+		     the `livetv:mode` detail) so W2 can read either:
+		     data-initial-category / data-initial-focus /
+		     data-browser-filter-kind / data-browser-filter-value /
+		     data-open-search. -->
+		<div
+			id="livetv-mode-browser"
+			data-livetv-mode="browser"
+			data-initial-category=""
+			data-initial-focus=""
+			data-browser-filter-kind=""
+			data-browser-filter-value=""
+			data-open-search="false"
+			hidden>
+			<div class="rs-livetv-home__playback-bar">
+				<button
+					type="button"
+					class="rs-hero__action rs-hero__action--secondary"
+					data-livetv-home
+					data-nylah-item>
+					‹ Live TV
+				</button>
+			</div>
+			<TvChannelBrowser browserId="browser" screenMode />
+		</div>
+
+		<!-- ── Mode: Playback (W3's TvPlaybackShell mounts here) ── -->
 		<div id="livetv-mode-playback" data-livetv-mode="playback" hidden>
 			<div class="rs-livetv-home__playback-bar">
 				<button
@@ -339,7 +264,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 	</div>
 
 	<style>
-		html[data-first-run="true"] #livetv-mode-home { display: none; }
+		html[data-first-run="true"] #livetv-mode-landing { display: none; }
 		html[data-first-run="true"] #livetv-welcome { display: flex; }
 		html[data-first-run="true"] .rs-livetv-home__head { display: none; }
 		html[data-first-run="true"] #livetv-provider-empty { display: none; }
@@ -447,13 +372,9 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		.rs-livetv-home__legend:empty {
 			display: none;
 		}
-		/* Rails hide when the client fill finds nothing — .rs-rail
-		   sets display:flex, which beats the UA [hidden] rule. */
-		.rs-livetv-home [data-livetv-rail][hidden],
-		.rs-livetv-home [data-livetv-resume][hidden],
-		.rs-livetv-home [data-livetv-collections][hidden] {
-			display: none;
-		}
+		/* 0.9.0: the [hidden] guard for the retired 0.7.0 Home
+		   rails / hero / collections was removed with them —
+		   TvLiveLanding owns the landing now. */
 		/* Player caps (v0.2.2 rule, preserved): on desktop/landscape
 		   the player is capped at 46dvh so the strip below it keeps
 		   real room; portrait/mobile keeps 60dvh. */
@@ -613,55 +534,77 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		import "../scripts/updater-startup.js";
 		import {
 			dispatchLivetvTune,
-			collectionNowPlaying,
-			favouriteChannels,
-			groupChannels,
 			loadLivetvHomeData,
-			nowNextForChannel,
-			pickResumeHero,
 			readActivePlaylistId,
-			recentlyWatchedChannels,
 			requestLivetvMode,
-			whatsOnNow,
 		} from "../scripts/lib/livetv-data.ts";
-		import { fallbackMarkFor } from "../scripts/lib/couch-image.ts";
-		import {
-			buildChannelCardElement,
-			buildProgrammeMetaElement,
-		} from "../scripts/lib/livetv-cards.ts";
 		import { getLivetvResumeLastChannel } from "../scripts/lib/app-settings.js";
-		import { restoreLivetvState } from "../scripts/lib/livetv-state.ts";
-		import { EPG_LOADED_EVENT } from "../scripts/lib/epg-data.js";
-		import { CACHE_REVALIDATED_EVENT } from "../scripts/lib/cache.js";
+		import { restoreLivetvState, parseLivetvModeParam } from "../scripts/lib/livetv-state.ts";
 
-		// ── Mode shell ──────────────────────────────────────────
-		// Listens for livetv:mode {mode} and shows / hides the three
-		// mount points. The player DOM is never re-created: switching
-		// modes only toggles visibility, so the tuned session
-		// survives. html[data-livetv-mode] is the gamepad layer's
-		// playback signal (W2) and the CSS hook for mode chrome.
+		// ── Mode shell (0.9.0: four modes + "home" alias) ─────────
+		// Listens for livetv:mode {mode, browserFilter?, guideMode?,
+		// openSearch?} and shows / hides the four mount points.
+		// The player DOM is never re-created: switching modes only
+		// toggles visibility, so the tuned session survives.
+		// html[data-livetv-mode] is the gamepad layer's context
+		// signal (W5) and the CSS hook for mode chrome. The legacy
+		// mode name "home" maps to "landing" here, in
+		// requestLivetvMode and in parseLivetvState — it is never
+		// stored. Browser detail is ALSO mirrored onto data
+		// attributes on #livetv-mode-browser so W2's browser can
+		// read either the event detail or the mount div; guide
+		// sub-mode is mirrored to html[data-livetv-guide-mode] for
+		// the button-hint legend.
 		const modeMounts = {
-			home: document.getElementById("livetv-mode-home"),
+			landing: document.getElementById("livetv-mode-landing"),
+			browser: document.getElementById("livetv-mode-browser"),
 			playback: document.getElementById("livetv-mode-playback"),
 			guide: document.getElementById("livetv-mode-guide"),
 		};
-		let currentMode = "home";
-		const setMode = (mode) => {
-			if (mode !== "home" && mode !== "playback" && mode !== "guide") return;
+		const browserMount = modeMounts.browser;
+		let currentMode = "landing";
+		const setMode = (mode, detail) => {
+			if (mode === "home") mode = "landing";
+			if (
+				mode !== "landing" &&
+				mode !== "browser" &&
+				mode !== "playback" &&
+				mode !== "guide"
+			)
+				return;
 			currentMode = mode;
 			for (const [key, mount] of Object.entries(modeMounts)) {
 				if (!mount) continue;
 				mount.toggleAttribute("hidden", key !== mode);
 			}
 			document.documentElement.dataset.livetvMode = mode;
+			if (detail && typeof detail === "object") {
+				if (mode === "browser" && browserMount) {
+					const filter = detail.browserFilter;
+					browserMount.dataset.initialCategory =
+						filter?.kind === "category" ? String(filter.value ?? "") : "";
+					browserMount.dataset.initialFocus =
+						detail.initialFocusId != null ? String(detail.initialFocusId) : "";
+					browserMount.dataset.browserFilterKind = filter?.kind ?? "";
+					browserMount.dataset.browserFilterValue =
+						filter?.value != null ? String(filter.value) : "";
+					browserMount.dataset.openSearch =
+						detail.openSearch === true ? "true" : "false";
+				}
+				if (mode === "guide" && detail.guideMode) {
+					document.documentElement.dataset.livetvGuideMode =
+						String(detail.guideMode);
+				}
+			}
 		};
 		window.addEventListener("livetv:mode", (event) => {
-			setMode(event.detail?.mode);
+			const detail = event.detail ?? {};
+			setMode(detail.mode, detail);
 		});
 
-		// Back-to-Home buttons (playback + guide mounts).
+		// Back-to-Landing buttons (browser + playback + guide mounts).
 		document.querySelectorAll("[data-livetv-home]").forEach((btn) => {
-			btn.addEventListener("click", () => requestLivetvMode("home"));
+			btn.addEventListener("click", () => requestLivetvMode("landing"));
 		});
 
 		// ── Guide entry ─────────────────────────────────────────
@@ -686,7 +629,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			if (playerEmpty) {
 				playerEmpty.style.display = playing ? "none" : "";
 			}
-			if (playing && currentMode === "home") setMode("playback");
+			if (playing && currentMode === "landing") setMode("playback");
 		};
 		if (playerEl) {
 			syncPlayerVisible();
@@ -696,401 +639,53 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			});
 		}
 
-		// ── Home render ─────────────────────────────────────────
-		const heroSection = document.querySelector("[data-livetv-resume]");
-		const heroSkeleton = document.getElementById("livetv-resume-skeleton");
-		const providerEmpty = document.getElementById("livetv-provider-empty");
-
-		const hideHero = () => {
-			heroSection?.setAttribute("hidden", "");
-			heroSkeleton?.remove();
-		};
-
-		const fillRail = (railId, cards) => {
-			const section = document.querySelector(`[data-livetv-rail="${railId}"]`);
-			if (!section) return;
-			const row = section.querySelector("[data-rail-row]");
-			if (!row) return;
-			row.replaceChildren();
-			if (!cards.length) {
-				section.setAttribute("hidden", "");
-				return;
-			}
-			section.removeAttribute("hidden");
-			for (const card of cards) row.appendChild(card);
-			window.SpatialNavigation?.makeFocusable?.();
-		};
-
-		const cardFor = (channel, data, focusPrefix) => {
-			const nn = nowNextForChannel(channel, data.programmes, data.playlistId);
-			return buildChannelCardElement(channel, {
-				nowTitle: nn.current?.title ?? undefined,
-				nextTitle: nn.next?.title ?? undefined,
-				progress: nn.current?.progress ?? undefined,
-				catchup: channel.catchup,
-				favourite: channel.favourite,
-				size: "large",
-				focusKey: `${focusPrefix}-${channel.id}`,
-			});
-		};
-
-		// Browser expander (W7): the All Channels list starts
-		// collapsed so first paint is hero + rails + collection
-		// cards, never a wall of logos. The browser stays mounted
-		// while collapsed, so category switching and focus restore
-		// keep working; expanding unhides it and nudges the
-		// virtual list to re-render its visible window.
-		const browserBody = document.getElementById("livetv-browser-body");
-		const browserToggle = document.querySelector("[data-livetv-browser-toggle]");
-		const setBrowserExpanded = (expanded) => {
-			browserBody?.toggleAttribute("hidden", !expanded);
-			if (browserToggle) {
-				browserToggle.setAttribute("aria-expanded", String(expanded));
-				browserToggle.textContent = expanded
-					? "Hide all channels"
-					: "Browse all channels";
-			}
-			if (expanded) {
-				const list = browserBody?.querySelector("[data-browser-list]");
-				if (list) {
-					list.scrollTop = 1;
-					list.scrollTop = 0;
-				}
-			}
-		};
-		browserToggle?.addEventListener("click", () => {
-			setBrowserExpanded(browserBody?.hasAttribute("hidden") ?? false);
-		});
-
-		const renderHome = async () => {
+		// ── Landing (0.9.0) ─────────────────────────────────────────
+		// The 0.7.0 Home's hero / rails / collections / browser
+		// rendering lived here and is RETIRED: W1's TvLiveLanding
+		// (mounted above) owns the landing now, including its own
+		// EPG / favourites / recents refresh listeners. The ONE
+		// behaviour the shell keeps is the resume setting
+		// (default OFF): straight to fullscreen playback of the
+		// last channel. W1's landing does not implement it, and
+		// dropping it silently would regress a user setting.
+		const maybeResumeLastChannel = async () => {
 			const playlistId = readActivePlaylistId();
-			if (!playlistId) {
-				hideHero();
-				for (const railId of ["favourites", "recents", "whats-on-now"]) {
-					fillRail(railId, []);
-				}
-				document.querySelector("[data-livetv-collections]")?.setAttribute("hidden", "");
-				providerEmpty?.removeAttribute("hidden");
-				return;
-			}
-			providerEmpty?.setAttribute("hidden", "");
+			if (!playlistId) return;
+			if (!getLivetvResumeLastChannel()) return;
+			const params = new URLSearchParams(window.location.search);
+			if (params.get("channel")) return;
 			let data;
 			try {
 				data = await loadLivetvHomeData(playlistId);
 			} catch {
-				hideHero();
 				return;
 			}
-			if (!data.channels.length) {
-				hideHero();
-				providerEmpty?.removeAttribute("hidden");
-				return;
-			}
-
-			// Resume setting (default OFF): straight to fullscreen
-			// playback of the last channel. The tune handoff below
-			// handles the actual tune (event + shell, no navigation).
-			const params = new URLSearchParams(window.location.search);
-			if (getLivetvResumeLastChannel() && !params.get("channel") && data.recents.length) {
-				dispatchLivetvTune(data.recents[0].id);
-				return;
-			}
-
-			// (A) Resume hero: last watched, else a favourite with a
-			// live programme, else any favourite, else the first
-			// channel with a live programme now, else a featured
-			// catalogue channel (W7 — first run with no history,
-			// no favourites and no EPG still gets a hero; programme
-			// lines are real EPG only, never invented).
-			const recents = recentlyWatchedChannels(data.channels, data.recents);
-			const favourites = favouriteChannels(data.channels);
-			const heroPick = pickResumeHero(
-				data.channels,
-				data.recents,
-				data.programmes,
-				data.playlistId,
-			);
-			const heroChannel = heroPick?.channel ?? null;
-			const heroEyebrow = heroPick?.eyebrow ?? "";
-			heroSkeleton?.remove();
-			if (heroChannel) {
-				const nn = nowNextForChannel(heroChannel, data.programmes, data.playlistId);
-				const eyebrow = heroSection?.querySelector("[data-hero-eyebrow]");
-				if (eyebrow) eyebrow.textContent = heroEyebrow;
-				const title = heroSection?.querySelector("[data-hero-title]");
-				if (title) title.textContent = heroChannel.displayName || heroChannel.name;
-				const logoMount = heroSection?.querySelector("[data-hero-logo]");
-				if (logoMount) {
-					logoMount.replaceChildren();
-					// Branded fallback (shared couch-image helper —
-					// W7 consumes it, never a home-grown mark): the
-					// "N" brand mark; the channel name is the hero
-					// title beside it. A failed logo swaps to the
-					// same fallback instead of an empty box.
-					const logoFallback = () => {
-						const fallback = document.createElement("span");
-						fallback.className = "rs-livetv-home-hero__logo-fallback";
-						fallback.setAttribute("aria-hidden", "true");
-						fallback.textContent = fallbackMarkFor(
-							"logo",
-							heroChannel.displayName || heroChannel.name,
-						);
-						return fallback;
-					};
-					if (heroChannel.logo) {
-						const img = document.createElement("img");
-						img.src = heroChannel.logo;
-						img.alt = "";
-						img.loading = "eager";
-						img.decoding = "async";
-						img.addEventListener("error", () => {
-							img.remove();
-							logoMount.appendChild(logoFallback());
-						});
-						logoMount.appendChild(img);
-					} else {
-						logoMount.appendChild(logoFallback());
-					}
-				}
-				const programmeMount = heroSection?.querySelector("[data-hero-programme]");
-				if (programmeMount) {
-					programmeMount.replaceChildren();
-					if (nn.current) {
-						const meta = buildProgrammeMetaElement({
-							title: nn.current.title,
-							startMs: nn.current.start,
-							stopMs: nn.current.stop,
-							desc: nn.current.desc || undefined,
-							catchup: heroChannel.catchup,
-							live: true,
-						});
-						if (meta) programmeMount.appendChild(meta);
-					} else {
-						const live = document.createElement("p");
-						live.className = "rs-livetv-home-hero__next";
-						live.textContent = "Live TV";
-						programmeMount.appendChild(live);
-					}
-				}
-				const nextEl = heroSection?.querySelector("[data-hero-next]");
-				if (nextEl) {
-					if (nn.next) {
-						nextEl.textContent = `Up next: ${nn.next.title}`;
-						nextEl.removeAttribute("hidden");
-					} else {
-						nextEl.setAttribute("hidden", "");
-					}
-				}
-				const watchBtn = heroSection?.querySelector("[data-hero-watch]");
-				if (watchBtn && !watchBtn.dataset.armed) {
-					watchBtn.dataset.armed = "1";
-					watchBtn.setAttribute("data-channel-id", String(heroChannel.id));
-					watchBtn.addEventListener("click", () => {
-						const id = watchBtn.getAttribute("data-channel-id");
-						if (id == null) return;
-						dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
-					});
-				} else if (watchBtn) {
-					watchBtn.setAttribute("data-channel-id", String(heroChannel.id));
-				}
-				heroSection?.removeAttribute("hidden");
-			} else {
-				hideHero();
-			}
-
-			// (B) Favourite Channels rail.
-			fillRail(
-				"favourites",
-				favourites.map((c) => cardFor(c, data, "livetv-home-fav")),
-			);
-			// (C) Recently Watched rail (live only, deduped by id).
-			fillRail(
-				"recents",
-				recents.map((c) => cardFor(c, data, "livetv-home-recent")),
-			);
-			// (D) What's On Now rail — hidden when no EPG.
-			const whatsOn = data.hasEpg
-				? whatsOnNow(data.channels, data.programmes, {
-						playlistId: data.playlistId,
-						favouriteIds: favourites.map((c) => c.id),
-						watchedIds: recents.map((c) => c.id),
-					})
-				: [];
-			fillRail(
-				"whats-on-now",
-				whatsOn.map((item) =>
-					buildChannelCardElement(item.channel, {
-						nowTitle: item.current.title,
-						nextTitle: item.next?.title ?? undefined,
-						progress: item.progress,
-						catchup: item.channel.catchup,
-						favourite: item.channel.favourite,
-						size: "large",
-						focusKey: `livetv-home-now-${item.channel.id}`,
-					}),
-				),
-			);
-
-			// (E) Channel Collections — LARGE cards from provider
-			// groups, never hardcoded provider naming.
-			const collectionsSection = document.querySelector("[data-livetv-collections]");
-			const collectionsGrid = document.querySelector("[data-collections-grid]");
-			if (collectionsSection && collectionsGrid) {
-				const groups = groupChannels(data.channels).filter(
-					(g) => g.id !== "all" && g.channels.length > 0,
-				);
-				collectionsGrid.replaceChildren();
-				if (!groups.length) {
-					collectionsSection.setAttribute("hidden", "");
-				} else {
-					collectionsSection.removeAttribute("hidden");
-					for (const group of groups) {
-						const card = document.createElement("button");
-						card.type = "button";
-						card.className = "rs-livetv-home-collection-card";
-						card.setAttribute("data-collection-id", group.id);
-						card.setAttribute("data-nylah-item", "");
-						card.setAttribute("data-focus-key", `livetv-home-collection-${group.id}`);
-						const label = document.createElement("span");
-						label.className = "rs-livetv-home-collection-card__label";
-						label.textContent = group.label;
-						const count = document.createElement("span");
-						count.className = "rs-livetv-home-collection-card__count";
-						count.textContent = `${group.channels.length} channel${group.channels.length === 1 ? "" : "s"}`;
-						// "Now on …" from real EPG only — omitted
-						// when the guide covers nothing in the group.
-						const nowPlaying = collectionNowPlaying(
-							group,
-							data.programmes,
-							data.playlistId,
-						);
-						const sample = document.createElement("span");
-						sample.className = "rs-livetv-home-collection-card__sample";
-						sample.setAttribute("aria-hidden", "true");
-						for (const sampleChannel of group.channels.slice(0, 3)) {
-							const sampleMark = () => {
-								const mark = document.createElement("span");
-								mark.textContent = fallbackMarkFor(
-									"logo",
-									sampleChannel.displayName || sampleChannel.name,
-								);
-								return mark;
-							};
-							if (sampleChannel.logo) {
-								const img = document.createElement("img");
-								img.src = sampleChannel.logo;
-								img.alt = "";
-								img.loading = "lazy";
-								img.decoding = "async";
-								img.addEventListener("error", () => {
-									img.remove();
-									sample.appendChild(sampleMark());
-								});
-								sample.appendChild(img);
-							} else {
-								sample.appendChild(sampleMark());
-							}
-						}
-						card.append(label, count);
-						if (nowPlaying) {
-							const now = document.createElement("span");
-							now.className = "rs-livetv-home-collection-card__now";
-							now.appendChild(document.createTextNode("Now on "));
-							const nowChannel = document.createElement("strong");
-							nowChannel.textContent = nowPlaying.channelName;
-							now.appendChild(nowChannel);
-							now.appendChild(document.createTextNode(`: ${nowPlaying.programmeTitle}`));
-							card.append(now);
-						}
-						card.append(sample);
-						card.addEventListener("click", () => {
-							setBrowserExpanded(true);
-							window.dispatchEvent(
-								new CustomEvent("livetv:browser-category", {
-									detail: { browserId: "home", categoryId: group.id },
-								}),
-							);
-							document
-								.getElementById("livetv-browser-section")
-								?.scrollIntoView({ behavior: "smooth", block: "start" });
-						});
-						collectionsGrid.appendChild(card);
-					}
-					window.SpatialNavigation?.makeFocusable?.();
-				}
-			}
+			if (data.recents.length) dispatchLivetvTune(data.recents[0].id);
 		};
 
-		// Card select (rails): explicit Watch only — a click on a
-		// card tunes, focus/hover never does.
-		document
-			.getElementById("livetv-mode-home")
-			?.addEventListener("click", (event) => {
-				const target = event.target;
-				const card = target?.closest?.("[data-channel-card]");
-				if (!card) return;
-				if (target?.closest?.("a[href]")) return; // link navigates; the tune event is the handoff
-				const id = card.getAttribute("data-channel-id");
-				if (id == null) return;
-				dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
-			});
-		document
-			.getElementById("livetv-mode-home")
-			?.addEventListener("keydown", (event) => {
-				if (event.key !== "Enter" && event.key !== " ") return;
-				const target = event.target;
-				const card = target?.closest?.("[data-channel-card]");
-				if (!card || target?.closest?.("a[href],button")) return;
-				event.preventDefault();
-				const id = card.getAttribute("data-channel-id");
-				if (id == null) return;
-				dispatchLivetvTune(/^\d+$/.test(id) ? Number(id) : id);
-			});
-
-		// Initial mode: a persisted guide mode (W3's state module)
-		// or ?mode=guide opens straight into the Guide — the Guide
-		// self-activates on the same conditions, and this shell must
-		// not hide its mount underneath it. An already-playing
-		// player opens into playback (covers ?channel= deep links:
-		// the engine tunes on load and unhides #player, and the
-		// observer above flips the shell). Otherwise Home.
-		// (Mode persistence across reloads is W3's state module's
-		// job — this shell never restores playback on its own, or a
-		// reload would land on an idle player.)
+		// Initial mode (0.9.0): ?mode= mapping — guide→guide,
+		// browser→browser, landing/home→landing, playback→
+		// playback. A persisted guide mode (W3's state module) also
+		// opens straight into the Guide — the Guide self-activates
+		// on the same conditions, and this shell must not hide its
+		// mount underneath it. An already-playing player opens into
+		// playback (covers ?channel= deep links: the engine tunes
+		// on load and unhides #player, and the observer above flips
+		// the shell). Otherwise landing. (Mode persistence across
+		// reloads is the state module's job — this shell never
+		// restores playback on its own, or a reload would land on
+		// an idle player.)
 		const initialParams = new URLSearchParams(window.location.search);
+		const modeFromParam = parseLivetvModeParam(initialParams.get("mode"));
 		const initialMode =
-			initialParams.get("mode") === "guide" ||
-			restoreLivetvState().mode === "guide"
+			modeFromParam ??
+			(restoreLivetvState().mode === "guide"
 				? "guide"
 				: !playerEl?.hasAttribute("hidden")
 					? "playback"
-					: "home";
+					: "landing");
 		setMode(initialMode);
-		void renderHome();
+		void maybeResumeLastChannel();
 
-		// Favourites / recents change → re-render the Home rails.
-		let rerenderTimer = null;
-		const scheduleRerender = () => {
-			if (rerenderTimer) clearTimeout(rerenderTimer);
-			rerenderTimer = setTimeout(() => void renderHome(), 250);
-		};
-		document.addEventListener("xt:favorites-changed", scheduleRerender);
-		document.addEventListener("xt:recents-changed", scheduleRerender);
-		// W7: a late EPG load upgrades the hero (Featured Channel →
-		// a real live programme) and fills What's On Now; a
-		// background cache refresh brings new channels in. Without
-		// these, Home kept whatever the cold-load snapshot showed.
-		// Guarded to this playlist.
-		document.addEventListener(EPG_LOADED_EVENT, (event) => {
-			const detail = event.detail;
-			if (detail?.playlistId && detail.playlistId !== readActivePlaylistId()) return;
-			scheduleRerender();
-		});
-		document.addEventListener(CACHE_REVALIDATED_EVENT, (event) => {
-			const detail = event.detail;
-			if (detail?.entryId && detail.entryId !== readActivePlaylistId()) return;
-			if (detail?.kind && detail.kind !== "live" && detail.kind !== "m3u") return;
-			scheduleRerender();
-		});
 	</script>
 </CouchLayout>

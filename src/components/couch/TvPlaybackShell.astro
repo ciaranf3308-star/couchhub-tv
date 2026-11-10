@@ -18,9 +18,15 @@
 //
 // Events (shared contracts): listens for `livetv:tune
 // {channelId}`, `livetv:mode {mode}`, `livetv:overlay {overlay}`,
+// `livetv:back {context:"playback"}` (0.9.0: gamepad B — resolved
+// in order dismiss Quick Surf → close overlay → return to landing,
+// the same path the keyboard Escape key takes),
+// `livetv:osd-action {action:"favourite"}` (OSD favourite button),
 // `livetv:playback-error {streamId, kind}` (dispatched by the
 // stream.ts seam). Tunes go through the engine seam only — this
-// shell never builds a stream URL.
+// shell never builds a stream URL. Confirmed switches go through
+// `switchChannel`: the prior stream is released before the
+// replacement opens.
 //
 // Error state: on `livetv:playback-error` the shell shows a
 // polished overlay (TvEmpty) with Retry / Previous channel /
@@ -30,6 +36,7 @@
 import TvOsd from "./TvOsd.astro";
 import TvQuickSurf from "./TvQuickSurf.astro";
 import TvEmpty from "./TvEmpty.astro";
+import TvLogo from "./TvLogo.astro";
 ---
 
 <section
@@ -42,6 +49,18 @@ import TvEmpty from "./TvEmpty.astro";
   hidden
   aria-label="Live TV playback"
 >
+  <!-- Slim playback top bar (INTEGRATION 0.9.0 — mockup 2/3): the
+       full top nav is hidden in playback, but the mockups keep a
+       slim brand bar over the video (mark + "Live TV" left, clock
+       right). Persistent while playback is active; pointer-events
+       none — chrome, not a control. -->
+  <div class="rs-livetv-play-topbar" data-livetv-play-topbar aria-hidden="true">
+    <span class="rs-livetv-play-topbar__brand">
+      <TvLogo variant="mark" size="nav" />
+      <span class="rs-livetv-play-topbar__label">Live TV</span>
+    </span>
+    <span class="rs-livetv-play-topbar__clock" data-play-clock></span>
+  </div>
   <TvOsd />
   <TvQuickSurf />
 
@@ -122,7 +141,10 @@ import TvEmpty from "./TvEmpty.astro";
     previousChannelTarget,
     retryTarget,
     streamToKeepOnFailure,
-    tuneToChannel,
+    resolveBackStep,
+    switchChannel,
+    catchupActionForPlaybackChannel,
+    toggleFavourite,
     windowPlaybackEngine,
   } from "@/scripts/lib/livetv-playback";
   import {
@@ -130,6 +152,7 @@ import TvEmpty from "./TvEmpty.astro";
     loadLivetvProgrammes,
     nowNextForChannel,
     activeLivetvPlaylistId,
+    requestLivetvMode,
     type LivetvChannel,
   } from "@/scripts/lib/livetv-data";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
@@ -148,6 +171,19 @@ import TvEmpty from "./TvEmpty.astro";
     let lastWorkingId: string | number | null = null;
     let failedId: string | number | null = null;
     let returnFocusKey: string | null = null;
+
+    // Slim top-bar clock (INTEGRATION 0.9.0 — mockup 2: "18:24 Tue
+    // 10 Nov"). Device-local time; ticks every 15 s, page lifetime.
+    const clockEl = shell.querySelector<HTMLElement>("[data-play-clock]");
+    const paintClock = () => {
+      if (!clockEl) return;
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const date = now.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+      clockEl.textContent = `${time} ${date}`;
+    };
+    paintClock();
+    setInterval(paintClock, 15000);
 
     // Detect (never create) the player session: if stream.ts already
     // mounted a player inside #player, mode switches must not
@@ -221,6 +257,58 @@ import TvEmpty from "./TvEmpty.astro";
       return "none";
     };
 
+    const hideOsd = () => {
+      if (!osd) return;
+      osd.dataset.hidden = "true";
+      osd.setAttribute("data-hidden", "true");
+    };
+
+    // ── B / back (0.9.0) ──────────────────────────────────────────
+    // One B press, resolved in order (resolveBackStep): dismiss
+    // Quick Surf → close the open overlay (options / browser / error
+    // / visible OSD) → return to the landing screen. Both entry
+    // points share this path: the gamepad `livetv:back
+    // {context:"playback"}` event (W5's contract) and the keyboard
+    // Escape key. A single physical press must advance exactly one
+    // step even if it arrives as both (gamepad B synthesising an
+    // Escape AND dispatching livetv:back): the 250 ms dedupe window
+    // swallows the second signal. The error overlay counts as an
+    // overlay — B never jumps to landing from under a failure state;
+    // closing it reveals the OSD so the kept stream still has a way
+    // out. Landing is LIVETV_LANDING_MODE ("home" — see
+    // livetv-playback.ts; there is no "landing" mode in 0.9.0).
+    let lastBackHandledAt = 0;
+    const BACK_DEDUPE_MS = 250;
+
+    const handleBack = () => {
+      const now = Date.now();
+      if (now - lastBackHandledAt < BACK_DEDUPE_MS) return;
+      lastBackHandledAt = now;
+      const step = resolveBackStep({
+        quicksurfOpen: overlayOpen() === "quicksurf",
+        overlayOpen:
+          overlayOpen() === "options" ||
+          overlayOpen() === "browser" ||
+          overlayOpen() === "error",
+        osdVisible: !!osd && osd.dataset.hidden === "false",
+      });
+      if (step === "dismiss-quicksurf") {
+        // Quick Surf hides itself on `livetv:overlay {overlay:"none"}`
+        // without retuning — B dismisses, never switches.
+        window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "none" } }));
+      } else if (step === "close-overlay") {
+        const open = overlayOpen();
+        if (open === "options") closeOptions();
+        else if (open === "browser") closeBrowser();
+        else if (open === "error") {
+          hideError();
+          showOsd();
+        } else hideOsd();
+      } else {
+        requestLivetvMode("landing");
+      }
+    };
+
     const closeOptions = () => {
       if (!optionsEl) return;
       optionsEl.hidden = true;
@@ -268,6 +356,7 @@ import TvEmpty from "./TvEmpty.astro";
     const paintOsd = () => {
       if (!osd) return;
       const channel = channels.find((c) => String(c.id) === String(tunedId)) ?? null;
+      osd.setAttribute("data-osd-channel-id", channel ? String(channel.id) : "");
       const setText = (sel: string, text: string) => {
         const el = osd.querySelector<HTMLElement>(sel);
         if (el) el.textContent = text;
@@ -280,10 +369,15 @@ import TvEmpty from "./TvEmpty.astro";
       } catch {}
       const favEl = osd.querySelector<HTMLElement>("[data-osd-fav]");
       if (favEl) favEl.hidden = !isFav;
+      // Restart (catch-up) is offered only where the provider
+      // honestly offers it for the current programme — the button
+      // stays hidden otherwise, never a dead control.
+      const restartBtn = osd.querySelector<HTMLElement>("[data-osd-restart]");
+      if (restartBtn) restartBtn.hidden = true;
       if (channel) {
         const nn = nowNextForChannel(channel, programmes, playlistId);
-        setText("[data-osd-now-title]", nn.current?.title ?? "");
-        const timeEl = osd.querySelector<HTMLElement>("[data-osd-now-time]");
+        setText("[data-programme-now-title]", nn.current?.title ?? "");
+        const timeEl = osd.querySelector<HTMLElement>("[data-programme-now-time]");
         if (timeEl && nn.current) {
           const fmt = (ms: number) =>
             new Date(ms).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" });
@@ -291,22 +385,51 @@ import TvEmpty from "./TvEmpty.astro";
         } else if (timeEl) {
           timeEl.textContent = "";
         }
-        setText("[data-osd-next-title]", nn.next?.title ? `Up next: ${nn.next.title}` : "");
-        const bar = osd.querySelector<HTMLElement>("[data-osd-progress]");
+        osd.setAttribute("data-osd-now-start", nn.current ? String(nn.current.start) : "");
+        setText("[data-programme-next-title]", nn.next?.title ?? "");
+        const nextTimeEl = osd.querySelector<HTMLElement>("[data-programme-next-time]");
+        if (nextTimeEl && nn.next) {
+          const fmt = (ms: number) =>
+            new Date(ms).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" });
+          nextTimeEl.textContent = `${fmt(nn.next.start)}–${fmt(nn.next.stop)}`;
+        } else if (nextTimeEl) {
+          nextTimeEl.textContent = "";
+        }
+        const nextBlock = osd.querySelector<HTMLElement>("[data-programme-next]");
+        if (nextBlock) nextBlock.hidden = !nn.next;
+        const bar = osd.querySelector<HTMLElement>("[data-programme-progress]");
         if (bar && nn.current) {
           bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
         }
+        if (restartBtn && nn.current) {
+          restartBtn.hidden =
+            catchupActionForPlaybackChannel(channel, nn.current.start, nn.current.stop) !==
+            "watch-from-start";
+        }
         const logoSlot = osd.querySelector<HTMLElement>("[data-osd-logo]");
-        if (logoSlot && channel.logo) {
+        if (logoSlot) {
           logoSlot.innerHTML = "";
-          const img = document.createElement("img");
-          img.src = channel.logo;
-          img.alt = "";
-          logoSlot.appendChild(img);
+          if (channel.logo) {
+            const img = document.createElement("img");
+            img.src = channel.logo;
+            img.alt = "";
+            logoSlot.appendChild(img);
+          } else {
+            // Logo-less channel: branded initial, not an empty tile
+            // (the :has() fallback rule gives it the burgundy tile).
+            const initial = document.createElement("span");
+            initial.className = "rs-livetv-play-osd__initial";
+            initial.setAttribute("aria-hidden", "true");
+            initial.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
+            logoSlot.appendChild(initial);
+          }
         }
       } else {
-        setText("[data-osd-now-title]", "");
-        setText("[data-osd-next-title]", "");
+        osd.setAttribute("data-osd-now-start", "");
+        setText("[data-programme-now-title]", "");
+        setText("[data-programme-next-title]", "");
+        const nextBlock = osd.querySelector<HTMLElement>("[data-programme-next]");
+        if (nextBlock) nextBlock.hidden = true;
       }
     };
 
@@ -399,6 +522,29 @@ import TvEmpty from "./TvEmpty.astro";
       }
     });
 
+    // B from the gamepad (W5 contract: gamepad resolves B/Escape to
+    // "back" and dispatches `livetv:back {context:"playback"}`).
+    // Ignored outside the playback context or for other contexts.
+    window.addEventListener("livetv:back", (ev) => {
+      if (!isPlaybackActive()) return;
+      if ((ev as CustomEvent).detail?.context !== "playback") return;
+      handleBack();
+    });
+
+    // OSD Favourite button: the shell owns the playlist + channel
+    // objects, so the OSD asks and the shell toggles + repaints.
+    window.addEventListener("livetv:osd-action", async (ev) => {
+      const detail = (ev as CustomEvent).detail ?? {};
+      if (detail.action !== "favourite") return;
+      if (!isPlaybackActive()) return;
+      await ensureData();
+      const channel = channels.find((c) => String(c.id) === String(tunedId)) ?? null;
+      if (!channel) return;
+      await toggleFavourite(playlistId, channel);
+      paintOsd();
+      showOsd();
+    });
+
     // Mouse movement reveals the OSD; the OSD hides itself after
     // OSD_AUTO_HIDE_MS of inactivity.
     let lastMouseShow = 0;
@@ -419,18 +565,10 @@ import TvEmpty from "./TvEmpty.astro";
       if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement) return;
       const key = ev.key;
       if (key === "Escape") {
-        // B: close overlay first, then return to Live Home.
-        const open = overlayOpen();
-        if (open !== "none") {
-          if (open === "options") closeOptions();
-          else if (open === "browser") closeBrowser();
-          return;
-        }
-        if (osd && osd.dataset.hidden === "false") {
-          osd.dataset.hidden = "true";
-          return;
-        }
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        // B (keyboard): same three-step sequence as `livetv:back`.
+        // (Quick Surf's own listener preventDefaults Escape while it
+        // is open, so this branch only runs when it did not.)
+        handleBack();
         return;
       }
       if (key === "Enter") {
@@ -444,7 +582,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "x" || key === "X") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        requestLivetvMode("guide");
         return;
       }
       if (key === "y" || key === "Y") {
@@ -452,7 +590,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "g" || key === "G") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        requestLivetvMode("guide");
         return;
       }
       if (key === "c" || key === "C") {
@@ -465,7 +603,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "h" || key === "H") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        requestLivetvMode("landing");
       }
     });
 
@@ -484,9 +622,9 @@ import TvEmpty from "./TvEmpty.astro";
       const actionBtn = target?.closest?.("[data-play-action]") as HTMLElement | null;
       if (actionBtn) {
         const action = actionBtn.dataset.playAction;
-        if (action === "guide") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        if (action === "guide") requestLivetvMode("guide");
         else if (action === "browser") window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
-        else if (action === "home") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        else if (action === "home") requestLivetvMode("landing");
         else if (action === "close") closeOptions();
         return;
       }
@@ -495,12 +633,14 @@ import TvEmpty from "./TvEmpty.astro";
         const action = errorBtn.dataset.errorAction;
         if (action === "retry") {
           const targetId = retryTarget(failedId, lastWorkingId);
-          if (targetId !== null) tuneToChannel(windowPlaybackEngine, targetId);
+          // Release-then-open: the failed mount is released before
+          // the retry opens its replacement.
+          if (targetId !== null) switchChannel(windowPlaybackEngine, tunedId, targetId);
         } else if (action === "previous") {
           const prev = previousChannelTarget(tunedId, previousId);
-          if (prev !== null) tuneToChannel(windowPlaybackEngine, prev);
+          if (prev !== null) switchChannel(windowPlaybackEngine, tunedId, prev);
         } else if (action === "home") {
-          window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+          requestLivetvMode("landing");
         }
         return;
       }

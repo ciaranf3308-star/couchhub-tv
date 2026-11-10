@@ -20,10 +20,23 @@ import {
   previousChannelId as epgPreviousChannelId,
   stepChannel,
   channelIndexById,
+  catchupActionForProgramme,
+  type CatchupAction,
 } from "./couch-livetv-epg";
 
 /** OSD auto-hide delay (ms). TvOsd.astro uses the same value. */
 export const OSD_AUTO_HIDE_MS = 5000;
+
+/**
+ * Live TV "landing" is the Home mode. The 0.9.0 directive names the
+ * return target "landing", but the mode vocabulary in livetv.astro /
+ * livetv-state.ts is home | playback | guide and the mode guard drops
+ * anything else — dispatching `livetv:mode {mode:"landing"}` would
+ * silently do nothing. Landing == home until W5 renames the mode;
+ * every return-to-landing dispatch in the playback shell goes through
+ * this constant so a rename is one edit.
+ */
+export const LIVETV_LANDING_MODE = "home" as const;
 
 /** Error-state keys (W1's shared vocabulary) for a failed tune. */
 export type LivetvPlaybackErrorKey = "stream-unavailable" | "provider-lost";
@@ -50,6 +63,15 @@ export interface PlaybackNowNext {
 export interface PlaybackEngine {
   /** Ask the engine to tune. Never called for a highlight move. */
   tune(channelId: string | number): void;
+  /**
+   * Release the currently held stream (provider connection) before a
+   * replacement is opened. Optional: engines that tear the previous
+   * mount down inside tune() (stream.ts's play() resets/disposes the
+   * prior mount before mounting the replacement) may omit it —
+   * `switchChannel` still orders release-before-tune whenever a
+   * release hook exists. Never called for a highlight move either.
+   */
+  release?(channelId: string | number | null | undefined): void;
 }
 
 export function dispatchTune(channelId: string | number): void {
@@ -58,10 +80,48 @@ export function dispatchTune(channelId: string | number): void {
   );
 }
 
+/**
+ * Ask the engine to release the currently held stream. Cancelable
+ * window event (`livetv:release {channelId}`) so the stream owner
+ * can wire it to its release path (stream.ts's
+ * releaseLocalPlaybackForHandoff); dispatching it with no listener
+ * is a harmless no-op — the one-stream guarantee does not depend on
+ * it, because play() already tears the prior mount down on a tune.
+ */
+export function dispatchRelease(
+  channelId: string | number | null | undefined,
+): void {
+  window.dispatchEvent(
+    new CustomEvent("livetv:release", { detail: { channelId } }),
+  );
+}
+
 /** The window-event engine: `livetv:tune` -> stream.ts `play()`. */
 export const windowPlaybackEngine: PlaybackEngine = {
   tune: (channelId) => dispatchTune(channelId),
+  release: (channelId) => dispatchRelease(channelId),
 };
+
+/**
+ * Confirmed channel switch: release the prior stream BEFORE opening
+ * the replacement, so the provider's one-stream limit is never
+ * exceeded by two live connections. Returns false (and touches the
+ * engine not at all) when there is no target — a null highlight is
+ * never a tune. A target equal to the current channel is a restart
+ * (release + re-open), not a no-op: explicit retry/confirm may
+ * re-mount the same channel. Callers that must never retune to self
+ * (previous-channel) gate through `previousChannelTarget` first.
+ */
+export function switchChannel(
+  engine: PlaybackEngine,
+  currentId: string | number | null | undefined,
+  targetId: string | number | null | undefined,
+): boolean {
+  if (targetId === null || targetId === undefined) return false;
+  engine.release?.(currentId);
+  engine.tune(targetId);
+  return true;
+}
 
 // ── Highlight vs tuned ────────────────────────────────────────────
 
@@ -118,6 +178,207 @@ export function previousChannelTarget(
   previousId: string | number | null | undefined,
 ): string | number | null {
   return epgPreviousChannelId(currentId, previousId);
+}
+
+export interface TuneRecord {
+  tunedId: string | number;
+  previousId: string | number | null;
+}
+
+/**
+ * Record a tune in the tuned/previous pair. Only a real channel
+ * change moves the previous pointer — a same-channel restart must
+ * not clobber it, and the caller must not re-apply the update after
+ * the (synchronous) `livetv:tune` dispatch, or previousId ends up
+ * equal to the new tune and Previous stops working. Both the shell
+ * and Quick Surf record through this rule.
+ */
+export function recordTune(
+  currentId: string | number | null | undefined,
+  previousId: string | number | null | undefined,
+  targetId: string | number,
+): TuneRecord {
+  const changed =
+    currentId !== null &&
+    currentId !== undefined &&
+    String(currentId) !== String(targetId);
+  return {
+    tunedId: targetId,
+    previousId: changed ? currentId : (previousId ?? null),
+  };
+}
+
+// ── Quick Surf window ─────────────────────────────────────────────
+
+export interface SurfWindow {
+  /** Nearby entries centred on the highlight (wraps at the ends). */
+  entries: PlaybackChannel[];
+  /** 1-based position of the highlight in the full surf list. */
+  position: number;
+  /** Length of the full surf list. */
+  total: number;
+}
+
+/**
+ * The compact Quick Surf list: a small window of nearby channels
+ * around the highlight (default 5: two before, highlight, two
+ * after), wrapping at the ends of the list. Pure — windowing never
+ * tunes. `position`/`total` feed the "5 / 11" indicator.
+ */
+export function surfWindow(
+  channels: ReadonlyArray<PlaybackChannel>,
+  highlightedId: string | number | null | undefined,
+  size: number = 5,
+): SurfWindow {
+  const total = channels.length;
+  if (total === 0) return { entries: [], position: 0, total: 0 };
+  const windowSize = Math.max(1, Math.min(size, total));
+  let centre = channelIndexById(channels, highlightedId);
+  if (centre < 0) centre = 0;
+  const before = Math.floor(windowSize / 2);
+  const entries: PlaybackChannel[] = [];
+  for (let offset = -before; offset < windowSize - before; offset++) {
+    const index = (((centre + offset) % total) + total) % total;
+    entries.push(channels[index]);
+  }
+  return { entries, position: centre + 1, total };
+}
+
+// ── B / back ──────────────────────────────────────────────────────
+
+/** What one B press does in fullscreen playback, in priority order. */
+export type PlaybackBackStep =
+  | "dismiss-quicksurf"
+  | "close-overlay"
+  | "return-landing";
+
+export interface PlaybackOverlayState {
+  quicksurfOpen: boolean;
+  /** Options panel, channel browser, or error overlay open. */
+  overlayOpen: boolean;
+  /** OSD lower third currently visible (no other overlay open). */
+  osdVisible: boolean;
+}
+
+/**
+ * One B press, resolved in order: dismiss Quick Surf; else close
+ * the open overlay (options / browser / error / visible OSD); else
+ * return to the landing screen. Pure — the caller performs the step.
+ * The error overlay counts as an overlay (B never jumps to landing
+ * from under a failure state); the caller closes it and shows the
+ * OSD so the kept stream still has a way out.
+ */
+export function resolveBackStep(state: PlaybackOverlayState): PlaybackBackStep {
+  if (state.quicksurfOpen) return "dismiss-quicksurf";
+  if (state.overlayOpen || state.osdVisible) return "close-overlay";
+  return "return-landing";
+}
+
+// ── OSD auto-hide (timer half — the DOM half lives in TvOsd) ─────
+
+export interface OsdAutoHideHandle {
+  /** Show the OSD and (re)arm the hide timer. */
+  show(): void;
+  /** Activity without showing: re-arm the timer while visible. */
+  poke(): void;
+  /** Stop the timer for good (unmount / mode change). */
+  dispose(): void;
+}
+
+/**
+ * Auto-hide timer for the OSD lower third: visible on `show()`,
+ * hidden `delayMs` after the last `show()`/`poke()` with no further
+ * activity. The DOM script owns the focus rule (never hide while
+ * focus is inside the OSD) via the `onHide` callback — this helper
+ * only owns timing, so vitest fake timers can assert it exactly.
+ */
+export function createOsdAutoHide(
+  onHide: () => void,
+  delayMs: number = OSD_AUTO_HIDE_MS,
+): OsdAutoHideHandle {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
+  const arm = () => {
+    if (disposed) return;
+    if (timer !== null) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      onHide();
+    }, delayMs);
+  };
+  return {
+    show: () => arm(),
+    poke: () => arm(),
+    dispose: () => {
+      disposed = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    },
+  };
+}
+
+// ── Player control-bar menus (audio / subtitles) ──────────────────
+
+/** Which player-owned track menu an OSD button opens. */
+export type PlayerMenuKind = "audio" | "subtitles";
+
+/**
+ * video.js control-bar buttons for the player's own track menus.
+ * The OSD never reimplements track selection: it clicks the
+ * player's own menu button (audioTrackButton / subsCapsButton in
+ * player-runtime.ts) so the menu that opens is the engine's. Null
+ * when the mount has no such button (native / artplayer mount) —
+ * the caller then falls back to revealing the player control bar.
+ */
+export const PLAYER_MENU_BUTTON_SELECTORS: Readonly<
+  Record<PlayerMenuKind, ReadonlyArray<string>>
+> = {
+  audio: [".vjs-audio-track-button", ".vjs-audio-button"],
+  subtitles: [
+    ".vjs-subs-caps-button",
+    ".vjs-subtitles-button",
+    ".vjs-captions-button",
+  ],
+};
+
+export function findPlayerMenuButton(
+  kind: PlayerMenuKind,
+  root: ParentNode = document,
+): HTMLElement | null {
+  const player = root.querySelector?.("#player") ?? null;
+  const scope = player ?? root;
+  for (const selector of PLAYER_MENU_BUTTON_SELECTORS[kind]) {
+    const button = scope.querySelector<HTMLElement>(selector);
+    if (button) return button;
+  }
+  return null;
+}
+
+// ── Catch-up for the cached channel shape ─────────────────────────
+
+/**
+ * Catch-up action for the OSD's current programme, from the cached
+ * channel row. LivetvChannel keeps only the boolean `catchup` flag
+ * (the raw tvArchive/catchupDays fields are dropped at load), so
+ * the adapter carries that flag through as the capability signal
+ * and the archive window defaults to 7 days — never invented per
+ * channel, never shown where the flag says the provider offers none.
+ */
+export function catchupActionForPlaybackChannel(
+  channel: { catchup?: boolean | null } | null | undefined,
+  startMs: number,
+  stopMs: number,
+  nowMs: number = Date.now(),
+): CatchupAction {
+  if (!channel) return "none";
+  return catchupActionForProgramme({
+    channel: { catchup: channel.catchup ? "1" : null },
+    startMs,
+    stopMs,
+    nowMs,
+  });
 }
 
 // ── Favourites (pure set half + thin preferences.js half) ────────
@@ -209,6 +470,36 @@ export function retryTarget(
     return lastWorkingChannelId;
   }
   return null;
+}
+
+export interface FailureRecovery {
+  /** Stream that keeps playing under the error state (null: none). */
+  keepId: string | number | null;
+  /** Retry target (failed channel, else last working). */
+  retryId: string | number | null;
+  /** Previous-channel escape hatch (null: no previous to go to). */
+  previousId: string | number | null;
+}
+
+/**
+ * One failed switch, resolved as a whole: the current stream is
+ * preserved (never torn down by the failure), and the caller is
+ * offered retry of the failed channel, return to the previous
+ * channel, or Home — at least one recovery is always present while
+ * any stream exists. Pure: resolving a failure never tunes.
+ */
+export function failureRecovery(
+  failedChannelId: string | number | null | undefined,
+  currentChannelId: string | number | null | undefined,
+  previousChannelIdValue: string | number | null | undefined,
+  lastWorkingChannelId: string | number | null | undefined,
+): FailureRecovery {
+  const keepId = streamToKeepOnFailure(failedChannelId, currentChannelId);
+  return {
+    keepId,
+    retryId: retryTarget(failedChannelId, lastWorkingChannelId),
+    previousId: previousChannelTarget(currentChannelId, previousChannelIdValue),
+  };
 }
 
 // ── Live-only transport rules ─────────────────────────────────────

@@ -2,9 +2,17 @@ import { describe, it, expect } from "vitest";
 import {
   addGuideDays,
   availableGuideDays,
+  clampGuideDayOffset,
+  DEFAULT_GUIDE_MODE,
+  filterGuideRows,
   guideCellViewModel,
+  guideDayForOffset,
+  guideReturnMode,
+  isGuideMode,
   jumpToNowWindow,
   normaliseCategoryLabel,
+  nowNextRows,
+  parseGuideMode,
   programmesForGuideDay,
   sanitiseGuideProgrammes,
   stableGuideSelection,
@@ -274,5 +282,180 @@ describe("normaliseCategoryLabel", () => {
     expect(normaliseCategoryLabel("")).toBe("Uncategorized");
     expect(normaliseCategoryLabel(null)).toBe("Uncategorized");
     expect(normaliseCategoryLabel("Documentary")).toBe("Documentary");
+  });
+});
+
+describe("Guide modes (Live TV 0.9.0)", () => {
+  it("default mode is On Now", () => {
+    expect(DEFAULT_GUIDE_MODE).toBe("now");
+  });
+
+  it("accepts exactly the four contracted modes", () => {
+    expect(isGuideMode("now")).toBe(true);
+    expect(isGuideMode("tonight")).toBe(true);
+    expect(isGuideMode("channel")).toBe(true);
+    expect(isGuideMode("grid")).toBe(true);
+    expect(isGuideMode("home")).toBe(false);
+    expect(isGuideMode("full")).toBe(false);
+    expect(isGuideMode(null)).toBe(false);
+    expect(isGuideMode(undefined)).toBe(false);
+  });
+
+  it("parseGuideMode passes valid modes through and falls back to now", () => {
+    expect(parseGuideMode("tonight")).toBe("tonight");
+    expect(parseGuideMode("grid")).toBe("grid");
+    expect(parseGuideMode("bogus")).toBe("now");
+    expect(parseGuideMode(null)).toBe("now");
+    expect(parseGuideMode("bogus", "channel")).toBe("channel");
+  });
+});
+
+describe("nowNextRows (On Now)", () => {
+  const byChannel = new Map([
+    ["ch-1", sanitiseGuideProgrammes("ch-1", [
+      { start: NOW - HOUR, stop: NOW + HOUR, title: "On Now 1" },
+      { start: NOW + HOUR, stop: NOW + 2 * HOUR, title: "Next 1" },
+    ])],
+    ["ch-2", sanitiseGuideProgrammes("ch-2", [
+      { start: NOW + HOUR, stop: NOW + 2 * HOUR, title: "Future only" },
+    ])],
+    ["ch-3", sanitiseGuideProgrammes("ch-3", [
+      { start: NOW - 2 * HOUR, stop: NOW - HOUR, title: "Already over" },
+    ])],
+    ["ch-4", sanitiseGuideProgrammes("ch-4", [
+      { start: NOW - 30 * 60_000, stop: NOW + 30 * 60_000, title: "On Now 4" },
+    ])],
+  ]);
+
+  it("lists only channels with a programme genuinely on air, with next", () => {
+    const rows = nowNextRows(byChannel, NOW);
+    expect(rows.map((r) => r.channelId)).toEqual(["ch-1", "ch-4"]);
+    expect(rows[0]?.current.title).toBe("On Now 1");
+    expect(rows[0]?.next?.title).toBe("Next 1");
+    expect(rows[0]?.progress).toBe(0.5);
+  });
+
+  it("next is null when the EPG ends after the current programme", () => {
+    const rows = nowNextRows(byChannel, NOW);
+    expect(rows[1]?.next).toBeNull();
+  });
+
+  it("returns [] when nothing is on anywhere", () => {
+    expect(nowNextRows(new Map(), NOW)).toEqual([]);
+  });
+});
+
+describe("By Channel day-nav bounds", () => {
+  it("clamps offsets to past 7 / future 14 days", () => {
+    expect(clampGuideDayOffset(-7)).toBe(-7);
+    expect(clampGuideDayOffset(-8)).toBe(-7);
+    expect(clampGuideDayOffset(-100)).toBe(-7);
+    expect(clampGuideDayOffset(14)).toBe(14);
+    expect(clampGuideDayOffset(15)).toBe(14);
+    expect(clampGuideDayOffset(100)).toBe(14);
+    expect(clampGuideDayOffset(3)).toBe(3);
+    expect(clampGuideDayOffset(0)).toBe(0);
+    expect(clampGuideDayOffset(Number.NaN)).toBe(0);
+  });
+
+  it("guideDayForOffset steps whole local days from today", () => {
+    const today = guideDayForOffset(0, NOW);
+    expect(guideDayForOffset(1, NOW) - today).toBe(GUIDE_DAY_MS);
+    expect(guideDayForOffset(-7, NOW)).toBe(today - 7 * GUIDE_DAY_MS);
+    expect(guideDayForOffset(14, NOW)).toBe(today + 14 * GUIDE_DAY_MS);
+    // Out-of-range offsets clamp instead of escaping the bounds.
+    expect(guideDayForOffset(99, NOW)).toBe(today + 14 * GUIDE_DAY_MS);
+    expect(guideDayForOffset(-99, NOW)).toBe(today - 7 * GUIDE_DAY_MS);
+  });
+
+  it("By Channel ordering is chronological (sanitised sort)", () => {
+    const list = sanitiseGuideProgrammes("ch-1", [
+      { start: DAY_START + 20 * HOUR, stop: DAY_START + 21 * HOUR, title: "Late" },
+      { start: DAY_START + 8 * HOUR, stop: DAY_START + 9 * HOUR, title: "Morning" },
+      { start: DAY_START + 12 * HOUR, stop: DAY_START + 13 * HOUR, title: "Midday" },
+    ]);
+    expect(programmesForGuideDay(list, DAY_START).map((p) => p.title)).toEqual([
+      "Morning",
+      "Midday",
+      "Late",
+    ]);
+  });
+});
+
+describe("filterGuideRows (Guide search)", () => {
+  const rows = [
+    { channelName: "RTÉ One", programmeTitle: "The Six O'Clock Show", programmeDesc: "Chat show" },
+    { channelName: "Sky Sports F1", programmeTitle: "F1: Brazilian Grand Prix", programmeDesc: "Qualifying" },
+    { channelName: "BBC One", programmeTitle: "Pointless", programmeDesc: "Quiz" },
+  ];
+
+  it("matches title, channel name and description, case-insensitive", () => {
+    expect(filterGuideRows(rows, "f1").map((r) => r.programmeTitle)).toEqual([
+      "F1: Brazilian Grand Prix",
+    ]);
+    expect(filterGuideRows(rows, "RTÉ").map((r) => r.programmeTitle)).toEqual([
+      "The Six O'Clock Show",
+    ]);
+    expect(filterGuideRows(rows, "quiz").map((r) => r.programmeTitle)).toEqual([
+      "Pointless",
+    ]);
+  });
+
+  it("empty query returns the list untouched; no match returns []", () => {
+    expect(filterGuideRows(rows, "")).toEqual(rows);
+    expect(filterGuideRows(rows, "   ")).toEqual(rows);
+    expect(filterGuideRows(rows, "zzz")).toEqual([]);
+  });
+});
+
+describe("guideReturnMode (B exit / focus restoration)", () => {
+  it("returns to playback when entered from playback, home otherwise", () => {
+    expect(guideReturnMode("playback")).toBe("playback");
+    expect(guideReturnMode("home")).toBe("home");
+    expect(guideReturnMode(null)).toBe("home");
+    expect(guideReturnMode(undefined)).toBe("home");
+    expect(guideReturnMode("bogus")).toBe("home");
+  });
+});
+
+// INTEGRATION (0.9.0) — Guide cold-load race: a cold ?mode=guide
+// load activates before the engine has fetched the channel list,
+// so the first loadChannels() finds nothing and nothing retried
+// it. The component must finish activation the moment the catalog
+// lands (cache event / EPG load / bounded retry), hydrate both
+// cache kinds, and switch tabs before the data arrives.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+
+describe("TvGuideView — cold-load catalog race (integration)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src/components/couch/TvGuideView.astro"),
+    "utf8",
+  );
+
+  it("hydrates both cache kinds on activation (live + m3u)", () => {
+    expect(src).toContain('hydrateCache(playlistId, "live")');
+    expect(src).toContain('hydrateCache(playlistId, "m3u")');
+  });
+
+  it("finishes activation when the catalog lands after an empty first read", () => {
+    expect(src).toContain("function finishActivation()");
+    expect(src).toContain("function maybeFinishActivation()");
+    expect(src).toContain("scheduleCatalogRetry(10)");
+    expect(src).toContain("CACHE_REVALIDATED_EVENT");
+    // The EPG arriving also re-checks the channel list.
+    expect(src).toContain("document.addEventListener(EPG_LOADED_EVENT");
+  });
+
+  it("switches tabs before the data arrives, and mirrors the sub-mode to html", () => {
+    // setGuideMode(guideMode) must run before the empty early-return.
+    const activate = src.slice(src.indexOf("async function activate(requestedMode)"));
+    const tabSwitch = activate.indexOf("setGuideMode(guideMode);");
+    const emptyReturn = activate.indexOf('showEmpty("No channels cached yet');
+    expect(tabSwitch).toBeGreaterThan(-1);
+    expect(emptyReturn).toBeGreaterThan(-1);
+    expect(tabSwitch).toBeLessThan(emptyReturn);
+    expect(src).toContain("document.documentElement.dataset.livetvGuideMode = next;");
   });
 });

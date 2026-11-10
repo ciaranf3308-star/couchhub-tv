@@ -55,6 +55,7 @@ import {
 } from "./epg-data.js";
 import { programmeProgress } from "./couch-livetv-epg";
 import type { Programme } from "./now-next";
+import type { GuideMode, LivetvBrowserFilter } from "./livetv-state.js";
 import { normalize } from "./text";
 import { channelSupportsCatchup, type CatchupCapableChannel } from "./catchup";
 
@@ -65,7 +66,18 @@ export const LIVETV_MODE_EVENT = "livetv:mode";
 export const LIVETV_OVERLAY_EVENT = "livetv:overlay";
 export const LIVETV_PROGRAMME_EVENT = "livetv:programme";
 
-export type LivetvMode = "home" | "playback" | "guide";
+export type LivetvMode = "landing" | "browser" | "playback" | "guide";
+
+/** Legacy mode name, accepted wherever a mode is accepted. */
+export type LivetvModeInput = LivetvMode | "home";
+
+/** Detail carried on `livetv:mode` (0.9.0). */
+export interface LivetvModeDetail {
+  mode: LivetvMode;
+  browserFilter?: LivetvBrowserFilter;
+  guideMode?: GuideMode;
+  openSearch?: boolean;
+}
 
 /**
  * Playback handoff. Dispatches cancelable `livetv:tune`
@@ -90,11 +102,23 @@ export function dispatchLivetvTune(channelId: string | number): boolean {
   return handled;
 }
 
-/** Ask the shell to show a mode (home / playback / guide). */
-export function requestLivetvMode(mode: LivetvMode): void {
+/** Ask the shell to show a mode. Legacy "home" maps to "landing".
+ *  Optional detail carries the browser filter / guide sub-mode /
+ *  open-search entry flag the mode should open with (0.9.0). */
+export function requestLivetvMode(
+  mode: LivetvMode | "home",
+  detail?: {
+    browserFilter?: LivetvBrowserFilter;
+    guideMode?: GuideMode;
+    openSearch?: boolean;
+  },
+): void {
   if (typeof window === "undefined") return;
+  const resolved: LivetvMode = mode === "home" ? "landing" : mode;
   window.dispatchEvent(
-    new CustomEvent(LIVETV_MODE_EVENT, { detail: { mode } }),
+    new CustomEvent(LIVETV_MODE_EVENT, {
+      detail: { ...detail, mode: resolved },
+    }),
   );
 }
 
