@@ -1,0 +1,80 @@
+---
+import Layout from "@/layouts/Layout.astro"
+---
+
+<Layout pageTitle="Followed Series">
+  <main class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-6 flex flex-col gap-6 flex-1 min-h-0">
+    <header class="route-hero route-hero--tv-compact shrink-0">
+      <h1 data-i18n="page.followed.heading" class="route-hero__title">Followed Series</h1>
+      <p data-i18n="page.followed.sub" class="route-hero__sub">
+        New episodes for the shows you follow, and the shows themselves. Checks run in the background — you never have to go looking.
+      </p>
+    </header>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <button id="followed-check-now" type="button" class="btn">
+        <span data-i18n="followed.checkNow">Check now</span>
+      </button>
+      <a href="/settings#settings-followed" class="btn">
+        <span data-i18n="followed.checkSettings">Check settings</span>
+      </a>
+      <span id="followed-last-check" class="text-sm text-fg-3 tabular-nums" aria-live="polite"></span>
+    </div>
+
+    <section aria-labelledby="followed-new-heading" class="flex flex-col gap-3">
+      <h2 id="followed-new-heading" class="font-serif text-2xl tracking-[-0.02em]">
+        <span data-i18n="followed.newEpisodes">New Episodes</span>
+        <span id="followed-unread-count" class="text-base text-fg-3 tabular-nums"></span>
+      </h2>
+      <div id="followed-new-list" class="flex flex-col gap-3"></div>
+      <div id="followed-new-empty" hidden class="nylah-card flex flex-col items-center gap-3 p-6 text-center">
+        <img src="/art/empty-library.jpg" alt="" class="w-40 rounded-xl ring-1 ring-line" />
+        <p data-i18n="followed.newEmpty" class="text-sm text-fg-3">No new episodes right now. When a followed show adds an episode, it will appear here.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="followed-list-heading" class="flex flex-col gap-3">
+      <h2 id="followed-list-heading" class="font-serif text-2xl tracking-[-0.02em]" data-i18n="followed.followedShows">Followed shows</h2>
+      <div id="followed-list" class="flex flex-col gap-3"></div>
+      <div id="followed-list-empty" hidden class="nylah-card flex flex-col items-center gap-3 p-6 text-center">
+        <img src="/art/empty-library.jpg" alt="" class="w-40 rounded-xl ring-1 ring-line" />
+        <p data-i18n="followed.listEmpty" class="text-sm text-fg-3">Nothing followed yet. Open a series and tap Follow — new episodes will be checked for you in the background.</p>
+        <a href="/series" class="btn"><span data-i18n="followed.browseSeries">Browse series</span></a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    import "@/scripts/followed-page.ts"
+    import "@/scripts/updater-startup.js"
+  </script>
+
+  <style>
+    /* Nylah Studios v0.4.0 (w3) — RedSilk treatment for the Followed page:
+       serif titles, wine focus glow, warm card material. */
+    .route-hero__title {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    }
+    .followed-card:focus-within {
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+    }
+    .followed-card .btn:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
+    }
+    .followed-poster {
+      box-shadow:
+        0 0 0 1px var(--color-line),
+        var(--nylah-card-shadow, 0 18px 48px -16px var(--nylah-focus-glow));
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .followed-card:focus-within,
+      .followed-card .btn:focus-visible {
+        box-shadow: 0 0 0 2px var(--nylah-focus-ring, var(--color-accent));
+      }
+    }
+  </style>
+</Layout>

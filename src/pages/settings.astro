@@ -25,6 +25,7 @@ import {
   IconStar,
   IconPencil,
   IconArchive,
+  IconBell,
   IconFileZip,
   IconDatabase,
   IconBrandDiscord,
@@ -76,6 +77,9 @@ const navStructure: NavSection[] = [
   { id: "settings-watching", labelKey: "settings.group.watching", label: "Watching", cards: [
     { id: "card-livetv",      labelKey: "nav.livetv",             label: "Live TV" },
     { id: "playback-section", labelKey: "settings.playback.title", label: "Playback" },
+  ]},
+  { id: "settings-followed", labelKey: "settings.followed.title", label: "Followed Series", cards: [
+    { id: "card-followed", labelKey: "settings.followed.title", label: "Followed Series" },
   ]},
   { id: "settings-network", labelKey: "settings.group.network", label: "Network", cards: [
     { id: "card-network",          labelKey: "settings.network.title", label: "Network" },
@@ -949,6 +953,92 @@ const navStructure: NavSection[] = [
 
             <RememberedAndroidPlayerCard client:load />
 
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Group: Followed Series (background episode checks) -->
+    <section id="settings-followed" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <h2 data-i18n="settings.followed.title" class="settings-group__title">Followed Series</h2>
+      <div class="flex flex-col gap-4">
+
+        <div id="card-followed" class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconBell aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.followed.title" class="text-base font-semibold">Followed Series</h3>
+          </div>
+          <div class="settings-rows">
+            <p data-i18n="settings.followed.description" class="text-sm text-fg-3">
+              Background checks for new episodes on the shows you follow. Checks use provider metadata only — they never open a stream.
+            </p>
+
+            <!-- Scheduled background checks: Windows Scheduled Task, removed when turned off -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.followed.scheduledLabel" class="text-sm font-medium leading-snug">Scheduled background checks</h3>
+                <p data-i18n="settings.followed.scheduledHint" class="text-xs text-fg-3">
+                  When on, the app checks every few hours even while closed, using a Windows Scheduled Task. Turning it off removes the task; in-app checks still work.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-followed-scheduled"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Scheduled background checks"
+                  data-i18n-attr="aria-label:settings.followed.scheduledLabel">
+                  <button type="button" data-scheduled="on" aria-pressed="false" data-i18n="settings.followed.on" class="followed-scheduled-btn btn">On</button>
+                  <button type="button" data-scheduled="off" aria-pressed="false" data-i18n="settings.followed.off" class="followed-scheduled-btn btn">Off</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Check interval -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.followed.intervalLabel" class="text-sm font-medium leading-snug">Check every</h3>
+                <p data-i18n="settings.followed.intervalHint" class="text-xs text-fg-3">
+                  How often background checks run. A check also runs when you open the app, if the last one is stale.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-followed-interval"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Check interval"
+                  data-i18n-attr="aria-label:settings.followed.intervalLabel">
+                  <button type="button" data-interval="3" aria-pressed="false" data-i18n="settings.followed.interval.3" class="followed-interval-btn btn">3 hours</button>
+                  <button type="button" data-interval="6" aria-pressed="false" data-i18n="settings.followed.interval.6" class="followed-interval-btn btn">6 hours</button>
+                  <button type="button" data-interval="12" aria-pressed="false" data-i18n="settings.followed.interval.12" class="followed-interval-btn btn">12 hours</button>
+                  <button type="button" data-interval="24" aria-pressed="false" data-i18n="settings.followed.interval.24" class="followed-interval-btn btn">24 hours</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Status + manual check -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.followed.statusTitle" class="text-sm font-medium leading-snug">Status</h3>
+                <p id="settings-followed-status" aria-live="polite" class="text-xs text-fg-3"></p>
+              </div>
+              <div class="settings-row__control flex flex-col items-stretch gap-2">
+                <button id="settings-followed-check-now" type="button" class="btn justify-center">
+                  <span data-i18n="followed.checkNow">Check now</span>
+                </button>
+                <a href="/followed" class="btn justify-center">
+                  <span data-i18n="settings.followed.manage">Manage followed series</span>
+                </a>
+              </div>
+            </div>
+
+            <p data-i18n="settings.followed.taskNote" class="text-xs text-fg-3">
+              Scheduled task: “Nylah Studios Followed Series Check”. Uninstalling the app does not remove the task automatically — delete it in Task Scheduler, or turn scheduled checks off before uninstalling.
+            </p>
           </div>
         </div>
 
@@ -5948,5 +6038,9 @@ const navStructure: NavSection[] = [
 
   <script>
     import "@/scripts/settings/play-on-tv-card.ts"
+  </script>
+
+  <script>
+    import "@/scripts/settings/followed-card.ts"
   </script>
 </Layout>
