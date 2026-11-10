@@ -295,6 +295,73 @@ export function genreDisplayLabel(id: GenreId): string {
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 
+// ---------------------------------------------------------------------------
+// Genre collections (B08, 0.10.0) — meaningful rails built from real
+// catalogue metadata. Only non-empty collections are returned, so the
+// page never exposes an empty or unsupported category. Documentaries
+// are a kind of their own: a documentary film appears ONLY in
+// "Documentary Films", never in a fictional genre collection, even
+// when its provider category also names that genre (C1 rule —
+// genres are attributes, the documentary kind is not).
+// ---------------------------------------------------------------------------
+
+export interface GenreCollection<T> {
+  /** Stable rail id, e.g. "movies-genre-action". */
+  id: string;
+  /** Rail title, e.g. "Action". */
+  title: string;
+  rows: T[];
+}
+
+/** True when the row's provider category marks it a documentary. */
+export function isDocumentaryMovie(row: MovieRow): boolean {
+  return movieGenres(row).includes("documentary");
+}
+
+const MOVIE_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: GenreId }> = [
+  { id: "movies-genre-action", title: "Action", genre: "action" },
+  { id: "movies-genre-thriller", title: "Thriller", genre: "thriller" },
+  { id: "movies-genre-comedy", title: "Comedy", genre: "comedy" },
+  { id: "movies-genre-horror", title: "Horror", genre: "horror" },
+  { id: "movies-genre-sci-fi", title: "Science Fiction", genre: "sci-fi" },
+  { id: "movies-genre-drama", title: "Drama", genre: "drama" },
+];
+
+/**
+ * B08 movie collections, in display order: Action, Thriller, Comedy,
+ * Horror, Science Fiction, Drama, Documentary Films, Recently Added.
+ * Genre collections are highest-rated first; Recently Added is
+ * newest-first. Empty collections are omitted. Pure — no provider,
+ * DOM or storage access.
+ */
+export function movieGenreCollections(rows: MovieRow[]): GenreCollection<MovieRow>[] {
+  const out: GenreCollection<MovieRow>[] = [];
+  for (const def of MOVIE_GENRE_COLLECTION_DEFS) {
+    const members = rows.filter(
+      (row) => !isDocumentaryMovie(row) && movieGenres(row).includes(def.genre),
+    );
+    if (members.length) {
+      out.push({ id: def.id, title: def.title, rows: sortMovies(members, "rating") });
+    }
+  }
+  const documentaries = rows.filter((row) => isDocumentaryMovie(row));
+  if (documentaries.length) {
+    out.push({
+      id: "movies-genre-documentary",
+      title: "Documentary Films",
+      rows: sortMovies(documentaries, "rating"),
+    });
+  }
+  if (rows.length) {
+    out.push({
+      id: "movies-recent",
+      title: "Recently Added",
+      rows: sortMovies(rows, "added"),
+    });
+  }
+  return out;
+}
+
 /** Watched fraction in [0, 1]; 0 when there is no usable progress. */
 export function movieProgressFraction(progress: MovieProgress | null | undefined): number {
   if (!progress || !(progress.duration != null && progress.duration > 0)) return 0;

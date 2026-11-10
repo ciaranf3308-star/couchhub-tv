@@ -1,7 +1,241 @@
 ---
-// Browse consolidation (0.8.0): /movies is retired as a destination —
-// it redirects into the single Browse destination with the movies
-// filter applied. The file stays so old links / bookmarks keep
-// working. Detail routes (/movies/detail) are unaffected.
-return Astro.redirect("/browse?type=movies");
+ // Couch Movies — cinematic browsing on the W1 shared UI system.
+ // Restored as a real destination in 0.10.0 (reverses the 0.8.0 Browse
+ // consolidation — user's explicit call). The catalogue loads
+ // client-side (Xtream provider) via src/scripts/movies/couch-index.ts:
+ // genre collections (Action, Thriller, Comedy, Horror, Sci-Fi, Drama,
+ // Documentary Films, Recently Added — only non-empty ones render),
+ // Continue Watching, Featured, Recommended, Favourites, Watch Later,
+ // genre/year/rating/sort controls, search + on-screen keyboard, and a
+ // windowed grid (computeVisibleWindow) for large catalogues.
+ // No Live TV here (B11): live recommendations live on Home and in the
+ // dedicated Live TV experience, never in catalogue browsing.
+ // The genre filter is ONE labelled select rendered by the controller
+ // into #couch-browse-genres — no per-genre pill buttons. The list
+ // tabs are ONE joined segmented control.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
+import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
+import TvSkeleton from "@/components/couch/TvSkeleton.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
+import { MOVIE_SORT_MODES } from "@/scripts/movies/couch-movies.ts";
+import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
+
+<CouchLayout pageTitle="Movies" activeNav="movies" view="movies">
+  <header class="rs-browse-head">
+    <h1 class="rs-page-title">Movies</h1>
+    <p class="rs-meta">
+      <span id="couch-browse-hero-count">—</span>
+      <span aria-hidden="true"> · </span>
+      <span id="couch-browse-status">Loading…</span>
+    </p>
+  </header>
+
+  <section class="rs-browse-toolbar" aria-label="Browse controls">
+    <div class="rs-browse-search">
+      <label class="rs-browse-label" for="couch-browse-search">Search movies</label>
+      <input
+        id="couch-browse-search"
+        type="search"
+        placeholder="Search movies…"
+        autocomplete="off"
+      />
+      <button
+        id="couch-search-open"
+        type="button"
+        class="rs-hero__action rs-hero__action--secondary"
+        data-couch-dialog-open="couch-search-dialog"
+      >
+        ⌨ On-screen keyboard
+      </button>
+    </div>
+
+    <div class="rs-browse-selects">
+      <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
+      <select id="couch-browse-sort">
+        {
+          MOVIE_SORT_MODES.map((mode) => (
+            <option value={mode.value}>{mode.label}</option>
+          ))
+        }
+      </select>
+      <label class="rs-browse-label" for="couch-browse-year">Decade</label>
+      <select id="couch-browse-year">
+        <option value="">Any decade</option>
+        {
+          YEAR_ORDER.map((year) => (
+            <option value={year}>{year}</option>
+          ))
+        }
+      </select>
+      <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
+      <select id="couch-browse-rating">
+        {
+          RATING_OPTIONS.map((min) => (
+            <option value={min}>
+              {min === 0 ? "Any rating" : `${min}+`}
+            </option>
+          ))
+        }
+      </select>
+        {/*
+          GENRE FILTER: the controller renders ONE labelled Genre
+          select into this mount point — no per-genre pill buttons.
+          It lives in the filter row with Sort / Decade / Rating.
+        */}
+        <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
+    </div>
+  </section>
+
+  <div
+    id="couch-browse-tabs"
+    class="rs-browse-tabs rs-browse-segmented"
+    role="group"
+    aria-label="Movie lists"
+  >
+  </div>
+
+  <div id="couch-browse-rails"></div>
+
+  <div id="couch-browse-skeleton">
+    <TvSkeleton kind="poster" count={12} />
+  </div>
+
+  <div id="couch-browse-empty" hidden>
+    <TvEmpty
+      title="No movies yet"
+      message="This playlist has no movies."
+      art="library"
+      actionLabel="Open Settings"
+      actionHref="/settings"
+    />
+  </div>
+
+  <div id="couch-browse-error" hidden role="alert">
+    <p class="rs-body-text" data-role="error-message"></p>
+    <p>
+      <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
+        Check Settings
+      </a>
+    </p>
+  </div>
+
+  <div
+    id="couch-browse-grid"
+    class="rs-grid"
+    data-couch-grid
+    aria-label="All movies"
+    hidden
+  >
+  </div>
+
+  <TvDialog id="couch-search-dialog" title="Search movies">
+    <TvKeyboard client:load placeholder="Type a movie title…" />
+    <p class="rs-meta">Type to filter the grid. The keyboard closes with B / Escape.</p>
+  </TvDialog>
+
+  <script>
+    import "@/scripts/movies/couch-index.ts";
+  </script>
+
+  <style>
+    .rs-browse-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .rs-browse-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: end;
+    }
+    .rs-browse-search {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: end;
+      flex: 1 1 32rem;
+    }
+    .rs-browse-search input {
+      flex: 1 1 16rem;
+      min-height: 3rem;
+      padding: 0.5rem 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.25rem;
+    }
+    .rs-browse-selects {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .rs-browse-selects select {
+      min-height: 3rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.125rem;
+    }
+    .rs-browse-label {
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    /* Genre filter: ONE labelled select in the filter row —
+       the controller renders it into the .rs-browse-genre-filter
+       mount point. No per-genre pill buttons anywhere. */
+    .rs-browse-genre-filter {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .rs-browse-genre-filter select {
+      min-height: 3rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.125rem;
+    }
+    /* List switcher: ONE joined segmented control — the segments
+       share a single border instead of floating as separate pills.
+       Same buttons, same aria-pressed behaviour as before. */
+    .rs-browse-segmented {
+      display: inline-flex;
+      flex-wrap: wrap;
+      /* Hug the segments: the page main is a flex column, and a bare
+         inline-flex item would otherwise stretch the full width. */
+      align-self: flex-start;
+      max-width: 100%;
+      border: 1px solid var(--rs-line);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: var(--rs-surface);
+      margin-bottom: 1.5rem;
+    }
+    .rs-browse-segmented .rs-browse-segment {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      transform: none;
+    }
+    .rs-browse-segmented .rs-browse-segment:hover {
+      transform: none;
+    }
+    .rs-browse-segmented .rs-browse-segment + .rs-browse-segment {
+      border-left: 1px solid var(--rs-line);
+    }
+    .rs-browse-segmented .rs-browse-segment[aria-pressed="true"] {
+      background: var(--rs-accent);
+      border-color: var(--rs-focus);
+      color: #fff;
+    }
+  </style>
+</CouchLayout>
