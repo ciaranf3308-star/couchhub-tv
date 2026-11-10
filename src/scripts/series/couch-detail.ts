@@ -48,7 +48,6 @@ import {
   episodeResumePosition,
   episodeWatchState,
   seriesDetailViewModel,
-  seriesDetailMetaLine,
   type SeriesRow,
   type Episode,
   type SeasonGroup,
@@ -59,6 +58,15 @@ import {
   type CouchVodPlayerHandle,
 } from "@/scripts/movies/couch-player.ts";
 import { renderCouchCards } from "@/scripts/movies/couch-cards.ts";
+import {
+  detailArtwork,
+  paintDetailArtwork,
+  paintDetailProgress,
+  paintMetaChips,
+  seasonWatchSummary,
+  seriesDetailChips,
+  wireDetailBackLink,
+} from "@/scripts/lib/couch-detail-presentation.ts";
 import TvSeasonPicker from "@/components/couch/TvSeasonPicker.svelte";
 import TvEpisodeCard from "@/components/couch/TvEpisodeCard.svelte";
 
@@ -80,6 +88,8 @@ const titleEl = $("series-detail-title");
 const metaEl = $("series-detail-meta");
 const plotEl = $("series-detail-plot");
 const posterEl = $("series-detail-poster");
+const progressEl = $("series-detail-progress");
+const episodesSummaryEl = $("series-episodes-summary");
 const resumeBtn = $("series-detail-resume") as HTMLButtonElement | null;
 const resumeLabelEl = $("series-detail-resume-label");
 const resumeSubEl = $("series-detail-resume-sub");
@@ -133,38 +143,40 @@ function progressById(): Map<number, EpisodeProgress> {
   return map;
 }
 
+function hideSkeleton() {
+  const skeleton = $("series-detail-skeleton");
+  if (skeleton) skeleton.hidden = true;
+}
+
 function paintHero() {
   if (titleEl) titleEl.textContent = detail.title || `Series ${seriesId}`;
-  if (metaEl) metaEl.textContent = seriesDetailMetaLine(detail);
+  // Meta renders as chips (year, seasons, genres, rating) plus a
+  // watched-progress chip — only supplied/real values, never invented.
+  const chips = seriesDetailChips(detail);
+  const summary = seasonWatchSummary(group, progressById());
+  if (summary.total > 0) {
+    chips.push({ label: summary.label, kind: "progress" });
+  }
+  paintMetaChips(metaEl, chips);
   if (plotEl) plotEl.textContent = detail.plot || "";
-  if (backdropEl) {
-    const url = detail.backdrop || detail.poster;
-    if (url) {
-      backdropEl.replaceChildren();
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = "";
-      img.loading = "eager";
-      img.decoding = "async";
-      backdropEl.appendChild(img);
-    }
-  }
-  if (posterEl) {
-    posterEl.replaceChildren();
-    if (detail.poster) {
-      const img = document.createElement("img");
-      img.src = detail.poster;
-      img.alt = detail.title;
-      img.loading = "eager";
-      img.decoding = "async";
-      posterEl.appendChild(img);
-    } else {
-      posterEl.textContent = detail.title;
-    }
-  }
+  // Backdrop falls back to the poster; with neither, the shared
+  // fallback system paints the intentional initials mark instead.
+  const art = detailArtwork(detail);
+  paintDetailArtwork(backdropEl, art.heroSrc, "backdrop", detail.title);
+  paintDetailArtwork(posterEl, art.posterSrc, "poster", detail.title);
   if (heroEl) heroEl.hidden = false;
+  hideSkeleton();
   const episodesSection = $("series-episodes-section");
   if (episodesSection) episodesSection.hidden = false;
+}
+
+function syncEpisodesSummary() {
+  if (!episodesSummaryEl) return;
+  const summary = seasonWatchSummary(group, progressById());
+  episodesSummaryEl.textContent =
+    summary.total > 0
+      ? `${summary.total} episode${summary.total === 1 ? "" : "s"} · ${summary.label}`
+      : "";
 }
 
 function syncResumeButton() {
@@ -172,6 +184,7 @@ function syncResumeButton() {
   const target = resumeOrNextEpisode(group, progressById());
   if (!target) {
     resumeBtn.hidden = true;
+    paintDetailProgress(progressEl, 0, "");
     return;
   }
   resumeBtn.hidden = false;
@@ -179,6 +192,14 @@ function syncResumeButton() {
   if (resumeSubEl) {
     resumeSubEl.textContent = `S${target.episode.season} E${target.episode.episodeNum} · ${episodeDisplayTitle(target.episode, detail.title)}`;
   }
+  // Progress bar tracks the episode the button will resume / start.
+  const targetProgress = progressById().get(target.episode.id);
+  const fraction = episodeProgressFraction(targetProgress);
+  paintDetailProgress(
+    progressEl,
+    fraction,
+    fraction > 0 ? `${Math.round(fraction * 100)}% watched` : "",
+  );
   resumeBtn.onclick = () => {
     void playEpisode(target.episode);
   };
@@ -313,6 +334,7 @@ function renderEpisodes(scrollToEpisodeId?: number) {
           renderEpisodes();
           renderSeasonPicker();
           syncResumeButton();
+          syncEpisodesSummary();
         },
       },
     });
@@ -566,6 +588,7 @@ watchBtn?.addEventListener("click", () => {
 async function loadDetail() {
   const active = await getActiveEntry();
   if (!active) {
+    hideSkeleton();
     if (statusEl) statusEl.textContent = "No playlist selected.";
     return;
   }
@@ -604,6 +627,7 @@ async function loadDetail() {
   paintHero();
   syncResumeButton();
   syncActionButtons();
+  syncEpisodesSummary();
   void syncFollowButton();
   renderCast();
   renderSimilar();
@@ -651,7 +675,12 @@ function allEpisodesSeasonOf(episodeId: number): number | null {
 (async () => {
   await initI18n().catch(() => {});
   creds = await loadCreds();
+  // Back to Browse: history.back() when we arrived from the Browse
+  // grid, so couch-focus memory restores the exact card; otherwise
+  // the link follows its href. (detailBackDecision is the tested half.)
+  wireDetailBackLink($("series-detail-back"), "/browse");
   if (!seriesId) {
+    hideSkeleton();
     if (statusEl) statusEl.textContent = "No series selected.";
     return;
   }

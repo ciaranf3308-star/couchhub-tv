@@ -31,10 +31,19 @@ import {
   mapMovieRow,
   movieDetailViewModel,
   movieDetailMetaLine,
+  movieProgressFraction,
   resumePosition,
   playButtonLabel,
   type MovieRow,
 } from "@/scripts/movies/couch-movies.ts";
+import {
+  detailArtwork,
+  movieDetailChips,
+  paintDetailArtwork,
+  paintDetailProgress,
+  paintMetaChips,
+  wireDetailBackLink,
+} from "@/scripts/lib/couch-detail-presentation.ts";
 import {
   createCouchVodPlayer,
   type CouchVodPlayerHandle,
@@ -56,6 +65,7 @@ const titleEl = $("movie-detail-title");
 const metaEl = $("movie-detail-meta");
 const plotEl = $("movie-detail-plot");
 const posterEl = $("movie-detail-poster");
+const progressEl = $("movie-detail-progress");
 const playBtn = $("movie-detail-play") as HTMLButtonElement | null;
 const playLabelEl = $("movie-detail-play-label");
 const playSubEl = $("movie-detail-play-sub");
@@ -67,7 +77,6 @@ const castListEl = $("movie-detail-cast-list");
 const similarSection = $("movie-detail-similar");
 const similarListEl = $("movie-detail-similar-list");
 const playerWrap = $("movie-detail-player-wrap");
-const posterWrap = $("movie-detail-poster-wrap");
 const statusEl = $("movie-detail-status");
 const trailerFrame = $("movie-detail-trailer-frame") as HTMLIFrameElement | null;
 
@@ -84,37 +93,24 @@ let player: CouchVodPlayerHandle | null = null;
 let playerOpen = false;
 let playRequestId = 0;
 
+function hideSkeleton() {
+  const skeleton = $("movie-detail-skeleton");
+  if (skeleton) skeleton.hidden = true;
+}
+
 function paintHero() {
   if (titleEl) titleEl.textContent = detail.title || `Movie ${movieId}`;
-  if (metaEl) metaEl.textContent = movieDetailMetaLine(detail);
+  // Meta renders as chips (year, runtime, genres, rating) — only the
+  // fields the provider actually supplied, never invented values.
+  paintMetaChips(metaEl, movieDetailChips(detail));
   if (plotEl) plotEl.textContent = detail.plot || "";
-  if (backdropEl) {
-    const url = detail.backdrop || detail.poster;
-    if (url) {
-      backdropEl.replaceChildren();
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = "";
-      img.loading = "eager";
-      img.decoding = "async";
-      backdropEl.appendChild(img);
-    }
-  }
-  if (posterEl) {
-    posterEl.replaceChildren();
-    if (detail.poster) {
-      const img = document.createElement("img");
-      img.src = detail.poster;
-      img.alt = detail.title;
-      img.loading = "eager";
-      img.decoding = "async";
-      posterEl.appendChild(img);
-    } else {
-      posterEl.textContent = detail.title;
-    }
-  }
+  // Backdrop falls back to the poster; with neither, the shared
+  // fallback system paints the intentional initials mark instead.
+  const art = detailArtwork(detail);
+  paintDetailArtwork(backdropEl, art.heroSrc, "backdrop", detail.title);
+  paintDetailArtwork(posterEl, art.posterSrc, "poster", detail.title);
   if (heroEl) heroEl.hidden = false;
-  if (posterWrap) posterWrap.hidden = false;
+  hideSkeleton();
   const osdTitle = $("movie-osd-title");
   if (osdTitle) osdTitle.textContent = detail.title || "";
   const osdSub = $("movie-osd-subtitle");
@@ -127,6 +123,12 @@ function syncPlayButton() {
   const { label, sub } = playButtonLabel(saved);
   playLabelEl.textContent = label;
   if (playSubEl) playSubEl.textContent = sub;
+  const fraction = movieProgressFraction(saved);
+  paintDetailProgress(
+    progressEl,
+    fraction,
+    fraction > 0 ? `${Math.round(fraction * 100)}% watched` : "",
+  );
 }
 
 function syncActionButtons() {
@@ -207,6 +209,7 @@ function renderSimilar() {
 async function loadDetail() {
   const active = await getActiveEntry();
   if (!active) {
+    hideSkeleton();
     if (statusEl) statusEl.textContent = "No playlist selected.";
     return;
   }
@@ -249,7 +252,6 @@ function hidePlayer() {
   player?.dispose();
   player = null;
   if (playerWrap) playerWrap.hidden = true;
-  if (posterWrap) posterWrap.hidden = false;
   syncPlayButton();
   playBtn?.focus();
 }
@@ -269,7 +271,6 @@ async function startPlayback() {
   const saved = activePlaylistId ? getProgress(activePlaylistId, "vod", movieId) : null;
   const resumeAt = resumePosition(saved);
   if (playerWrap) playerWrap.hidden = false;
-  if (posterWrap) posterWrap.hidden = true;
   playerOpen = true;
   const created = await createCouchVodPlayer({
     logTag: "[xt:couch-movie-detail]",
@@ -362,7 +363,12 @@ document.getElementById("movie-trailer-dialog")?.addEventListener("close", () =>
 (async () => {
   await initI18n().catch(() => {});
   creds = await loadCreds();
+  // Back to Browse: history.back() when we arrived from the Browse
+  // grid, so couch-focus memory restores the exact card; otherwise
+  // the link follows its href. (detailBackDecision is the tested half.)
+  wireDetailBackLink($("movie-detail-back"), "/browse");
   if (!movieId) {
+    hideSkeleton();
     if (statusEl) statusEl.textContent = "No movie selected.";
     return;
   }
