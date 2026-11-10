@@ -124,7 +124,6 @@ import TvEmpty from "./TvEmpty.astro";
 <script>
   import {
     OSD_AUTO_HIDE_MS,
-    LIVETV_LANDING_MODE,
     errorKeyForFailureKind,
     previousChannelTarget,
     retryTarget,
@@ -140,6 +139,7 @@ import TvEmpty from "./TvEmpty.astro";
     loadLivetvProgrammes,
     nowNextForChannel,
     activeLivetvPlaylistId,
+    requestLivetvMode,
     type LivetvChannel,
   } from "@/scripts/lib/livetv-data";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
@@ -279,9 +279,7 @@ import TvEmpty from "./TvEmpty.astro";
           showOsd();
         } else hideOsd();
       } else {
-        window.dispatchEvent(
-          new CustomEvent("livetv:mode", { detail: { mode: LIVETV_LANDING_MODE } }),
-        );
+        requestLivetvMode("landing");
       }
     };
 
@@ -558,7 +556,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "x" || key === "X") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        requestLivetvMode("guide");
         return;
       }
       if (key === "y" || key === "Y") {
@@ -566,7 +564,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "g" || key === "G") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        requestLivetvMode("guide");
         return;
       }
       if (key === "c" || key === "C") {
@@ -579,7 +577,7 @@ import TvEmpty from "./TvEmpty.astro";
         return;
       }
       if (key === "h" || key === "H") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        requestLivetvMode("landing");
       }
     });
 
@@ -598,9 +596,9 @@ import TvEmpty from "./TvEmpty.astro";
       const actionBtn = target?.closest?.("[data-play-action]") as HTMLElement | null;
       if (actionBtn) {
         const action = actionBtn.dataset.playAction;
-        if (action === "guide") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        if (action === "guide") requestLivetvMode("guide");
         else if (action === "browser") window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
-        else if (action === "home") window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+        else if (action === "home") requestLivetvMode("landing");
         else if (action === "close") closeOptions();
         return;
       }
@@ -616,7 +614,7 @@ import TvEmpty from "./TvEmpty.astro";
           const prev = previousChannelTarget(tunedId, previousId);
           if (prev !== null) switchChannel(windowPlaybackEngine, tunedId, prev);
         } else if (action === "home") {
-          window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
+          requestLivetvMode("landing");
         }
         return;
       }

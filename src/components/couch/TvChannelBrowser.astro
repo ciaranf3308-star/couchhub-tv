@@ -76,6 +76,8 @@ const {
     type BrowserEntryFilter,
     type ChannelBrowserHandle,
   } from "@/scripts/lib/livetv-browser";
+  // INTEGRATION: mode requests go through the shared helper.
+  import { requestLivetvMode } from "@/scripts/lib/livetv-data";
 
   const host = document.querySelector<HTMLElement>("[data-livetv-browser-mount]");
   if (host && !host.dataset.browserArmed) {
@@ -131,9 +133,7 @@ const {
       autoHighlightFirst: screenMode,
       onClose: screenMode
         ? () => {
-            window.dispatchEvent(
-              new CustomEvent("livetv:mode", { detail: { mode: "landing" } }),
-            );
+            requestLivetvMode("landing");
           }
         : undefined,
     }).then((handle: ChannelBrowserHandle | null) => {

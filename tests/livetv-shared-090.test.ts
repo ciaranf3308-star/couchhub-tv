@@ -29,8 +29,25 @@ describe("shell — livetv.astro mounts all four modes", () => {
     expect(shell).not.toContain('id="livetv-mode-home"');
   });
 
-  it("mounts TvChannelBrowser in the browser mount with a browser-mode id", () => {
-    expect(shell).toContain('<TvChannelBrowser browserId="browser-mode" />');
+  it("mounts TvChannelBrowser in the browser mount as the screen (browser id + screenMode)", () => {
+    // INTEGRATION: W5 wired browserId="browser-mode"; the component
+    // contract (TvChannelBrowser.astro) names the screen instance
+    // browserId "browser", and the directive pins screenMode on.
+    expect(shell).toContain('<TvChannelBrowser browserId="browser" screenMode />');
+    expect(shell).not.toContain('browser-mode');
+  });
+
+  it("mounts TvLiveLanding in the landing mount; the 0.7.0 Home interior is gone", () => {
+    expect(shell).toContain("<TvLiveLanding />");
+    for (const retired of [
+      'id="livetv-resume"',
+      'data-livetv-rail=',
+      'id="livetv-collections"',
+      'id="livetv-browser-section"',
+      'data-livetv-browser-toggle',
+    ]) {
+      expect(shell).not.toContain(retired);
+    }
   });
 
   it("setMode accepts the legacy \"home\" alias and sets html[data-livetv-mode]", () => {

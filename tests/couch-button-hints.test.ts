@@ -100,8 +100,8 @@ describe("Live TV landing — 0.9.0: B backs via livetv:back, X is contextual, Y
   });
 });
 
-describe("Live TV browser — 0.9.0: LB/RB categories, LT/RT pages, X favourite, Y search", () => {
-  it("Move / Select / Back / categories / pages / Favourite / Search / Options / Home", () => {
+describe("Live TV browser — 0.9.0: A Watch, LB/RB categories, LT/RT pages, X favourite, Y search", () => {
+  it("Move / Watch / Back / categories / pages / Favourite / Search / Options / Home", () => {
     const config = HINT_CONFIGS["livetv-browser"];
     expect(glyphsOf(config)).toEqual([
       "dpad",
@@ -117,7 +117,7 @@ describe("Live TV browser — 0.9.0: LB/RB categories, LT/RT pages, X favourite,
     ]);
     expect(labelsOf(config)).toEqual([
       "Move",
-      "Select",
+      "Watch",
       "Back",
       "Previous category",
       "Next category",

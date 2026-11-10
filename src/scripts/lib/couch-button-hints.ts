@@ -209,14 +209,16 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
       RETURN_HOME_HINT,
     ],
   },
-  // 0.9.0 Channel Browser (W5/W2): LB/RB step categories, LT/RT
-  // step pages, X toggles the favourite, Y opens search, B returns
-  // to the landing via `livetv:back`.
+  // 0.9.0 Channel Browser (W5/W2): A watches the highlighted
+  // channel live, LB/RB step categories, LT/RT step pages, X
+  // toggles the favourite, Y opens search, B returns to the
+  // landing via `livetv:back`. (INTEGRATION: A was "Select" in
+  // W5; W2's spec names it Watch — Enter on a row tunes live.)
   "livetv-browser": {
     id: "livetv-browser",
     items: [
       { glyph: "dpad", label: "Move" },
-      { glyph: "a", label: "Select" },
+      { glyph: "a", label: "Watch" },
       { glyph: "b", label: "Back" },
       { glyph: "lb", label: "Previous category" },
       { glyph: "rb", label: "Next category" },

@@ -53,6 +53,7 @@ import {
   loadLivetvHomeData,
   nowNextForChannel,
   readActivePlaylistId,
+  requestLivetvMode,
   searchChannels,
   type LivetvChannel,
   type LivetvNowNext,
@@ -795,11 +796,8 @@ export function mountChannelBrowser(
       opts.onViewGuide(channel);
       return;
     }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("livetv:mode", { detail: { mode: "guide" } }),
-      );
-    }
+    // Unified on the shared helper (integration): same event + shape.
+    requestLivetvMode("guide");
   }
 
   // ── Events ──

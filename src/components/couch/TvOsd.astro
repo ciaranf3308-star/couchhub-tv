@@ -150,8 +150,9 @@ const label = channel ? channel.displayName || channel.name || "" : "";
   import {
     createOsdAutoHide,
     findPlayerMenuButton,
-    LIVETV_LANDING_MODE,
   } from "@/scripts/lib/livetv-playback";
+  // INTEGRATION: mode requests go through the shared helper.
+  import { requestLivetvMode } from "@/scripts/lib/livetv-data";
 
   const osds = Array.from(document.querySelectorAll("[data-livetv-osd]"));
   for (const osd of osds) {
@@ -227,17 +228,13 @@ const label = channel ? channel.displayName || channel.name || "" : "";
       }
       const action = btn.getAttribute("data-osd-action");
       if (action === "guide") {
-        window.dispatchEvent(
-          new CustomEvent("livetv:mode", { detail: { mode: "guide" } }),
-        );
+        requestLivetvMode("guide");
       } else if (action === "browser") {
         window.dispatchEvent(
           new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }),
         );
       } else if (action === "home") {
-        window.dispatchEvent(
-          new CustomEvent("livetv:mode", { detail: { mode: LIVETV_LANDING_MODE } }),
-        );
+        requestLivetvMode("landing");
       } else if (action === "info" || action === "restart") {
         // Info opens programme detail; Restart replays the current
         // programme from its start. Both go through the engine's

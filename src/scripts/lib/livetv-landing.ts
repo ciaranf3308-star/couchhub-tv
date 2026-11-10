@@ -14,11 +14,10 @@
 //     never on highlight/focus. Opening the landing starts NO stream.
 //   - `livetv:mode` {mode, ...detail} where mode is "browser" |
 //     "guide" | "playback" | "home" and detail is
-//     {browserFilter?, guideMode?, openSearch?}. W5 extends
-//     requestLivetvMode(mode, detail?) to the same shape; until that
-//     lands this module dispatches the window event directly with
-//     the identical detail shape, using the LIVETV_MODE_EVENT
-//     constant from livetv-data.ts (never a second event name).
+//     {browserFilter?, guideMode?, openSearch?} — via W5's
+//     requestLivetvMode(mode, detail?) (integration unified the
+//     landing's dispatchLandingMode onto that helper; the emitted
+//     event + shape are identical).
 //   - `livetv:back` {context:"landing"} (W5: gamepad resolves
 //     B/Escape to "back" and the shell dispatches it) — the landing
 //     answers by navigating to the app Home ("/"), the same
@@ -39,7 +38,6 @@
 // artwork: a deterministic burgundy gradient variant + one large
 // initial motif per category, fixed dimensions, artwork bounded.
 import {
-  LIVETV_MODE_EVENT,
   collectionNowPlaying,
   dispatchLivetvTune,
   favouriteChannels,
@@ -49,10 +47,12 @@ import {
   pickResumeHero,
   readActivePlaylistId,
   recentlyWatchedChannels,
+  requestLivetvMode,
   type LivetvChannel,
   type LivetvGroup,
   type LivetvHomeData,
 } from "./livetv-data";
+import type { GuideMode } from "./livetv-state";
 import { formatTimeRange, type Programme } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
 import { readCouchFocusMemory } from "./couch-focus";
@@ -86,18 +86,34 @@ export interface LandingModeDetail {
 
 /**
  * Ask the shell to show a mode, with the contracted detail shape.
- * Dispatches `livetv:mode` {mode, ...detail} on window — the same
- * event + shape W5's requestLivetvMode(mode, detail?) will emit, so
- * the shell cannot tell the two apart.
+ * Delegates to W5's requestLivetvMode(mode, detail?) — one helper
+ * for every mode request in the app. Only ever called with
+ * "browser" / "guide" (never "home"), so the helper's home→landing
+ * alias never changes a landing request. An unknown guideMode
+ * string is dropped rather than forwarded.
  */
 export function dispatchLandingMode(
   mode: LandingMode,
   detail: LandingModeDetail = {},
 ): void {
   if (typeof window === "undefined") return;
-  window.dispatchEvent(
-    new CustomEvent(LIVETV_MODE_EVENT, { detail: { mode, ...detail } }),
-  );
+  const guideMode: GuideMode | undefined =
+    detail.guideMode === "now" ||
+    detail.guideMode === "tonight" ||
+    detail.guideMode === "channel" ||
+    detail.guideMode === "grid"
+      ? detail.guideMode
+      : undefined;
+  // Only defined keys are forwarded — the shell tests presence.
+  requestLivetvMode(mode, {
+    ...(detail.browserFilter !== undefined
+      ? { browserFilter: detail.browserFilter }
+      : {}),
+    ...(guideMode !== undefined ? { guideMode } : {}),
+    ...(detail.openSearch !== undefined
+      ? { openSearch: detail.openSearch }
+      : {}),
+  });
 }
 
 // ── Quick access ────────────────────────────────────────────────

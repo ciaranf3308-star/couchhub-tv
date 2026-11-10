@@ -92,6 +92,7 @@ import TvChannelRow from "./TvChannelRow.astro";
     loadLivetvProgrammes,
     nowNextForChannel,
     activeLivetvPlaylistId,
+    requestLivetvMode,
     type LivetvChannel,
   } from "@/scripts/lib/livetv-data";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
@@ -372,7 +373,7 @@ import TvChannelRow from "./TvChannelRow.astro";
       } else if (action === "browser") {
         emitOverlay("browser");
       } else if (action === "guide") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
+        requestLivetvMode("guide");
       }
     });
 

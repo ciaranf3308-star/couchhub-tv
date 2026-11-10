@@ -1,6 +1,12 @@
 ---
 // TvEpgGrid — programme guide grid shell (W3).
 //
+// Live TV 0.9.0 (W4): this shell is NOT redesigned and is NOT the
+// Guide's default. The timeline grid lives on only as the secondary
+// "Full Guide" tab inside TvGuideView (which owns its own grid
+// engine/markup); this component stays the shell for the classic
+// /epg route, wired exactly as before. No behaviour changed here.
+//
 // The grid itself is painted by epg.ts into #epg-grid /
 // #epg-time-header-inner / #epg-body — those ids are epg.ts's, keep
 // them exact. This component provides the shell (couch-sized, RedSilk

@@ -43,6 +43,7 @@ import { sortChannelsForView } from "@/scripts/lib/channel-sort.ts"
 import { fmtChannelIdentity, formatBehindLive } from "@/scripts/lib/format.ts"
 import { providerFetch } from "@/scripts/lib/provider-fetch.js"
 import { buildLiveStreamUrl } from "@/scripts/lib/stream-urls.ts"
+import { requestLivetvMode } from "@/scripts/lib/livetv-data"
 import { attachPlayerFocusKeeper } from "@/scripts/lib/player-focus-keeper.js"
 import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { togglePip } from "@/scripts/lib/pip-toggle.js"
@@ -234,14 +235,25 @@ window.addEventListener("livetv:programme", (ev) => {
     toastError(t("catchup.notAvailable"))
     return
   }
-  window.dispatchEvent(
-    new CustomEvent("livetv:mode", { detail: { mode: "playback" } }),
-  )
+  requestLivetvMode("playback")
   void playCatchup(channel, {
     startUtcMs: programmeWindow.startUtcMs,
     stopUtcMs: programmeWindow.stopUtcMs,
     title: resolveProgrammeTitleAt(channel, startUtcMs) || channel.name || "",
   })
+})
+
+// Integration 0.9.0: `livetv:release` consumer (W3's
+// livetv-playback.ts dispatches it from switchChannel, release
+// BEFORE tune, so the provider's one-stream limit is never
+// exceeded by two live connections). Wired to the existing
+// releaseLocalPlaybackForHandoff — the same path the engine's
+// own stopLocal hooks already use. The one-stream guarantee does
+// NOT depend on this listener (play() tears the prior mount down
+// on a tune); it only makes the release land earlier, before the
+// replacement opens. Idempotent when idle.
+window.addEventListener("livetv:release", () => {
+  releaseLocalPlaybackForHandoff()
 })
 
 /** @type {{host:string,port:string,user:string,pass:string}} */
