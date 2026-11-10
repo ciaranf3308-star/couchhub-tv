@@ -9,7 +9,7 @@
 // (CouchLayout + couch cards, stores untouched), login reskin (auth
 // field ids untouched).
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import {
@@ -363,5 +363,50 @@ describe("couch-login: reskin only", () => {
     expect(src).not.toContain('import Layout from "@/layouts/Layout.astro"');
     const missing = BASELINE_LOGIN_IDS.filter((id) => !src.includes(`id="${id}"`));
     expect(missing).toEqual([]);
+  });
+});
+
+describe("couch-brand: NylahBox Studios", () => {
+  const BRAND_KEYS = [
+    "settings.about.title",
+    "settings.support.intro",
+    "settings.followed.taskNote",
+    "settings.discord.helperLong",
+    "settings.receiver.helperLong",
+    "settings.receiver.screensaver.helper",
+  ];
+
+  it("the Settings About brand mark is NylahBox Studios in every locale", () => {
+    const files = readdirSync(resolve(root, "src/i18n")).filter((f) =>
+      f.endsWith(".json"),
+    );
+    expect(files.length).toBeGreaterThan(1);
+    for (const file of files) {
+      const messages = JSON.parse(
+        readFileSync(resolve(root, "src/i18n", file), "utf8"),
+      );
+      expect(messages["settings.about.title"], file).toBe("NylahBox Studios");
+    }
+  });
+
+  it("the brand-mention keys on the settings screen use the new brand (en)", () => {
+    const messages = JSON.parse(pageSource("src/i18n/en.json"));
+    for (const key of BRAND_KEYS) {
+      expect(messages[key], key).toContain("NylahBox Studios");
+      expect(messages[key], key).not.toContain("Nylah Studios");
+    }
+  });
+
+  it("settings.astro / login.astro carry no old brand name; upstream attribution stays", () => {
+    for (const page of ["src/pages/settings.astro", "src/pages/login.astro"]) {
+      const src = pageSource(page);
+      expect(src, page).not.toContain("Nylah Studios");
+    }
+    const settings = pageSource("src/pages/settings.astro");
+    expect(settings).toContain("NylahBox Studios");
+    // Deliberate exceptions, not rebrand misses: the upstream fork
+    // attribution and real github.com/infinitel8p URLs must stay factual.
+    expect(settings).toContain("A fork of");
+    expect(settings).toContain("github.com/infinitel8p/Extreme-InfiniTV");
   });
 });
