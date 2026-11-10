@@ -11,14 +11,62 @@
  * color-scheme: dark (so global.css light-dark() tokens resolve to
  * their dark wine branch) and the body background is --rs-bg.
  *
+ * Typography — Manrope ONLY (home production pass, W1). The font is
+ * vendored locally in public/fonts/manrope/ (OFL, see OFL.txt) and
+ * loaded with @font-face below: zero Google Fonts, zero network
+ * requests at runtime. Both --rs-font-display and --rs-font-body are
+ * Manrope; display type uses 700/800, body copy 400/500/600. The
+ * legacy desktop UI (global.css: Geist Variable / Instrument Serif)
+ * is untouched — these faces are referenced only by the --rs-* tokens.
+ *
  * Type scale — canvas scaling, same idea as src/styles/tv.css:
  * the design canvas is 1920x1080 and the root font size scales that
  * canvas to the viewport (min(100vw/120, 100vh/67.5)), so fixed rem
  * sizes below hit their px targets at 1920x1080 and stay in the same
  * proportion of the screen at 4K. Targets at 1920x1080 (root 16px):
- * hero titles 48-64px, section headings 30-38px, nav 23-28px,
- * body 20-24px, meta 17-20px.
+ * hero titles 48-60px, section headings 28-34px, nav 22-25px,
+ * card titles 19-22px, descriptions 20-23px, secondary meta 16-19px.
  */
+
+/* Manrope, vendored locally — latin subset, weights 400/500/600/700/800.
+   Files: public/fonts/manrope/manrope-latin-<weight>-normal.woff2
+   (from @fontsource/manrope@5.3.0, OFL — see OFL.txt in the same dir).
+   Served from the app bundle at /fonts/manrope/; no CDN, no fetch. */
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("/fonts/manrope/manrope-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("/fonts/manrope/manrope-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600;
+  src: url("/fonts/manrope/manrope-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 700;
+  src: url("/fonts/manrope/manrope-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Manrope";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 800;
+  src: url("/fonts/manrope/manrope-latin-800-normal.woff2") format("woff2");
+}
 
 html[data-couch] {
   font-size: clamp(12px, calc(min(100vw / 120, 100vh / 67.5)), 32px);
@@ -42,8 +90,18 @@ html[data-couch] {
   --rs-shadow-lift: 0 1.125rem 3rem rgb(0 0 0 / 0.55);
   --rs-radius: 1rem;
   --rs-motion: 160ms cubic-bezier(0.16, 1, 0.3, 1);
-  --rs-font-display: "Instrument Serif", Georgia, "Times New Roman", serif;
-  --rs-font-body: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  /* Manrope everywhere on Couch: display 700/800, body 400/500/600.
+     No mixed families — the serif/sans split is gone with the old
+     Instrument Serif / Geist pairing. */
+  --rs-font-display: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  --rs-font-body: "Manrope", ui-sans-serif, system-ui, sans-serif;
+  /* Shared type-size tokens (px values at 1920x1080, root 16px).
+     Components use these, never per-element font sizes, so the scale
+     stays consistent across every Couch screen. */
+  --rs-nav-size: 1.5rem; /* 24px — primary nav */
+  --rs-card-title-size: 1.25rem; /* 20px — poster card title */
+  --rs-description-size: 1.375rem; /* 22px — descriptions / body copy */
+  --rs-meta-size: 1.125rem; /* 18px — secondary metadata */
 }
 
 /* ── Shell ─────────────────────────────────────────────────────── */
@@ -84,9 +142,9 @@ html[data-couch] .rs-main {
 
 html[data-couch] .rs-hero-title {
   font-family: var(--rs-font-display);
-  font-size: 3.5rem; /* 56px */
+  font-size: 3.375rem; /* 54px */
   line-height: 1.05;
-  font-weight: 400;
+  font-weight: 800;
   letter-spacing: -0.01em;
   margin: 0;
 }
@@ -95,7 +153,7 @@ html[data-couch] .rs-section-title {
   font-family: var(--rs-font-display);
   font-size: 2rem; /* 32px */
   line-height: 1.15;
-  font-weight: 400;
+  font-weight: 700;
   margin: 0;
 }
 
@@ -103,18 +161,18 @@ html[data-couch] .rs-page-title {
   font-family: var(--rs-font-display);
   font-size: 2.375rem; /* 38px */
   line-height: 1.1;
-  font-weight: 400;
+  font-weight: 700;
   margin: 0;
 }
 
 html[data-couch] .rs-meta {
-  font-size: 1.125rem; /* 18px */
+  font-size: var(--rs-meta-size); /* 18px */
   line-height: 1.4;
   color: var(--rs-text-2);
 }
 
 html[data-couch] .rs-body-text {
-  font-size: 1.375rem; /* 22px */
+  font-size: var(--rs-description-size); /* 22px */
   line-height: 1.5;
 }
 
@@ -168,6 +226,7 @@ html[data-couch] .rs-topnav {
 html[data-couch] .rs-brand {
   font-family: var(--rs-font-display);
   font-size: 1.75rem; /* 28px */
+  font-weight: 800;
   line-height: 1;
   white-space: nowrap;
   color: var(--rs-text);
@@ -195,7 +254,8 @@ html[data-couch] .rs-nav__row::-webkit-scrollbar {
 }
 
 html[data-couch] .rs-nav__link {
-  font-size: 1.5rem; /* 24px */
+  font-size: var(--rs-nav-size); /* 24px */
+  font-weight: 600;
   line-height: 1.2;
   padding: 0.625rem 1rem;
   border-radius: 0.75rem;
@@ -224,7 +284,7 @@ html[data-couch] .rs-nav__group {
   border-left: 1px solid var(--rs-line);
 }
 html[data-couch] .rs-nav__group-label {
-  font-size: 1.125rem; /* 18px */
+  font-size: var(--rs-meta-size); /* 18px */
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--rs-text-2);
@@ -252,6 +312,10 @@ html[data-couch] .rs-nav__settings.is-active {
 /* ── Images (TvImage) ──────────────────────────────────────────── */
 
 html[data-couch] .rs-image {
+  display: block; /* TvImage renders a div, HomeView a span — both
+    must be block boxes, or aspect-ratio / height:100% / the
+    absolute fallback are ignored on the inline span and no-art
+    cards collapse to a clipped letter at the top. */
   position: relative;
   overflow: hidden;
   background: var(--rs-bg-2);
@@ -300,6 +364,7 @@ html[data-couch] .rs-image.is-fallback img {
 html[data-couch] .rs-image__fallback-mark {
   font-family: var(--rs-font-display);
   font-size: 2.5rem;
+  font-weight: 800;
   line-height: 1;
   color: var(--rs-focus);
 }
@@ -307,7 +372,7 @@ html[data-couch] .rs-image--backdrop .rs-image__fallback-mark {
   font-size: 3.5rem;
 }
 html[data-couch] .rs-image__fallback-title {
-  font-size: 1.125rem;
+  font-size: var(--rs-meta-size); /* 18px */
   line-height: 1.3;
   color: var(--rs-text-2);
   display: -webkit-box;
@@ -330,6 +395,19 @@ html[data-couch] .rs-card__media {
   position: relative;
   border-radius: var(--rs-radius);
   box-shadow: var(--rs-shadow);
+  overflow: hidden;
+}
+/* The media box holds its aspect before the poster art loads, so
+   lazy images never reflow the rail. The inner TvImage fills it. */
+html[data-couch] .rs-card--poster .rs-card__media {
+  aspect-ratio: 2 / 3;
+}
+html[data-couch] .rs-card--landscape .rs-card__media,
+html[data-couch] .rs-card--channel .rs-card__media {
+  aspect-ratio: 16 / 9;
+}
+html[data-couch] .rs-card__media .rs-image {
+  height: 100%;
 }
 html[data-couch] .rs-card__body {
   display: flex;
@@ -339,7 +417,7 @@ html[data-couch] .rs-card__body {
   padding: 0 0.25rem;
 }
 html[data-couch] .rs-card__title {
-  font-size: 1.25rem; /* 20px */
+  font-size: var(--rs-card-title-size); /* 20px */
   line-height: 1.3;
   font-weight: 600;
   color: var(--rs-text);
@@ -349,12 +427,52 @@ html[data-couch] .rs-card__title {
 }
 html[data-couch] .rs-card__subtitle,
 html[data-couch] .rs-card__meta {
-  font-size: 1.125rem; /* 18px */
+  font-size: var(--rs-meta-size); /* 18px */
   line-height: 1.35;
   color: var(--rs-text-2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Clean hierarchy under a poster: title + ONE secondary line. When a
+   subtitle is present the meta line is detail spam — it stays in the
+   DOM (screen readers / focus reveal) but does not render a third
+   line under every card. Landscape/channel cards keep both lines:
+   episode and channel rows use the extra line. */
+html[data-couch] .rs-card--poster .rs-card__body:has(.rs-card__subtitle) .rs-card__meta {
+  display: none;
+}
+/* Focused-card detail: extra info (TvCard `detail` prop / slot) as an
+   overlay at the foot of the poster art. Opacity + transform only —
+   it never changes layout, so neighbours and the rail below never
+   jump when focus moves. */
+html[data-couch] .rs-card__detail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  padding: 1.75rem 0.875rem 0.625rem;
+  background: linear-gradient(0deg, rgb(10 5 8 / 0.88) 0%, transparent 100%);
+  color: var(--rs-text);
+  font-size: var(--rs-meta-size); /* 18px */
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(0.25rem);
+  transition:
+    opacity var(--rs-motion),
+    transform var(--rs-motion);
+  pointer-events: none;
+}
+html[data-couch] .rs-card:focus-visible .rs-card__detail,
+html[data-couch] .rs-card:focus-within .rs-card__detail,
+html[data-couch] .rs-card:hover .rs-card__detail {
+  opacity: 1;
+  transform: translateY(0);
 }
 html[data-couch] .rs-card__badge {
   position: absolute;
@@ -424,6 +542,20 @@ html[data-couch] .rs-rail__row > .rs-card--landscape,
 html[data-couch] .rs-rail__row > .rs-card--channel {
   flex: 0 0 clamp(15rem, 19vw, 22rem);
 }
+/* Large density (TvRail density="large"; Home rails): roughly 5–6
+   substantial poster cards per visible rail at 1080p. vw-based with
+   rem clamps, so the count holds as the viewport changes — at
+   1920x1080 the poster basis is ~315px against ~1824px of rail
+   (~5.5 cards); at 4K the rem cap keeps the same proportion, and
+   narrower viewports stay near 5. Other screens keep the default
+   above. */
+html[data-couch] .rs-rail--large .rs-rail__row > .rs-card--poster {
+  flex: 0 0 clamp(15rem, 16.4vw, 19rem);
+}
+html[data-couch] .rs-rail--large .rs-rail__row > .rs-card--landscape,
+html[data-couch] .rs-rail--large .rs-rail__row > .rs-card--channel {
+  flex: 0 0 clamp(22rem, 24vw, 28rem);
+}
 
 /* ── Grids (TvGrid) ────────────────────────────────────────────── */
 
@@ -481,18 +613,18 @@ html[data-couch] .rs-hero__content {
   padding: 2.5rem;
 }
 html[data-couch] .rs-hero__eyebrow {
-  font-size: 1.125rem;
+  font-size: var(--rs-meta-size); /* 18px */
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--rs-focus);
 }
 html[data-couch] .rs-hero__meta {
-  font-size: 1.25rem;
+  font-size: var(--rs-meta-size); /* 18px */
   color: var(--rs-text-2);
 }
 html[data-couch] .rs-hero__description {
-  font-size: 1.375rem;
+  font-size: var(--rs-description-size); /* 22px */
   line-height: 1.5;
   color: var(--rs-text);
   display: -webkit-box;
@@ -558,7 +690,7 @@ html[data-couch] .rs-dialog__head {
 html[data-couch] .rs-dialog__title {
   font-family: var(--rs-font-display);
   font-size: 2rem;
-  font-weight: 400;
+  font-weight: 700;
   margin: 0;
 }
 html[data-couch] .rs-dialog__close {
@@ -574,7 +706,7 @@ html[data-couch] .rs-dialog__close:hover {
   background: var(--rs-bg);
 }
 html[data-couch] .rs-dialog__body {
-  font-size: 1.375rem;
+  font-size: var(--rs-description-size); /* 22px */
   line-height: 1.5;
   color: var(--rs-text);
 }
@@ -659,10 +791,11 @@ html[data-couch] .rs-empty__art {
 html[data-couch] .rs-empty__title {
   font-family: var(--rs-font-display);
   font-size: 2rem;
+  font-weight: 700;
   margin: 0;
 }
 html[data-couch] .rs-empty__message {
-  font-size: 1.375rem;
+  font-size: var(--rs-description-size); /* 22px */
   color: var(--rs-text-2);
   max-width: 36rem;
   margin: 0;
@@ -707,10 +840,11 @@ html[data-couch] .rs-osd__info {
 html[data-couch] .rs-osd__title {
   font-family: var(--rs-font-display);
   font-size: 2rem;
+  font-weight: 700;
   line-height: 1.15;
 }
 html[data-couch] .rs-osd__subtitle {
-  font-size: 1.25rem;
+  font-size: var(--rs-meta-size); /* 18px */
   color: var(--rs-text-2);
 }
 html[data-couch] .rs-osd__controls {

@@ -2,17 +2,29 @@
 // TvRail — horizontal rail, registered as a gamepad section.
 // Props: id (rail id for data-nylah-rail + focus memory), title,
 // href? ("See all" link — a plain link, deliberately NOT a rail item
-// so D-pad left/right stays on the cards).
+// so D-pad left/right stays on the cards), density? ("default" |
+// "large" — sizing ONLY: "large" renders roughly 5–6 substantial
+// cards per visible rail at 1080p via .rs-rail--large in couch.css;
+// default is the current sizing, unchanged. Home rails use "large";
+// every other screen keeps the default. Behaviour — slots, focus
+// memory, gamepad section registration — is identical either way).
 // Children are the rail's cards (TvCard, each data-nylah-item).
+export type TvRailDensity = "default" | "large";
+
 interface Props {
   id: string;
   title: string;
   href?: string;
+  density?: TvRailDensity;
 }
-const { id, title, href } = Astro.props;
+const { id, title, href, density = "default" } = Astro.props;
 ---
 
-<section class="rs-rail" data-nylah-rail={id} aria-label={title}>
+<section
+  class={`rs-rail${density === "large" ? " rs-rail--large" : ""}`}
+  data-nylah-rail={id}
+  aria-label={title}
+>
   <div class="rs-rail__head">
     <h2 class="rs-section-title">{title}</h2>
     {href && <a class="rs-rail__more" href={href}>See all ›</a>}
