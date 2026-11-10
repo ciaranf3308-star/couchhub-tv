@@ -224,10 +224,20 @@ pub fn run() {
     let builder = builder
         .plugin(external_player::sandbox_bootstrap_plugin())
         .plugin(
+            // Nylah Studios v0.2.2: FULLSCREEN and DECORATIONS are NOT
+            // saved or restored. The saved state predates the fullscreen
+            // launch (0.2.0) — restoring it put every launch back into
+            // the old 1300x850 windowed state and overrode the
+            // fullscreen:true config, which is why the app launched
+            // windowed on the TV. Fullscreen is owned by the config
+            // plus the explicit set_fullscreen(true) in setup() below;
+            // decorations are forced off there too.
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
-                        - tauri_plugin_window_state::StateFlags::VISIBLE,
+                        - tauri_plugin_window_state::StateFlags::VISIBLE
+                        - tauri_plugin_window_state::StateFlags::FULLSCREEN
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
                 )
                 .build(),
         )
@@ -328,6 +338,13 @@ pub fn run() {
                 if let Some(main_window) = app.get_webview_window("main") {
                     if let Err(error) = main_window.set_decorations(false) {
                         log::warn!("[window] set_decorations(false) failed: {error}");
+                    }
+                    // Nylah Studios v0.2.2: belt-and-braces for any state
+                    // already saved before this release — the window must
+                    // launch fullscreen even if a stale saved state was
+                    // restored by the plugin above.
+                    if let Err(error) = main_window.set_fullscreen(true) {
+                        log::warn!("[window] set_fullscreen(true) failed: {error}");
                     }
                     if let Err(error) = main_window.set_shadow(true) {
                         log::warn!("[window] set_shadow(true) failed: {error}");

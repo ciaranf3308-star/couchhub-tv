@@ -9,6 +9,8 @@ interface Props {
 	labelKey?: string
 	placeholderKey?: string
 	clearKey?: string
+	/** Extra classes appended to the <input> (e.g. larger type in a dialog). */
+	inputClass?: string
 }
 
 const {
@@ -19,6 +21,7 @@ const {
 	labelKey,
 	placeholderKey,
 	clearKey,
+	inputClass,
 } = Astro.props
 ---
 
@@ -35,7 +38,7 @@ const {
 			type="search"
 			placeholder={placeholder}
 			data-i18n-attr={placeholderKey ? `placeholder:${placeholderKey}` : undefined}
-			class="w-full rounded-xl border border-line bg-bg pl-9 pr-3 py-2 min-h-11 text-base sm:text-sm text-fg placeholder:text-fg-3 outline-none ring-0 transition focus:border-accent focus:bg-surface-2"
+			class={`w-full rounded-xl border border-line bg-bg pl-9 pr-3 py-2 min-h-11 text-base sm:text-sm text-fg placeholder:text-fg-3 outline-none ring-0 transition focus:border-accent focus:bg-surface-2${inputClass ? ` ${inputClass}` : ""}`}
 		/>
 	</div>
 	{

@@ -12,22 +12,22 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 <dialog
 	id={`${idPrefix}-dialog`}
 	aria-labelledby={`${idPrefix}-title`}
-	class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
-		w-[min(34rem,calc(100vw-2rem))] h-[min(80dvh,42rem)]
+	class="nylah-cat-dialog fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
+		w-[min(46rem,calc(100vw-3rem))] h-[min(88dvh,54rem)]
 		backdrop:bg-black/60">
-	<div class="flex flex-col h-full p-4 gap-3">
+	<div class="flex flex-col h-full p-5 gap-4">
 		<div class="flex items-center justify-between gap-3 shrink-0">
 			<h2
 				id={`${idPrefix}-title`}
 				data-i18n="list.chooseCategory"
-				class="text-base font-semibold">
+				class="font-serif text-2xl">
 				Choose a category
 			</h2>
 			<button
 				id={`${idPrefix}-close`}
 				type="button"
 				data-i18n="common.close"
-				class="rounded-lg border border-line px-3 py-1.5 text-xs text-fg-2
+				class="rounded-lg border border-line px-4 py-2.5 min-h-11 text-sm text-fg-2
 					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent">
 				Close
 			</button>
@@ -39,6 +39,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 			placeholder="Search categories…"
 			labelKey="list.searchCategories"
 			placeholderKey="list.searchCategoriesPlaceholder"
+			inputClass="text-lg sm:text-lg py-3 min-h-14"
 		/>
 
 		{showSyncToggle && (
@@ -67,7 +68,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 			role="radiogroup"
 			aria-label="Sort categories"
 			data-i18n-attr="aria-label:list.sortCategories"
-			class="cat-sort-toggle flex p-0.5 rounded-lg border border-line bg-surface-2 text-xs shrink-0">
+			class="cat-sort-toggle flex p-0.5 rounded-lg border border-line bg-surface-2 text-sm shrink-0">
 			<button
 				id={`${idPrefix}-sort-default`}
 				type="button"
@@ -75,7 +76,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				aria-checked="true"
 				data-sort="default"
 				data-i18n="sort.sourceOrder"
-				class="flex-1 rounded-md px-3 py-1.5 font-medium transition-colors text-fg-2
+				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
 				Source order
@@ -87,7 +88,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				aria-checked="false"
 				data-sort="az"
 				data-i18n="sort.az"
-				class="flex-1 rounded-md px-3 py-1.5 font-medium transition-colors text-fg-2
+				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
 				A-Z
@@ -99,7 +100,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				aria-checked="false"
 				data-sort="za"
 				data-i18n="sort.za"
-				class="flex-1 rounded-md px-3 py-1.5 font-medium transition-colors text-fg-2
+				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
 				Z-A
@@ -110,7 +111,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 			role="radiogroup"
 			aria-label="Category filter mode"
 			data-i18n-attr="aria-label:livetv.cat.modeAria"
-			class="cat-mode-toggle flex p-0.5 rounded-lg border border-line bg-surface-2 text-xs shrink-0">
+			class="cat-mode-toggle flex p-0.5 rounded-lg border border-line bg-surface-2 text-sm shrink-0">
 			<button
 				id={`${idPrefix}-mode-hide`}
 				type="button"
@@ -118,7 +119,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				aria-checked="true"
 				data-mode="hide"
 				data-i18n="livetv.cat.hide"
-				class="flex-1 rounded-md px-3 py-1.5 font-medium transition-colors text-fg-2
+				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
 				Hide selected
@@ -130,7 +131,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				aria-checked="false"
 				data-mode="select"
 				data-i18n="livetv.cat.select"
-				class="flex-1 rounded-md px-3 py-1.5 font-medium transition-colors text-fg-2
+				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
 				Show only selected
@@ -140,12 +141,12 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 		<div
 			id={`${idPrefix}-select-actions`}
 			hidden
-			class="flex flex-wrap items-center gap-2 text-xs shrink-0">
+			class="flex flex-wrap items-center gap-2 text-sm shrink-0">
 			<button
 				id={`${idPrefix}-show-selected`}
 				type="button"
 				aria-pressed="false"
-				class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-fg-2
+				class="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-2 text-fg-2
 					hover:text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
 					aria-pressed:bg-accent-soft aria-pressed:text-fg aria-pressed:border-accent">
 				<span class="cat-show-selected-box inline-flex size-3.5 items-center justify-center rounded-sm border border-fg-3 transition-colors">
@@ -179,7 +180,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 		<div
 			id={`${idPrefix}-list-status`}
 			data-i18n="list.noPlaylistSelected"
-			class="px-2.5 text-sm text-fg-3 tabular-nums shrink-0">
+			class="px-2.5 text-base text-fg-3 tabular-nums shrink-0">
 			No playlist selected.
 		</div>
 	</div>

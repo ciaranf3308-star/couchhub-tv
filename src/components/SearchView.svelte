@@ -482,6 +482,20 @@
     if (trimmedQuery) pushRecentSearch(activePlaylistId, trimmedQuery)
   }
 
+  // Clear the query entirely and hand focus back to the input — the
+  // escape hatch from a no-results dead end (v0.2.2).
+  function clearQuery() {
+    query = ""
+    queryDebounced = ""
+    syncUrl("")
+    actorResults = []
+    if (_personSearchTimer) {
+      clearTimeout(_personSearchTimer)
+      _personSearchTimer = null
+    }
+    inputEl?.focus()
+  }
+
   function selectRecentSearch(text) {
     if (_queryTimer) {
       clearTimeout(_queryTimer)
@@ -663,7 +677,7 @@
         aria-label={tr("common.search")}
         autocomplete="off"
         spellcheck="false"
-        class="flex-1 min-w-0 bg-transparent text-fg placeholder:text-fg-3 outline-none py-2 text-base" />
+        class="flex-1 min-w-0 bg-transparent text-fg placeholder:text-fg-3 outline-none py-2 text-lg" />
       {#if query && !personMode}
         <button
           type="button"
@@ -807,6 +821,12 @@
               {tr("search.showAllKinds", { n: kindCounts.all })}
             </button>
           {/if}
+          <button
+            type="button"
+            onclick={clearQuery}
+            class="mt-4 ml-2 inline-flex items-center justify-center min-h-11 px-3.5 rounded-lg border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors outline-none">
+            {tr("search.clear")}
+          </button>
         {/if}
       </div>
     {:else}

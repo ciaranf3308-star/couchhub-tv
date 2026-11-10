@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.1"
+version = "0.2.2"
 description = "Nylah Studios — Xbox-controller-first IPTV player, fork of Extreme InfiniTV (GPL-3.0-or-later)"
 authors = ["CouchHub"]
 license = "GPL-3.0-or-later"

@@ -297,12 +297,12 @@ export function mountCategoryPicker(
     else if (rowOpts.hideAction === "unhide") row.dataset.rowKind = "hidden"
     else row.dataset.rowKind = "regular"
     row.className =
-      "group/cat relative w-full py-2 px-2 text-sm flex items-center justify-between hover:bg-surface-2 focus:bg-surface-2 outline-none text-fg cursor-pointer" +
+      "group/cat nylah-cat-row relative w-full py-3.5 px-3 text-lg flex items-center justify-between hover:bg-surface-2 focus:bg-surface-2 outline-none text-fg cursor-pointer" +
       (extraClass ? " " + extraClass : "") +
       (rowOpts.dim ? " opacity-60" : "")
 
     const left = document.createElement("span")
-    left.className = "truncate"
+    left.className = "truncate font-medium"
     left.textContent = label
     row.appendChild(left)
 
@@ -315,7 +315,7 @@ export function mountCategoryPicker(
       rightAction.type = "button"
       rightAction.tabIndex = 0
       rightAction.className =
-        "category-hide-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:text-fg outline-none opacity-0 group-hover/cat:opacity-100 group-focus-within/cat:opacity-100 focus-visible:opacity-100 transition-opacity"
+        "category-hide-btn shrink-0 size-9 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-3 focus-visible:bg-surface-3 focus-visible:text-fg outline-none opacity-0 group-hover/cat:opacity-100 group-focus-within/cat:opacity-100 focus-visible:opacity-100 transition-opacity"
       rightAction.setAttribute(
         "aria-label",
         rowOpts.hideAction === "hide"
@@ -360,7 +360,7 @@ export function mountCategoryPicker(
         ? t("list.showingCategoryTitle")
         : t("list.showCategoryTitle")
       rightAction.className =
-        "category-select-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md " +
+        "category-select-btn shrink-0 size-9 inline-flex items-center justify-center rounded-md " +
         "border outline-none transition-colors focus-visible:ring-1 focus-visible:ring-accent " +
         (checked
           ? "bg-accent border-accent text-bg"
@@ -379,7 +379,7 @@ export function mountCategoryPicker(
 
     const countEl = document.createElement("span")
     countEl.className =
-      "category-count text-xs text-fg-3 tabular-nums min-w-8 text-right"
+      "category-count text-base font-semibold text-fg-2 tabular-nums min-w-10 text-right"
     countEl.textContent = count != null ? String(count) : ""
     right.appendChild(countEl)
 
@@ -387,7 +387,7 @@ export function mountCategoryPicker(
       right.appendChild(rightAction)
     } else {
       const spacer = document.createElement("span")
-      spacer.className = "shrink-0 size-6"
+      spacer.className = "shrink-0 size-9"
       spacer.setAttribute("aria-hidden", "true")
       right.appendChild(spacer)
     }
@@ -424,15 +424,15 @@ export function mountCategoryPicker(
     const favs = pid ? getFavorites(pid, pseudoKind) : new Set<number>()
     const recs = pid ? getRecents(pid, pseudoKind) : []
 
-    const favRow = addRow(CAT_FAVORITES, t("list.specialFavorites"), favs.size, "text-accent")
+    const favRow = addRow(CAT_FAVORITES, t("list.specialFavorites"), favs.size, "text-accent nylah-cat-row--pinned")
     if (favs.size === 0) favRow.style.display = "none"
     frag.appendChild(favRow)
 
-    const recRow = addRow(CAT_RECENTS, t("list.specialRecents"), recs.length, "")
+    const recRow = addRow(CAT_RECENTS, t("list.specialRecents"), recs.length, "nylah-cat-row--pinned")
     if (recs.length === 0) recRow.style.display = "none"
     frag.appendChild(recRow)
 
-    frag.appendChild(addRow("", t("list.allCategories"), null, ""))
+    frag.appendChild(addRow("", t("list.allCategories"), null, "nylah-cat-row--pinned"))
 
     if (genreKind) {
       const enrichmentActive = isEnrichmentActive()
@@ -457,7 +457,7 @@ export function mountCategoryPicker(
 
         if (genreIndexSnapshot) {
           const footer = document.createElement("div")
-          footer.className = "px-2 pt-1.5 pb-2 text-xs text-fg-3 border-b border-line"
+          footer.className = "px-2 pt-1.5 pb-2 text-sm text-fg-3 border-b border-line"
           footer.textContent = t("genres.coverage", {
             classified: genreIndexSnapshot.classifiedCount.toLocaleString(),
             total: genreIndexSnapshot.totalCount.toLocaleString(),
@@ -498,7 +498,7 @@ export function mountCategoryPicker(
       toggle.type = "button"
       toggle.dataset.hiddenToggle = "1"
       toggle.className =
-        "w-full px-2 py-2 text-xs text-fg-3 hover:text-fg hover:bg-surface-2 focus:bg-surface-2 outline-none flex items-center justify-between"
+        "w-full px-3 py-2.5 text-sm text-fg-3 hover:text-fg hover:bg-surface-2 focus:bg-surface-2 outline-none flex items-center justify-between"
       const toggleLabel = showHidden
         ? t("list.hideHiddenCategories", { count: hiddenNames.length })
         : t("list.showHiddenCategories", { count: hiddenNames.length })
@@ -828,7 +828,7 @@ export function mountCategoryPicker(
         : t("list.includeInShownAria", { label: categoryName }),
     )
     checkbox.className =
-      "category-select-btn shrink-0 size-6 inline-flex items-center justify-center rounded-md " +
+      "category-select-btn shrink-0 size-9 inline-flex items-center justify-center rounded-md " +
       "border outline-none transition-colors focus-visible:ring-1 focus-visible:ring-accent " +
       (allowed
         ? "bg-accent border-accent text-bg"

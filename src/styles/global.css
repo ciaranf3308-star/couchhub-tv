@@ -382,6 +382,51 @@ html[data-perf-mode="on"] :is(a, button, summary, input, textarea, select, [tabi
     display: block;
 }
 
+/* ── Category picker rows (v0.2.2) ─────────────────────────────────
+   The "Choose a category" dialog is the app's finding tool, so its
+   rows get the same glowing focus treatment as the EPG panel rows
+   (see livetv.astro): accent ring + halo on focus, a wine bar on the
+   active (selected) row, and a subtle lift. The gliding indicator
+   stays the outer ring; this is the row's own glow, never a second
+   outline. Pinned rows (Favorites / Recently watched / All
+   categories) sit at the top of the list and carry a tinted surface
+   so they read as "yours" at a glance. */
+.nylah-cat-row {
+    border-radius: 0.75rem;
+    transition:
+        transform 180ms cubic-bezier(0.16, 1, 0.3, 1),
+        background-color 180ms ease,
+        box-shadow 180ms ease;
+}
+.nylah-cat-row:focus-visible {
+    background: var(--color-surface-2);
+    box-shadow:
+        0 0 0 2px var(--color-accent),
+        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+    transform: translateY(-1px);
+}
+.nylah-cat-row[aria-selected="true"] {
+    background: var(--color-surface-2);
+    box-shadow: inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350));
+}
+.nylah-cat-row[aria-selected="true"]:focus-visible {
+    box-shadow:
+        inset 3px 0 0 var(--nylah-focus-ring, oklch(0.72 0.17 350)),
+        0 0 0 2px var(--color-accent),
+        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+}
+.nylah-cat-row--pinned {
+    background: var(--color-surface-2);
+}
+.nylah-cat-row--pinned .category-count {
+    color: var(--color-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+    .nylah-cat-row:focus-visible {
+        transform: none;
+    }
+}
+
 /* ── Home hero ──────────────────────────────────────────────── */
 .nylah-hero {
     display: flex;

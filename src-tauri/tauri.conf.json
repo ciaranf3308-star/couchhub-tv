@@ -1,7 +1,7 @@
 {
   "productName": "CouchHub TV",
   "mainBinaryName": "couchhub-tv",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "identifier": "com.couchhub.tv",
   "build": {
     "frontendDist": "../dist",

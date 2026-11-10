@@ -277,7 +277,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					<div
 						id="epg"
 						data-epg-collapsed="true"
-						class="border-t border-line overflow-auto custom-scroll md:landscape:flex-1 md:landscape:min-h-0 lg:flex-1 lg:min-h-0">
+						class="border-t border-line overflow-auto custom-scroll min-h-44 md:landscape:flex-1 lg:flex-1 lg:min-h-56">
 						<div class="flex items-center justify-between gap-2 text-sm font-medium text-fg sticky top-0 bg-surface pt-3 pb-2 z-10">
 							<span data-i18n="livetv.epgPanelHeading" class="ps-1">EPG</span>
 							<div class="flex items-center gap-1 pe-1">
@@ -320,6 +320,20 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 		.player-wrap {
 			max-height: 60dvh;
 			max-width: calc(60dvh * 16 / 9);
+		}
+
+		/* Nylah Studios v0.2.2: on desktop/landscape the player ate 60dvh
+		   and left the EPG panel ~100px tall in a windowed 850px window —
+		   the guide clipped at the window edge (user report 2026-11-10).
+		   Cap the player tighter where the EPG shares the column, so the
+		   guide always has real room. Portrait/mobile keeps 60dvh: the
+		   EPG sits below the player there and the page scrolls. Radio
+		   mode already overrides max-height below. */
+		@media (min-width: 1024px), (min-width: 768px) and (orientation: landscape) {
+			.player-wrap {
+				max-height: 46dvh;
+				max-width: calc(46dvh * 16 / 9);
+			}
 		}
 
 		/* Radio mode */
