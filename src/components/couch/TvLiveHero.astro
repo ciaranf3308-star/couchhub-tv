@@ -1,0 +1,67 @@
+---
+// TvLiveHero — Now Watching / Continue Live hero (0.9.0 Landing).
+//
+// The full-width cinematic hero band. Renders the skeleton with
+// [data-hero-*] mounts; src/scripts/lib/livetv-landing.ts fills it
+// (fillLandingHero) from the cached home data. No props: the hero
+// channel + programme come from loadLivetvHomeData at runtime, so a
+// server-rendered hero would be stale by construction.
+//
+// Artwork honesty: the EPG Programme shape carries NO artwork
+// field, so there is no genuine programme artwork to show. The hero
+// art is a branded burgundy gradient (couch.css) + the channel logo
+// in [data-hero-logo] (real <img> when the provider supplies one,
+// the 0.8.0 fallback mark otherwise) — never a fabricated image.
+//
+// No rectangles inside rectangles: the hero is a full-bleed band,
+// not a panel — no border, no card, hierarchy via typography,
+// spacing and the gradient. Watch Live tunes explicitly
+// (dispatchLivetvTune); opening the landing never auto-starts a
+// stream.
+---
+
+<section
+	class="rs-livetv-landing-hero"
+	data-livetv-hero
+	data-nylah-rail="livetv-landing-hero"
+	aria-label="Now watching"
+	hidden>
+	<div class="rs-livetv-landing-hero__art" aria-hidden="true">
+		<div class="rs-livetv-landing-hero__logo" data-hero-logo></div>
+	</div>
+	<div class="rs-livetv-landing-hero__body">
+		<p class="rs-livetv-landing-hero__eyebrow" data-hero-eyebrow>Now Watching</p>
+		<h2 class="rs-livetv-landing-hero__title" data-hero-title></h2>
+		<p class="rs-livetv-landing-hero__programme" data-hero-programme-title></p>
+		<p class="rs-livetv-landing-hero__time" data-hero-programme-time></p>
+		<div
+			class="rs-livetv-landing-hero__progress"
+			data-hero-progress-wrap
+			role="progressbar"
+			aria-label="Programme progress"
+			hidden>
+			<div class="rs-livetv-landing-hero__progress-fill" data-hero-progress-fill style="width: 0%"></div>
+		</div>
+		<p class="rs-livetv-landing-hero__next" data-hero-next hidden></p>
+		<div class="rs-livetv-landing-hero__actions">
+			<button
+				type="button"
+				class="rs-livetv-landing-hero__action rs-livetv-landing-hero__action--primary"
+				data-hero-watch
+				data-nylah-item
+				data-couch-key="landing-hero-watch"
+				data-focus-key="landing-hero-watch">
+				Watch Live
+			</button>
+			<button
+				type="button"
+				class="rs-livetv-landing-hero__action rs-livetv-landing-hero__action--secondary"
+				data-hero-guide
+				data-nylah-item
+				data-couch-key="landing-hero-guide"
+				data-focus-key="landing-hero-guide">
+				Open Guide
+			</button>
+		</div>
+	</div>
+</section>

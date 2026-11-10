@@ -1968,3 +1968,367 @@ html[data-couch][data-livetv-mode="playback"] #current,
 html[data-couch][data-livetv-mode="playback"] #current-nownext {
   display: none;
 }
+
+/* Live TV 0.9.0 — Landing */
+/* Cinematic Live TV landing (TvLiveLanding / TvLiveHero /
+   TvCategoryTile). NO rectangles inside rectangles: the landing is
+   one flowing column — a full-bleed hero band, a text-button quick
+   row divided by hairlines, a horizontal category row — no outer
+   panel containing smaller panels, no giant logo columns. Hierarchy
+   via spacing, typography, gradients and focus states only.
+   All sizes are rem on the existing root scaling (design canvas
+   1920×1080), so 4K stays proportional. No new colour literals:
+   every colour is a --rs-* token or color-mix off one, so the
+   burgundy hue regression (340–355°) cannot regress here. */
+
+html[data-couch] .rs-livetv-landing {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  min-height: 0;
+  flex: 1;
+}
+
+/* (A) Hero — full-width cinematic band. The art layer is a branded
+   burgundy gradient (the EPG carries no programme artwork, so none
+   is fabricated); the channel logo sits large at the right. No
+   border, no card: the band bleeds to the content edges and is
+   closed by a single hairline. Fixed band height keeps the landing
+   inside 1920×1080 with the quick row + category row below it. */
+html[data-couch] .rs-livetv-landing-hero {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 24rem;
+  padding: 2.5rem 2.5rem 2rem;
+  overflow: hidden;
+  border-bottom: 1px solid var(--rs-line-soft);
+  background:
+    radial-gradient(90% 130% at 88% 10%, color-mix(in srgb, var(--rs-accent) 38%, transparent) 0%, transparent 55%),
+    radial-gradient(70% 100% at 10% 100%, color-mix(in srgb, var(--rs-accent) 18%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-hero[hidden] {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-hero__art {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 3rem;
+  pointer-events: none;
+}
+html[data-couch] .rs-livetv-landing-hero__logo {
+  width: 20rem;
+  height: 11.25rem;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  opacity: 0.92;
+}
+html[data-couch] .rs-livetv-landing-hero__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 1rem;
+  filter: drop-shadow(0 0.5rem 1.5rem rgb(0 0 0 / 0.5));
+}
+html[data-couch] .rs-livetv-landing-hero__logo-fallback {
+  font-size: 6rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--rs-focus);
+  text-shadow: 0 0 2rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-landing-hero__body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 52rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-landing-hero__eyebrow {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-livetv-landing-hero__title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.25rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 800;
+}
+html[data-couch] .rs-livetv-landing-hero__programme {
+  margin: 0.25rem 0 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+html[data-couch] .rs-livetv-landing-hero__time {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-livetv-landing-hero__time:empty {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-hero__progress {
+  width: 22rem;
+  max-width: 100%;
+  height: 0.25rem;
+  margin-top: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rs-accent) 25%, transparent);
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-landing-hero__progress[hidden] {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-hero__progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+  transition: width 500ms ease;
+}
+html[data-couch] .rs-livetv-landing-hero__next {
+  margin: 0.5rem 0 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-landing-hero__next[hidden] {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+html[data-couch] .rs-livetv-landing-hero__action {
+  padding: 0.875rem 1.75rem;
+  border-radius: 999px;
+  font-family: var(--rs-font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+html[data-couch] .rs-livetv-landing-hero__action--primary {
+  border: 1px solid transparent;
+  background: var(--rs-accent);
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-landing-hero__action--secondary {
+  border: 1px solid var(--rs-line);
+  background: transparent;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-landing-hero__action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--rs-bg), 0 0 0 4px var(--rs-focus);
+}
+
+/* (B) Quick access — restrained text-button row, not a panel of
+   panels: transparent buttons, hairline dividers, focus ring only.
+   The row wraps rather than overflowing; sublabels carry the real
+   counts / channel name in secondary text. */
+html[data-couch] .rs-livetv-landing-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0;
+}
+html[data-couch] .rs-livetv-landing-quick__action {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 0.75rem 1.75rem;
+  border: 0;
+  border-left: 1px solid var(--rs-line-soft);
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--rs-text);
+  font-family: var(--rs-font-body);
+  text-align: left;
+  cursor: pointer;
+}
+html[data-couch] .rs-livetv-landing-quick__action:first-child {
+  border-left: 0;
+  padding-left: 0.25rem;
+}
+html[data-couch] .rs-livetv-landing-quick__action[hidden] {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-quick__action:hover {
+  background: color-mix(in srgb, var(--rs-surface) 55%, transparent);
+}
+html[data-couch] .rs-livetv-landing-quick__action:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--rs-focus), 0 0 2rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-landing-quick__glyph {
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-livetv-landing-quick__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-landing-quick__label {
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-landing-quick__sub {
+  font-size: 1rem;
+  line-height: 1.2;
+  color: var(--rs-text-2);
+  white-space: nowrap;
+}
+html[data-couch] .rs-livetv-landing-quick__sub:empty {
+  display: none;
+}
+
+/* (C) Browse by Category — horizontal row of FIXED-SIZE tiles:
+   18.75rem × 10.625rem (300×170px at 1920×1080), rem-scaled.
+   The tile height is fixed, never auto: artwork is bounded inside
+   the tile and can never drive the parent's height. Artwork is a
+   deterministic burgundy gradient variant + one large initial
+   motif — deliberately sized, consistent, and NEVER a stack of
+   channel logos (tiles contain no <img> at all). The row scrolls
+   horizontally instead of wrapping into a wall of tiles. */
+html[data-couch] .rs-livetv-landing-categories {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-landing-categories[hidden] {
+  display: none;
+}
+html[data-couch] .rs-livetv-landing-categories__title {
+  margin: 0;
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+html[data-couch] .rs-livetv-landing-categories__row {
+  display: flex;
+  gap: 1.25rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: thin;
+}
+html[data-couch] .rs-livetv-landing-category-tile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 18.75rem;
+  height: 10.625rem;
+  padding: 1.25rem;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 0.125rem;
+  text-align: left;
+  border: 1px solid var(--rs-line-soft);
+  border-radius: 1rem;
+  background: linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+  color: var(--rs-text);
+  font-family: var(--rs-font-body);
+  cursor: pointer;
+  box-shadow: var(--rs-shadow);
+}
+html[data-couch] .rs-livetv-landing-category-tile:hover {
+  border-color: var(--rs-accent);
+}
+html[data-couch] .rs-livetv-landing-category-tile:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow: 0 0 0 2px var(--rs-focus), 0 0 2rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-landing-category-tile__motif {
+  position: absolute;
+  top: -1.75rem;
+  right: 0.75rem;
+  font-size: 8rem;
+  font-weight: 800;
+  line-height: 1;
+  color: color-mix(in srgb, var(--rs-focus) 22%, transparent);
+  pointer-events: none;
+}
+html[data-couch] .rs-livetv-landing-category-tile__label {
+  position: relative;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+}
+html[data-couch] .rs-livetv-landing-category-tile__count {
+  position: relative;
+  font-size: 1.125rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-landing-category-tile__now {
+  position: relative;
+  margin-top: 0.375rem;
+  font-size: 1rem;
+  line-height: 1.3;
+  color: var(--rs-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-landing-category-tile__now strong {
+  color: var(--rs-text);
+  font-weight: 700;
+}
+/* Gradient variants — angle + accent depth only, all color-mix off
+   the frozen burgundy tokens (no new colour literals). */
+html[data-couch] .rs-livetv-landing-category-tile--v0 {
+  background:
+    radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--rs-accent) 32%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-category-tile--v1 {
+  background:
+    radial-gradient(110% 100% at 15% 0%, color-mix(in srgb, var(--rs-accent) 28%, transparent) 0%, transparent 55%),
+    linear-gradient(205deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-category-tile--v2 {
+  background:
+    radial-gradient(100% 120% at 90% 100%, color-mix(in srgb, var(--rs-accent) 36%, transparent) 0%, transparent 55%),
+    linear-gradient(115deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-category-tile--v3 {
+  background:
+    radial-gradient(130% 80% at 10% 100%, color-mix(in srgb, var(--rs-accent) 24%, transparent) 0%, transparent 55%),
+    linear-gradient(245deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-category-tile--v4 {
+  background:
+    radial-gradient(90% 110% at 50% 0%, color-mix(in srgb, var(--rs-accent) 40%, transparent) 0%, transparent 55%),
+    linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-landing-category-tile--v5 {
+  background:
+    radial-gradient(120% 100% at 50% 100%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(135deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+
+html[data-couch] .rs-livetv-landing__empty[hidden] {  display: none;
+}
