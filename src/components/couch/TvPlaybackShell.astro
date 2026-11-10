@@ -352,8 +352,8 @@ import TvEmpty from "./TvEmpty.astro";
       if (restartBtn) restartBtn.hidden = true;
       if (channel) {
         const nn = nowNextForChannel(channel, programmes, playlistId);
-        setText("[data-osd-now-title]", nn.current?.title ?? "");
-        const timeEl = osd.querySelector<HTMLElement>("[data-osd-now-time]");
+        setText("[data-programme-now-title]", nn.current?.title ?? "");
+        const timeEl = osd.querySelector<HTMLElement>("[data-programme-now-time]");
         if (timeEl && nn.current) {
           const fmt = (ms: number) =>
             new Date(ms).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" });
@@ -362,8 +362,8 @@ import TvEmpty from "./TvEmpty.astro";
           timeEl.textContent = "";
         }
         osd.setAttribute("data-osd-now-start", nn.current ? String(nn.current.start) : "");
-        setText("[data-osd-next-title]", nn.next?.title ?? "");
-        const nextTimeEl = osd.querySelector<HTMLElement>("[data-osd-next-time]");
+        setText("[data-programme-next-title]", nn.next?.title ?? "");
+        const nextTimeEl = osd.querySelector<HTMLElement>("[data-programme-next-time]");
         if (nextTimeEl && nn.next) {
           const fmt = (ms: number) =>
             new Date(ms).toLocaleTimeString("en-IE", { hour: "2-digit", minute: "2-digit" });
@@ -371,9 +371,9 @@ import TvEmpty from "./TvEmpty.astro";
         } else if (nextTimeEl) {
           nextTimeEl.textContent = "";
         }
-        const nextBlock = osd.querySelector<HTMLElement>("[data-osd-next-block]");
+        const nextBlock = osd.querySelector<HTMLElement>("[data-programme-next]");
         if (nextBlock) nextBlock.hidden = !nn.next;
-        const bar = osd.querySelector<HTMLElement>("[data-osd-progress]");
+        const bar = osd.querySelector<HTMLElement>("[data-programme-progress]");
         if (bar && nn.current) {
           bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
         }
@@ -402,9 +402,9 @@ import TvEmpty from "./TvEmpty.astro";
         }
       } else {
         osd.setAttribute("data-osd-now-start", "");
-        setText("[data-osd-now-title]", "");
-        setText("[data-osd-next-title]", "");
-        const nextBlock = osd.querySelector<HTMLElement>("[data-osd-next-block]");
+        setText("[data-programme-now-title]", "");
+        setText("[data-programme-next-title]", "");
+        const nextBlock = osd.querySelector<HTMLElement>("[data-programme-next]");
         if (nextBlock) nextBlock.hidden = true;
       }
     };

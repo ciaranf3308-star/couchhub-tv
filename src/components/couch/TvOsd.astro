@@ -32,10 +32,14 @@
 // Props: channel?, nowTitle?, nowStartMs?, nowStopMs?, progress?,
 // nextTitle?, nextStartMs?, nextStopMs?, favourite?, autoHideMs?
 // (default 5000 — see OSD_AUTO_HIDE_MS in livetv-playback.ts). The
-// shell updates the text content live via [data-osd-*] hooks; these
-// props are the first paint only.
+// shell updates the text content live via the shared TvProgrammeRow
+// hooks ([data-programme-*]); these props are the first paint only.
+// The programme zone (Now title/times/progress + Up Next) IS a
+// TvProgrammeRow without its channel column — the OSD already shows
+// the channel beside it — so the Now/Next typography, spacing and
+// progress treatment are identical to the Guide's rows.
 import TvImage from "./TvImage.astro";
-import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+import TvProgrammeRow from "./TvProgrammeRow.astro";
 
 interface Props {
   channel?: {
@@ -68,20 +72,6 @@ const {
   autoHideMs = 5000,
 } = Astro.props;
 const label = channel ? channel.displayName || channel.name || "" : "";
-const pct =
-  typeof progress === "number" && Number.isFinite(progress)
-    ? Math.max(0, Math.min(1, progress))
-    : nowStartMs !== undefined && nowStopMs !== undefined
-      ? programmeProgress(nowStartMs, nowStopMs)
-      : null;
-const timeLabel =
-  nowStartMs !== undefined && nowStopMs !== undefined
-    ? epgTimeRangeLabel(nowStartMs, nowStopMs, "en-IE")
-    : "";
-const nextTimeLabel =
-  nextStartMs !== undefined && nextStopMs !== undefined
-    ? epgTimeRangeLabel(nextStartMs, nextStopMs, "en-IE")
-    : "";
 ---
 
 <div
@@ -116,23 +106,18 @@ const nextTimeLabel =
           ♥
         </span>
       </span>
-      <span class="rs-livetv-play-osd__now" data-osd-now-title>{nowTitle ?? ""}</span>
-      <span class="rs-livetv-play-osd__time" data-osd-now-time>
-        {timeLabel}
-      </span>
-      <span class="rs-livetv-play-osd__progress" aria-hidden="true">
-        <span data-osd-progress style={`width: ${pct !== null ? Math.round(pct * 100) : 0}%`} />
-      </span>
     </span>
-    <span class="rs-livetv-play-osd__next-block" data-osd-next-block>
-      <span class="rs-livetv-play-osd__next-label">Up Next</span>
-      <span class="rs-livetv-play-osd__next" data-osd-next-title>
-        {nextTitle ?? ""}
-      </span>
-      <span class="rs-livetv-play-osd__next-time" data-osd-next-time>
-        {nextTimeLabel}
-      </span>
-    </span>
+    <TvProgrammeRow
+      showChannel={false}
+      nowTitle={nowTitle}
+      nowStartMs={nowStartMs}
+      nowStopMs={nowStopMs}
+      progress={progress}
+      nextTitle={nextTitle}
+      nextStartMs={nextStartMs}
+      nextStopMs={nextStopMs}
+      nextLabel="Up Next"
+    />
   </div>
   <div class="rs-livetv-play-osd__controls" data-osd-controls>
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-key=" " data-focus-key="livetv-osd-pause">⏸ Pause</button>

@@ -1,0 +1,106 @@
+---
+// TvChannelRow — the shared Live TV channel row (0.9.0).
+//
+// ONE component for every channel row in the app: Quick Surf,
+// Channel Browser, Guide. Built to mockup 1 (Quick Surf): each row
+// is its own soft tile — rounded rectangle, hairline border, gap
+// between rows — never a flat divider list. Contents, left to
+// right: channel number, logo tile, name + "Now: …" programme line;
+// the highlighted row additionally shows "Next: …" and a progress
+// bar. Highlight is a full glowing red border around the tile, not
+// a left bar.
+//
+// Artwork treatment: a real logo renders bare (contained, bounded)
+// in the tile; with no logo the tile carries the channel initial
+// on the dark surface (the mockup's icon-tile look). Logos are
+// never invented.
+//
+// Two uses: static Astro rendering (props below), and Quick Surf's
+// client paint — TvQuickSurf renders ONE row inside a
+// <template data-qs-row-template> and clones it per channel, filling
+// the [data-row-*] hooks. The hooks are the contract: any caller
+// that paints rows by hand targets these, never the class names.
+//
+// Props: id, chno, name/displayName, logo, nowTitle, nextTitle,
+// progress (0..1, shown only on the highlighted row), favourite,
+// highlighted. Rows are always <button>s: every channel row in the
+// app is activatable (highlight on first press, tune on confirm).
+interface Props {
+  id?: string | number;
+  chno?: number | null;
+  name?: string;
+  displayName?: string;
+  logo?: string | null;
+  nowTitle?: string | null;
+  nextTitle?: string | null;
+  progress?: number | null;
+  favourite?: boolean;
+  highlighted?: boolean;
+}
+const {
+  id = "",
+  chno = null,
+  name = "",
+  displayName = "",
+  logo = null,
+  nowTitle = null,
+  nextTitle = null,
+  progress = null,
+  favourite = false,
+  highlighted = false,
+} = Astro.props;
+const label = displayName || name || (id !== "" ? `#${id}` : "");
+const pct =
+  typeof progress === "number" && Number.isFinite(progress)
+    ? Math.max(0, Math.min(1, progress))
+    : null;
+---
+
+<button
+  type="button"
+  class={`rs-channel-row${highlighted ? " rs-channel-row--highlighted" : ""}`}
+  data-channel-row
+  data-channel-id={id !== "" ? String(id) : ""}
+  role="option"
+  aria-selected={highlighted ? "true" : "false"}
+>
+  <span class="rs-channel-row__num" data-row-num>{chno != null ? String(chno) : ""}</span>
+  <span class="rs-channel-row__logo" data-row-logo>
+    {
+      logo ? (
+        <img src={logo} alt="" loading="lazy" decoding="async" data-row-logo-img />
+      ) : (
+        <span class="rs-channel-row__initial" data-row-initial aria-hidden="true">
+          {label.slice(0, 1)}
+        </span>
+      )
+    }
+  </span>
+  <span class="rs-channel-row__body">
+    <span class="rs-channel-row__name" data-row-name>{label}</span>
+    <span class="rs-channel-row__now" data-row-now>
+      {nowTitle ? `Now: ${nowTitle}` : ""}
+    </span>
+    {
+      highlighted && nextTitle && (
+        <span class="rs-channel-row__next" data-row-next>
+          {`Next: ${nextTitle}`}
+        </span>
+      )
+    }
+  </span>
+  {
+    favourite && (
+      <span class="rs-channel-row__fav" data-row-fav aria-label="Favourite">
+        ♥
+      </span>
+    )
+  }
+  {
+    highlighted && pct !== null && (
+      <span class="rs-channel-row__progress" aria-hidden="true">
+        <span data-row-progress style={`width: ${Math.round(pct * 100)}%`} />
+      </span>
+    )
+  }
+</button>

@@ -12,19 +12,21 @@
 //
 // 0.9.0 shape (mockup): ONE compact floating panel docked right,
 // video visible behind it — a short window of nearby channels (two
-// before, highlighted, two after) as plain rows separated by subtle
-// dividers, never cards-in-cards. Header names the panel and shows
-// the highlight's position in the full list ("5 / 11"). Each row:
-// number, logo, name, current programme; the highlighted row also
-// shows the next programme. A row click highlights; clicking the
-// highlighted row tunes. Category + Guide via the contextual
-// shortcuts below the list. Confirmed switches go through
-// `switchChannel` — the prior stream is released before the
+// before, highlighted, two after) as shared TvChannelRow tiles
+// (rounded, hairline border, gap between rows), never cards-in-
+// cards. Header names the panel and shows the highlight's position
+// in the full list ("5 / 11"). Each row: number, logo, name,
+// current programme; the highlighted row also shows the next
+// programme. A row click highlights; clicking the highlighted row
+// tunes. Category + Guide via the contextual shortcuts below the
+// list. Confirmed switches go through `switchChannel` — the prior
+// stream is released before the
 // replacement opens.
 //
 // Opens on `livetv:overlay {overlay:"quicksurf"}` and on ArrowUp /
 // ArrowDown while playback is active with no overlay open. Channel
 // data is cache-only (livetv-data.ts) — no fetch, no invented EPG.
+import TvChannelRow from "./TvChannelRow.astro";
 ---
 
 <section
@@ -39,7 +41,9 @@
       <p class="rs-livetv-play-quicksurf__eyebrow">» Quick Surf</p>
       <p class="rs-livetv-play-quicksurf__position" data-qs-position aria-label="Position in channel list"></p>
     </div>
+    <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="-1" aria-label="Previous channel">⌃</button>
     <div class="rs-livetv-play-quicksurf__list" data-qs-list role="listbox" aria-label="Nearby channels"></div>
+    <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="1" aria-label="Next channel">⌄</button>
     <p class="rs-livetv-play-quicksurf__note" aria-hidden="true">Current channel keeps playing — A watches the highlighted channel</p>
     <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
     <div class="rs-livetv-play-quicksurf__actions">
@@ -54,6 +58,22 @@
       ↑↓ browse · A watch · B back · ←→ programme info
     </p>
   </div>
+
+  <!-- Row template: the shared TvChannelRow, cloned per channel by
+       paintRow (see the script). Rendered with placeholder props so
+       every [data-row-*] hook exists in the clone; paintRow fills
+       them and drops the parts a row does not need. -->
+  <template data-qs-row-template>
+    <TvChannelRow
+      id=""
+      chno={null}
+      name="—"
+      nowTitle=""
+      nextTitle="—"
+      progress={0}
+      highlighted={true}
+    />
+  </template>
 </section>
 
 <script>
@@ -119,72 +139,77 @@
       }
     };
 
+    // Rows come from the shared TvChannelRow template (one source
+    // of truth for row markup): clone it, fill the [data-row-*]
+    // hooks, drop the parts this row does not need (Next + progress
+    // only exist on the highlighted row; the favourite heart only
+    // where the channel is one). Never build row markup by hand.
+    const rowTemplate = root.querySelector<HTMLTemplateElement>(
+      "[data-qs-row-template]",
+    );
+
     const paintRow = (channel: LivetvChannel, isHighlighted: boolean) => {
-      const row = document.createElement("button");
+      const tpl = rowTemplate?.content?.querySelector<HTMLElement>("[data-channel-row]");
+      const row = (
+        tpl ? (tpl.cloneNode(true) as HTMLElement) : document.createElement("button")
+      ) as HTMLButtonElement;
       row.type = "button";
-      row.className = "rs-livetv-play-quicksurf__row";
-      if (isHighlighted) row.classList.add("rs-livetv-play-quicksurf__row--highlighted");
+      row.classList.toggle("rs-channel-row--highlighted", isHighlighted);
       row.dataset.qsRow = "";
       row.dataset.channelId = String(channel.id);
-      row.setAttribute("role", "option");
       row.setAttribute("aria-selected", isHighlighted ? "true" : "false");
       if (isHighlighted) row.setAttribute("aria-current", "true");
+      else row.removeAttribute("aria-current");
 
-      const num = document.createElement("span");
-      num.className = "rs-livetv-play-quicksurf__num";
-      num.textContent = channel.chno != null ? String(channel.chno) : "";
-      row.appendChild(num);
-
-      const logo = document.createElement("span");
-      logo.className = "rs-livetv-play-quicksurf__logo";
-      if (channel.logo) {
-        const img = document.createElement("img");
-        img.src = channel.logo;
-        img.alt = "";
-        img.loading = "lazy";
-        logo.appendChild(img);
-      } else {
-        const initial = document.createElement("span");
-        initial.className = "rs-livetv-play-quicksurf__initial";
-        initial.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
-        logo.appendChild(initial);
+      const setText = (sel: string, text: string) => {
+        const el = row.querySelector<HTMLElement>(sel);
+        if (el) el.textContent = text;
+      };
+      setText("[data-row-num]", channel.chno != null ? String(channel.chno) : "");
+      const logoSlot = row.querySelector<HTMLElement>("[data-row-logo]");
+      if (logoSlot) {
+        logoSlot.innerHTML = "";
+        if (channel.logo) {
+          const img = document.createElement("img");
+          img.src = channel.logo;
+          img.alt = "";
+          img.loading = "lazy";
+          logoSlot.appendChild(img);
+        } else {
+          const initial = document.createElement("span");
+          initial.className = "rs-channel-row__initial";
+          initial.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
+          logoSlot.appendChild(initial);
+        }
       }
-      row.appendChild(logo);
-
-      const body = document.createElement("span");
-      body.className = "rs-livetv-play-quicksurf__body";
-      const name = document.createElement("span");
-      name.className = "rs-livetv-play-quicksurf__name";
-      name.textContent = channel.displayName || channel.name || `#${channel.id}`;
-      body.appendChild(name);
+      setText("[data-row-name]", channel.displayName || channel.name || `#${channel.id}`);
       const nn = nowNextForChannel(channel, programmes, playlistId);
-      const nowEl = document.createElement("span");
-      nowEl.className = "rs-livetv-play-quicksurf__now";
-      nowEl.textContent = nn.current?.title ? `Now: ${nn.current.title}` : "";
-      body.appendChild(nowEl);
+      setText("[data-row-now]", nn.current?.title ? `Now: ${nn.current.title}` : "");
+      const nextEl = row.querySelector<HTMLElement>("[data-row-next]");
       if (isHighlighted && nn.next?.title) {
-        const nextEl = document.createElement("span");
-        nextEl.className = "rs-livetv-play-quicksurf__next";
-        nextEl.textContent = `Next: ${nn.next.title}`;
-        body.appendChild(nextEl);
+        if (nextEl) nextEl.textContent = `Next: ${nn.next.title}`;
+      } else {
+        nextEl?.remove();
       }
-      row.appendChild(body);
-
+      const favEl = row.querySelector<HTMLElement>("[data-row-fav]");
       if (isFavourite(channel)) {
-        const fav = document.createElement("span");
-        fav.className = "rs-livetv-play-quicksurf__fav";
-        fav.textContent = "♥";
-        fav.setAttribute("aria-label", "Favourite");
-        row.appendChild(fav);
+        if (!favEl) {
+          const fav = document.createElement("span");
+          fav.className = "rs-channel-row__fav";
+          fav.textContent = "♥";
+          fav.setAttribute("aria-label", "Favourite");
+          row.appendChild(fav);
+        }
+      } else {
+        favEl?.remove();
       }
+      const bar = row.querySelector<HTMLElement>("[data-row-progress]");
       if (isHighlighted && nn.current) {
-        const bar = document.createElement("span");
-        bar.className = "rs-livetv-play-quicksurf__progress";
-        bar.setAttribute("aria-hidden", "true");
-        const fill = document.createElement("span");
-        fill.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
-        bar.appendChild(fill);
-        row.appendChild(bar);
+        if (bar) {
+          bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
+        }
+      } else {
+        bar?.closest(".rs-channel-row__progress")?.remove();
       }
       return row;
     };
@@ -247,7 +272,7 @@
       root.hidden = false;
       root.dataset.hidden = "false";
       emitOverlay("quicksurf");
-      const first = root.querySelector<HTMLElement>(".rs-livetv-play-quicksurf__row--highlighted, [data-focus-key='livetv-quicksurf-tune']");
+      const first = root.querySelector<HTMLElement>(".rs-channel-row--highlighted, [data-focus-key='livetv-quicksurf-tune']");
       first?.focus?.({ preventScroll: true });
     };
 
@@ -304,6 +329,18 @@
     };
 
     root.addEventListener("click", async (ev) => {
+      // Step chevrons (^ / v above and below the list): move the
+      // highlight one adjacent channel, never a tune.
+      const stepBtn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-step]") as HTMLElement | null;
+      if (stepBtn) {
+        const delta = stepBtn.dataset.qsStep === "-1" ? -1 : 1;
+        const next = stepHighlight(surfList(), highlightedId, delta as 1 | -1);
+        if (next !== null) {
+          highlightedId = next;
+          paint();
+        }
+        return;
+      }
       // Row click: highlight only — unless the row is already the
       // highlight, in which case the click confirms (tunes).
       const row = (ev.target as HTMLElement | null)?.closest?.("[data-qs-row]") as HTMLElement | null;
