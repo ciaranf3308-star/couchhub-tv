@@ -578,11 +578,20 @@
   }
   .player-row:focus-within {
     border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent);
+    box-shadow:
+      0 0 0 2px var(--color-accent),
+      var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
   }
   .player-row:has(input[name="player-backend"]:checked) {
     border-color: var(--color-accent);
-    background: var(--color-accent-soft);
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--color-accent) 18%, transparent),
+      color-mix(in oklch, var(--color-accent) 6%, transparent)
+    );
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent),
+      0 0 20px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
   }
   .player-row__title {
     font-size: 0.875rem;
@@ -611,11 +620,20 @@
   }
   .pref-option:focus-within {
     border-color: var(--color-accent);
-    box-shadow: 0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent);
+    box-shadow:
+      0 0 0 2px var(--color-accent),
+      var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
   }
   .pref-option:has(input:checked) {
     border-color: var(--color-accent);
-    background: var(--color-accent-soft);
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--color-accent) 18%, transparent),
+      color-mix(in oklch, var(--color-accent) 6%, transparent)
+    );
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent),
+      0 0 20px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
   }
 
   .active-pill {
@@ -632,7 +650,9 @@
     line-height: 1;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    box-shadow: 0 0 0 4px color-mix(in oklch, var(--color-accent) 14%, transparent);
+    box-shadow:
+      0 0 0 4px color-mix(in oklch, var(--color-accent) 14%, transparent),
+      0 0 16px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
   }
 
   .status-meta {

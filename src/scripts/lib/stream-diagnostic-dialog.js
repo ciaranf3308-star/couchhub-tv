@@ -6,9 +6,43 @@ import { t } from "@/scripts/lib/i18n.js"
 import { writeClipboardText } from "@/scripts/lib/clipboard"
 
 const DIALOG_ID = "stream-diagnostic-dialog"
+const STYLE_ID = "nylah-stream-diagnostic-dialog-style"
 
 /** @type {HTMLDialogElement | null} */
 let dlg = null
+
+// Nylah Studios v0.3.0 (w6) — RedSilk treatment: warm gradient shell,
+// layered wine shadow, serif title, warm stage sections, glowing close
+// focus. Verdict colors stay semantic (ok/warn/bad). Layout and
+// behavior untouched.
+function ensureDialogStyle() {
+  if (typeof document === "undefined") return
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = STYLE_ID
+  style.textContent = `
+#${DIALOG_ID} {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+  );
+  box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+#${DIALOG_ID} [data-role="report"] section {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))),
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350)))
+  );
+  box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+}
+#${DIALOG_ID} [data-role="close"]:focus-visible {
+  box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+}
+`
+  document.head.appendChild(style)
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -35,6 +69,7 @@ function fmtMs(n) {
 function ensureDialog() {
   if (dlg) return dlg
   if (typeof document === "undefined") return null
+  ensureDialogStyle()
 
   const node = document.createElement("dialog")
   node.id = DIALOG_ID
@@ -49,7 +84,7 @@ function ensureDialog() {
       <header class="flex items-start justify-between gap-3 shrink-0">
         <div class="flex flex-col gap-1 min-w-0">
           <div data-role="eyebrow" data-i18n="streamTest.eyebrow" class="text-eyebrow font-medium uppercase tracking-widest text-fg-3">${escapeHtml(t("streamTest.eyebrow"))}</div>
-          <h2 id="${DIALOG_ID}-title" data-role="title" class="text-xl font-semibold tracking-[-0.01em] truncate"></h2>
+          <h2 id="${DIALOG_ID}-title" data-role="title" class="font-serif text-2xl font-semibold tracking-[-0.01em] truncate"></h2>
           <div data-role="url" class="text-2xs text-fg-3 break-all font-mono"></div>
         </div>
         <button

@@ -35,6 +35,40 @@ export function formatSubtitleDelay(offsetSeconds: number): string {
   return `${offsetSeconds >= 0 ? "+" : ""}${offsetSeconds.toFixed(1)}s`
 }
 
+const SUBTITLE_DELAY_STYLE_ID = "nylah-subtitle-delay-dialog-style"
+
+// Nylah Studios v0.3.0 (w6) — RedSilk treatment: warm gradient shell,
+// layered wine shadow, serif title, the delay readout in accent serif,
+// glowing stepper focus. Layout and behavior untouched.
+function ensureSubtitleDelayStyle(dialogId: string): void {
+  if (typeof document === "undefined") return
+  if (document.getElementById(SUBTITLE_DELAY_STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = SUBTITLE_DELAY_STYLE_ID
+  style.textContent = `
+#${dialogId} {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+  );
+  box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+#${dialogId} [data-role="value"] {
+  font-family: var(--nylah-font-display, var(--font-serif));
+  font-size: 1.5rem;
+  color: var(--color-accent);
+}
+#${dialogId} [data-role="minus"]:focus-visible,
+#${dialogId} [data-role="plus"]:focus-visible,
+#${dialogId} [data-role="reset"]:focus-visible,
+#${dialogId} [data-role="close"]:focus-visible {
+  box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+}
+`
+  document.head.appendChild(style)
+}
+
 export function createSubtitleDelayController(options: SubtitleDelayDialogOptions): SubtitleDelayController {
   const { dialogId, button, nudge, getMediaElement } = options
   let dialogEl: HTMLDialogElement | null = null
@@ -107,6 +141,7 @@ export function createSubtitleDelayController(options: SubtitleDelayDialogOption
 
   function ensureDialog(): HTMLDialogElement {
     if (dialogEl) return dialogEl
+    ensureSubtitleDelayStyle(dialogId)
     const node = document.createElement("dialog")
     node.id = dialogId
     node.setAttribute("aria-labelledby", `${dialogId}-title`)
@@ -120,7 +155,7 @@ export function createSubtitleDelayController(options: SubtitleDelayDialogOption
       <div class="flex flex-col flex-auto min-h-0 gap-4 p-5 overflow-y-auto">
         <header class="flex items-center gap-3">
           <span class="icon-mark" aria-hidden="true">${ICON_CLOCK_EDIT}</span>
-          <h2 id="${dialogId}-title" data-role="title" class="text-base font-semibold"></h2>
+          <h2 id="${dialogId}-title" data-role="title" class="font-serif text-xl font-semibold"></h2>
         </header>
         <div class="flex items-center justify-center gap-3">
           <button

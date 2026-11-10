@@ -50,7 +50,7 @@
     <div class="settings-row__text">
       <div class="flex items-center gap-2 flex-wrap">
         <h3 class="text-sm font-medium leading-snug">{tr("settings.androidNativePlayer.title")}</h3>
-        <span class="inline-flex shrink-0 items-center px-2 py-0.5 rounded-full border border-line bg-surface-2 text-fg-3 text-2xs font-medium">
+        <span class="android-exp-pill inline-flex shrink-0 items-center px-2 py-0.5 rounded-full border border-line bg-surface-2 text-fg-3 text-2xs font-medium">
           {tr("settings.androidNativePlayer.experimental")}
         </span>
       </div>
@@ -82,3 +82,28 @@
     </div>
   </div>
 {/if}
+
+<!-- Nylah Studios v0.3.0 (w6) — RedSilk treatment, code-grade only:
+     this card only renders on Android Tauri, unverifiable on desktop.
+     Brass-tinted experimental pill; the active seg button glows wine. -->
+<style>
+  .android-exp-pill {
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 16%, transparent),
+      color-mix(in oklch, var(--color-accent) 10%, transparent)
+    );
+    border-color: color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 45%, transparent);
+    box-shadow: 0 0 12px 1px color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 18%, transparent);
+  }
+  #android-native-player-section .settings-seg > .btn[aria-checked="true"] {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--color-accent) 40%, transparent),
+      0 0 18px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+  }
+  #android-native-player-section .settings-seg > .btn:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--color-accent),
+      var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+  }
+</style>
