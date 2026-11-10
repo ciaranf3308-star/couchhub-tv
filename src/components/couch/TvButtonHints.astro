@@ -1,0 +1,272 @@
+---
+// TvButtonHints — the ONE shared Xbox button legend for Couch screens.
+//
+// Bottom-anchored, subtle, burgundy-on-dark, Manrope. One component,
+// many configs: the per-screen configs live in
+// src/scripts/lib/couch-button-hints.ts (audited against gamepad.ts +
+// the per-screen handlers — a hint appears ONLY where its handler
+// really does something on that screen).
+//
+// Context switching is client-side and needs no per-screen wiring:
+// the layout passes `view` (main[data-couch-view]); Live TV modes
+// come from html[data-livetv-mode]; a focused text field switches to
+// the minimal editing legend (only B + View+Menu work while typing,
+// per gamepad.ts) and focus on an on-screen keyboard key switches to
+// the OSK legend (A types, B deletes — X "clears" is dead, see
+// couch-button-hints.ts *9, so it is never shown). The legend hides while a modal dialog owns input,
+// and in fullscreen playback while the OSD or any playback overlay
+// (options / Quick Surf / channel browser / error) is visible — those
+// surfaces already name their own keys (OSD shortcuts line, overlay
+// buttons), so the legend would only duplicate them over the video.
+// View+Menu held 2 s = return home is global and is never hidden
+// with the legend: the hold is owned by gamepad.ts, not by this bar.
+import {
+  hintsForView,
+  hintItemHtml,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+
+interface Props {
+  /** Couch view id (CouchLayout `view` prop / main[data-couch-view]). */
+  view?: string;
+}
+const { view = "home" } = Astro.props;
+const initial: HintConfig = hintsForView(view);
+---
+
+<nav
+  class="rs-button-hints"
+  data-button-hints
+  data-view={view}
+  data-config={initial.id}
+  aria-label="Controller buttons"
+>
+  <ul
+    class="rs-button-hints__list"
+    data-button-hints-list
+    data-config={initial.id}
+    set:html={initial.items.map((item) => hintItemHtml(item)).join("")}
+  >
+  </ul>
+</nav>
+
+<script>
+  import {
+    hintsForView,
+    hintItemHtml,
+  } from "@/scripts/lib/couch-button-hints.ts";
+
+  const nav = document.querySelector<HTMLElement>("[data-button-hints]");
+  const list = nav?.querySelector<HTMLElement>("[data-button-hints-list]");
+  if (nav && list) {
+    const view = nav.dataset.view ?? "home";
+
+    // Selectors whose visibility means "an overlay owns the buttons":
+    // OSD + options + Quick Surf + channel browser + error, all
+    // driven by data-hidden + the hidden attribute.
+    const OVERLAY_SELECTORS =
+      "[data-livetv-osd], [data-livetv-options], [data-livetv-quicksurf], [data-livetv-play-browser], [data-livetv-error]";
+
+    function isEditingTarget(target: EventTarget | null): boolean {
+      const el = target as HTMLElement | null;
+      if (!el || typeof el.tagName !== "string") return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return true;
+      return el.isContentEditable === true;
+    }
+
+    function overlayVisible(): boolean {
+      const overlays = document.querySelectorAll<HTMLElement>(OVERLAY_SELECTORS);
+      for (const el of overlays) {
+        if (el.dataset.hidden === "false" && !el.hidden) return true;
+      }
+      return false;
+    }
+
+    function dialogOpen(): boolean {
+      if (document.querySelector("dialog[open]")) return true;
+      try {
+        return !!document.querySelector("[popover]:popover-open");
+      } catch {
+        return false;
+      }
+    }
+
+    function render(): void {
+      const editing = isEditingTarget(document.activeElement);
+      const osk =
+        !editing &&
+        !!(document.activeElement as HTMLElement | null)?.closest?.("[data-osk]");
+      const mode = document.documentElement.dataset.livetvMode ?? null;
+      const config = hintsForView(view, { livetvMode: mode, editing, osk });
+      // Hide while a dialog owns input; in Live TV playback hide
+      // while the OSD / an overlay is up (it names its own keys).
+      const hidden =
+        dialogOpen() ||
+        (view === "livetv" && mode === "playback" && overlayVisible());
+      nav.toggleAttribute("hidden", hidden);
+      nav.dataset.config = config.id;
+      if (list.dataset.config !== config.id) {
+        list.innerHTML = config.items.map((item) => hintItemHtml(item)).join("");
+        list.dataset.config = config.id;
+      }
+    }
+
+    const modeObserver = new MutationObserver(render);
+    modeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-livetv-mode"],
+    });
+    const domObserver = new MutationObserver(render);
+    domObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-hidden", "hidden", "open"],
+      childList: true,
+      subtree: true,
+    });
+    document.addEventListener("focusin", render);
+    document.addEventListener("focusout", render);
+    render();
+  }
+</script>
+
+<style is:global>
+  /* is:global is required, not a shortcut: the legend items are
+     injected via set:html / innerHTML (server + client re-render),
+     so they never carry Astro's scoped-style CID attribute and a
+     scoped block would leave them unstyled. Selectors are rooted
+     at html[data-couch] so nothing leaks onto non-Couch pages.
+     Fixed bottom-anchored pill bar. pointer-events:none so it can
+     never swallow a click meant for the page; the bar is display
+     only. .rs-main already carries 3rem of bottom padding, so the
+     bar sits in that clearance and covers no content. */
+  html[data-couch] .rs-button-hints {
+    position: fixed;
+    left: 50%;
+    bottom: 0.75rem;
+    transform: translateX(-50%);
+    z-index: 60;
+    max-width: calc(100vw - 2rem);
+    pointer-events: none;
+  }
+  html[data-couch] .rs-button-hints[hidden] {
+    display: none;
+  }
+  html[data-couch] .rs-button-hints__list {
+    display: flex;
+    align-items: center;
+    gap: 1.125rem;
+    margin: 0;
+    padding: 0.45rem 1rem;
+    list-style: none;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-family: var(--rs-font-body);
+    font-size: 0.8125rem;
+    line-height: 1;
+    color: var(--rs-text-2);
+    background: color-mix(in srgb, var(--rs-bg) 74%, transparent);
+    border: 1px solid var(--rs-line-soft);
+    border-radius: 999px;
+    box-shadow: var(--rs-shadow);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  html[data-couch] .rs-button-hints__list::-webkit-scrollbar {
+    display: none;
+  }
+  html[data-couch] .rs-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  html[data-couch] .rs-hint__label {
+    font-weight: 600;
+    color: var(--rs-text);
+    opacity: 0.92;
+  }
+  html[data-couch] .rs-hint__when {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--rs-text-2);
+  }
+  html[data-couch] .rs-hint-glyphs {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+  html[data-couch] .rs-hint-plus {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--rs-text-2);
+  }
+  html[data-couch] .rs-hint-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    height: 1.05rem;
+    min-width: 1.05rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #fff;
+  }
+  /* Xbox face buttons — authentic colours, small and flat. */
+  html[data-couch] .rs-hint-glyph--a {
+    border-radius: 50%;
+    background: #107c10;
+  }
+  html[data-couch] .rs-hint-glyph--b {
+    border-radius: 50%;
+    background: #e81123;
+  }
+  html[data-couch] .rs-hint-glyph--x {
+    border-radius: 50%;
+    background: #0078d7;
+  }
+  html[data-couch] .rs-hint-glyph--y {
+    border-radius: 50%;
+    background: #f2c200;
+    color: #201600;
+  }
+  /* Shoulders / Menu / arrows — burgundy surface pills. */
+  html[data-couch] .rs-hint-glyph--shoulder {
+    padding: 0 0.32rem;
+    border-radius: 0.3rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.02em;
+    color: var(--rs-text);
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+  }
+  /* D-pad — CSS plus on a burgundy tile. */
+  html[data-couch] .rs-hint-glyph--dpad {
+    position: relative;
+    border-radius: 0.25rem;
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+  }
+  html[data-couch] .rs-hint-glyph--dpad::before,
+  html[data-couch] .rs-hint-glyph--dpad::after {
+    content: "";
+    position: absolute;
+    background: var(--rs-text);
+    border-radius: 1px;
+  }
+  html[data-couch] .rs-hint-glyph--dpad::before {
+    left: 50%;
+    top: 18%;
+    width: 2px;
+    height: 64%;
+    transform: translateX(-50%);
+  }
+  html[data-couch] .rs-hint-glyph--dpad::after {
+    top: 50%;
+    left: 18%;
+    height: 2px;
+    width: 64%;
+    transform: translateY(-50%);
+  }
+</style>
