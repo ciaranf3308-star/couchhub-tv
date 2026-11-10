@@ -16,7 +16,11 @@
 //     10,000 card nodes. The focused card is pinned into the window
 //     so windowing never steals focus.
 //
-// DOM contract (ids the .astro templates provide):
+// DOM contract (ids the .astro templates provide, optionally prefixed
+// with `opts.idPrefix` — the /browse page hosts two controllers at
+// once, one per kind, so its ids carry a "browse-movies-" /
+// "browse-series-" prefix; the standalone /movies and /series pages
+// use the bare ids):
 //   couch-browse-status, couch-browse-hero-count, couch-browse-tabs,
 //   couch-browse-genres, couch-browse-year, couch-browse-rating,
 //   couch-browse-sort, couch-browse-search, couch-search-open,
@@ -93,20 +97,34 @@ function $(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
 
-export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
-  const statusEl = $("couch-browse-status");
-  const heroCountEl = $("couch-browse-hero-count");
-  const tabsEl = $("couch-browse-tabs");
-  const genresEl = $("couch-browse-genres");
-  const yearEl = $("couch-browse-year") as HTMLSelectElement | null;
-  const ratingEl = $("couch-browse-rating") as HTMLSelectElement | null;
-  const sortEl = $("couch-browse-sort") as HTMLSelectElement | null;
-  const searchEl = $("couch-browse-search") as HTMLInputElement | null;
-  const railsEl = $("couch-browse-rails");
-  const gridEl = $("couch-browse-grid");
-  const skeletonEl = $("couch-browse-skeleton");
-  const emptyEl = $("couch-browse-empty");
-  const errorEl = $("couch-browse-error");
+export interface CouchBrowseMountOptions {
+  /**
+   * Prefix prepended to every DOM id in the contract above. "" keeps
+   * the standalone /movies and /series pages on their bare ids.
+   * /browse mounts one controller per kind with "browse-movies-" /
+   * "browse-series-" so the two sections never share an id.
+   */
+  idPrefix?: string;
+}
+
+export function mountCouchBrowse<T>(
+  adapter: CouchBrowseAdapter<T>,
+  opts: CouchBrowseMountOptions = {},
+): void {
+  const prefix = opts.idPrefix ?? "";
+  const statusEl = $(`${prefix}couch-browse-status`);
+  const heroCountEl = $(`${prefix}couch-browse-hero-count`);
+  const tabsEl = $(`${prefix}couch-browse-tabs`);
+  const genresEl = $(`${prefix}couch-browse-genres`);
+  const yearEl = $(`${prefix}couch-browse-year`) as HTMLSelectElement | null;
+  const ratingEl = $(`${prefix}couch-browse-rating`) as HTMLSelectElement | null;
+  const sortEl = $(`${prefix}couch-browse-sort`) as HTMLSelectElement | null;
+  const searchEl = $(`${prefix}couch-browse-search`) as HTMLInputElement | null;
+  const railsEl = $(`${prefix}couch-browse-rails`);
+  const gridEl = $(`${prefix}couch-browse-grid`);
+  const skeletonEl = $(`${prefix}couch-browse-skeleton`);
+  const emptyEl = $(`${prefix}couch-browse-empty`);
+  const errorEl = $(`${prefix}couch-browse-error`);
 
   let all: T[] = [];
   let filtered: T[] = [];
