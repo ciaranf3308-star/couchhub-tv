@@ -21,6 +21,7 @@
 import "../styles/global.css";
 import "../styles/couch.css";
 import pkg from "../../package.json";
+import TvLogo from "@/components/couch/TvLogo.astro";
 import {
   COUCH_NAV_PRIMARY,
   COUCH_NAV_LIBRARY,
@@ -37,8 +38,8 @@ const { pageTitle, activeNav, view } = Astro.props;
 const path = Astro.url.pathname.replace(/\/+$/, "") || "/";
 const active = activeNav ?? couchNavIdFor(path) ?? "home";
 const documentTitle = pageTitle
-  ? `${pageTitle} | Nylah Studios`
-  : "Nylah Studios";
+  ? `${pageTitle} | NylahBox Studios`
+  : "NylahBox Studios";
 ---
 
 <!doctype html>
@@ -57,8 +58,8 @@ const documentTitle = pageTitle
 
   <body class="rs-body">
     <header class="rs-topnav" data-couch-nav>
-      <a class="rs-brand" href="/" aria-label="Nylah Studios — Home">
-        Nylah <em>Studios</em>
+      <a class="rs-brand" href="/" aria-label="NylahBox Studios — Home">
+        <TvLogo variant="lockup" size="nav" />
       </a>
       <nav class="rs-nav" aria-label="Primary">
         <div class="rs-nav__row" data-nylah-rail="couch-nav">

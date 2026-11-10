@@ -1,16 +1,39 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="8 58 224 124">
-    <path d="M65.6 70.2 A50 50 0 1 1 20.2 115.6" fill="none" class="fc-stroke" stroke-width="20" stroke-linecap="round"></path>
-    <circle cx="34.6" cy="84.6" r="9" class="fc-fill"></circle>
-    <circle cx="170" cy="120" r="50" fill="none" class="fc-stroke" stroke-width="20"></circle>
-    <rect x="146.5" y="94" width="13" height="52" rx="6.5" class="fc-fill"></rect>
-    <rect x="164.5" y="102" width="13" height="36" rx="6.5" class="fc-fill"></rect>
-    <rect x="182.5" y="110" width="13" height="20" rx="6.5" class="fc-fill"></rect>
-    <style>
-        .fc-stroke { stroke: #9d2398; }
-        .fc-fill { fill: #9d2398; }
-        @media (prefers-color-scheme: dark) {
-            .fc-stroke { stroke: #ec92e5; }
-            .fc-fill { fill: #ec92e5; }
-        }
-    </style>
+<!-- NylahBox Studios — pixel-TV mark (hand-drawn vector, RedSilk palette).
+     32x32 pixel grid: burgundy TV body, dark screen, glowing rose play
+     triangle, rabbit-ear antennae. No text — spelling-safe at any size. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges" role="img" aria-label="NylahBox Studios">
+  <!-- antennae -->
+  <rect x="12" y="1" width="1" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="2" width="1" height="1" fill="#A84365"/>
+  <rect x="10" y="3" width="1" height="1" fill="#A84365"/>
+  <rect x="9" y="4" width="1" height="1" fill="#A84365"/>
+  <rect x="8" y="5" width="1" height="1" fill="#A84365"/>
+  <rect x="8" y="6" width="1" height="1" fill="#A84365"/>
+  <rect x="19" y="1" width="1" height="1" fill="#E5A6BD"/>
+  <rect x="20" y="2" width="1" height="1" fill="#A84365"/>
+  <rect x="21" y="3" width="1" height="1" fill="#A84365"/>
+  <rect x="22" y="4" width="1" height="1" fill="#A84365"/>
+  <rect x="23" y="5" width="1" height="1" fill="#A84365"/>
+  <rect x="23" y="6" width="1" height="1" fill="#A84365"/>
+  <!-- body -->
+  <rect x="4" y="8" width="24" height="21" fill="#2A0A12"/>
+  <rect x="5" y="9" width="22" height="19" fill="#7A2233"/>
+  <rect x="5" y="9" width="22" height="1" fill="#C65B7C"/>
+  <!-- screen -->
+  <rect x="6" y="10" width="17" height="13" fill="#2A0A12"/>
+  <rect x="7" y="11" width="15" height="11" fill="#20090F"/>
+  <!-- play triangle -->
+  <rect x="11" y="13" width="1" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="14" width="2" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="15" width="3" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="16" width="4" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="17" width="3" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="18" width="2" height="1" fill="#E5A6BD"/>
+  <rect x="11" y="19" width="1" height="1" fill="#E5A6BD"/>
+  <!-- knobs -->
+  <rect x="8" y="25" width="2" height="2" fill="#E5A6BD"/>
+  <rect x="15" y="25" width="2" height="2" fill="#E5A6BD"/>
+  <rect x="22" y="25" width="2" height="2" fill="#E5A6BD"/>
+  <!-- base shadow -->
+  <rect x="5" y="28" width="22" height="1" fill="#2A0A12"/>
 </svg>
