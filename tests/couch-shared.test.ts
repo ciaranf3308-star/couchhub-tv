@@ -101,15 +101,33 @@ describe("couch-nav destination table", () => {
     expect(couchNavIdFor("/")).toBe("home");
     expect(couchNavIdFor("/livetv")).toBe("livetv");
     expect(couchNavIdFor("/epg")).toBe("livetv");
-    expect(couchNavIdFor("/movies")).toBe("movies");
-    expect(couchNavIdFor("/movies/detail?id=1")).toBe("movies");
-    expect(couchNavIdFor("/series/detail")).toBe("series");
-    expect(couchNavIdFor("/discover")).toBe("discover");
-    expect(couchNavIdFor("/followed")).toBe("followed");
-    expect(couchNavIdFor("/search")).toBe("search");
+    expect(couchNavIdFor("/browse")).toBe("browse");
     expect(couchNavIdFor("/favorites")).toBe("favorites");
     expect(couchNavIdFor("/watchlist")).toBe("watchlist");
     expect(couchNavIdFor("/settings")).toBe("settings");
+  });
+
+  it("maps the pre-consolidation routes to browse", () => {
+    // Browse consolidation (0.8.0): the old Movies / Series / Discover
+    // / Search destinations redirect into the Browse flow, and their
+    // detail pages resolve to the Browse section.
+    expect(couchNavIdFor("/movies")).toBe("browse");
+    expect(couchNavIdFor("/movies/detail?id=1")).toBe("browse");
+    expect(couchNavIdFor("/series")).toBe("browse");
+    expect(couchNavIdFor("/series/detail")).toBe("browse");
+    expect(couchNavIdFor("/discover")).toBe("browse");
+    expect(couchNavIdFor("/search")).toBe("browse");
+  });
+
+  it("has exactly one Browse tab and no Movies / Series / Discover / Search tabs", () => {
+    const ids = COUCH_NAV_PRIMARY.map((item) => item.id);
+    expect(ids).toEqual(["home", "livetv", "browse", "followed"]);
+    expect(ids.filter((id) => id === "browse")).toHaveLength(1);
+    expect(COUCH_DESTINATIONS.browse).toBe("/browse");
+    expect(COUCH_DESTINATIONS.movies).toBeUndefined();
+    expect(COUCH_DESTINATIONS.series).toBeUndefined();
+    expect(COUCH_DESTINATIONS.discover).toBeUndefined();
+    expect(COUCH_DESTINATIONS.search).toBeUndefined();
   });
 
   it("returns null outside the Couch UI", () => {
@@ -118,6 +136,7 @@ describe("couch-nav destination table", () => {
     expect(couchNavIdFor("/receiver")).toBeNull();
     expect(isCouchRoute("/tv/live")).toBe(false);
     expect(isCouchRoute("/discover")).toBe(true);
+    expect(isCouchRoute("/browse")).toBe(true);
   });
 
   it("covers every nav entry in the destination table", () => {

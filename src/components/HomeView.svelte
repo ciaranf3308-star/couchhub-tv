@@ -393,7 +393,7 @@
         </div>
         <h2 class="rs-empty__title">Your library is empty</h2>
         <p class="rs-empty__message">Once films and series are in your playlist, your picks, trending titles and new episodes will appear here.</p>
-        <a class="rs-empty__action" data-nylah-item href="/discover">Browse Discover</a>
+        <a class="rs-empty__action" data-nylah-item href="/browse">Browse Discover</a>
       </div>
     {/if}
   {/if}
