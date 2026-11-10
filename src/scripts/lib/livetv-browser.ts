@@ -20,6 +20,9 @@
 //     initialFocusId, or keep the handle and call highlightChannel.
 import { computeVisibleWindow } from "./couch-grid";
 import { programmeProgress } from "./couch-livetv-epg";
+import { fallbackMarkFor } from "./couch-image";
+import { CACHE_REVALIDATED_EVENT } from "./cache.js";
+import { EPG_LOADED_EVENT, getProgrammesSync } from "./epg-data.js";
 import {
   dispatchLivetvTune,
   groupChannels,
@@ -277,19 +280,28 @@ export function mountChannelBrowser(
       row.classList.add("is-highlighted");
     }
     const logo = el("span", "rs-livetv-browser__logo");
+    const logoFallback = () => {
+      // Branded fallback from the shared couch-image helper (W7
+      // consumes it — the "N" brand mark for logos; the channel
+      // name sits beside the logo in every row).
+      const mark = el("span", "rs-livetv-browser__initial");
+      mark.setAttribute("aria-hidden", "true");
+      mark.textContent = fallbackMarkFor("logo", channel.displayName || channel.name);
+      return mark;
+    };
     if (channel.logo) {
       const img = el("img") as HTMLImageElement;
       img.src = channel.logo;
       img.alt = "";
       img.loading = "lazy";
       img.decoding = "async";
-      img.addEventListener("error", () => img.remove());
+      img.addEventListener("error", () => {
+        img.remove();
+        logo.appendChild(logoFallback());
+      });
       logo.appendChild(img);
     } else {
-      const mark = el("span", "rs-livetv-browser__initial");
-      mark.setAttribute("aria-hidden", "true");
-      mark.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
-      logo.appendChild(mark);
+      logo.appendChild(logoFallback());
     }
     row.appendChild(logo);
 
@@ -564,15 +576,26 @@ export async function mountCachedChannelBrowser(
   const playlistId = readActivePlaylistId();
   if (!playlistId) return null;
   const data = await loadLivetvHomeData(playlistId);
-  const programmes = data.programmes;
   const recentIds = data.recents.map((r) => r.id);
+  // W7: read the EPG fresh on every row render instead of closing
+  // over the programmes snapshot from mount time — the guide loads
+  // after Home mounts, and rows must gain their now/next lines
+  // when it lands rather than staying blank until a favourites /
+  // recents change happens to re-render.
+  const freshProgrammes = () => {
+    try {
+      return getProgrammesSync(playlistId)?.programmes ?? null;
+    } catch {
+      return null;
+    }
+  };
   const handle = mountChannelBrowser(root, {
     channels: data.channels,
     browserId: opts.browserId,
     recentIds,
     playlistId,
     nowNextFor: (channel) =>
-      nowNextForChannel(channel, programmes, playlistId),
+      nowNextForChannel(channel, freshProgrammes(), playlistId),
     initialCategoryId: opts.initialCategoryId ?? undefined,
     initialFocusId: opts.initialFocusId ?? undefined,
     sort: opts.sort,
@@ -587,12 +610,35 @@ export async function mountCachedChannelBrowser(
   };
   const onFavs = () => void refresh();
   const onRecents = () => void refresh();
+  // W7: a late EPG load or a background cache refresh re-renders
+  // the browser (rows gain now/next; new channels appear) instead
+  // of leaving the cold-load snapshot on screen. Guarded to this
+  // playlist.
+  const onEpg = (event: Event) => {
+    const detail = (event as CustomEvent).detail as
+      | { playlistId?: string }
+      | undefined;
+    if (detail?.playlistId && detail.playlistId !== playlistId) return;
+    void refresh();
+  };
+  const onCache = (event: Event) => {
+    const detail = (event as CustomEvent).detail as
+      | { entryId?: string; kind?: string }
+      | undefined;
+    if (detail?.entryId && detail.entryId !== playlistId) return;
+    if (detail?.kind && detail.kind !== "live" && detail.kind !== "m3u") return;
+    void refresh();
+  };
   document.addEventListener("xt:favorites-changed", onFavs);
   document.addEventListener("xt:recents-changed", onRecents);
+  document.addEventListener(EPG_LOADED_EVENT, onEpg);
+  document.addEventListener(CACHE_REVALIDATED_EVENT, onCache);
   const baseDestroy = handle.destroy.bind(handle);
   handle.destroy = () => {
     document.removeEventListener("xt:favorites-changed", onFavs);
     document.removeEventListener("xt:recents-changed", onRecents);
+    document.removeEventListener(EPG_LOADED_EVENT, onEpg);
+    document.removeEventListener(CACHE_REVALIDATED_EVENT, onCache);
     baseDestroy();
   };
   return handle;

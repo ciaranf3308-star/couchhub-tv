@@ -32,9 +32,14 @@
 //     from preferences) as well as the flag/recents forms in the
 //     W1 brief. Both spellings are the same function, not a copy.
 //
-// Channel identity is ALWAYS the provider id. Distinct channels
-// are never merged on similar names — dedupe is by id only.
+// Channel identity is ALWAYS the provider id — except for the
+// W7 dedupe, which collapses true duplicates only on reliable
+// matching information (same id, same stream URL, or same
+// quality-stripped name + same tvg-id with no conflicting logo).
+// Distinct channels are never merged on similar names; same-name
+// survivors are labelled distinctly instead.
 import { getActiveEntry } from "./creds.js";
+import { hydrate as hydrateCache } from "./cache.js";
 import {
   readCachedLiveChannels,
   ensureOverridesReady,
@@ -169,6 +174,12 @@ export interface LivetvChannel {
   hidden: boolean;
   /** Cached normalised haystack: name + category + tvgId. */
   norm: string;
+  /**
+   * Ids of provider rows merged into this channel by dedupe
+   * (dedupeLivetvChannels). Present only when rows were merged, so
+   * no original stream identifier is ever silently lost.
+   */
+  duplicateIds?: (string | number)[];
 }
 
 /** Raw provider row shape (untyped upstream). Only the fields we read. */
@@ -244,6 +255,171 @@ export function isLocalChannel(channel: LivetvChannel): boolean {
   return LOCAL_REGION_RE.test(channel.categoryId || "");
 }
 
+// ── Dedupe (W7) ────────────────────────────────────────────────
+
+/**
+ * Channel name as a dedupe key: the shared normaliser, then
+ * trailing quality tags stripped ("BBC One FHD" / "BBC One HD" →
+ * "bbc one"). Quality tags are provider mirrors of the same
+ * broadcast, never a different channel. Region words are NOT
+ * stripped — "BBC One Scotland" is a genuinely distinct regional
+ * feed and must survive as its own (disambiguated) tile.
+ */
+export function normaliseChannelName(name: string): string {
+  const n = normalize(name ?? "");
+  return n
+    .replace(/(?:\s+(?:fhd|uhd|4k|hd|sd|hevc|h265|1080p|720p|2160p))+$/g, "")
+    .trim();
+}
+
+interface DedupeMergeTarget {
+  kept: LivetvChannel;
+  mergedIds: (string | number)[];
+}
+
+/**
+ * Collapse TRUE duplicates — the rows that made Live TV Home show
+ * BBC One twice, AFN Sports twice, Sky Cinema three times as
+ * identical tiles side by side. Providers list the same broadcast
+ * under several rows (quality mirrors, re-listed playlist entries);
+ * nothing here ever merges on a similar name alone.
+ *
+ * A row merges into an earlier kept channel only on reliable
+ * matching information, in this order:
+ *   1. same provider id (String-compared, so M3U string ids work),
+ *   2. same non-empty direct stream URL (M3U rows),
+ *   3. same quality-stripped name AND same non-empty tvg-id, unless
+ *      both rows carry a logo and the logos differ (different logos
+ *      = possibly distinct feeds, so they survive for
+ *      disambiguation instead).
+ *
+ * The first row wins (source order preserved); merged rows' ids are
+ * kept on `duplicateIds`, and a kept row adopts a logo / tvg-id /
+ * stream URL / favourite flag from a merged row only when it lacks
+ * that value itself. A row is never dropped when its identity is
+ * unproven — distinct channels that merely share a name survive and
+ * are labelled distinctly by disambiguateLivetvDisplayNames.
+ */
+export function dedupeLivetvChannels(
+  channels: readonly LivetvChannel[],
+): LivetvChannel[] {
+  const byId = new Map<string, DedupeMergeTarget>();
+  const byUrl = new Map<string, DedupeMergeTarget>();
+  const byNameTvg = new Map<string, DedupeMergeTarget>();
+  const targets: DedupeMergeTarget[] = [];
+  const out: LivetvChannel[] = [];
+
+  const nameTvgKey = (channel: LivetvChannel): string | null =>
+    channel.tvgId
+      ? `${normaliseChannelName(channel.name)}|${channel.tvgId.toLowerCase()}`
+      : null;
+
+  const register = (channel: LivetvChannel): DedupeMergeTarget => {
+    const target: DedupeMergeTarget = { kept: channel, mergedIds: [] };
+    targets.push(target);
+    byId.set(String(channel.id), target);
+    if (channel.streamUrl) byUrl.set(channel.streamUrl, target);
+    const key = nameTvgKey(channel);
+    if (key) byNameTvg.set(key, target);
+    out.push(channel);
+    return target;
+  };
+
+  const mergeInto = (target: DedupeMergeTarget, row: LivetvChannel): void => {
+    const kept = target.kept;
+    target.mergedIds.push(row.id);
+    if (!kept.logo && row.logo) kept.logo = row.logo;
+    if (!kept.tvgId && row.tvgId) kept.tvgId = row.tvgId;
+    if (!kept.streamUrl && row.streamUrl) kept.streamUrl = row.streamUrl;
+    if (kept.chno == null && row.chno != null) kept.chno = row.chno;
+    if (row.favourite) kept.favourite = true;
+    // A merged row is hidden only when every copy is hidden; a
+    // visible copy must never be swallowed by a hidden one.
+    kept.hidden = kept.hidden && row.hidden;
+    // A merged row's keys must keep pointing at the kept channel,
+    // so a third mirror of the same broadcast merges too.
+    byId.set(String(row.id), target);
+    if (row.streamUrl) byUrl.set(row.streamUrl, target);
+    const rowKey = nameTvgKey(row);
+    if (rowKey) byNameTvg.set(rowKey, target);
+    const keptKey = nameTvgKey(kept);
+    if (keptKey) byNameTvg.set(keptKey, target);
+  };
+
+  for (const row of channels) {
+    const idTarget = byId.get(String(row.id));
+    if (idTarget) {
+      mergeInto(idTarget, row);
+      continue;
+    }
+    const urlTarget = row.streamUrl ? byUrl.get(row.streamUrl) : undefined;
+    if (urlTarget) {
+      mergeInto(urlTarget, row);
+      continue;
+    }
+    let nameTvgTarget: DedupeMergeTarget | undefined;
+    const rowKey = nameTvgKey(row);
+    if (rowKey) nameTvgTarget = byNameTvg.get(rowKey);
+    if (
+      nameTvgTarget &&
+      !(nameTvgTarget.kept.logo && row.logo && nameTvgTarget.kept.logo !== row.logo)
+    ) {
+      mergeInto(nameTvgTarget, row);
+      continue;
+    }
+    register(row);
+  }
+
+  for (const target of targets) {
+    if (target.mergedIds.length > 0) {
+      target.kept.duplicateIds = [...target.mergedIds];
+    }
+  }
+  return out;
+}
+
+/**
+ * Label distinct channels that merely share a name so identical
+ * tiles never sit side by side: after dedupe, any kept channels
+ * whose names normalise equal get a qualifier on displayName —
+ * the provider group / region label when it differs within the
+ * group, else the channel number, else the tvg-id, else the id.
+ * The raw `name` is never rewritten; only the display label gains
+ * the qualifier. Groups of one are untouched.
+ */
+export function disambiguateLivetvDisplayNames(
+  channels: readonly LivetvChannel[],
+): LivetvChannel[] {
+  const groups = new Map<string, LivetvChannel[]>();
+  for (const channel of channels) {
+    const key = normalize(channel.displayName || channel.name);
+    const group = groups.get(key);
+    if (group) group.push(channel);
+    else groups.set(key, [channel]);
+  }
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const uniqueInGroup = (pick: (c: LivetvChannel) => string | null): boolean => {
+      const values = group.map(pick);
+      return new Set(values).size === values.length && values.every((v) => v != null && v !== "");
+    };
+    for (const channel of group) {
+      let qualifier: string | null = null;
+      if (uniqueInGroup((c) => c.categoryLabel || null)) {
+        qualifier = channel.categoryLabel;
+      } else if (uniqueInGroup((c) => (c.chno != null ? String(c.chno) : null))) {
+        qualifier = `CH ${channel.chno}`;
+      } else if (uniqueInGroup((c) => c.tvgId)) {
+        qualifier = channel.tvgId;
+      } else {
+        qualifier = `#${channel.id}`;
+      }
+      channel.displayName = `${channel.name} — ${qualifier}`;
+    }
+  }
+  return [...channels];
+}
+
 // ── Mapping (pure core of loadLivetvChannels) ───────────────────
 
 export function mapLivetvChannels(
@@ -290,7 +466,11 @@ export function mapLivetvChannels(
           : normalize(`${name} ${categoryLabel} ${tvgId ?? ""}`),
     });
   }
-  return out;
+  // Providers re-list the same broadcast under several rows
+  // (quality mirrors, re-listed entries): collapse true duplicates
+  // on reliable identity, then label the distinct same-name
+  // channels that remain so identical tiles never sit side by side.
+  return disambiguateLivetvDisplayNames(dedupeLivetvChannels(out));
 }
 
 /** Active playlist id, or "" when no playlist is active. */
@@ -367,6 +547,23 @@ export interface LivetvHomeData {
 export async function loadLivetvHomeData(
   playlistId: string,
 ): Promise<LivetvHomeData> {
+  // W7: the engine hydrates the channel cache from IndexedDB at
+  // boot, but Home used to read the in-memory map before that
+  // landed — on a cold load it rendered "No live playlist
+  // connected" with a warm cache sitting in IndexedDB, and nothing
+  // ever re-rendered. Wait for hydration first (a no-op once the
+  // cache is already in memory); a hydration failure still falls
+  // through to the empty read, never breaks Home.
+  if (playlistId) {
+    try {
+      await Promise.allSettled([
+        hydrateCache(playlistId, "live"),
+        hydrateCache(playlistId, "m3u"),
+      ]);
+    } catch {
+      // See above: Home degrades to the empty read.
+    }
+  }
   const channels = await loadLivetvChannels(playlistId);
   let recents: LivetvRecentEntry[] = [];
   try {
@@ -400,7 +597,13 @@ export async function loadLivetvHomeData(
   };
 }
 
-/** Active playlist id from the xt_playlists blob (same rule TvChannelList used). "" when none. */
+/**
+ * Active playlist id from the xt_playlists blob (same rule TvChannelList used). "" when none.
+ * When the stored selection matches no entry (stale selectedId),
+ * the first entry wins over showing the provider-empty state for
+ * a playlist that is really there — Home must not strand itself
+ * on a dead selection.
+ */
 export function readActivePlaylistId(): string {
   try {
     if (typeof localStorage === "undefined") return "";
@@ -409,7 +612,9 @@ export function readActivePlaylistId(): string {
     const parsed = JSON.parse(raw);
     const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
     const selected = entries.find((e: { _id?: string }) => e && e._id === parsed?.selectedId);
-    return selected ? String(selected._id) : "";
+    const fallback = entries.find((e: { _id?: string }) => e && e._id);
+    const entry = selected ?? fallback;
+    return entry ? String(entry._id) : "";
   } catch {
     return "";
   }
@@ -694,8 +899,13 @@ export interface ResumeHeroPick {
  * last watched channel first ("Resume Watching"); else a favourite
  * with a live programme now, else any favourite ("Favourite
  * Channel"); else the first channel with a live programme now
- * ("On Now"). Null when there is nothing real to feature — the
- * hero is hidden, never invented.
+ * ("On Now"); else — first run with no history, no favourites and
+ * no EPG coverage — a credible featured channel from the catalogue
+ * ("Featured Channel"), preferring a local channel with a logo.
+ * Null only when there are no channels at all. The hero must never
+ * be a bare wall of logos on first run: a real channel is real
+ * data, and programme lines still come from real EPG only (the
+ * shell shows "Live TV" when there is no current programme).
  */
 export function pickResumeHero(
   channels: readonly LivetvChannel[],
@@ -716,6 +926,38 @@ export function pickResumeHero(
     (c) => nowNextForChannel(c, programmes, playlistId, atMs).current,
   );
   if (liveNow) return { channel: liveNow, eyebrow: "On Now" };
+  const featured =
+    channels.find((c) => isLocalChannel(c) && c.logo) ??
+    channels.find((c) => c.logo) ??
+    channels[0];
+  if (featured) return { channel: featured, eyebrow: "Featured Channel" };
+  return null;
+}
+
+export interface CollectionNowPlaying {
+  channelName: string;
+  programmeTitle: string;
+}
+
+/**
+ * The first live programme in a collection, from real EPG only
+ * (null when the guide covers nothing in the group). Scans at most
+ * the first 100 channels so a 15,000-channel group never pays for
+ * a full EPG sweep to fill one card line. Never invents a
+ * programme.
+ */
+export function collectionNowPlaying(
+  group: LivetvGroup,
+  programmes: Map<string, Programme[]> | { programmes?: Map<string, Programme[]> } | null | undefined,
+  playlistId: string = "",
+  atMs: number = Date.now(),
+): CollectionNowPlaying | null {
+  for (const channel of group.channels.slice(0, 100)) {
+    const nn = nowNextForChannel(channel, programmes, playlistId, atMs);
+    if (nn.current) {
+      return { channelName: channel.displayName, programmeTitle: nn.current.title };
+    }
+  }
   return null;
 }
 

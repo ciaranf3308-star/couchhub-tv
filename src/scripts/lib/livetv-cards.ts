@@ -16,6 +16,7 @@ import {
   programmeProgress,
   epgTimeRangeLabel,
 } from "./couch-livetv-epg";
+import { fallbackMarkFor } from "./couch-image";
 import type { LivetvChannel } from "./livetv-data";
 
 export interface ChannelCardRenderOptions {
@@ -60,9 +61,12 @@ function logoBox(channel: Pick<LivetvChannel, "logo" | "displayName" | "name">):
 }
 
 function initialMark(label: string): HTMLElement {
+  // Branded fallback from the shared couch-image helper (W7
+  // consumes it — the "N" brand mark for logos; the channel name
+  // sits beside the logo in every card, so no info is lost).
   const mark = el("span", "rs-livetv-channel-card__initial");
   mark.setAttribute("aria-hidden", "true");
-  mark.textContent = (label || "?").slice(0, 1);
+  mark.textContent = fallbackMarkFor("logo", label);
   return mark;
 }
 
