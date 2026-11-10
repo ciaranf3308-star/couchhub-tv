@@ -12,8 +12,9 @@
 // come from html[data-livetv-mode]; a focused text field switches to
 // the minimal editing legend (only B + View+Menu work while typing,
 // per gamepad.ts) and focus on an on-screen keyboard key switches to
-// the OSK legend (A types, B deletes — X "clears" is dead, see
-// couch-button-hints.ts *9, so it is never shown). The legend hides while a modal dialog owns input,
+// the OSK legend (A types, B deletes, X clears — the clear poll is
+// scoped to [data-couch-keyboard], see couch-button-hints.ts *9).
+// The legend hides while a modal dialog owns input,
 // and in fullscreen playback while the OSD or any playback overlay
 // (options / Quick Surf / channel browser / error) is visible — those
 // surfaces already name their own keys (OSD shortcuts line, overlay

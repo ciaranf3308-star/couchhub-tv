@@ -47,12 +47,12 @@
 //     focused         (— on Search)
 //   (*9) On-screen keyboard focus (TvKeyboard / OnScreenKeyboard):
 //        A types the focused key, B (Escape) backspaces (the OSK's
-//        own keydown handler), D-pad moves between keys. X "clears"
-//        is DEAD: the clear poll only fires inside `.search-view`
-//        (OnScreenKeyboard.svelte) and no element in the app carries
-//        that class (SearchView's root is `.couch-search`) — so the
-//        "X clears" caption on Discover/Search is currently false.
-//        The OSK legend therefore omits X. See W6 hand-back.
+//        own keydown handler), D-pad moves between keys. X clears the
+//        query: the clear poll fires while focus is inside
+//        [data-couch-keyboard] (OnScreenKeyboard.svelte, W2 fix — the
+//        old `.search-view` scope matched nothing, so X cleared
+//        nothing before W2). The OSK legend therefore shows X Clear.
+//        See W6 hand-back + integration fix.
 //
 //   Global, every screen: D-pad / left stick moves focus; LT / RT
 //   volume works only where a video element exists (Live TV playback,
@@ -134,16 +134,17 @@ export const EDITING_HINTS: HintConfig = {
 /**
  * Legend while focus is on an on-screen keyboard key ([data-osk]).
  * A types the focused key, B backspaces (OnScreenKeyboard's own
- * keydown handler), D-pad moves between keys. X is deliberately
- * absent: the clear poll is scoped to `.search-view`, a class no
- * element carries, so X currently clears nothing. Y goes to Search
- * except on the Search screen itself, where it is a no-op.
+ * keydown handler), X clears the query (the clear poll fires while
+ * focus is inside [data-couch-keyboard] — W2 fix). D-pad moves
+ * between keys. Y goes to Search except on the Search screen
+ * itself, where it is a no-op.
  */
 export function hintsForOsk(view: string | null | undefined): HintConfig {
   const items: HintItem[] = [
     { glyph: "dpad", label: "Move" },
     { glyph: "a", label: "Type" },
     { glyph: "b", label: "Delete" },
+    { glyph: "x", label: "Clear" },
   ];
   if ((view ?? "").trim() !== "search") {
     items.push({ glyph: "y", label: "Search" });

@@ -20,10 +20,12 @@
 // without duplicating any data fetching. The standalone pages are
 // untouched and keep working.
 //
-// Search entry: #browse-search-slot is a clearly-marked placeholder —
-// W2 builds the search button and the integration wires it in.
+// Search entry: #browse-search-slot mounts W2's TvSearchAction
+// (client:load — the focus-restore on the return trip from /search
+// needs hydration; the link still navigates pre-hydration).
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import DiscoverView from "@/components/DiscoverView.svelte";
+import TvSearchAction from "@/components/couch/TvSearchAction.svelte";
 import TvDialog from "@/components/couch/TvDialog.astro";
 import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
@@ -77,11 +79,10 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       </button>
     </div>
 
-    <!--
-      SEARCH SLOT (W2): the Browse search button mounts here.
-      Placeholder only — W1 does not build a search button.
-    -->
-    <div id="browse-search-slot" data-browse-search-slot></div>
+    <!-- SEARCH SLOT: W2's TvSearchAction mounts here (client:load). -->
+    <div id="browse-search-slot" data-browse-search-slot>
+      <TvSearchAction client:load />
+    </div>
   </div>
 
   <section id="browse-discover" aria-label="Discover" hidden>

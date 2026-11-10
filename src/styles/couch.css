@@ -205,6 +205,30 @@ html[data-couch] .rs-page-title {
   margin: 0;
 }
 
+/* Legacy WelcomeCard (no-playlist Live TV Home): the global rule
+ * renders its headline in Instrument Serif italic with a white
+ * (.btn-primary is bg-fg) pill — both read as legacy desktop on
+ * Couch. In Couch scope the headline is Manrope like every other
+ * Couch title, and the actions use the Couch primary/secondary
+ * buttons (burgundy accent + surface), never a white pill. */
+html[data-couch] .welcome-heading {
+  font-family: var(--rs-font-display);
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--rs-text);
+}
+html[data-couch] .welcome-actions .btn-primary {
+  background: var(--rs-accent);
+  color: #fff;
+  border: 1px solid var(--rs-focus);
+}
+html[data-couch] .welcome-actions .btn {
+  background: var(--rs-surface);
+  color: var(--rs-text);
+  border: 1px solid var(--rs-line);
+}
+
 html[data-couch] .rs-meta {
   font-size: var(--rs-meta-size); /* 18px */
   line-height: 1.4;

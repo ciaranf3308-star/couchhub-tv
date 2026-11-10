@@ -225,40 +225,43 @@ describe("editing + fallback", () => {
     expect(labelsOf(EDITING_HINTS)).toEqual(["Back", "Return home"]);
   });
 
-  it("on-screen keyboard focus: Type / Delete, no X (clear is dead)", () => {
+  it("on-screen keyboard focus: Type / Delete / Clear (W2 fixed the scope)", () => {
     // A types the focused key, B backspaces (OnScreenKeyboard's own
-    // keydown handler). X "clears" is dead: the poll only fires inside
-    // `.search-view` and no element carries that class — see the
-    // source test below. Y goes to Search except on Search itself.
+    // keydown handler). X clears: the poll fires while focus is
+    // inside [data-couch-keyboard] (W2 fix — the old `.search-view`
+    // scope matched nothing, so X cleared nothing before W2). Y goes
+    // to Search except on Search itself.
     const discover = hintsForView("discover", { osk: true });
     expect(discover.id).toBe("osk");
-    expect(glyphsOf(discover)).toEqual(["dpad", "a", "b", "y", "menu", "view-menu"]);
+    expect(glyphsOf(discover)).toEqual(["dpad", "a", "b", "x", "y", "menu", "view-menu"]);
     expect(labelsOf(discover)).toEqual([
       "Move",
       "Type",
       "Delete",
+      "Clear",
       "Search",
       "Settings",
       "Return home",
     ]);
     const search = hintsForView("search", { osk: true });
-    expect(glyphsOf(search)).toEqual(["dpad", "a", "b", "menu", "view-menu"]);
-    expect(configHasGlyph(search, "x")).toBe(false);
-    expect(configHasGlyph(discover, "x")).toBe(false);
+    expect(glyphsOf(search)).toEqual(["dpad", "a", "b", "x", "menu", "view-menu"]);
+    expect(configHasGlyph(search, "x")).toBe(true);
+    expect(configHasGlyph(discover, "x")).toBe(true);
   });
 
   it("editing wins over OSK focus (an input owns the controller)", () => {
     expect(hintsForView("search", { editing: true, osk: true }).id).toBe("editing");
   });
 
-  it("X-clear poll is scoped to a class nothing carries (W6 bug report)", () => {
+  it("X-clear poll is scoped to the live keyboard wrapper (W2 fix)", () => {
     // OnScreenKeyboard.svelte polls gamepad X and clears only when
-    // focus is inside `.search-view`. SearchView's root is
-    // `.couch-search`; nothing in src/ uses `search-view` as a
-    // class, so X never clears. If W2 fixes the scope, this test
-    // must be updated together with the OSK config above.
+    // focus is inside [data-couch-keyboard] (TvKeyboard's wrapper).
+    // Before W2 the poll was scoped to `.search-view`, a class no
+    // element carried, so X cleared nothing — that scope must never
+    // come back.
     const osk = read("src/components/OnScreenKeyboard.svelte");
-    expect(osk).toContain('closest?.(".search-view")');
+    expect(osk).toContain('closest?.("[data-couch-keyboard]")');
+    expect(osk).not.toContain('".search-view"');
     expect(read("src/components/SearchView.svelte")).not.toContain("search-view");
     const hits = read("src/components/DiscoverView.svelte").match(/search-view/g) ?? [];
     expect(hits.length).toBe(0);

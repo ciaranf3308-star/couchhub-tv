@@ -1,28 +1,23 @@
-// Controller-navigable Year + Rating chip filters for the /movies and
-// /series full-library grids.
+// Pure Year + Rating filter helpers for the Browse movies/series
+// grids (couch-movies.ts / couch-series.ts).
 //
-// Genre already has a controller-navigable filter on both pages (the
-// category picker, including the genre categories from the genre index),
-// so this module adds the two missing axes: release decade and minimum
-// rating. Chips are plain <button>s, so D-pad / spatial navigation moves
-// between them and A selects — no hover-only or mouse-only control.
+// The legacy controller-navigable chip system that used to live here
+// (mountBrowseFilters) is gone: its only callers were the legacy
+// standalone /movies and /series entry scripts (movies.ts /
+// series.ts), deleted in the 0.8.0 Browse consolidation when those
+// pages became redirects into /browse. Browse now filters with one
+// labelled Genre select + Sort / Decade / Rating selects — no
+// per-value pill chips. The pure helpers below stay: the Browse
+// adapters use parseYear / yearMatches / ratingMatches, and
+// computeYearOptions lists the decades actually present in a catalog.
 //
 // Filters are per-playlist + per-kind, persisted in preferences.js
-// (browseFilters), and apply at the display-group level in the page's
-// applyFilter() — the same level hide-watched and the language filter
-// use — so a filter can never hide a variant the group display entry
-// still represents. "All" is always the default, so nothing in the
-// library can become unfindable through these filters.
-import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
-import {
-  getBrowseYearFilter,
-  setBrowseYearFilter,
-  getBrowseMinRating,
-  setBrowseMinRating,
-} from "@/scripts/lib/preferences.js"
+// (browseFilters), and apply at the display-group level in the
+// adapter's filter — the same level hide-watched and the language
+// filter use — so a filter can never hide a variant the group
+// display entry still represents. "All" is always the default, so
+// nothing in the library can become unfindable through these filters.
 import { ratingSortValue } from "@/scripts/lib/format.js"
-
-export type BrowseKind = "vod" | "series"
 
 /** Decade keys, newest first. "older" means before 1980. */
 export const YEAR_ORDER = ["2030s", "2020s", "2010s", "2000s", "1990s", "1980s", "older"]
@@ -64,170 +59,4 @@ export function computeYearOptions(entries: Array<{ year?: unknown }>): string[]
     if (year != null) present.add(decadeKeyForYear(year))
   }
   return YEAR_ORDER.filter((key) => present.has(key))
-}
-
-const CHIP_BASE =
-  // v0.3.0 (w7) — RedSilk chips: warm surface, wine focus glow.
-  "browse-filter-chip rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors " +
-  "outline-none border min-h-9 bg-surface " +
-  "hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent " +
-  "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
-const CHIP_ACTIVE =
-  "bg-accent-soft text-accent border-accent shadow-[0_0_18px_-2px_var(--nylah-focus-glow)]"
-const CHIP_IDLE = "text-fg-2 border-line"
-
-export interface BrowseFiltersHandle {
-  /** Rebuild the year chips from the loaded catalog (decades present). */
-  refreshYears(entries: Array<{ year?: unknown }>): void
-  /** Re-read stored filters (e.g. after a playlist switch) and repaint. */
-  sync(): void
-  getYear(): string
-  getMinRating(): number
-}
-
-export function mountBrowseFilters(opts: {
-  kind: BrowseKind
-  containerId: string
-  getActivePlaylistId: () => string
-  onChange: () => void
-}): BrowseFiltersHandle | null {
-  const containerEl = document.getElementById(opts.containerId)
-  if (!containerEl) return null
-  // Non-null alias: TS does not carry the getElementById guard into the
-  // render() closure below, so keep the narrowed type explicit.
-  const container: HTMLElement = containerEl
-
-  let yearOptions: string[] = []
-  let yearGroupEl: HTMLElement | null = null
-  let ratingGroupEl: HTMLElement | null = null
-  let resetBtn: HTMLButtonElement | null = null
-
-  const getYear = () => getBrowseYearFilter(opts.getActivePlaylistId(), opts.kind)
-  const getMinRating = () => getBrowseMinRating(opts.getActivePlaylistId(), opts.kind)
-
-  function yearLabel(key: string): string {
-    if (!key) return t("list.filterYearAll")
-    if (key === "older") return t("list.filterYearOlder")
-    return key
-  }
-
-  function ratingLabel(minRating: number): string {
-    if (!minRating) return t("list.filterRatingAll")
-    return t("list.filterRatingMin", { n: minRating })
-  }
-
-  function makeChip(
-    label: string,
-    active: boolean,
-    ariaLabel: string,
-    onClick: () => void,
-  ): HTMLButtonElement {
-    const btn = document.createElement("button")
-    btn.type = "button"
-    btn.className = `${CHIP_BASE} ${active ? CHIP_ACTIVE : CHIP_IDLE}`
-    btn.setAttribute("aria-pressed", String(active))
-    btn.setAttribute("aria-label", ariaLabel)
-    btn.textContent = label
-    btn.addEventListener("click", onClick)
-    return btn
-  }
-
-  function render() {
-    const activeYear = getYear()
-    const activeRating = getMinRating()
-    container.replaceChildren()
-
-    const wrap = document.createElement("div")
-    wrap.className = "flex flex-wrap items-center gap-x-5 gap-y-2"
-
-    // Year group.
-    yearGroupEl = document.createElement("div")
-    yearGroupEl.className = "flex flex-wrap items-center gap-1.5"
-    yearGroupEl.setAttribute("role", "group")
-    yearGroupEl.setAttribute("aria-label", t("list.filterYear"))
-    const yearTitle = document.createElement("span")
-    yearTitle.className = "text-xs font-medium uppercase tracking-wide text-fg-3 px-1"
-    yearTitle.textContent = t("list.filterYear")
-    yearGroupEl.appendChild(yearTitle)
-    const yearKeys = ["", ...yearOptions]
-    for (const key of yearKeys) {
-      const label = yearLabel(key)
-      yearGroupEl.appendChild(
-        makeChip(label, key === activeYear, label, () => {
-          setBrowseYearFilter(opts.getActivePlaylistId(), opts.kind, key)
-          render()
-          opts.onChange()
-        }),
-      )
-    }
-    wrap.appendChild(yearGroupEl)
-
-    // Rating group.
-    ratingGroupEl = document.createElement("div")
-    ratingGroupEl.className = "flex flex-wrap items-center gap-1.5"
-    ratingGroupEl.setAttribute("role", "group")
-    ratingGroupEl.setAttribute("aria-label", t("list.filterRating"))
-    const ratingTitle = document.createElement("span")
-    ratingTitle.className = "text-xs font-medium uppercase tracking-wide text-fg-3 px-1"
-    ratingTitle.textContent = t("list.filterRating")
-    ratingGroupEl.appendChild(ratingTitle)
-    for (const minRating of RATING_OPTIONS) {
-      const label = ratingLabel(minRating)
-      ratingGroupEl.appendChild(
-        makeChip(label, minRating === activeRating, label, () => {
-          setBrowseMinRating(opts.getActivePlaylistId(), opts.kind, minRating)
-          render()
-          opts.onChange()
-        }),
-      )
-    }
-    wrap.appendChild(ratingGroupEl)
-
-    // Reset — only when a filter is actually active.
-    resetBtn = document.createElement("button")
-    resetBtn.type = "button"
-    resetBtn.className =
-      "rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors outline-none " +
-      "border border-line bg-surface text-fg-2 min-h-9 " +
-      "hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent " +
-      "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
-    resetBtn.textContent = t("list.filterReset")
-    resetBtn.addEventListener("click", () => {
-      setBrowseYearFilter(opts.getActivePlaylistId(), opts.kind, "")
-      setBrowseMinRating(opts.getActivePlaylistId(), opts.kind, 0)
-      render()
-      opts.onChange()
-    })
-    resetBtn.hidden = !activeYear && !activeRating
-    wrap.appendChild(resetBtn)
-
-    container.appendChild(wrap)
-    window.SpatialNavigation?.makeFocusable?.()
-  }
-
-  function refreshYears(entries: Array<{ year?: unknown }>): void {
-    const next = computeYearOptions(entries)
-    const changed =
-      next.length !== yearOptions.length ||
-      next.some((key, i) => key !== yearOptions[i])
-    if (!changed) return
-    yearOptions = next
-    // A stored decade with no titles in this catalog resets to All rather
-    // than silently filtering everything out.
-    if (getYear() && !yearOptions.includes(getYear())) {
-      setBrowseYearFilter(opts.getActivePlaylistId(), opts.kind, "")
-    }
-    render()
-  }
-
-  function sync(): void {
-    render()
-  }
-
-  // Re-render labels when the locale changes (chips are built DOM, not
-  // Astro markup, so the i18n pass does not rewrite them).
-  document.addEventListener(LOCALE_EVENT, render)
-
-  render()
-  return { refreshYears, sync, getYear, getMinRating }
 }
