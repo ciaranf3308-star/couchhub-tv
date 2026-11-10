@@ -219,11 +219,11 @@
   {#if loading && !entries.length}
     <div class="text-sm text-fg-3 px-1">{tr("common.loading")}</div>
   {:else if !entries.length}
-    <div class="rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
+    <div class="w7-empty rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
       {tr("watchlist.helperEmpty")}
     </div>
   {:else if !visible.length}
-    <div class="rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
+    <div class="w7-empty rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
       {tr("watchlist.helperFiltered")}
     </div>
   {:else}
@@ -266,7 +266,7 @@
             <div class="h-full w-full flex flex-col items-center justify-center gap-2 px-3
                         text-fg-3 bg-linear-to-br from-surface-2 to-surface-3">
               <span class="size-7 opacity-60 inline-flex items-center justify-center" aria-hidden="true">{@html KIND_ICON_SVG[entry.kind]}</span>
-              <span class="text-2xs text-center truncate max-w-full">{entry.name}</span>
+              <span class="font-serif text-xs text-center truncate max-w-full">{entry.name}</span>
             </div>
           {/if}
 
@@ -294,10 +294,35 @@
 {/if}
 
 <style>
+  /* Nylah Studios v0.3.0 (w7) — RedSilk treatment: warm gradient cards,
+     layered wine shadow, lit active chips, serif empty panels. */
+  .fav-card {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
+  .fav-card:hover,
+  .fav-card:focus-visible {
+    box-shadow:
+      0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+      var(--nylah-card-shadow-lift, 0 18px 44px -16px var(--nylah-focus-glow));
+  }
   .filter-chip.active {
-    background: var(--color-surface-2);
-    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    border-color: var(--nylah-focus-ring, var(--color-accent));
     color: var(--color-fg);
+    box-shadow: 0 0 16px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .filter-chip:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .w7-empty {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    font-size: 1.0625rem;
+    text-align: center;
   }
   /* Touch / TV-remote: bump chip to 44px tap target. */
   @media (pointer: coarse) {
@@ -305,6 +330,12 @@
       padding-top: 0.5rem;
       padding-bottom: 0.5rem;
       min-height: 2.75rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fav-card,
+    .filter-chip.active {
+      box-shadow: none;
     }
   }
 </style>

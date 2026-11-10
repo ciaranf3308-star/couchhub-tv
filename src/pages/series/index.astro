@@ -27,7 +27,7 @@ import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@t
 				type="button"
 				aria-haspopup="dialog"
 				aria-controls="series-category-picker-dialog"
-				class="rounded-xl border border-line bg-surface px-3.5 py-2 min-h-11 text-sm flex items-center gap-2 text-left
+				class="browse-toolbar-btn rounded-xl border border-line bg-surface px-3.5 py-2 min-h-11 text-sm flex items-center gap-2 text-left
 					sm:w-60 lg:w-72 shrink-0
 					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
 				<span data-i18n="list.category" class="text-fg-3 shrink-0">Category</span>
@@ -83,7 +83,7 @@ import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@t
 					data-i18n-attr="aria-label:surprise.buttonAria;title:surprise.buttonAria"
 					aria-label="Surprise me with a random title"
 					title="Surprise me with a random title"
-					class="rounded-xl border border-line bg-surface min-h-11 text-sm shrink-0
+					class="browse-toolbar-btn rounded-xl border border-line bg-surface min-h-11 text-sm shrink-0
 						flex items-center justify-center w-11 px-0 gap-0 xl:w-auto xl:px-3.5 xl:gap-2
 						hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
 					<IconDice5 aria-hidden="true" stroke={2} class="size-4 text-fg-3 shrink-0" />
@@ -142,4 +142,47 @@ import { IconAdjustmentsHorizontal, IconChevronDown, IconDice5, IconX } from "@t
 		import "@/scripts/series/series.ts";
 		import "@/scripts/updater-startup.js";
 	</script>
+
+	<style>
+		/* Nylah Studios v0.3.0 (w7) — RedSilk browse treatment. Layout,
+		   navigation and behavior unchanged; surfaces only. */
+		.route-hero__title {
+			font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+		}
+		/* Toolbar buttons: warm gradient, layered shadow, wine focus glow. */
+		.browse-toolbar-btn {
+			background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+			box-shadow: var(--nylah-card-shadow, 0 8px 24px -12px var(--nylah-focus-glow));
+		}
+		.browse-toolbar-btn:hover,
+		.browse-toolbar-btn:focus-visible {
+			border-color: var(--nylah-focus-ring, var(--color-accent));
+			box-shadow:
+				0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+				0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+		}
+		/* Grid empty state is rendered by series.ts into #series-grid — the
+		   :global() hook lets this scoped block grade it: a warm panel with
+		   a serif line instead of a bare grey sentence. */
+		:global(#series-grid > .col-span-full) {
+			background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+			border: 1px solid var(--color-line);
+			border-radius: 1rem;
+			box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+			padding: 2.5rem 1.25rem;
+			font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+			font-size: 1.0625rem;
+			color: var(--color-fg-2);
+		}
+		/* Loading skeletons (renderPosterSkeletons in grid-view.ts): depth
+		   under the shimmer wave. */
+		:global(#series-grid [data-skeleton]) {
+			box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.browse-toolbar-btn {
+				box-shadow: none;
+			}
+		}
+	</style>
 </Layout>

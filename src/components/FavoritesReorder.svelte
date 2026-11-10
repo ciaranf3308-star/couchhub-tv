@@ -207,7 +207,7 @@
     {#each KIND_ORDER as kind}
       {#if lists[kind].length}
         <div class="flex flex-col gap-1.5">
-          <div class="sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 py-1.5 bg-surface/95 backdrop-blur-sm border-b border-line/60 text-eyebrow font-semibold uppercase tracking-wide text-fg-3">
+          <div class="reorder-kind-head sticky top-0 z-10 -mx-5 sm:-mx-6 px-5 sm:px-6 py-1.5 bg-surface/95 backdrop-blur-sm border-b border-line/60 text-eyebrow font-semibold uppercase tracking-wide text-fg-3">
             {klp(kind)}
           </div>
           <ul class="flex flex-col gap-1">
@@ -267,12 +267,28 @@
 </div>
 
 <style>
+  /* Nylah Studios v0.3.0 (w7) — RedSilk treatment: warm gradient rows,
+     wine drop-target glow, serif kind headings, lit arrow focus. */
+  .reorder-row {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
+    box-shadow: var(--nylah-card-shadow, 0 6px 18px -10px var(--nylah-focus-glow));
+  }
+  .reorder-kind-head {
+    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+  }
+  .reorder-arrow:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 14px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
   .reorder-row.is-dragging {
     opacity: 0.4;
   }
   .reorder-row.is-drop-target {
-    border-color: var(--color-accent);
-    box-shadow: 0 0 0 1px var(--color-accent) inset;
+    border-color: var(--nylah-focus-ring, var(--color-accent));
+    box-shadow:
+      inset 0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 18px 2px var(--nylah-focus-glow, var(--color-accent-soft));
   }
 
   .reorder-row.is-settling {

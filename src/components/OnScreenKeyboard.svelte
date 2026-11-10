@@ -159,18 +159,41 @@
 </div>
 
 <style>
+  /* Nylah Studios v0.3.0 (w7) — RedSilk keyboard: warm gradient keys +
+     tray, wine focus glow, lit Search key. */
+  .osk {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
+  .osk-key[data-osk-key],
+  .osk-key[data-osk-action="backspace"],
+  .osk-key[data-osk-action="space"] {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface-3)));
+  }
+  .osk-key[data-osk-action="clear"] {
+    box-shadow: 0 0 14px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .osk-key[data-osk-action="search"] {
+    background: linear-gradient(180deg, var(--nylah-wine, var(--color-accent)), var(--nylah-wine-deep, var(--color-accent)));
+    box-shadow: var(--nylah-focus-glow-strong, 0 0 24px 2px var(--nylah-focus-glow));
+  }
   /* Glowing focus ring, same language as the poster cards: accent ring
      plus a soft accent halo so the focused key reads from the couch. */
   .osk-key:focus-visible {
-    border-color: var(--color-accent);
+    border-color: var(--nylah-focus-ring, var(--color-accent));
     box-shadow:
-      0 0 0 2px var(--color-accent-soft),
-      0 0 18px var(--color-accent-soft);
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 18px 2px var(--nylah-focus-glow, var(--color-accent-soft));
   }
   .osk-key:active {
     background: var(--color-accent-soft);
   }
   @media (prefers-reduced-motion: reduce) {
     .osk-key { transition: none; }
+    .osk,
+    .osk-key[data-osk-action="clear"],
+    .osk-key[data-osk-action="search"] {
+      box-shadow: none;
+    }
   }
 </style>
