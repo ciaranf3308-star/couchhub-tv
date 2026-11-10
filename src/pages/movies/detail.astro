@@ -309,35 +309,48 @@ import {
   </main>
 
   <style>
-    /* Nylah Studios v0.2.0 (w3) — detail reskin. The poster, title and
-       action buttons are in this template, so plain scoped selectors
-       match them; runtime-injected rows (cast, episodes) need :global(). */
+    /* Nylah Studios v0.3.0 (w7) — RedSilk detail treatment: wine tokens,
+       warm gradients, strong focus glow. The poster, title and action
+       buttons are in this template, so plain scoped selectors match them;
+       runtime-injected rows (cast, episodes) need :global(). */
     #movie-detail-poster {
       box-shadow:
         0 0 0 1px var(--color-line),
-        0 24px 64px -24px color-mix(in oklch, var(--color-accent) 55%, transparent);
+        var(--nylah-card-shadow-lift, 0 24px 64px -24px var(--nylah-focus-glow));
+    }
+    /* Hero wraps: same depth treatment, video black stays black. */
+    #movie-detail-player-wrap,
+    #movie-detail-trailer-wrap {
+      box-shadow:
+        0 0 0 1px var(--color-line),
+        var(--nylah-card-shadow, 0 18px 48px -16px var(--nylah-focus-glow));
+    }
+    /* Play is the hero action: wine gradient + strong wine glow. */
+    #movie-detail-play {
+      background: linear-gradient(180deg, var(--nylah-wine, var(--color-accent)), var(--nylah-wine-deep, var(--color-accent)));
+      box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
     }
     /* Controller-first focus glow on every action button. */
     .btn:focus-visible {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 24px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     #movie-detail-play:focus-visible {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 32px 6px color-mix(in oklch, var(--color-accent) 55%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        var(--nylah-focus-glow-strong, 0 0 32px 6px var(--nylah-focus-glow));
     }
     /* Cast cards are injected by detail-chrome.ts: a focused card glows. */
     :global(#movie-detail-cast-list a:focus-visible) {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     :global(#movie-detail-similar-list a:focus-visible) {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     @media (prefers-reduced-motion: reduce) {
       #movie-detail-poster,
@@ -351,7 +364,7 @@ import {
       #movie-detail-play:focus-visible,
       :global(#movie-detail-cast-list a:focus-visible),
       :global(#movie-detail-similar-list a:focus-visible) {
-        box-shadow: 0 0 0 2px var(--color-accent);
+        box-shadow: 0 0 0 2px var(--nylah-focus-ring, var(--color-accent));
       }
     }
   </style>

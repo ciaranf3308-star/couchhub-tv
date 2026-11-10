@@ -210,15 +210,20 @@ export function renderCastList(opts: {
   for (const member of cast) {
     const interactive = !!member.tmdbPersonId
     const card = document.createElement(interactive ? "a" : "div")
-    card.className = "flex flex-col items-center gap-1.5 w-24 sm:w-28 shrink-0 snap-start text-center rounded-lg outline-none"
+    card.className = "flex flex-col items-center gap-1.5 w-24 sm:w-28 shrink-0 snap-start text-center rounded-lg outline-none transition-[transform,box-shadow] duration-150"
     if (interactive) {
       ;(card as HTMLAnchorElement).href = buildPersonHref(member.name, member.tmdbPersonId)
-      card.classList.add("group", "cursor-pointer", "focus-visible:ring-2", "focus-visible:ring-accent")
+      // v0.3.0 (w7) — focused glow for cast links lives in the detail
+      // page's scoped :global() rules; here just the hover lift.
+      card.classList.add("group", "cursor-pointer", "hover:-translate-y-0.5", "focus-visible:ring-2", "focus-visible:ring-accent")
     }
 
     const photoWrap = document.createElement("div")
     photoWrap.className =
-      "size-20 sm:size-24 rounded-full overflow-hidden bg-surface-2 ring-1 ring-line flex items-center justify-center text-fg-3"
+      // v0.3.0 (w7) — warm gradient + soft wine shadow behind the portrait
+      // (visible while the photo loads, and as the fallback disc).
+      "size-20 sm:size-24 rounded-full overflow-hidden bg-surface-2 bg-linear-to-br from-surface-2 to-surface-3 " +
+      "ring-1 ring-line shadow-[0_8px_20px_-8px_var(--nylah-focus-glow)] flex items-center justify-center text-fg-3"
     const profileUrl = castProfileUrl(member.profilePath)
     if (profileUrl) {
       const img = document.createElement("img")
@@ -273,8 +278,10 @@ export function renderProviderPeopleChipRow(opts: {
     const chip = document.createElement("a")
     chip.href = buildPersonHref(name, null)
     chip.className =
-      "rounded-full border border-line px-2 py-0.5 text-xs text-fg-2 " +
-      "hover:text-accent hover:border-accent focus-visible:text-accent focus-visible:border-accent outline-none transition-colors"
+      // v0.3.0 (w7) — warm chip + wine focus glow.
+      "rounded-full border border-line bg-surface px-2 py-0.5 text-xs text-fg-2 " +
+      "hover:text-accent hover:border-accent hover:bg-surface-2 " +
+      "focus-visible:text-accent focus-visible:border-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)] outline-none transition-colors"
     chip.textContent = name
     listEl.appendChild(chip)
   }
@@ -432,10 +439,12 @@ export function renderLanguagePills(opts: {
     const isCurrent = entryId === item.id
     const pill = document.createElement(isCurrent ? "span" : "a")
     pill.className =
+      // v0.3.0 (w7) — current variant reads as lit wine; others warm + glow on focus.
       "rounded-full border px-2 py-0.5 text-xs outline-none transition-colors " +
       (isCurrent
-        ? "border-accent text-accent"
-        : "border-line text-fg-2 hover:text-accent hover:border-accent focus-visible:text-accent focus-visible:border-accent")
+        ? "border-accent bg-accent-soft text-accent shadow-[0_0_14px_-2px_var(--nylah-focus-glow)]"
+        : "border-line bg-surface text-fg-2 hover:text-accent hover:border-accent hover:bg-surface-2 " +
+          "focus-visible:text-accent focus-visible:border-accent focus-visible:shadow-[0_0_14px_var(--nylah-focus-glow)]")
     pill.textContent = text
     if (isCurrent) pill.setAttribute("aria-current", "true")
     else (pill as HTMLAnchorElement).href = `${detailHrefBase}?id=${encodeURIComponent(entryId)}`

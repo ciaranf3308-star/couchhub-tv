@@ -67,10 +67,13 @@ export function computeYearOptions(entries: Array<{ year?: unknown }>): string[]
 }
 
 const CHIP_BASE =
+  // v0.3.0 (w7) — RedSilk chips: warm surface, wine focus glow.
   "browse-filter-chip rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors " +
-  "outline-none border min-h-9 " +
-  "hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent"
-const CHIP_ACTIVE = "bg-accent-soft text-accent border-accent"
+  "outline-none border min-h-9 bg-surface " +
+  "hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent " +
+  "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
+const CHIP_ACTIVE =
+  "bg-accent-soft text-accent border-accent shadow-[0_0_18px_-2px_var(--nylah-focus-glow)]"
 const CHIP_IDLE = "text-fg-2 border-line"
 
 export interface BrowseFiltersHandle {
@@ -185,8 +188,9 @@ export function mountBrowseFilters(opts: {
     resetBtn.type = "button"
     resetBtn.className =
       "rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors outline-none " +
-      "border border-line text-fg-2 min-h-9 " +
-      "hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent"
+      "border border-line bg-surface text-fg-2 min-h-9 " +
+      "hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:border-accent " +
+      "focus-visible:shadow-[0_0_16px_var(--nylah-focus-glow)]"
     resetBtn.textContent = t("list.filterReset")
     resetBtn.addEventListener("click", () => {
       setBrowseYearFilter(opts.getActivePlaylistId(), opts.kind, "")

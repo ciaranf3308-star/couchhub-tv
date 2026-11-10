@@ -89,8 +89,10 @@ export function setLanguageChipsOffset(posterWrap: HTMLElement, badgePresent: bo
 export function makeFallback(name?: string | null): HTMLDivElement {
   const fb = document.createElement("div")
   fb.className =
+    // v0.3.0 (w7) — no-poster fallback: serif title on a warm gradient,
+    // so a missing poster still reads as a designed card, not a hole.
     "h-full w-full flex items-center justify-center text-center px-3 " +
-    "text-fg-3 text-xs tracking-wide bg-gradient-to-br from-surface-2 to-surface-3"
+    "font-serif text-base leading-snug text-fg-2 bg-linear-to-br from-surface-2 to-surface-3"
   fb.textContent = name || t("list.noPosterFallback")
   return fb
 }
@@ -180,8 +182,11 @@ export function buildEntryCard<T extends EntryLike>(
   card.dataset.idx = String(idx)
   const stagger = idx < 12
   card.className =
-    "movie-card group relative rounded-xl overflow-hidden bg-surface-2 " +
-    "ring-1 ring-line " +
+    // v0.3.0 (w7) — RedSilk card: warm vertical gradient, layered wine
+    // shadow. Hover lift + focus glow come from .movie-card in global.css.
+    "movie-card group relative rounded-xl overflow-hidden " +
+    "bg-linear-to-b from-surface-2 to-surface " +
+    "ring-1 ring-line shadow-[var(--nylah-card-shadow,0_10px_28px_-14px_var(--nylah-focus-glow))] " +
     "transition-[transform,box-shadow] duration-150 " +
     "hover:ring-1 hover:ring-accent hover:[transform:translateY(-2px)] " +
     "focus-within:ring-1 focus-within:ring-accent focus-within:[transform:translateY(-2px)]" +

@@ -167,7 +167,7 @@
   {#if loading && !merged.length}
     <div class="text-sm text-fg-3 px-1">{tr("common.loading")}</div>
   {:else if !merged.length}
-    <div class="rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
+    <div class="w7-empty rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
       {tr("recentlyAdded.empty")}
     </div>
   {:else}
@@ -208,7 +208,7 @@
               class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
           {:else}
             <div class="h-full w-full flex items-center justify-center text-center px-3
-                        text-fg-3 text-xs tracking-wide
+                        font-serif text-sm leading-snug text-fg-2
                         bg-linear-to-br from-surface-2 to-surface-3">
               {row.item.name || kl(row.kind)}
             </div>
@@ -256,10 +256,35 @@
 {/if}
 
 <style>
+  /* Nylah Studios v0.3.0 (w7) — RedSilk treatment: warm gradient cards,
+     layered wine shadow, lit active chips, serif empty panel. */
+  .ra-card {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
+  .ra-card:hover,
+  .ra-card:focus-visible {
+    box-shadow:
+      0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+      var(--nylah-card-shadow-lift, 0 18px 44px -16px var(--nylah-focus-glow));
+  }
   .filter-chip.active {
-    background: var(--color-surface-2);
-    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+    border-color: var(--nylah-focus-ring, var(--color-accent));
     color: var(--color-fg);
+    box-shadow: 0 0 16px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .filter-chip:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .w7-empty {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    font-size: 1.0625rem;
+    text-align: center;
   }
   .aspect-2-3 { aspect-ratio: 2 / 3; }
   /* Touch / TV-remote: bump chip to 44px tap target. */
@@ -268,6 +293,12 @@
       padding-top: 0.5rem;
       padding-bottom: 0.5rem;
       min-height: 2.75rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ra-card,
+    .filter-chip.active {
+      box-shadow: none;
     }
   }
 </style>

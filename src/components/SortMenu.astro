@@ -233,3 +233,41 @@ const initialLabel =
 <script>
     import "@/scripts/lib/sort-menu.js";
 </script>
+
+<style>
+    /* Nylah Studios v0.3.0 (w7) — RedSilk menu: warm gradient trigger +
+       panel, layered shadow, wine focus glow. Behavior unchanged. */
+    [data-sort-menu-button] {
+        background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+        box-shadow: var(--nylah-card-shadow, 0 8px 24px -12px var(--nylah-focus-glow));
+    }
+    [data-sort-menu-button]:hover,
+    [data-sort-menu-button]:focus-visible,
+    [data-sort-menu-button][aria-expanded="true"] {
+        border-color: var(--nylah-focus-ring, var(--color-accent));
+        box-shadow:
+            0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+            0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+    }
+    .sort-menu__panel {
+        background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+        box-shadow:
+            var(--nylah-card-shadow-lift, 0 24px 64px -16px var(--nylah-focus-glow)),
+            0 0 0 1px var(--color-line);
+    }
+    .sort-menu__option:focus-visible {
+        box-shadow:
+            0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+            0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+    }
+    .sort-menu__option[aria-selected="true"],
+    .sort-menu__option[aria-checked="true"] {
+        box-shadow: 0 0 14px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+    }
+    @media (prefers-reduced-motion: reduce) {
+        [data-sort-menu-button],
+        .sort-menu__panel {
+            box-shadow: none;
+        }
+    }
+</style>

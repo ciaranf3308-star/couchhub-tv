@@ -53,3 +53,22 @@ const {
 		)
 	}
 </div>
+
+<style>
+	/* Nylah Studios v0.3.0 (w7) — RedSilk field: warm gradient, wine
+	   focus glow. Shared by the browse toolbars and the category dialog. */
+	input {
+		background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-bg)), var(--nylah-surface-2-warm, var(--color-surface)));
+	}
+	input:focus {
+		border-color: var(--nylah-focus-ring, var(--color-accent));
+		box-shadow:
+			0 0 0 2px var(--nylah-focus-glow, var(--color-accent-soft)),
+			0 0 20px 2px var(--nylah-focus-halo, var(--color-accent-soft));
+	}
+	@media (prefers-reduced-motion: reduce) {
+		input:focus {
+			box-shadow: none;
+		}
+	}
+</style>

@@ -311,48 +311,62 @@ import {
   </main>
 
   <style>
-    /* Nylah Studios v0.2.0 (w3) — detail reskin. Poster, title and action
-       buttons are in this template, so plain scoped selectors match them;
-       season tabs and episode rows are injected by detail.ts and need
-       :global(). */
+    /* Nylah Studios v0.3.0 (w7) — RedSilk detail treatment: wine tokens,
+       warm gradients, strong focus glow. Poster, title and action buttons
+       are in this template, so plain scoped selectors match them; season
+       tabs and episode rows are injected by detail.ts and need :global(). */
     #series-detail-poster {
       box-shadow:
         0 0 0 1px var(--color-line),
-        0 24px 64px -24px color-mix(in oklch, var(--color-accent) 55%, transparent);
+        var(--nylah-card-shadow-lift, 0 24px 64px -24px var(--nylah-focus-glow));
+    }
+    /* Hero wraps: same depth treatment, video black stays black. */
+    #series-detail-player-wrap,
+    #series-detail-trailer-wrap {
+      box-shadow:
+        0 0 0 1px var(--color-line),
+        var(--nylah-card-shadow, 0 18px 48px -16px var(--nylah-focus-glow));
+    }
+    /* Play is the hero action: wine gradient + strong wine glow. */
+    #series-detail-play {
+      background: linear-gradient(180deg, var(--nylah-wine, var(--color-accent)), var(--nylah-wine-deep, var(--color-accent)));
+      box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px var(--nylah-focus-glow));
     }
     /* Controller-first focus glow on every action button. */
     .btn:focus-visible {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 24px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     #series-detail-play:focus-visible {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 32px 6px color-mix(in oklch, var(--color-accent) 55%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        var(--nylah-focus-glow-strong, 0 0 32px 6px var(--nylah-focus-glow));
     }
     /* The episode now playing is the controller's anchor in the list. */
     :global(.episode-row[data-now-playing="true"]) {
       background: var(--color-accent-soft);
       box-shadow:
-        0 0 0 1px color-mix(in oklch, var(--color-accent) 55%, transparent),
-        0 0 20px 2px color-mix(in oklch, var(--color-accent) 25%, transparent);
+        0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     :global(.episode-row:focus-within) {
-      background: var(--color-surface-2);
-      box-shadow: 0 0 0 2px var(--color-accent);
+      background: var(--nylah-surface-2-warm, var(--color-surface-2));
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 2px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     :global(#series-season-tabs button:focus-visible) {
-      border-color: var(--color-accent);
+      border-color: var(--nylah-focus-ring, var(--color-accent));
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     :global(#series-detail-cast-list a:focus-visible),
     :global(#series-detail-similar-list a:focus-visible) {
       box-shadow:
-        0 0 0 2px var(--color-accent),
-        0 0 20px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+        0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+        0 0 20px 4px var(--nylah-focus-glow, var(--color-accent-soft));
     }
     @media (prefers-reduced-motion: reduce) {
       #series-detail-poster,
@@ -369,7 +383,7 @@ import {
       #series-detail-play:focus-visible,
       :global(.episode-row:focus-within),
       :global(#series-season-tabs button:focus-visible) {
-        box-shadow: 0 0 0 2px var(--color-accent);
+        box-shadow: 0 0 0 2px var(--nylah-focus-ring, var(--color-accent));
       }
     }
   </style>

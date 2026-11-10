@@ -27,7 +27,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				id={`${idPrefix}-close`}
 				type="button"
 				data-i18n="common.close"
-				class="rounded-lg border border-line px-4 py-2.5 min-h-11 text-sm text-fg-2
+				class="cat-dialog-close rounded-lg border border-line px-4 py-2.5 min-h-11 text-sm text-fg-2
 					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent">
 				Close
 			</button>
@@ -78,7 +78,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				data-i18n="sort.sourceOrder"
 				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
+					aria-checked:bg-accent-soft aria-checked:text-fg aria-checked:shadow-[0_0_16px_-2px_var(--nylah-focus-glow)]">
 				Source order
 			</button>
 			<button
@@ -90,7 +90,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				data-i18n="sort.az"
 				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
+					aria-checked:bg-accent-soft aria-checked:text-fg aria-checked:shadow-[0_0_16px_-2px_var(--nylah-focus-glow)]">
 				A-Z
 			</button>
 			<button
@@ -102,7 +102,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				data-i18n="sort.za"
 				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
+					aria-checked:bg-accent-soft aria-checked:text-fg aria-checked:shadow-[0_0_16px_-2px_var(--nylah-focus-glow)]">
 				Z-A
 			</button>
 		</div>
@@ -121,7 +121,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				data-i18n="livetv.cat.hide"
 				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
+					aria-checked:bg-accent-soft aria-checked:text-fg aria-checked:shadow-[0_0_16px_-2px_var(--nylah-focus-glow)]">
 				Hide selected
 			</button>
 			<button
@@ -133,7 +133,7 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 				data-i18n="livetv.cat.select"
 				class="flex-1 rounded-md px-3 py-2.5 min-h-11 font-medium transition-colors text-fg-2
 					hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent
-					aria-checked:bg-surface aria-checked:text-fg aria-checked:shadow-sm">
+					aria-checked:bg-accent-soft aria-checked:text-fg aria-checked:shadow-[0_0_16px_-2px_var(--nylah-focus-glow)]">
 				Show only selected
 			</button>
 		</div>
@@ -185,3 +185,31 @@ const { idPrefix, showSyncToggle = false } = Astro.props;
 		</div>
 	</div>
 </dialog>
+
+<style>
+	/* Nylah Studios v0.3.0 (w7) — RedSilk dialog surfaces only. Layout is
+	   the v0.2.2 flagship exactly: 46rem × 88dvh, sort/hide toggles,
+	   pinned rows (.nylah-cat-row keeps its global wine focus glow). */
+	.nylah-cat-dialog {
+		background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+		box-shadow:
+			var(--nylah-card-shadow-lift, 0 24px 64px -16px var(--nylah-focus-glow)),
+			0 0 0 1px var(--color-line);
+	}
+	.cat-sort-toggle,
+	.cat-mode-toggle {
+		background: linear-gradient(180deg, var(--nylah-surface-2-warm, var(--color-surface-2)), var(--nylah-surface-warm, var(--color-surface)));
+	}
+	.cat-dialog-close:focus-visible,
+	.cat-sort-toggle button:focus-visible,
+	.cat-mode-toggle button:focus-visible {
+		box-shadow:
+			0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+			0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.nylah-cat-dialog {
+			box-shadow: 0 0 0 1px var(--color-line);
+		}
+	}
+</style>

@@ -784,11 +784,11 @@
           </ul>
         </div>
       {/if}
-      <div class="px-4 text-center text-sm text-fg-3 max-w-md mx-auto" class:py-12={!showRecentSearches} class:py-6={showRecentSearches}>
+      <div class="search-landing px-4 text-center text-sm text-fg-3 max-w-md mx-auto" class:py-12={!showRecentSearches} class:py-6={showRecentSearches}>
         {#if isWarming}
           {@render warming(tr("search.warmingHint"))}
         {:else}
-          <p class="text-base text-fg-2 mb-1">{tr("search.helpHeading")}</p>
+          <p class="font-serif text-lg text-fg-2 mb-1">{tr("search.helpHeading")}</p>
           <p class="text-2xs">{tr("search.helpKbd")}</p>
           <p class="text-2xs mt-1">{tr("search.keyboardHint")}</p>
         {/if}
@@ -806,13 +806,13 @@
         {/each}
       </ul>
     {:else if !results.length}
-      <div class="px-4 py-12 text-center text-sm text-fg-3 max-w-md mx-auto">
+      <div class="search-no-results px-4 py-12 text-center text-sm text-fg-3 max-w-md mx-auto">
         {#if personMode}
-          <p>{tr("search.noResultsForPerson", { name: personMode.name })}</p>
+          <p class="search-no-results-text">{tr("search.noResultsForPerson", { name: personMode.name })}</p>
         {:else if isWarming}
           {@render warming(tr("search.warmingResultsHint"))}
         {:else}
-          <p>{tr("search.noResults", { query: queryDebounced.trim() })}</p>
+          <p class="search-no-results-text">{tr("search.noResults", { query: queryDebounced.trim() })}</p>
           {#if kindFilter !== "all" && kindCounts.all > 0}
             <button
               type="button"
@@ -886,7 +886,7 @@
                     class:object-cover={result.kind !== "live"}
                     class:object-contain={result.kind === "live"} />
                 {:else}
-                  <span class="flex h-full w-full items-center justify-center text-2xl font-semibold text-fg-3">{kl(result.kind)[0]}</span>
+                  <span class="flex h-full w-full items-center justify-center font-serif text-3xl text-fg-3">{kl(result.kind)[0]}</span>
                 {/if}
                 <span class="absolute bottom-1.5 left-1.5 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold uppercase tracking-wide">
                   {kl(result.kind)}
@@ -919,20 +919,76 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* Nylah Studios v0.3.0 (w7) — RedSilk search treatment: warm gradient
+     field + cards, strong wine focus glow, serif landing / no-results. */
+  .search-input-wrap {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
   .search-input-wrap:focus-within {
-    box-shadow: 0 0 0 2px var(--color-accent-soft);
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 24px 2px var(--nylah-focus-glow, var(--color-accent-soft));
   }
   /* The wrapper carries the focus ring; Layout's global input outline would draw a second, inner one. */
   .search-input-wrap input:focus-visible {
     outline: none;
   }
 
+  .filter-chip[aria-pressed="true"] {
+    box-shadow: 0 0 16px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+  .filter-chip:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+
+  /* Result cards: warm gradient + layered shadow, same language as the
+     poster cards; focused card lifts + halo. */
+  .search-result-card {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
+  .search-result-card:hover {
+    box-shadow:
+      0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
+      var(--nylah-card-shadow-lift, 0 18px 44px -16px var(--nylah-focus-glow));
+  }
+
   /* Glowing focus ring on result cards, same language as the poster
      cards: accent ring plus a soft accent halo, legible from the couch. */
   .search-result-card:focus-visible {
     box-shadow:
-      0 0 0 2px var(--color-accent-soft),
-      0 0 18px var(--color-accent-soft);
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 24px 4px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+
+  .recent-search-row:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+  }
+
+  /* Landing + no-results are surfaces too: warm panels, serif voice.
+     The v0.2.2 Clear-search escape hatch in the no-results state is
+     unchanged — only its frame is graded. */
+  .search-landing,
+  .search-no-results {
+    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
+    border: 1px solid var(--color-line);
+    border-radius: 1rem;
+    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  }
+  .search-no-results-text {
+    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    font-size: 1.0625rem;
+    color: var(--color-fg-2);
+  }
+  .search-no-results button:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
+      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
   }
 
   @media (pointer: coarse) {
@@ -951,5 +1007,11 @@
   @media (prefers-reduced-motion: reduce) {
     .result-row { animation: none; }
     .search-input-wrap { transition: none; }
+    .search-input-wrap,
+    .search-result-card,
+    .search-landing,
+    .search-no-results {
+      box-shadow: none;
+    }
   }
 </style>
