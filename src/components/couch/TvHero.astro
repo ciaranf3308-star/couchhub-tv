@@ -1,8 +1,13 @@
 ---
-// TvHero — cinematic hero.
+// TvHero — cinematic hero (W3 production pass).
 // Props: title, meta?, description?, backdrop?, backdropAlt?,
-// eyebrow?, primaryAction? { label, href }, secondaryAction? { label, href }.
+// eyebrow?, badge? (short label such as "New" or "Live" — one accent,
+// never a competing colour), primaryAction? { label, href },
+// secondaryAction? { label, href }.
 // Title is 48–64px at 1920x1080 (see couch.css .rs-hero-title).
+// The hero is 40–45% of the initial viewport; the backdrop dominates
+// the right side under the burgundy scrim (couch.css), text stays
+// left-aligned and readable. No autoplaying video, ever.
 import TvImage from "./TvImage.astro";
 
 interface HeroAction {
@@ -16,6 +21,7 @@ interface Props {
   backdrop?: string;
   backdropAlt?: string;
   eyebrow?: string;
+  badge?: string;
   primaryAction?: HeroAction;
   secondaryAction?: HeroAction;
 }
@@ -26,6 +32,7 @@ const {
   backdrop,
   backdropAlt,
   eyebrow,
+  badge,
   primaryAction,
   secondaryAction,
 } = Astro.props;
@@ -43,6 +50,7 @@ const {
   </div>
   <div class="rs-hero__scrim" aria-hidden="true"></div>
   <div class="rs-hero__content">
+    {badge && <span class="rs-hero__badge">{badge}</span>}
     {eyebrow && <span class="rs-hero__eyebrow">{eyebrow}</span>}
     <h1 class="rs-hero-title">{title}</h1>
     {meta && <p class="rs-hero__meta">{meta}</p>}
@@ -69,3 +77,23 @@ const {
     }
   </div>
 </section>
+
+<style>
+  /* Production pass — hero presence: 40–45% of the initial viewport.
+     Scoped to TvHero; the shared hero tokens stay in couch.css (W1). */
+  .rs-hero {
+    min-height: clamp(24rem, 42vh, 34rem);
+  }
+  /* Badge: same single accent as the card badge, no new colour. */
+  .rs-hero__badge {
+    align-self: flex-start;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.25rem 0.625rem;
+    border-radius: 999px;
+    background: var(--rs-accent);
+    color: var(--rs-text);
+  }
+</style>
