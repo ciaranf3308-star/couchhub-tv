@@ -513,4 +513,19 @@ describe("mountChannelBrowser", () => {
     expect(handle.getHighlightedId()).toBeNull();
     handle.destroy();
   });
+
+  it("screen mode carries its own Channel Browser title + live count (mockup 1)", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS, acceptModeEntry: true });
+    expect(root.querySelector(".rs-livetv-browser__title-text")?.textContent).toBe("Channel Browser");
+    expect(root.querySelector("[data-browser-subtitle]")?.textContent).toBe(
+      "Browse and watch live TV • 4 channels",
+    );
+    handle.destroy();
+  });
+
+  it("inline / overlay instances carry no screen title", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    expect(root.querySelector(".rs-livetv-browser__title-text")).toBeNull();
+    handle.destroy();
+  });
 });

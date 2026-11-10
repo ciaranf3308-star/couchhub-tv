@@ -190,3 +190,30 @@ describe("Quick Surf overlay open/close events", () => {
     }
   });
 });
+
+// INTEGRATION (0.9.0) — mockup 2: the surf panel is rows +
+// chevrons only. The note + six-button action grid were removed
+// (every action is a key the hint line documents, or an OSD
+// button once surf closes); the category filter stays.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+
+describe("TvQuickSurf — mockup-2 panel trim (integration)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src/components/couch/TvQuickSurf.astro"),
+    "utf8",
+  );
+
+  it("has no action-button grid or note in the panel", () => {
+    expect(src).not.toContain("rs-livetv-play-quicksurf__actions");
+    expect(src).not.toContain("rs-livetv-play-quicksurf__note");
+    expect(src).not.toContain("[data-qs-action]");
+  });
+
+  it("keeps the category filter, the rows and the key hint line", () => {
+    expect(src).toContain("rs-livetv-play-quicksurf__categories");
+    expect(src).toContain("rs-livetv-play-quicksurf__list");
+    expect(src).toContain("↑↓ browse · A watch · B back");
+  });
+});

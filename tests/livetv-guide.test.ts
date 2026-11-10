@@ -417,3 +417,45 @@ describe("guideReturnMode (B exit / focus restoration)", () => {
     expect(guideReturnMode("bogus")).toBe("home");
   });
 });
+
+// INTEGRATION (0.9.0) — Guide cold-load race: a cold ?mode=guide
+// load activates before the engine has fetched the channel list,
+// so the first loadChannels() finds nothing and nothing retried
+// it. The component must finish activation the moment the catalog
+// lands (cache event / EPG load / bounded retry), hydrate both
+// cache kinds, and switch tabs before the data arrives.
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+
+describe("TvGuideView — cold-load catalog race (integration)", () => {
+  const src = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src/components/couch/TvGuideView.astro"),
+    "utf8",
+  );
+
+  it("hydrates both cache kinds on activation (live + m3u)", () => {
+    expect(src).toContain('hydrateCache(playlistId, "live")');
+    expect(src).toContain('hydrateCache(playlistId, "m3u")');
+  });
+
+  it("finishes activation when the catalog lands after an empty first read", () => {
+    expect(src).toContain("function finishActivation()");
+    expect(src).toContain("function maybeFinishActivation()");
+    expect(src).toContain("scheduleCatalogRetry(10)");
+    expect(src).toContain("CACHE_REVALIDATED_EVENT");
+    // The EPG arriving also re-checks the channel list.
+    expect(src).toContain("document.addEventListener(EPG_LOADED_EVENT");
+  });
+
+  it("switches tabs before the data arrives, and mirrors the sub-mode to html", () => {
+    // setGuideMode(guideMode) must run before the empty early-return.
+    const activate = src.slice(src.indexOf("async function activate(requestedMode)"));
+    const tabSwitch = activate.indexOf("setGuideMode(guideMode);");
+    const emptyReturn = activate.indexOf('showEmpty("No channels cached yet');
+    expect(tabSwitch).toBeGreaterThan(-1);
+    expect(emptyReturn).toBeGreaterThan(-1);
+    expect(tabSwitch).toBeLessThan(emptyReturn);
+    expect(src).toContain("document.documentElement.dataset.livetvGuideMode = next;");
+  });
+});

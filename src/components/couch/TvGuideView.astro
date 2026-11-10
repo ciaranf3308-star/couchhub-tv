@@ -741,7 +741,10 @@ const nowMs = Date.now();
   } from "@/scripts/lib/epg-data.js";
   import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.ts";
   import { getActiveEntry } from "@/scripts/lib/creds.js";
-  import { hydrate as hydrateCache } from "@/scripts/lib/cache.js";
+  import {
+    CACHE_REVALIDATED_EVENT,
+    hydrate as hydrateCache,
+  } from "@/scripts/lib/cache.js";
   import {
     getChannelEpgOverride,
     getFavorites,
@@ -1288,6 +1291,10 @@ const nowMs = Date.now();
       // Write back to shared state so re-entry restores the tab.
       liveState = setSharedGuideMode(liveState, next);
       persistLivetvState(liveState);
+      // Mirror to html so the button-hints legend picks the
+      // sub-mode config (the shell only mirrors livetv:mode events,
+      // which never fire on a ?mode=guide deep link).
+      document.documentElement.dataset.livetvGuideMode = next;
       for (const tab of tabEls) {
         const isActive = tab.dataset.guideTab === next;
         tab.classList.toggle("rs-guide-tab--active", isActive);
@@ -1778,6 +1785,75 @@ const nowMs = Date.now();
       if (fallback instanceof HTMLElement) fallback.focus({ preventScroll: true });
     }
 
+    // ── Cold-load catalog race (INTEGRATION 0.9.0) ───────────────
+    // The Guide's script runs before the engine (stream.ts) has
+    // fetched the channel list, so activate's first loadChannels()
+    // can legitimately find nothing — and nothing retried it, so a
+    // cold ?mode=guide load (and the /epg redirect) stayed empty
+    // forever even after the catalog landed. finishActivation()
+    // is the single post-catalog step; maybeFinishActivation()
+    // runs it the moment channels appear (catalog event, EPG
+    // load, or a bounded retry timer), and the tab switch no
+    // longer waits for data (see activate).
+    let activationFinished = false;
+    let catalogRetryTimer = null;
+
+    function finishActivation() {
+      if (activationFinished) return;
+      activationFinished = true;
+      if (catalogRetryTimer !== null) {
+        clearTimeout(catalogRetryTimer);
+        catalogRetryTimer = null;
+      }
+      hideEmpty();
+      rebuildCategoryOptions();
+      loadAllProgrammes();
+      rebuildDays();
+      loadProgrammesForDay();
+      visibleChannels = applyCategoryFilter();
+      setGuideMode(guideMode);
+      if (guideMode === "grid") {
+        renderTimeHeader();
+        updateDayControls();
+        const all = [...dayProgrammes.values()].flat();
+        selectedKey =
+          stableGuideSelection(
+            liveState.guideProgrammeKey || selectedKey,
+            all,
+            Date.now(),
+          ) || selectedKey;
+        if (selectedKey) {
+          const [channelId, startRaw] = selectedKey.split("@");
+          selectProgramme(channelId, Number(startRaw), { openDetail: false });
+        }
+        renderRows();
+        scrollToViewStart();
+        restoreSelectionFocus();
+      }
+    }
+
+    function maybeFinishActivation() {
+      if (!active || activationFinished) return;
+      loadChannels();
+      if (allChannels.length === 0) return;
+      finishActivation();
+    }
+
+    function scheduleCatalogRetry(attemptsLeft) {
+      if (!active || activationFinished || attemptsLeft <= 0) return;
+      if (catalogRetryTimer !== null) return;
+      catalogRetryTimer = setTimeout(() => {
+        catalogRetryTimer = null;
+        if (!active || activationFinished) return;
+        loadChannels();
+        if (allChannels.length === 0) {
+          scheduleCatalogRetry(attemptsLeft - 1);
+          return;
+        }
+        finishActivation();
+      }, 1000);
+    }
+
     async function activate(requestedMode) {
       if (active) {
         // Already open: a mode request just switches tabs.
@@ -1807,53 +1883,49 @@ const nowMs = Date.now();
       guideMode = liveState.guideMode;
       persistLivetvState(liveState);
       active = true;
+      activationFinished = false;
       root.hidden = false;
       document.documentElement.dataset.livetvMode = "guide";
+      // The tab follows the request NOW, not after data loads: the
+      // old code switched tabs only at the end of activate, so a
+      // ?guideMode=tonight deep link stayed on On Now whenever the
+      // catalog had not landed yet.
+      setGuideMode(guideMode);
       await resolvePlaylist();
       if (!playlistId) {
         showEmpty("No playlist selected — open Live TV first to pick a playlist.");
         return;
       }
       try {
-        await hydrateCache(playlistId, "live");
+        // Hydrate BOTH kinds: a playlist only ever hits one, and
+        // "live" alone misses a warm M3U cache after a reload.
+        await Promise.allSettled([
+          hydrateCache(playlistId, "live"),
+          hydrateCache(playlistId, "m3u"),
+        ]);
       } catch {
         // Cache hydration is best-effort; cached rows may already exist.
       }
       loadChannels();
       if (allChannels.length === 0) {
         showEmpty("No channels cached yet — open Live TV first so the channel list loads.");
+        // The engine fetches the catalog in parallel; finish the
+        // moment it lands instead of staying empty (catalog event,
+        // EPG load, or the bounded retry below).
+        scheduleCatalogRetry(10);
         return;
       }
-      hideEmpty();
-      rebuildCategoryOptions();
-      loadAllProgrammes();
-      rebuildDays();
-      loadProgrammesForDay();
-      visibleChannels = applyCategoryFilter();
-      setGuideMode(guideMode);
-      if (guideMode === "grid") {
-        renderTimeHeader();
-        updateDayControls();
-        const all = [...dayProgrammes.values()].flat();
-        selectedKey =
-          stableGuideSelection(
-            liveState.guideProgrammeKey || selectedKey,
-            all,
-            Date.now(),
-          ) || selectedKey;
-        if (selectedKey) {
-          const [channelId, startRaw] = selectedKey.split("@");
-          selectProgramme(channelId, Number(startRaw), { openDetail: false });
-        }
-        renderRows();
-        scrollToViewStart();
-        restoreSelectionFocus();
-      }
+      finishActivation();
     }
 
     function deactivate() {
       if (!active) return;
       active = false;
+      activationFinished = false;
+      if (catalogRetryTimer !== null) {
+        clearTimeout(catalogRetryTimer);
+        catalogRetryTimer = null;
+      }
       root.hidden = true;
       if (document.documentElement.dataset.livetvMode === "guide") {
         delete document.documentElement.dataset.livetvMode;
@@ -2051,9 +2123,21 @@ const nowMs = Date.now();
       if (!active) return;
       handleBack();
     });
+    // The catalog can land after activation (cold ?mode=guide):
+    // a cache write, or the EPG arriving, re-checks the channel
+    // list and finishes activation the moment it appears.
+    document.addEventListener(CACHE_REVALIDATED_EVENT, (event) => {
+      if (!active || activationFinished) return;
+      const detail = event.detail ?? {};
+      if (detail.entryId && detail.entryId !== playlistId) return;
+      if (detail.kind && detail.kind !== "live" && detail.kind !== "m3u") return;
+      maybeFinishActivation();
+    });
     document.addEventListener(EPG_LOADED_EVENT, () => {
       if (!active) return;
       const previous = selectedKey;
+      loadChannels();
+      maybeFinishActivation();
       loadAllProgrammes();
       rebuildDays();
       loadProgrammesForDay();

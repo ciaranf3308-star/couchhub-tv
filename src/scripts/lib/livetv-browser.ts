@@ -316,6 +316,22 @@ export function mountChannelBrowser(
   detail.setAttribute("aria-label", "Selected channel");
   layout.appendChild(detail);
 
+  // ── Screen title (screen mode only — mockup 1): the shell's
+  //    generic "Live TV" head is hidden in browser mode, so the
+  //    browser carries its own title + live channel count.
+  let subtitleEl: HTMLElement | null = null;
+  if (opts.acceptModeEntry) {
+    const titleBlock = el("div", "rs-livetv-browser__title");
+    const titleText = el("h2", "rs-livetv-browser__title-text");
+    titleText.textContent = "Channel Browser";
+    titleBlock.appendChild(titleText);
+    subtitleEl = el("p", "rs-livetv-browser__subtitle");
+    subtitleEl.setAttribute("data-browser-subtitle", "");
+    subtitleEl.textContent = "Browse and watch live TV";
+    titleBlock.appendChild(subtitleEl);
+    main.appendChild(titleBlock);
+  }
+
   // ── Toolbar: search (top-right) + sort + close ──
   const toolbar = el("div", "rs-livetv-browser__toolbar");
   const search = el("input", "rs-livetv-browser__search") as HTMLInputElement;
@@ -626,6 +642,13 @@ export function mountChannelBrowser(
               ? "Nothing watched yet — channels you watch will appear here."
               : "No channels in this category."
         : `${list.length.toLocaleString()} channel${list.length === 1 ? "" : "s"}`;
+    if (subtitleEl) {
+      const total = channels.length;
+      subtitleEl.textContent =
+        total > 0
+          ? `Browse and watch live TV • ${total.toLocaleString()} channel${total === 1 ? "" : "s"}`
+          : "Browse and watch live TV";
+    }
     renderDetail();
   }
 

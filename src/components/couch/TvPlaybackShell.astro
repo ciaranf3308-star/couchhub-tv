@@ -36,6 +36,7 @@
 import TvOsd from "./TvOsd.astro";
 import TvQuickSurf from "./TvQuickSurf.astro";
 import TvEmpty from "./TvEmpty.astro";
+import TvLogo from "./TvLogo.astro";
 ---
 
 <section
@@ -48,6 +49,18 @@ import TvEmpty from "./TvEmpty.astro";
   hidden
   aria-label="Live TV playback"
 >
+  <!-- Slim playback top bar (INTEGRATION 0.9.0 — mockup 2/3): the
+       full top nav is hidden in playback, but the mockups keep a
+       slim brand bar over the video (mark + "Live TV" left, clock
+       right). Persistent while playback is active; pointer-events
+       none — chrome, not a control. -->
+  <div class="rs-livetv-play-topbar" data-livetv-play-topbar aria-hidden="true">
+    <span class="rs-livetv-play-topbar__brand">
+      <TvLogo variant="mark" size="nav" />
+      <span class="rs-livetv-play-topbar__label">Live TV</span>
+    </span>
+    <span class="rs-livetv-play-topbar__clock" data-play-clock></span>
+  </div>
   <TvOsd />
   <TvQuickSurf />
 
@@ -158,6 +171,19 @@ import TvEmpty from "./TvEmpty.astro";
     let lastWorkingId: string | number | null = null;
     let failedId: string | number | null = null;
     let returnFocusKey: string | null = null;
+
+    // Slim top-bar clock (INTEGRATION 0.9.0 — mockup 2: "18:24 Tue
+    // 10 Nov"). Device-local time; ticks every 15 s, page lifetime.
+    const clockEl = shell.querySelector<HTMLElement>("[data-play-clock]");
+    const paintClock = () => {
+      if (!clockEl) return;
+      const now = new Date();
+      const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const date = now.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+      clockEl.textContent = `${time} ${date}`;
+    };
+    paintClock();
+    setInterval(paintClock, 15000);
 
     // Detect (never create) the player session: if stream.ts already
     // mounted a player inside #player, mode switches must not

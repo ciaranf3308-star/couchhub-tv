@@ -1752,13 +1752,20 @@ html[data-couch] .rs-livetv-browser__row {
   border-bottom: 1px solid var(--rs-line);
   cursor: pointer;
 }
+/* INTEGRATION 0.9.0 — mockup 1: the highlighted row carries a
+   full glowing red border around the whole row (rounded rect),
+   not a thin left bar. The focus-visible treatment already uses
+   this pattern; highlighted matches it in accent red. */
 html[data-couch] .rs-livetv-browser__row.is-highlighted {
   background: linear-gradient(
     90deg,
     color-mix(in srgb, var(--rs-accent) 16%, transparent),
     color-mix(in srgb, var(--rs-accent) 5%, transparent)
   );
-  box-shadow: inset 3px 0 0 var(--rs-accent);
+  border-radius: 0.75rem;
+  box-shadow:
+    inset 0 0 0 2px var(--rs-accent),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
 }
 html[data-couch] .rs-livetv-browser__row:focus-visible {
   outline: none;
@@ -3404,4 +3411,76 @@ html[data-couch] .rs-guide-channel-dayhint {
   html[data-couch] .rs-guide-featured {
     box-shadow: none;
   }
+}
+
+/* ── INTEGRATION 0.9.0 — browser screen title + shell head ───── */
+/* Mockup 1's browser carries its own "Channel Browser" title, and
+   mockup 3's guide carries its tabs — neither shows the shell's
+   generic "Live TV" page head. The head's title/subtitle hide in
+   browser + guide modes (the legend mount inside the header is
+   untouched, so the bottom hints bar keeps rendering). Landing
+   keeps the head: its hero sits under it and reads as the page
+   header. */
+html[data-couch][data-livetv-mode="browser"] .rs-livetv-home__head .rs-page-title,
+html[data-couch][data-livetv-mode="browser"] .rs-livetv-home__head .rs-meta,
+html[data-couch][data-livetv-mode="guide"] .rs-livetv-home__head .rs-page-title,
+html[data-couch][data-livetv-mode="guide"] .rs-livetv-home__head .rs-meta {
+  display: none;
+}
+html[data-couch] .rs-livetv-browser__title {
+  margin: 0.25rem 0 0.5rem;
+}
+html[data-couch] .rs-livetv-browser__title-text {
+  font-family: var(--rs-font-display);
+  font-size: 2.375rem;
+  line-height: 1.1;
+  font-weight: 700;
+  margin: 0;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-browser__subtitle {
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+  margin: 0.25rem 0 0;
+}
+
+/* ── INTEGRATION 0.9.0 — slim playback top bar (mockup 2/3) ───── */
+html[data-couch] .rs-livetv-play-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.75rem 2.75rem;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0.6) 0%, transparent 100%);
+}
+html[data-couch] .rs-livetv-play-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+html[data-couch] .rs-livetv-play-topbar__label {
+  font-family: var(--rs-font-display);
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-play-topbar__clock {
+  font-size: 1.125rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--rs-text);
+}
+
+/* INTEGRATION 0.9.0 — no bottom hints legend over fullscreen
+   playback (mockup 2/3): the OSD carries its own hint line, so
+   the app-wide legend pill would double it over the video. */
+html[data-couch][data-livetv-mode="playback"] .rs-livetv-home__legend {
+  display: none;
 }

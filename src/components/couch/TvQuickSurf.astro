@@ -44,16 +44,15 @@ import TvChannelRow from "./TvChannelRow.astro";
     <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="-1" aria-label="Previous channel">⌃</button>
     <div class="rs-livetv-play-quicksurf__list" data-qs-list role="listbox" aria-label="Nearby channels"></div>
     <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="1" aria-label="Next channel">⌄</button>
-    <p class="rs-livetv-play-quicksurf__note" aria-hidden="true">Current channel keeps playing — A watches the highlighted channel</p>
+    <!-- INTEGRATION 0.9.0 — mockup 2: the panel is rows + chevrons
+         only. The note and the six-button action grid (Watch /
+         Previous / Favourite / Guide / Channels / Back) made the
+         panel ~900px tall against the mockup's ~525px; every one of
+         those actions is already a key (A / X / Y / B, documented
+         in the hint line below) or an OSD button once surf closes,
+         so the grid is removed rather than kept as decoration. The
+         category filter stays: it changes what is surfable. -->
     <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
-    <div class="rs-livetv-play-quicksurf__actions">
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="tune" data-focus-key="livetv-quicksurf-tune">Watch (A)</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="previous" data-focus-key="livetv-quicksurf-previous">Previous channel</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="favourite" data-focus-key="livetv-quicksurf-favourite">Favourite</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="guide" data-focus-key="livetv-quicksurf-guide">Full Guide (X)</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="browser" data-focus-key="livetv-quicksurf-browser">Channels (Y)</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="dismiss" data-focus-key="livetv-quicksurf-dismiss">Back (B)</button>
-    </div>
     <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
       ↑↓ browse · A watch · B back · ←→ programme info
     </p>
@@ -80,9 +79,7 @@ import TvChannelRow from "./TvChannelRow.astro";
   import {
     stepHighlight,
     confirmHighlight,
-    previousChannelTarget,
     recordTune,
-    toggleFavourite,
     switchChannel,
     surfWindow,
     windowPlaybackEngine,
@@ -273,7 +270,7 @@ import TvChannelRow from "./TvChannelRow.astro";
       root.hidden = false;
       root.dataset.hidden = "false";
       emitOverlay("quicksurf");
-      const first = root.querySelector<HTMLElement>(".rs-channel-row--highlighted, [data-focus-key='livetv-quicksurf-tune']");
+      const first = root.querySelector<HTMLElement>(".rs-channel-row--highlighted");
       first?.focus?.({ preventScroll: true });
     };
 
@@ -356,25 +353,9 @@ import TvChannelRow from "./TvChannelRow.astro";
         }
         return;
       }
-      const btn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-action]") as HTMLElement | null;
-      if (!btn) return;
-      const action = btn.dataset.qsAction;
-      if (action === "tune") tuneHighlighted();
-      else if (action === "dismiss") hide();
-      else if (action === "previous") {
-        const target = previousChannelTarget(tunedId, previousId);
-        if (target !== null) tuneTo(target);
-      } else if (action === "favourite") {
-        const channel = highlightedChannel();
-        if (channel) {
-          await toggleFavourite(playlistId, channel);
-          paint();
-        }
-      } else if (action === "browser") {
-        emitOverlay("browser");
-      } else if (action === "guide") {
-        requestLivetvMode("guide");
-      }
+      // INTEGRATION 0.9.0 — the action-button grid was removed
+      // with the markup above (mockup 2); its keys (A/X/Y/B) are
+      // handled by the shell / keydown path, not by this panel.
     });
 
     window.addEventListener("livetv:overlay", (ev) => {

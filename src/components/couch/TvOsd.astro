@@ -183,7 +183,13 @@ const label = channel ? channel.displayName || channel.name || "" : "";
     });
     window.addEventListener("couch-osd:show", onActivity);
     window.addEventListener("livetv:overlay", (ev) => {
-      if ((ev as CustomEvent).detail?.overlay === "osd") show();
+      const overlay = (ev as CustomEvent).detail?.overlay;
+      if (overlay === "osd") show();
+      // INTEGRATION 0.9.0 — Quick Surf docks over the OSD's right
+      // side (mockup 2 shows no OSD while surfing): hide the OSD
+      // while the surf panel is open. The OSD returns on the next
+      // activity / tune / pointer move once surf closes.
+      else if (overlay === "quicksurf") el.setAttribute("data-hidden", "true");
     });
 
     const programmeDetail = () => {

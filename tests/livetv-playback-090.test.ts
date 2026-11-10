@@ -413,3 +413,35 @@ describe("catch-up on the OSD (catchupActionForPlaybackChannel)", () => {
     ).toBe("none");
   });
 });
+
+// INTEGRATION (0.9.0) — mockup 2/3 playback chrome: the OSD
+// hides while Quick Surf is open (the panel docks over its right
+// side), the slim top bar (mark + Live TV + clock) persists over
+// the video, and the bottom hints legend stays out of fullscreen
+// playback (the OSD carries its own hint line).
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
+
+describe("playback chrome — mockup 2/3 (integration)", () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const osd = readFileSync(join(root, "src/components/couch/TvOsd.astro"), "utf8");
+  const shell = readFileSync(join(root, "src/components/couch/TvPlaybackShell.astro"), "utf8");
+  const css = readFileSync(join(root, "src/styles/couch.css"), "utf8");
+
+  it("hides the OSD when Quick Surf opens", () => {
+    expect(osd).toContain('else if (overlay === "quicksurf") el.setAttribute("data-hidden", "true");');
+  });
+
+  it("renders a slim top bar with brand mark, Live TV label and live clock", () => {
+    expect(shell).toContain("rs-livetv-play-topbar");
+    expect(shell).toContain('variant="mark"');
+    expect(shell).toContain("Live TV</span>");
+    expect(shell).toContain("[data-play-clock]");
+    expect(shell).toContain("setInterval(paintClock, 15000)");
+  });
+
+  it("keeps the bottom hints legend out of fullscreen playback", () => {
+    expect(css).toContain('[data-livetv-mode="playback"] .rs-livetv-home__legend');
+  });
+});
