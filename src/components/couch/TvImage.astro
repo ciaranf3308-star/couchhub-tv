@@ -1,29 +1,43 @@
 ---
-// TvImage — aspect-correct image with an elegant fallback.
+// TvImage — aspect-correct image with an elegant branded fallback.
 // Props: src, alt, kind ('poster' | 'backdrop' | 'logo' | 'thumb'),
-// title (for the fallback title block / logo mark).
+// title (for the fallback title block / logo mark), media (optional:
+// 'movie' | 'series' | 'channel' | 'episode' — refines the fallback
+// label when the caller knows the media type; posters cover movies and
+// series, so without it the label stays a neutral "No artwork").
 // Lazy by default. NEVER renders a broken-image icon: on error (or an
 // empty src) the <img> hides and the branded fallback shows instead
-// (see couch-image.ts — the same code the tests exercise).
-import { fallbackMarkFor, isUsableImageSrc } from "@/scripts/lib/couch-image.ts";
-import type { TvImageKind } from "@/scripts/lib/couch-image.ts";
+// (see couch-image.ts — the same code the tests exercise). The fallback
+// is automatic by kind/media — no caller has to remember a new prop:
+// every existing call site keeps working unchanged.
+// The fallback is a branded stand-in (initials medallion + type label
+// on a burgundy gradient, styled in couch.css), never fabricated art.
+import {
+  fallbackKindLabel,
+  fallbackMarkFor,
+  isUsableImageSrc,
+} from "@/scripts/lib/couch-image.ts";
+import type { TvImageKind, TvImageMedia } from "@/scripts/lib/couch-image.ts";
 
 interface Props {
   src?: string;
   alt?: string;
   kind?: TvImageKind;
   title?: string;
+  media?: TvImageMedia;
   eager?: boolean;
 }
-const { src, alt = "", kind = "poster", title = "", eager = false } = Astro.props;
+const { src, alt = "", kind = "poster", title = "", media, eager = false } = Astro.props;
 const usable = isUsableImageSrc(src);
 const mark = fallbackMarkFor(kind, title);
+const kindLabel = fallbackKindLabel(kind, media);
 ---
 
 <div
   class={`rs-image rs-image--${kind}${usable ? "" : " is-fallback"}`}
   data-tv-image
   data-kind={kind}
+  data-media={media}
 >
   {
     usable && (
@@ -38,6 +52,7 @@ const mark = fallbackMarkFor(kind, title);
   }
   <div class="rs-image__fallback" aria-hidden="true">
     <span class="rs-image__fallback-mark">{mark}</span>
+    <span class="rs-image__fallback-kind">{kindLabel}</span>
     {title && <span class="rs-image__fallback-title">{title}</span>}
   </div>
 </div>
