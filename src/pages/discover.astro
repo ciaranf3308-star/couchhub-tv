@@ -1,0 +1,30 @@
+---
+// RedSilk Discover (W1, Discover CORE): mood search + personalised rows
+// over the household's own library. Local engine only — the AI ranker
+// seam lives in src/scripts/lib/discover.ts and is wired by the
+// coordinator when W2's module lands.
+import Layout from "@/layouts/Layout.astro";
+import DiscoverView from "@/components/DiscoverView.svelte";
+---
+
+<Layout pageTitle="Discover" showVersion={false}>
+  <main
+    class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-6
+           flex flex-col gap-4 flex-1 min-h-0">
+    <header class="route-hero shrink-0">
+      <h1 class="route-hero__title">Discover</h1>
+      <p class="route-hero__sub">
+        Personal picks from your own library — no account, no cloud, nothing invented.
+      </p>
+    </header>
+
+    <DiscoverView client:load />
+  </main>
+
+  <style>
+    /* Nylah Studios v0.3.0 — RedSilk hero: Instrument Serif title. */
+    .route-hero__title {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    }
+  </style>
+</Layout>

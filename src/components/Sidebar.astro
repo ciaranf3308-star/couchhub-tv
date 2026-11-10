@@ -5,6 +5,7 @@ import {
   IconMovie,
   IconStack2,
   IconCalendarTime,
+  IconCompass,
   IconDownload,
   IconSettings,
   IconLayoutGrid,
@@ -22,6 +23,7 @@ const path = Astro.url.pathname.replace(/\/$/, "") || "/"
 
 const items = [
   { href: "/",                key: "nav.home",          label: "Home",            Icon: IconHome,         match: (p) => p === "/" },
+  { href: "/discover",         key: "nav.discover",      label: "Discover",        Icon: IconCompass,      match: (p) => p === "/discover" || p.startsWith("/discover/") },
   { href: "/livetv",          key: "nav.livetv",        label: "Live TV",         Icon: IconDeviceTv,     match: (p) => p === "/livetv" || p.startsWith("/livetv/") },
   { href: "/movies",          key: "nav.movies",        label: "Movies",          Icon: IconMovie,        match: (p) => p === "/movies" || p.startsWith("/movies/") },
   { href: "/series",          key: "nav.series",        label: "Series",          Icon: IconStack2,       match: (p) => p === "/series" || p.startsWith("/series/") },
@@ -43,6 +45,7 @@ const moreItems = [
   { href: "/favorites",      key: "nav.favorites",     label: "Favorites",      Icon: IconStar,     match: (p) => p === "/favorites" || p.startsWith("/favorites/") },
   { href: "/watchlist",      key: "nav.watchlist",     label: "Watchlist",      Icon: IconBookmark, match: (p) => p === "/watchlist" || p.startsWith("/watchlist/") },
   { href: "/recently-added", key: "nav.recentlyAdded", label: "Recently added", Icon: IconSparkles,     match: (p) => p === "/recently-added" || p.startsWith("/recently-added/") },
+  { href: "/discover",       key: "nav.discover",     label: "Discover",       Icon: IconCompass,     match: (p) => p === "/discover" || p.startsWith("/discover/") },
   { href: "/epg",            key: "nav.epg",           label: "EPG",            Icon: IconCalendarTime, match: (p) => p === "/epg" || p.startsWith("/epg/") },
   { href: "/downloads",      key: "nav.downloads",     label: "Downloads",      Icon: IconDownload,     match: (p) => p === "/downloads" || p.startsWith("/downloads/"), id: "mobile-more-downloads" },
   { href: "/settings",       key: "nav.settings",      label: "Settings",       Icon: IconSettings, match: (p) => p === "/settings"  || p.startsWith("/settings/") },
