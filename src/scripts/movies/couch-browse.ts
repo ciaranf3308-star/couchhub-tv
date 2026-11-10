@@ -9,14 +9,20 @@
 //   - rails (Continue Watching, Recently Added, Recommended, Favourites,
 //     Watch Later — only the non-empty ones render),
 //   - list tabs (All / Continue / Recent / Favourites / Watch Later),
-//   - genre chips, year + rating selects, sort select, search input +
+//     as one joined segmented control,
+//   - the genre filter, as one labelled select in the filter row,
+//     year + rating selects, sort select, search input +
 //     on-screen keyboard dialog,
 //   - the full catalogue grid, windowed with computeVisibleWindow +
 //     gridColumnsForWidth so a 10,000-title catalogue never builds
 //     10,000 card nodes. The focused card is pinned into the window
 //     so windowing never steals focus.
 //
-// DOM contract (ids the .astro templates provide):
+// DOM contract (ids the .astro templates provide, optionally prefixed
+// with `opts.idPrefix` — the /browse page hosts two controllers at
+// once, one per kind, so its ids carry a "browse-movies-" /
+// "browse-series-" prefix; the standalone /movies and /series pages
+// use the bare ids):
 //   couch-browse-status, couch-browse-hero-count, couch-browse-tabs,
 //   couch-browse-genres, couch-browse-year, couch-browse-rating,
 //   couch-browse-sort, couch-browse-search, couch-search-open,
@@ -62,7 +68,7 @@ export interface CouchBrowseAdapter<T> {
   lists: Array<{ value: CouchBrowseList; label: string }>;
   /** Rails above the grid, in order. Only non-empty rails render. */
   rails: (rows: T[], playlistId: string) => CouchRail<T>[];
-  /** Genre chips present in this catalogue. */
+  /** Genres present in this catalogue (shown as one Genre select). */
   genres: (rows: T[]) => Array<{ id: GenreId; label: string; count: number }>;
   /** Apply the current filter (query/genre/year/rating/list). */
   applyFilter: (rows: T[], filter: CouchBrowseFilter, playlistId: string) => T[];
@@ -93,20 +99,34 @@ function $(id: string): HTMLElement | null {
   return document.getElementById(id);
 }
 
-export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
-  const statusEl = $("couch-browse-status");
-  const heroCountEl = $("couch-browse-hero-count");
-  const tabsEl = $("couch-browse-tabs");
-  const genresEl = $("couch-browse-genres");
-  const yearEl = $("couch-browse-year") as HTMLSelectElement | null;
-  const ratingEl = $("couch-browse-rating") as HTMLSelectElement | null;
-  const sortEl = $("couch-browse-sort") as HTMLSelectElement | null;
-  const searchEl = $("couch-browse-search") as HTMLInputElement | null;
-  const railsEl = $("couch-browse-rails");
-  const gridEl = $("couch-browse-grid");
-  const skeletonEl = $("couch-browse-skeleton");
-  const emptyEl = $("couch-browse-empty");
-  const errorEl = $("couch-browse-error");
+export interface CouchBrowseMountOptions {
+  /**
+   * Prefix prepended to every DOM id in the contract above. "" keeps
+   * the standalone /movies and /series pages on their bare ids.
+   * /browse mounts one controller per kind with "browse-movies-" /
+   * "browse-series-" so the two sections never share an id.
+   */
+  idPrefix?: string;
+}
+
+export function mountCouchBrowse<T>(
+  adapter: CouchBrowseAdapter<T>,
+  opts: CouchBrowseMountOptions = {},
+): void {
+  const prefix = opts.idPrefix ?? "";
+  const statusEl = $(`${prefix}couch-browse-status`);
+  const heroCountEl = $(`${prefix}couch-browse-hero-count`);
+  const tabsEl = $(`${prefix}couch-browse-tabs`);
+  const genresEl = $(`${prefix}couch-browse-genres`);
+  const yearEl = $(`${prefix}couch-browse-year`) as HTMLSelectElement | null;
+  const ratingEl = $(`${prefix}couch-browse-rating`) as HTMLSelectElement | null;
+  const sortEl = $(`${prefix}couch-browse-sort`) as HTMLSelectElement | null;
+  const searchEl = $(`${prefix}couch-browse-search`) as HTMLInputElement | null;
+  const railsEl = $(`${prefix}couch-browse-rails`);
+  const gridEl = $(`${prefix}couch-browse-grid`);
+  const skeletonEl = $(`${prefix}couch-browse-skeleton`);
+  const emptyEl = $(`${prefix}couch-browse-empty`);
+  const errorEl = $(`${prefix}couch-browse-error`);
 
   let all: T[] = [];
   let filtered: T[] = [];
@@ -138,6 +158,10 @@ export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
   };
 
   // --- Rails -------------------------------------------------------------
+  // (W8 pillfest cleanup: the list tabs are ONE joined segmented
+  // control and the genre filter is ONE labelled <select> in the
+  // filter row — no more per-genre pill buttons. Same options, same
+  // behaviour; presentation only.)
   const renderRails = () => {
     if (!railsEl) return;
     railsEl.replaceChildren();
@@ -262,13 +286,17 @@ export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
   };
 
   // --- Filter bar ----------------------------------------------------------
+  // List tabs: ONE joined segmented control (same buttons, same
+  // aria-pressed behaviour, same click handling — the segments just
+  // share one border instead of floating as separate pills).
   const renderTabs = () => {
     if (!tabsEl) return;
     tabsEl.replaceChildren();
     for (const list of adapter.lists) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "rs-hero__action rs-hero__action--secondary";
+      btn.className =
+        "rs-hero__action rs-hero__action--secondary rs-browse-segment";
       btn.textContent = list.label;
       btn.setAttribute("aria-pressed", filter.list === list.value ? "true" : "false");
       btn.addEventListener("click", () => {
@@ -280,33 +308,49 @@ export function mountCouchBrowse<T>(adapter: CouchBrowseAdapter<T>): void {
     }
   };
 
+  // Genre filter: ONE labelled <select> in the filter row (next to
+  // Sort / Decade / Rating) instead of one pill button per genre.
+  // Same options (All genres + every catalogue genre with its count),
+  // same behaviour (picking one filters the grid; re-picking All
+  // clears it). The select is built once and its options refreshed
+  // in place so focus is never stolen by a re-render.
   const renderGenres = () => {
     if (!genresEl) return;
-    genresEl.replaceChildren();
-    const allBtn = document.createElement("button");
-    allBtn.type = "button";
-    allBtn.className = "rs-hero__action rs-hero__action--secondary";
-    allBtn.textContent = "All genres";
-    allBtn.setAttribute("aria-pressed", filter.genre === "" ? "true" : "false");
-    allBtn.addEventListener("click", () => {
-      filter.genre = "";
-      renderGenres();
-      applyFilterAndRender();
-    });
-    genresEl.appendChild(allBtn);
-    for (const genre of adapter.genres(all)) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "rs-hero__action rs-hero__action--secondary";
-      btn.textContent = `${genre.label} (${genre.count})`;
-      btn.setAttribute("aria-pressed", filter.genre === genre.id ? "true" : "false");
-      btn.addEventListener("click", () => {
-        filter.genre = filter.genre === genre.id ? "" : genre.id;
-        renderGenres();
+    const genres = adapter.genres(all);
+    let select = genresEl.querySelector("select") as HTMLSelectElement | null;
+    if (!select) {
+      genresEl.replaceChildren();
+      const label = document.createElement("label");
+      label.className = "rs-browse-label";
+      label.htmlFor = `${prefix}couch-browse-genre`;
+      label.textContent = "Genre";
+      const built = document.createElement("select");
+      built.id = `${prefix}couch-browse-genre`;
+      built.setAttribute("aria-label", "Filter by genre");
+      built.addEventListener("change", () => {
+        filter.genre = (built.value || "") as GenreId | "";
         applyFilterAndRender();
       });
-      genresEl.appendChild(btn);
+      genresEl.append(label, built);
+      select = built;
     }
+    // A stored genre with no titles in this catalogue resets to All
+    // rather than silently filtering everything out.
+    if (filter.genre && !genres.some((g) => g.id === filter.genre)) {
+      filter.genre = "";
+    }
+    select.replaceChildren();
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All genres";
+    select.appendChild(allOpt);
+    for (const genre of genres) {
+      const opt = document.createElement("option");
+      opt.value = genre.id;
+      opt.textContent = `${genre.label} (${genre.count})`;
+      select.appendChild(opt);
+    }
+    select.value = filter.genre;
   };
 
   const applyFilterAndRender = () => {

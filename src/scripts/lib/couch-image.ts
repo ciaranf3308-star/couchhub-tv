@@ -7,6 +7,44 @@
 
 export type TvImageKind = "poster" | "backdrop" | "logo" | "thumb";
 
+/** Media type behind a fallback, when the caller knows it. Posters cover
+ * both movies and series, so callers that know which one it is pass it
+ * explicitly; otherwise the label falls back to the kind alone. */
+export type TvImageMedia = "movie" | "series" | "channel" | "episode";
+
+/** Default media for a kind, used when the caller passes no `media`.
+ * Posters/backdrops cover both movies and series, so there is no honest
+ * default for them — the label stays a neutral "No artwork" instead of
+ * guessing. */
+export function defaultMediaForKind(kind: TvImageKind): TvImageMedia | undefined {
+  if (kind === "logo") return "channel";
+  if (kind === "thumb") return "episode";
+  return undefined;
+}
+
+/**
+ * Honest fallback label for a missing image: the type, plus "No artwork"
+ * — a branded stand-in, never fabricated art. Pure.
+ */
+export function fallbackKindLabel(
+  kind: TvImageKind,
+  media?: TvImageMedia,
+): string {
+  const resolved = media ?? defaultMediaForKind(kind);
+  switch (resolved) {
+    case "movie":
+      return "Movie · No artwork";
+    case "series":
+      return "Series · No artwork";
+    case "channel":
+      return "Channel · No artwork";
+    case "episode":
+      return "Episode · No artwork";
+    default:
+      return "No artwork";
+  }
+}
+
 /** True only for a non-blank src string. Pure. */
 export function isUsableImageSrc(src: string | undefined | null): boolean {
   return typeof src === "string" && src.trim().length > 0;

@@ -22,6 +22,7 @@ import "../styles/global.css";
 import "../styles/couch.css";
 import pkg from "../../package.json";
 import TvLogo from "@/components/couch/TvLogo.astro";
+import TvButtonHints from "@/components/couch/TvButtonHints.astro";
 import {
   COUCH_NAV_PRIMARY,
   COUCH_NAV_LIBRARY,
@@ -52,7 +53,7 @@ const documentTitle = pageTitle
     />
     <title>{documentTitle}</title>
     <meta name="x-app-version" content={pkg.version} />
-    <meta name="theme-color" content="#160D14" />
+    <meta name="theme-color" content="#170A0C" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
 
@@ -105,6 +106,12 @@ const documentTitle = pageTitle
     <main id="main" class="rs-main" data-couch-view={view ?? active}>
       <slot />
     </main>
+
+    <!-- Shared Xbox button legend (W6): one component, per-screen
+         configs from couch-button-hints.ts; contextual via `view` +
+         html[data-livetv-mode]. Rendered here so every Couch screen
+         gets it with no per-screen edits. -->
+    <TvButtonHints view={view ?? active} />
 
     <script>
       import "@/scripts/spatial-navigation";

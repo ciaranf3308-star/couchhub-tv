@@ -11,7 +11,7 @@
      search, rs-rail / rs-card markup with the W1 image-fallback
      structure, rs-empty / rs-skeleton states. -->
 <script>
-  import { onMount } from "svelte"
+  import { onMount, tick } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
   import { warmupActive } from "@/scripts/lib/catalog.js"
   import {
@@ -46,10 +46,75 @@
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
+  import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"
+  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
   } from "@/scripts/lib/couch-image.ts"
+
+  // Keyboard lifecycle (W2 Browse consolidation): the on-screen
+  // keyboard is hidden on landing and opens when the mood input receives
+  // focus; see src/scripts/lib/couch-keyboard.ts for the full contract
+  // (Escape / Hide-button dismiss, blur-to-a-real-element hides,
+  // commit moves focus to results).
+  /** @type {HTMLInputElement | null} */
+  let inputEl = null
+  const keyboard = new CouchKeyboardLifecycle()
+  let keyboardOpen = $state(false)
+  function syncKeyboard() {
+    keyboardOpen = keyboard.open
+  }
+  function onMoodInputFocus() {
+    keyboard.onInputFocus()
+    syncKeyboard()
+  }
+  function onMoodInputKeyDown(ev) {
+    if (ev.key === "Escape") {
+      // Dismiss first; focus stays on the mood input.
+      if (keyboard.dismiss()) {
+        ev.preventDefault()
+        ev.stopPropagation()
+        syncKeyboard()
+      }
+      return
+    }
+    if (ev.key === "ArrowDown") {
+      // Down from the input opens the keyboard and lands on its first
+      // key (controller + physical path into the grid).
+      ev.preventDefault()
+      ev.stopPropagation()
+      keyboard.openKeyboard()
+      syncKeyboard()
+      requestAnimationFrame(() => {
+        document
+          .querySelector("[data-couch-keyboard] [data-osk-key]")
+          ?.focus()
+      })
+    }
+  }
+  function onKeyboardScopeFocusOut(ev) {
+    const next = /** @type {HTMLElement | null} */ (ev.relatedTarget)
+    const scope = /** @type {HTMLElement} */ (ev.currentTarget)
+    // Hide only when focus left the scope entirely. Focus moving
+    // between the input and the keyboard keys stays inside the scope
+    // (the keys live in it), and focus leaving to nowhere (gamepad B
+    // blur) keeps the keyboard so the next D-pad move can reach it.
+    const leftScope = !!next && !scope.contains(next)
+    keyboard.onScopeFocusOut(leftScope)
+    syncKeyboard()
+  }
+  function dismissKeyboardToInput() {
+    if (keyboard.dismissToInput()) {
+      syncKeyboard()
+      inputEl?.focus()
+    }
+  }
+  function onKeyboardCommit() {
+    keyboard.commit()
+    syncKeyboard()
+    focusFirstResult()
+  }
 
   let query = $state("")
   let queryDebounced = $state("")
@@ -185,6 +250,25 @@
     void runSearch()
   }
 
+  /** Short subtitle for a mood card, derived only from the preset's
+      own fields (genres / rating floor / runtime cap) — never
+      invented. W8: the moods are large cards now, not a pill row. */
+  function moodSubtitle(preset) {
+    if (preset.maxRuntimeMinutes) return `Under ${preset.maxRuntimeMinutes} minutes`
+    if (preset.hiddenGem)
+      return `Rated ${(preset.minRating ?? 7.5).toFixed(1)}+ · under the radar`
+    if (preset.genres?.length) {
+      return preset.genres
+        .slice(0, 3)
+        .map((g) => g.charAt(0).toUpperCase() + g.slice(1))
+        .join(" · ")
+    }
+    if (preset.kind === "series")
+      return preset.minRating ? `Series rated ${preset.minRating}+` : "Series"
+    if (preset.minRating) return `Rated ${preset.minRating}+`
+    return "Anything in your library"
+  }
+
   function clearSearch() {
     query = ""
     queryDebounced = ""
@@ -283,52 +367,81 @@
 
   // W1 image fallback: arms the capture-phase error handler once; the
   // scan covers images that already failed before this ran.
+  // Focus restore (Browse consolidation): the rows render async after
+  // mount, long after CouchLayout's one-shot restore ran — so restore
+  // again after every rows render. restoreCouchFocus is a no-op when
+  // something is already focused or a modal is open, so this never
+  // moves focus during ordinary browsing; it only lands the remembered
+  // card when returning from a detail with focus on the body. It can
+  // never pop the keyboard open: the mood input sits in no rail, so
+  // focus memory never points at it.
   $effect(() => {
     void rows
     void searchResults
     void loading
     armTvImageFallbacks(document)
+    void tick().then(() => restoreCouchFocus())
   })
 </script>
 
 <div class="rs-discover" data-discover-root>
   <div class="rs-discover__search">
-    <div class="rs-discover__input-row">
-      <label for="discover-query" class="sr-only">What are you in the mood for?</label>
-      <input
-        id="discover-query"
-        type="search"
+    <!-- Keyboard scope: the mood input + the keyboard only. Focus
+         leaving this scope for a real element (mood chip, result)
+         hides the keyboard; the moods row sits outside the scope. -->
+    <div class="rs-discover__keyboard-scope" onfocusout={onKeyboardScopeFocusOut}>
+      <div class="rs-discover__input-row">
+        <label for="discover-query" class="sr-only">What are you in the mood for?</label>
+        <input
+          id="discover-query"
+          type="search"
+          bind:this={inputEl}
+          bind:value={query}
+          oninput={(e) => onQueryInput(e.currentTarget.value)}
+          onfocus={onMoodInputFocus}
+          onclick={onMoodInputFocus}
+          onkeydown={onMoodInputKeyDown}
+          placeholder="What are you in the mood for?"
+          autocomplete="off"
+          class="rs-discover-input" />
+        {#if query || activeMood || moreLikeSeed}
+          <button
+            type="button"
+            onclick={clearSearch}
+            class="rs-discover-clear">Clear</button>
+        {/if}
+      </div>
+
+      <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears.
+           Hidden on landing; opens on input focus, hides on dismiss / blur / commit. -->
+      <TvKeyboard
         bind:value={query}
-        oninput={(e) => onQueryInput(e.currentTarget.value)}
-        placeholder="What are you in the mood for?"
-        autocomplete="off"
-        class="rs-discover-input" />
-      {#if query || activeMood || moreLikeSeed}
-        <button
-          type="button"
-          onclick={clearSearch}
-          class="rs-discover-clear">Clear</button>
-      {/if}
+        open={keyboardOpen}
+        onInput={onOskInput}
+        onCommit={onKeyboardCommit}
+        onDismiss={dismissKeyboardToInput}
+        placeholder="What are you in the mood for?" />
     </div>
 
-    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
-    <TvKeyboard
-      bind:value={query}
-      onInput={onOskInput}
-      onCommit={focusFirstResult}
-      placeholder="What are you in the mood for?" />
-
-    <div class="rs-discover__moods" role="group" aria-label="Quick picks">
-      {#each MOOD_PRESETS as preset (preset.id)}
-        <button
-          type="button"
-          onclick={() => pickMood(preset.id)}
-          aria-pressed={activeMood === preset.id}
-          class="rs-discover-chip"
-          class:is-active={activeMood === preset.id}>
-          {preset.label}
-        </button>
-      {/each}
+    <!-- W8: quick picks are large navigable cards now, not a row of
+         tiny pills. Same six presets, same pickMood behaviour — a
+         card is a destination choice, so it gets card scale. -->
+    <div class="rs-discover__moods">
+      <p class="rs-discover__moods-title">Quick picks</p>
+      <div class="rs-discover__mood-grid" role="group" aria-label="Quick picks">
+        {#each MOOD_PRESETS as preset (preset.id)}
+          <button
+            type="button"
+            onclick={() => pickMood(preset.id)}
+            aria-pressed={activeMood === preset.id}
+            data-nylah-item
+            class="rs-discover-mood"
+            class:is-active={activeMood === preset.id}>
+            <span class="rs-discover-mood__label">{preset.label}</span>
+            <span class="rs-discover-mood__sub">{moodSubtitle(preset)}</span>
+          </button>
+        {/each}
+      </div>
     </div>
   </div>
 
@@ -525,41 +638,91 @@
     border-color: var(--rs-focus);
     box-shadow: 0 0 0 2px var(--rs-focus-glow);
   }
-  .rs-discover-clear,
-  .rs-discover-chip {
+  /* W8: no pills. Clear is one clean rectangular button; the quick
+     picks are large cards in a grid (see .rs-discover-mood below). */
+  .rs-discover-clear {
     font-size: 1.25rem;
     padding: 0.625rem 1.25rem;
-    border-radius: 9999px;
+    border-radius: 0.75rem;
     border: 1px solid var(--rs-line);
-    background: transparent;
+    background: var(--rs-surface);
     color: var(--rs-text-2);
     cursor: pointer;
     white-space: nowrap;
     outline: none;
   }
   .rs-discover-clear:hover,
-  .rs-discover-clear:focus-visible,
-  .rs-discover-chip:hover,
-  .rs-discover-chip:focus-visible {
+  .rs-discover-clear:focus-visible {
     color: var(--rs-text);
     background: var(--rs-surface);
     border-color: var(--rs-focus);
   }
-  .rs-discover-chip.is-active {
-    color: var(--rs-text);
-    background: var(--rs-accent);
-    border-color: var(--rs-accent);
-  }
   .rs-discover__moods {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 0.75rem;
-    overflow-x: auto;
-    padding: 0.25rem;
-    scrollbar-width: none;
   }
-  .rs-discover__moods::-webkit-scrollbar {
-    display: none;
+  .rs-discover__moods-title {
+    margin: 0;
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: var(--rs-text);
+  }
+  .rs-discover__mood-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  @media (max-width: 56rem) {
+    .rs-discover__mood-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  /* Large navigable mood card: big label + an honest subtitle
+     derived from the preset itself. One clear focus ring, and the
+     active card reads as selected, not as a pressed pill. */
+  .rs-discover-mood {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.375rem;
+    min-height: 6.5rem;
+    padding: 1.25rem 1.5rem;
+    border-radius: 1rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    text-align: left;
+    cursor: pointer;
+    outline: none;
+  }
+  .rs-discover-mood:hover,
+  .rs-discover-mood:focus-visible {
+    border-color: var(--rs-focus);
+    background: var(--rs-bg-2);
+  }
+  .rs-discover-mood:focus-visible {
+    box-shadow:
+      0 0 0 3px var(--rs-focus),
+      0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .rs-discover-mood.is-active {
+    background: var(--rs-accent);
+    border-color: var(--rs-focus);
+    color: #fff;
+  }
+  .rs-discover-mood__label {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .rs-discover-mood__sub {
+    font-size: 1.125rem;
+    line-height: 1.35;
+    color: var(--rs-text-2);
+  }
+  .rs-discover-mood.is-active .rs-discover-mood__sub {
+    color: rgb(255 255 255 / 0.85);
   }
   .rs-discover-toast {
     border-radius: 0.75rem;
@@ -625,14 +788,17 @@
     gap: 0.375rem;
     padding: 0 0.25rem;
   }
+  /* W8: feedback actions are one clean rectangular action row, not
+     a cluster of tiny pills under every card. Same five actions,
+     same handlers — presentation only. */
   .discover-fb-btn {
     border: 1px solid var(--rs-line);
-    border-radius: 9999px;
-    padding: 0.375rem 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.5rem 1rem;
     font-size: 1.125rem;
     line-height: 1.2;
     color: var(--rs-text-2);
-    background: transparent;
+    background: var(--rs-surface);
     cursor: pointer;
     outline: none;
     transition: color 120ms, background-color 120ms, border-color 120ms;

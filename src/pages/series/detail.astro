@@ -1,60 +1,94 @@
 ---
- // Couch Series detail — full-width backdrop layout with seasons and
-// episodes (NOT a pop-up). Painted client-side by
-// src/scripts/series/couch-detail.ts from `get_series_info` + the
-// cached catalogue row: backdrop, title, plot, year/seasons/genres/
-// rating, Resume / Next Episode, Follow (shared followed store),
-// Favourite, Watch Later, a D-pad season picker, episode cards with
-// descriptions/thumbnails/progress, and Similar series. Episode
-// playback mounts the shared engine (mountPlayer) with the TvOsd
-// Couch controls incl. Next Episode + Autoplay-next; B / Escape while
-// playing returns to the episode listing, never to Home.
+// Couch Series detail — cinematic detail splash (Browse 0.8.0, W5).
+// Full-width backdrop hero with the poster seated inside it, gradient
+// metadata (eyebrow, title, meta chips incl. season count and watched
+// progress, plot), prominent Resume / Next Episode with a progress
+// bar, and Follow / Favourite / Watch Later actions. Below: a proper
+// season picker (D-pad rail with per-season watched counts), episode
+// cards with thumbnails, progress and watched state, cast, and Similar
+// series. Painted client-side by src/scripts/series/couch-detail.ts
+// from `get_series_info` + the cached catalogue row. Artwork paints
+// through the shared TvImage fallback system (couch-image.ts) — a
+// title with no art still gets the intentional initials fallback.
+// Episode playback mounts the shared engine (mountPlayer) with the
+// TvOsd Couch controls incl. Next Episode + Autoplay-next; B / Escape
+// while playing returns to the episode listing, never to Home. The
+// back link returns to Browse and history.back()s when you arrived
+// from there, so focus restores to the exact Browse card.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvOsd from "@/components/couch/TvOsd.astro";
+import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 ---
 
-<CouchLayout pageTitle="Series" activeNav="series" view="series-detail">
-  <a class="rs-hero__action rs-hero__action--secondary" href="/series">
+<CouchLayout pageTitle="Series" activeNav="browse" view="series-detail">
+  <a
+    id="series-detail-back"
+    class="rs-detail-back rs-hero__action rs-hero__action--secondary"
+    href="/browse?type=series"
+    data-nylah-item
+    aria-label="Back to Browse"
+  >
     ‹ Series
   </a>
 
+  <div id="series-detail-skeleton" aria-hidden="true">
+    <TvSkeleton kind="hero" />
+  </div>
+
   <div id="series-detail-body">
-    <section id="series-detail-hero" class="rs-hero" hidden aria-label="Series">
+    <section id="series-detail-hero" class="rs-hero rs-detail-hero" hidden aria-label="Series">
       <div id="series-detail-backdrop" class="rs-hero__backdrop" aria-hidden="true"></div>
       <div class="rs-hero__scrim" aria-hidden="true"></div>
-      <div class="rs-hero__content">
-        <h1 id="series-detail-title" class="rs-hero-title"></h1>
-        <p id="series-detail-meta" class="rs-hero__meta"></p>
-        <p id="series-detail-plot" class="rs-hero__description"></p>
-        <div class="rs-hero__actions">
-          <button id="series-detail-resume" type="button" class="rs-hero__action" hidden>
-            ▶ <span id="series-detail-resume-label">Next Episode</span>
-            <span id="series-detail-resume-sub" class="rs-hero__meta"></span>
-          </button>
-          <button
-            id="series-detail-follow"
-            type="button"
-            class="rs-hero__action rs-hero__action--secondary"
-            aria-pressed="false"
-          >
-            + Follow
-          </button>
-          <button
-            id="series-detail-fav"
-            type="button"
-            class="rs-hero__action rs-hero__action--secondary"
-            aria-pressed="false"
-          >
-            ☆ Favourite
-          </button>
-          <button
-            id="series-detail-watch"
-            type="button"
-            class="rs-hero__action rs-hero__action--secondary"
-            aria-pressed="false"
-          >
-            + Watch Later
-          </button>
+      <div class="rs-hero__content rs-detail-hero__content">
+        <div id="series-detail-poster" class="rs-detail-poster" aria-hidden="true"></div>
+        <div class="rs-detail-hero__text">
+          <span class="rs-hero__eyebrow">Series</span>
+          <h1 id="series-detail-title" class="rs-hero-title"></h1>
+          <div id="series-detail-meta" class="rs-detail-chips" aria-label="Details"></div>
+          <p id="series-detail-plot" class="rs-hero__description"></p>
+          <div id="series-detail-progress" class="rs-detail-progress" hidden>
+            <div class="rs-detail-progress__track" aria-hidden="true">
+              <span data-role="detail-progress-fill"></span>
+            </div>
+            <span data-role="detail-progress-label" class="rs-meta"></span>
+          </div>
+          <div class="rs-hero__actions" data-nylah-rail="detail-actions">
+            <button id="series-detail-resume" type="button" class="rs-hero__action" data-nylah-item hidden>
+              ▶ <span id="series-detail-resume-label">Next Episode</span>
+              <span id="series-detail-resume-sub" class="rs-hero__meta"></span>
+            </button>
+            <button
+              id="series-detail-follow"
+              type="button"
+              class="rs-hero__action rs-hero__action--secondary"
+              data-nylah-item
+              aria-pressed="false"
+            >
+              + Follow
+            </button>
+            <button
+              id="series-detail-fav"
+              type="button"
+              class="rs-hero__action rs-hero__action--secondary"
+              data-nylah-item
+              aria-pressed="false"
+            >
+              ☆ Favourite
+            </button>
+            <button
+              id="series-detail-watch"
+              type="button"
+              class="rs-hero__action rs-hero__action--secondary"
+              data-nylah-item
+              aria-pressed="false"
+            >
+              + Watch Later
+            </button>
+          </div>
+          <p class="rs-detail-hints" aria-hidden="true">
+            <span class="rs-detail-hint-key">A</span> Select
+            <span class="rs-detail-hint-key">B</span> Back to Browse
+          </p>
         </div>
       </div>
     </section>
@@ -62,9 +96,12 @@ import TvOsd from "@/components/couch/TvOsd.astro";
     <p id="series-detail-status" class="rs-meta" role="status"></p>
 
     <section id="series-episodes-section" class="rs-detail-section" aria-label="Seasons and episodes" hidden>
-      <h2 class="rs-section-title">Episodes</h2>
+      <div class="rs-detail-section__head">
+        <h2 class="rs-section-title">Episodes</h2>
+        <p id="series-episodes-summary" class="rs-meta"></p>
+      </div>
       <div id="series-season-picker"></div>
-      <div id="series-episode-list" class="rs-episode-grid"></div>
+      <div id="series-episode-list" class="rs-episode-grid" data-nylah-rail="series-episodes"></div>
     </section>
 
     <section id="series-detail-cast" class="rs-detail-section" hidden>
@@ -76,7 +113,7 @@ import TvOsd from "@/components/couch/TvOsd.astro";
       <div class="rs-rail__head">
         <h2 class="rs-section-title">Similar Series</h2>
       </div>
-      <div id="series-detail-similar-list" class="rs-rail__row"></div>
+      <div id="series-detail-similar-list" class="rs-rail__row" data-nylah-rail="detail-similar"></div>
     </section>
   </div>
 
@@ -120,6 +157,121 @@ import TvOsd from "@/components/couch/TvOsd.astro";
   </script>
 
   <style>
+    /* Detail splash — scoped to this page; the shared tokens,
+       .rs-hero / .rs-image / focus ring all stay in couch.css. */
+    .rs-detail-back {
+      align-self: flex-start;
+    }
+    .rs-hero.rs-detail-hero {
+      min-height: clamp(30rem, 62vh, 46rem);
+    }
+    .rs-detail-hero .rs-hero__scrim {
+      background:
+        linear-gradient(90deg, color-mix(in srgb, var(--rs-bg) 92%, transparent) 0%, color-mix(in srgb, var(--rs-bg) 62%, transparent) 52%, color-mix(in srgb, var(--rs-bg) 18%, transparent) 100%),
+        linear-gradient(0deg, var(--rs-bg) 0%, color-mix(in srgb, var(--rs-bg) 55%, transparent) 45%, transparent 75%),
+        linear-gradient(180deg, color-mix(in srgb, var(--rs-bg) 45%, transparent) 0%, transparent 22%);
+    }
+    /* Actions wrap as whole buttons, never mid-label. */
+    .rs-detail-hero .rs-hero__actions {
+      flex-wrap: wrap;
+    }
+    .rs-detail-hero .rs-hero__action {
+      white-space: nowrap;
+    }
+    .rs-detail-hero .rs-detail-hero__content {
+      flex-direction: row;
+      align-items: flex-end;
+      gap: 2.5rem;
+      max-width: none;
+      width: 100%;
+      padding: 3rem;
+    }
+    .rs-detail-poster {
+      width: clamp(11rem, 15vw, 17rem);
+      flex-shrink: 0;
+      border-radius: var(--rs-radius);
+      box-shadow: var(--rs-shadow-lift);
+    }
+    .rs-detail-hero__text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.875rem;
+      min-width: 0;
+      max-width: 52rem;
+    }
+    .rs-detail-hero__text .rs-hero__description {
+      -webkit-line-clamp: 5;
+    }
+    .rs-detail-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    /* Chips are painted client-side — :global() so the scoped rule
+       reaches the JS-created spans. */
+    .rs-detail-chips :global(.rs-detail-chip) {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.375rem 0.875rem;
+      border-radius: 999px;
+      border: 1px solid var(--rs-line);
+      background: color-mix(in srgb, var(--rs-bg) 55%, transparent);
+      color: var(--rs-text);
+      font-size: var(--rs-meta-size);
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+    .rs-detail-chips :global(.rs-detail-chip--rating) {
+      border-color: color-mix(in srgb, var(--rs-accent) 65%, transparent);
+      background: color-mix(in srgb, var(--rs-accent) 32%, transparent);
+      font-weight: 700;
+    }
+    .rs-detail-chips :global(.rs-detail-chip--progress) {
+      border-color: color-mix(in srgb, var(--rs-focus) 55%, transparent);
+      color: var(--rs-focus);
+      font-weight: 700;
+    }
+    .rs-detail-progress {
+      display: flex;
+      align-items: center;
+      gap: 0.875rem;
+      max-width: 30rem;
+    }
+    .rs-detail-progress__track {
+      flex: 1;
+      height: 0.5rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--rs-text) 22%, transparent);
+      overflow: hidden;
+    }
+    .rs-detail-progress__track :global([data-role="detail-progress-fill"]) {
+      display: block;
+      height: 100%;
+      width: 0;
+      border-radius: 999px;
+      background: var(--rs-accent);
+    }
+    .rs-detail-hints {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      margin: 0.25rem 0 0;
+      font-size: 1rem;
+      color: var(--rs-text-2);
+    }
+    .rs-detail-hint-key {
+      display: inline-grid;
+      place-items: center;
+      min-width: 1.75rem;
+      height: 1.75rem;
+      padding: 0 0.375rem;
+      border-radius: 999px;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 0.875rem;
+      font-weight: 800;
+    }
     .rs-detail-player {
       position: relative;
       aspect-ratio: 16 / 9;
@@ -151,21 +303,32 @@ import TvOsd from "@/components/couch/TvOsd.astro";
       flex-direction: column;
       gap: 1rem;
     }
+    .rs-detail-section__head {
+      display: flex;
+      align-items: baseline;
+      gap: 1.25rem;
+      flex-wrap: wrap;
+    }
     .rs-episode-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
       gap: 1.25rem;
     }
-    .rs-detail-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-    }
-    .rs-detail-chips .rs-meta {
+    .rs-detail-section .rs-detail-chips :global(.rs-meta) {
       background: var(--rs-surface);
       border: 1px solid var(--rs-line);
       border-radius: 999px;
       padding: 0.5rem 1rem;
+    }
+    @media (max-width: 70rem) {
+      .rs-detail-hero .rs-detail-hero__content {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 2rem;
+      }
+      .rs-detail-poster {
+        width: clamp(9rem, 26vw, 12rem);
+      }
     }
   </style>
 </CouchLayout>

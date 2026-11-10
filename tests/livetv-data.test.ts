@@ -341,10 +341,19 @@ describe("pickResumeHero", () => {
     expect(noEpg).toEqual({ channel: channels[0], eyebrow: "Favourite Channel" });
   });
 
-  it("falls back to the first channel with a live programme, else null (never invented)", () => {
+  it("falls back to the first channel with a live programme, else a featured channel (never invented)", () => {
     const channels = [ch({ id: 2, name: "Sky Sports", tvgId: "sky.sports" })];
     expect(pickResumeHero(channels, [], programmes, "", NOW)?.eyebrow).toBe("On Now");
-    expect(pickResumeHero(channels, [], new Map(), "", NOW)).toBeNull();
+    // No EPG at all: the hero still renders a real catalogue
+    // channel (W7) instead of leaving Home a bare wall of logos.
+    expect(pickResumeHero(channels, [], new Map(), "", NOW)).toEqual({
+      channel: channels[0],
+      eyebrow: "Featured Channel",
+    });
+    expect(pickResumeHero(channels, [], null, "", NOW)).toEqual({
+      channel: channels[0],
+      eyebrow: "Featured Channel",
+    });
     expect(pickResumeHero([], [], programmes, "", NOW)).toBeNull();
   });
 });

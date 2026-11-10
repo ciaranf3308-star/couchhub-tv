@@ -142,7 +142,16 @@ const timeLabel =
   <slot />
 </div>
 
-<script define:vars={{ autoHideMs }}>
+<script>
+  // TvOsd auto-hide + transport wiring. A plain <script> (bundled as
+  // a module): the old <script define:vars> was inlined verbatim by
+  // Astro, so the TypeScript casts below shipped raw to the browser
+  // and threw a SyntaxError on every /livetv load — the OSD script
+  // never ran. define:vars is gone: the per-instance delay now comes
+  // only from the element's own data-autohide-ms attribute (the
+  // component renders autoHideMs there; 5000 fallback). One script
+  // instance arms every [data-livetv-osd] on the page, guarded so a
+  // second instance never double-attaches.
   // One OSD per player wrap; the script is bundled once per page and
   // arms every [data-livetv-osd] on it. Auto-hide ~5s after the last
   // activity (pointer, key, focus, gamepad input as synthetic keys,
@@ -156,7 +165,7 @@ const timeLabel =
     const el = osd;
     if (el.dataset.osdArmed) continue;
     el.dataset.osdArmed = "1";
-    const delay = Number(el.getAttribute("data-autohide-ms") || autoHideMs) || 5000;
+    const delay = Number(el.getAttribute("data-autohide-ms")) || 5000;
     let timer = 0;
     const show = () => {
       el.setAttribute("data-hidden", "false");
