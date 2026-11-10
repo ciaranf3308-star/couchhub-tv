@@ -3,7 +3,7 @@
 // The catalogue loads client-side (Xtream provider) via
 // src/scripts/movies/couch-index.ts: rails (Continue Watching,
 // Featured, Recently Added, Recommended, Favourites, Watch Later),
-// genre chips, year/rating/sort controls, search + on-screen keyboard,
+// genre select, year/rating/sort controls, search + on-screen keyboard,
 // and a windowed grid (computeVisibleWindow) for large catalogues.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
@@ -71,22 +71,20 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
           ))
         }
       </select>
+      {/*
+        GENRE FILTER (W8): the controller renders ONE labelled Genre
+        select into this mount point — no per-genre pill buttons.
+        It lives in the filter row with Sort / Decade / Rating.
+      */}
+      <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
     </div>
   </section>
 
   <div
     id="couch-browse-tabs"
-    class="rs-browse-tabs"
+    class="rs-browse-tabs rs-browse-segmented"
     role="group"
     aria-label="Movie lists"
-  >
-  </div>
-
-  <div
-    id="couch-browse-genres"
-    class="rs-browse-genres"
-    role="group"
-    aria-label="Filter by genre"
   >
   </div>
 
@@ -181,14 +179,52 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       font-size: 1.125rem;
       color: var(--rs-text-2);
     }
-    .rs-browse-tabs,
-    .rs-browse-genres {
+    /* Genre filter (W8): ONE labelled select in the filter row —
+       the controller renders it into the .rs-browse-genre-filter
+       mount point. No per-genre pill buttons anywhere. */
+    .rs-browse-genre-filter {
       display: flex;
-      flex-wrap: wrap;
+      align-items: center;
       gap: 0.75rem;
     }
-    .rs-browse-tabs .rs-hero__action[aria-pressed="true"],
-    .rs-browse-genres .rs-hero__action[aria-pressed="true"] {
+    .rs-browse-genre-filter select {
+      min-height: 3rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.125rem;
+    }
+    /* List switcher (W8): ONE joined segmented control — the segments
+       share a single border instead of floating as separate pills.
+       Same buttons, same aria-pressed behaviour as before. */
+    .rs-browse-segmented {
+      display: inline-flex;
+      flex-wrap: wrap;
+      /* Hug the segments: the page main is a flex column, and a bare
+         inline-flex item would otherwise stretch the full width. */
+      align-self: flex-start;
+      max-width: 100%;
+      border: 1px solid var(--rs-line);
+      border-radius: 0.75rem;
+      overflow: hidden;
+      background: var(--rs-surface);
+      margin-bottom: 1.5rem;
+    }
+    .rs-browse-segmented .rs-browse-segment {
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      transform: none;
+    }
+    .rs-browse-segmented .rs-browse-segment:hover {
+      transform: none;
+    }
+    .rs-browse-segmented .rs-browse-segment + .rs-browse-segment {
+      border-left: 1px solid var(--rs-line);
+    }
+    .rs-browse-segmented .rs-browse-segment[aria-pressed="true"] {
       background: var(--rs-accent);
       border-color: var(--rs-focus);
       color: #fff;

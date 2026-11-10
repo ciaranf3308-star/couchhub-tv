@@ -98,7 +98,13 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
     // shared JSDoc omits "series" although favKey handles it.
     const favIds = getFavorites(playlistId, "series" as "vod");
     const favoriteRows = rows.filter((row) => favIds.has(row.id));
-    const watchIds = getWatchlist(playlistId, "series");
+    // W8: getWatchlist returns a plain-object map { id -> meta }, not a
+    // Set — calling .has() on it threw on every unfiltered load, so the
+    // rails never rendered and the grid never painted. The map keys are
+    // the ids; convert them once to the Set filterSeries expects.
+    const watchIds = new Set(
+      Object.keys(getWatchlist(playlistId, "series")).map(Number),
+    );
     const watchLaterRows = rows.filter((row) => watchIds.has(row.id));
     const followedRows = rows.filter((row) => followedIds.has(row.id));
     const featured = pickFeaturedSeries(rows);
@@ -125,7 +131,11 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       // fix requested, not made here.
       filter.list === "favorites" ? getFavorites(playlistId, "series" as "vod") : null;
     const watchlistIds =
-      filter.list === "watchlater" ? getWatchlist(playlistId, "series") : null;
+      // W8: getWatchlist returns a map { id -> meta }, not a Set —
+      // filterSeries calls .has() on it, so convert the keys (see rails).
+      filter.list === "watchlater"
+        ? new Set(Object.keys(getWatchlist(playlistId, "series")).map(Number))
+        : null;
     const inProgressIds =
       filter.list === "continue"
         ? new Set(

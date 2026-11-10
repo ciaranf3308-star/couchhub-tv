@@ -9,7 +9,9 @@
 //   - rails (Continue Watching, Recently Added, Recommended, Favourites,
 //     Watch Later — only the non-empty ones render),
 //   - list tabs (All / Continue / Recent / Favourites / Watch Later),
-//   - genre chips, year + rating selects, sort select, search input +
+//     as one joined segmented control,
+//   - the genre filter, as one labelled select in the filter row,
+//     year + rating selects, sort select, search input +
 //     on-screen keyboard dialog,
 //   - the full catalogue grid, windowed with computeVisibleWindow +
 //     gridColumnsForWidth so a 10,000-title catalogue never builds
@@ -66,7 +68,7 @@ export interface CouchBrowseAdapter<T> {
   lists: Array<{ value: CouchBrowseList; label: string }>;
   /** Rails above the grid, in order. Only non-empty rails render. */
   rails: (rows: T[], playlistId: string) => CouchRail<T>[];
-  /** Genre chips present in this catalogue. */
+  /** Genres present in this catalogue (shown as one Genre select). */
   genres: (rows: T[]) => Array<{ id: GenreId; label: string; count: number }>;
   /** Apply the current filter (query/genre/year/rating/list). */
   applyFilter: (rows: T[], filter: CouchBrowseFilter, playlistId: string) => T[];
@@ -156,6 +158,10 @@ export function mountCouchBrowse<T>(
   };
 
   // --- Rails -------------------------------------------------------------
+  // (W8 pillfest cleanup: the list tabs are ONE joined segmented
+  // control and the genre filter is ONE labelled <select> in the
+  // filter row — no more per-genre pill buttons. Same options, same
+  // behaviour; presentation only.)
   const renderRails = () => {
     if (!railsEl) return;
     railsEl.replaceChildren();
@@ -280,13 +286,17 @@ export function mountCouchBrowse<T>(
   };
 
   // --- Filter bar ----------------------------------------------------------
+  // List tabs: ONE joined segmented control (same buttons, same
+  // aria-pressed behaviour, same click handling — the segments just
+  // share one border instead of floating as separate pills).
   const renderTabs = () => {
     if (!tabsEl) return;
     tabsEl.replaceChildren();
     for (const list of adapter.lists) {
       const btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "rs-hero__action rs-hero__action--secondary";
+      btn.className =
+        "rs-hero__action rs-hero__action--secondary rs-browse-segment";
       btn.textContent = list.label;
       btn.setAttribute("aria-pressed", filter.list === list.value ? "true" : "false");
       btn.addEventListener("click", () => {
@@ -298,33 +308,49 @@ export function mountCouchBrowse<T>(
     }
   };
 
+  // Genre filter: ONE labelled <select> in the filter row (next to
+  // Sort / Decade / Rating) instead of one pill button per genre.
+  // Same options (All genres + every catalogue genre with its count),
+  // same behaviour (picking one filters the grid; re-picking All
+  // clears it). The select is built once and its options refreshed
+  // in place so focus is never stolen by a re-render.
   const renderGenres = () => {
     if (!genresEl) return;
-    genresEl.replaceChildren();
-    const allBtn = document.createElement("button");
-    allBtn.type = "button";
-    allBtn.className = "rs-hero__action rs-hero__action--secondary";
-    allBtn.textContent = "All genres";
-    allBtn.setAttribute("aria-pressed", filter.genre === "" ? "true" : "false");
-    allBtn.addEventListener("click", () => {
-      filter.genre = "";
-      renderGenres();
-      applyFilterAndRender();
-    });
-    genresEl.appendChild(allBtn);
-    for (const genre of adapter.genres(all)) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "rs-hero__action rs-hero__action--secondary";
-      btn.textContent = `${genre.label} (${genre.count})`;
-      btn.setAttribute("aria-pressed", filter.genre === genre.id ? "true" : "false");
-      btn.addEventListener("click", () => {
-        filter.genre = filter.genre === genre.id ? "" : genre.id;
-        renderGenres();
+    const genres = adapter.genres(all);
+    let select = genresEl.querySelector("select") as HTMLSelectElement | null;
+    if (!select) {
+      genresEl.replaceChildren();
+      const label = document.createElement("label");
+      label.className = "rs-browse-label";
+      label.htmlFor = `${prefix}couch-browse-genre`;
+      label.textContent = "Genre";
+      const built = document.createElement("select");
+      built.id = `${prefix}couch-browse-genre`;
+      built.setAttribute("aria-label", "Filter by genre");
+      built.addEventListener("change", () => {
+        filter.genre = (built.value || "") as GenreId | "";
         applyFilterAndRender();
       });
-      genresEl.appendChild(btn);
+      genresEl.append(label, built);
+      select = built;
     }
+    // A stored genre with no titles in this catalogue resets to All
+    // rather than silently filtering everything out.
+    if (filter.genre && !genres.some((g) => g.id === filter.genre)) {
+      filter.genre = "";
+    }
+    select.replaceChildren();
+    const allOpt = document.createElement("option");
+    allOpt.value = "";
+    allOpt.textContent = "All genres";
+    select.appendChild(allOpt);
+    for (const genre of genres) {
+      const opt = document.createElement("option");
+      opt.value = genre.id;
+      opt.textContent = `${genre.label} (${genre.count})`;
+      select.appendChild(opt);
+    }
+    select.value = filter.genre;
   };
 
   const applyFilterAndRender = () => {

@@ -185,6 +185,25 @@
     void runSearch()
   }
 
+  /** Short subtitle for a mood card, derived only from the preset's
+      own fields (genres / rating floor / runtime cap) — never
+      invented. W8: the moods are large cards now, not a pill row. */
+  function moodSubtitle(preset) {
+    if (preset.maxRuntimeMinutes) return `Under ${preset.maxRuntimeMinutes} minutes`
+    if (preset.hiddenGem)
+      return `Rated ${(preset.minRating ?? 7.5).toFixed(1)}+ · under the radar`
+    if (preset.genres?.length) {
+      return preset.genres
+        .slice(0, 3)
+        .map((g) => g.charAt(0).toUpperCase() + g.slice(1))
+        .join(" · ")
+    }
+    if (preset.kind === "series")
+      return preset.minRating ? `Series rated ${preset.minRating}+` : "Series"
+    if (preset.minRating) return `Rated ${preset.minRating}+`
+    return "Anything in your library"
+  }
+
   function clearSearch() {
     query = ""
     queryDebounced = ""
@@ -318,17 +337,25 @@
       onCommit={focusFirstResult}
       placeholder="What are you in the mood for?" />
 
-    <div class="rs-discover__moods" role="group" aria-label="Quick picks">
-      {#each MOOD_PRESETS as preset (preset.id)}
-        <button
-          type="button"
-          onclick={() => pickMood(preset.id)}
-          aria-pressed={activeMood === preset.id}
-          class="rs-discover-chip"
-          class:is-active={activeMood === preset.id}>
-          {preset.label}
-        </button>
-      {/each}
+    <!-- W8: quick picks are large navigable cards now, not a row of
+         tiny pills. Same six presets, same pickMood behaviour — a
+         card is a destination choice, so it gets card scale. -->
+    <div class="rs-discover__moods">
+      <p class="rs-discover__moods-title">Quick picks</p>
+      <div class="rs-discover__mood-grid" role="group" aria-label="Quick picks">
+        {#each MOOD_PRESETS as preset (preset.id)}
+          <button
+            type="button"
+            onclick={() => pickMood(preset.id)}
+            aria-pressed={activeMood === preset.id}
+            data-nylah-item
+            class="rs-discover-mood"
+            class:is-active={activeMood === preset.id}>
+            <span class="rs-discover-mood__label">{preset.label}</span>
+            <span class="rs-discover-mood__sub">{moodSubtitle(preset)}</span>
+          </button>
+        {/each}
+      </div>
     </div>
   </div>
 
@@ -525,41 +552,91 @@
     border-color: var(--rs-focus);
     box-shadow: 0 0 0 2px var(--rs-focus-glow);
   }
-  .rs-discover-clear,
-  .rs-discover-chip {
+  /* W8: no pills. Clear is one clean rectangular button; the quick
+     picks are large cards in a grid (see .rs-discover-mood below). */
+  .rs-discover-clear {
     font-size: 1.25rem;
     padding: 0.625rem 1.25rem;
-    border-radius: 9999px;
+    border-radius: 0.75rem;
     border: 1px solid var(--rs-line);
-    background: transparent;
+    background: var(--rs-surface);
     color: var(--rs-text-2);
     cursor: pointer;
     white-space: nowrap;
     outline: none;
   }
   .rs-discover-clear:hover,
-  .rs-discover-clear:focus-visible,
-  .rs-discover-chip:hover,
-  .rs-discover-chip:focus-visible {
+  .rs-discover-clear:focus-visible {
     color: var(--rs-text);
     background: var(--rs-surface);
     border-color: var(--rs-focus);
   }
-  .rs-discover-chip.is-active {
-    color: var(--rs-text);
-    background: var(--rs-accent);
-    border-color: var(--rs-accent);
-  }
   .rs-discover__moods {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 0.75rem;
-    overflow-x: auto;
-    padding: 0.25rem;
-    scrollbar-width: none;
   }
-  .rs-discover__moods::-webkit-scrollbar {
-    display: none;
+  .rs-discover__moods-title {
+    margin: 0;
+    font-size: 1.375rem;
+    font-weight: 700;
+    color: var(--rs-text);
+  }
+  .rs-discover__mood-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  @media (max-width: 56rem) {
+    .rs-discover__mood-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  /* Large navigable mood card: big label + an honest subtitle
+     derived from the preset itself. One clear focus ring, and the
+     active card reads as selected, not as a pressed pill. */
+  .rs-discover-mood {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.375rem;
+    min-height: 6.5rem;
+    padding: 1.25rem 1.5rem;
+    border-radius: 1rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    text-align: left;
+    cursor: pointer;
+    outline: none;
+  }
+  .rs-discover-mood:hover,
+  .rs-discover-mood:focus-visible {
+    border-color: var(--rs-focus);
+    background: var(--rs-bg-2);
+  }
+  .rs-discover-mood:focus-visible {
+    box-shadow:
+      0 0 0 3px var(--rs-focus),
+      0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .rs-discover-mood.is-active {
+    background: var(--rs-accent);
+    border-color: var(--rs-focus);
+    color: #fff;
+  }
+  .rs-discover-mood__label {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .rs-discover-mood__sub {
+    font-size: 1.125rem;
+    line-height: 1.35;
+    color: var(--rs-text-2);
+  }
+  .rs-discover-mood.is-active .rs-discover-mood__sub {
+    color: rgb(255 255 255 / 0.85);
   }
   .rs-discover-toast {
     border-radius: 0.75rem;
@@ -625,14 +702,17 @@
     gap: 0.375rem;
     padding: 0 0.25rem;
   }
+  /* W8: feedback actions are one clean rectangular action row, not
+     a cluster of tiny pills under every card. Same five actions,
+     same handlers — presentation only. */
   .discover-fb-btn {
     border: 1px solid var(--rs-line);
-    border-radius: 9999px;
-    padding: 0.375rem 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.5rem 1rem;
     font-size: 1.125rem;
     line-height: 1.2;
     color: var(--rs-text-2);
-    background: transparent;
+    background: var(--rs-surface);
     cursor: pointer;
     outline: none;
     transition: color 120ms, background-color 120ms, border-color 120ms;
