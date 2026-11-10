@@ -1,51 +1,61 @@
 ---
-import Layout from "@/layouts/Layout.astro";
+// Programme guide — RedSilk Couch rebuild (W3).
+//
+// CouchLayout shell + the W1 shared system. The guide engine is
+// unchanged and stays in epg.ts / mapping.ts: this page keeps every
+// DOM id they own (grid shell, time header, focus strip, toolbar,
+// mapping + picker dialogs) and reskins the chrome around it.
+//
+// Controller-first timeline guide: channels vertically, programmes
+// horizontally by time, current-time marker, now/next in the focus
+// strip, D-pad movement between programmes (spatial nav), fast
+// channel selection via the sticky channel column. Catch-up actions
+// come only from epg.ts's own gating (channelSupportsCatchup /
+// isCatchupPlayable) — never invented here. Rows are virtualised by
+// epg.ts (visible window + overscan) with content-visibility as a
+// second layer in TvEpgGrid.
+import CouchLayout from "@/layouts/CouchLayout.astro";
 import CategoryPickerDialog from "@/components/CategoryPickerDialog.astro";
 import SearchInput from "@/components/SearchInput.astro";
+import TvEpgGrid from "@/components/couch/TvEpgGrid.astro";
 import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevronRight, IconClockHour3, IconLink } from "@tabler/icons-svelte";
 ---
 
-<Layout pageTitle="EPG" showVersion={false}>
-	<main
-		class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 md:landscape:pt-6 pb-6
-			flex flex-col gap-3 flex-1 min-h-0">
-
-		<header class="route-hero shrink-0">
-			<h1 data-i18n="page.epg.title" class="route-hero__title">Programme guide</h1>
+<CouchLayout pageTitle="Programme guide" view="epg">
+	<div class="rs-epg">
+		<header class="rs-epg__head">
+			<h1 class="rs-page-title">Programme guide</h1>
 			<p
 				id="epg-title"
-				class="route-hero__sub truncate min-w-0">
+				class="rs-meta">
 				What's on right now and what's coming up across the active playlist's channels.
 			</p>
 		</header>
 
 		<!-- Toolbar -->
-		<section class="flex items-center gap-3 shrink-0 flex-wrap">
+		<section class="rs-epg__toolbar" aria-label="Guide controls">
 			<a
 				href="/livetv"
 				aria-label="Back to Live TV"
-				data-i18n-attr="aria-label:page.livetv.title"
-				class="rounded-xl border border-line bg-surface px-3 py-2 text-sm text-fg-2 inline-flex items-center gap-2
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconArrowLeft aria-hidden="true" stroke={2} class="size-4" />
-				<span data-i18n="page.livetv.title">Live TV</span>
+				class="rs-epg__toolbtn">
+				<IconArrowLeft aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
+				<span>Live TV</span>
 			</a>
 			<button
 				id="epg-category-picker-trigger"
 				type="button"
 				aria-haspopup="dialog"
 				aria-controls="epg-category-picker-dialog"
-				class="rounded-xl border border-line bg-surface px-3 py-2 text-sm flex items-center gap-2 text-left max-w-[18rem] min-w-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<span data-i18n="list.category" class="text-fg-3 shrink-0">Category</span>
+				class="rs-epg__toolbtn rs-epg__toolbtn--grow">
+				<span class="rs-epg__toolbtn-label">Category</span>
 				<span
 					id="epg-category-picker-label"
 					data-i18n="list.allCategories"
-					class="text-fg truncate flex-1">All categories</span>
+					class="rs-epg__toolbtn-value">All categories</span>
 				<IconChevronDown
 					aria-hidden="true"
 					stroke={2}
-					class="size-4 text-fg-3 shrink-0"
+					class="rs-epg__toolbtn-icon"
 				/>
 			</button>
 			<button
@@ -53,15 +63,13 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 				type="button"
 				aria-label="Previous day"
 				title="Previous day"
-				data-i18n-attr="aria-label:epg.previousDay;title:epg.previousDay"
-				class="rounded-xl border border-line bg-surface min-h-11 min-w-11 text-fg-2 inline-flex items-center justify-center shrink-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconChevronLeft aria-hidden="true" stroke={2} class="size-4" />
+				class="rs-epg__toolbtn rs-epg__toolbtn--square">
+				<IconChevronLeft aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
 			</button>
 			<span
 				id="epg-day-label"
 				aria-live="polite"
-				class="text-sm font-medium text-fg-3 tabular-nums whitespace-nowrap px-1 shrink-0">
+				class="rs-epg__daylabel">
 				Today
 			</span>
 			<button
@@ -69,30 +77,24 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 				type="button"
 				aria-label="Next day"
 				title="Next day"
-				data-i18n-attr="aria-label:epg.nextDay;title:epg.nextDay"
-				class="rounded-xl border border-line bg-surface min-h-11 min-w-11 text-fg-2 inline-flex items-center justify-center shrink-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconChevronRight aria-hidden="true" stroke={2} class="size-4" />
+				class="rs-epg__toolbtn rs-epg__toolbtn--square">
+				<IconChevronRight aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
 			</button>
 			<button
 				id="epg-now"
 				type="button"
 				aria-label="Snap timeline to now"
 				title="Snap to now"
-				data-i18n-attr="aria-label:epg.now;title:epg.now"
-				class="rounded-xl border border-line bg-surface min-h-11 min-w-11 px-2 sm:px-3 text-sm text-fg-2 inline-flex items-center justify-center gap-2 shrink-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconClockHour3 aria-hidden="true" stroke={2} class="size-4" />
-				<span data-i18n="epg.now" class="hidden sm:inline">Now</span>
+				class="rs-epg__toolbtn">
+				<IconClockHour3 aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
+				<span>Now</span>
 			</button>
 			<button
 				id="epg-refresh"
 				type="button"
 				aria-label="Refresh EPG"
-				data-i18n-attr="aria-label:downloads.refresh"
-				class="rounded-xl border border-line bg-surface min-h-11 min-w-11 text-fg-2 inline-flex items-center justify-center
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconRefresh aria-hidden="true" stroke={2} class="size-4" />
+				class="rs-epg__toolbtn rs-epg__toolbtn--square">
+				<IconRefresh aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
 			</button>
 			<button
 				id="epg-map-open"
@@ -101,76 +103,13 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 				aria-controls="epg-map-dialog"
 				aria-label="Manage EPG channel mapping"
 				title="Manage EPG channel mapping"
-				data-i18n-attr="aria-label:epg.map.openDialog;title:epg.map.openDialog"
-				class="rounded-xl border border-line bg-surface p-2 sm:px-3 text-sm text-fg-2 inline-flex items-center gap-2 shrink-0
-					hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors">
-				<IconLink aria-hidden="true" stroke={2} class="size-4" />
-				<span data-i18n="epg.map.openDialog" class="hidden sm:inline">Map channels</span>
+				class="rs-epg__toolbtn">
+				<IconLink aria-hidden="true" stroke={2} class="rs-epg__toolbtn-icon" />
+				<span>Map channels</span>
 			</button>
 		</section>
 
-		<!-- Status message (skeleton / error text) -->
-		<div
-			id="epg-status"
-			class="hidden rounded-2xl border border-line bg-surface px-4 py-6 text-fg-2 text-sm">
-			Loading…
-		</div>
-
-		<!-- Nylah Studios v0.2.0 (w3): focused-programme strip. The grid
-		     cells are small by necessity, so the focused cell's full title,
-		     times, description and next programme live here — filled from
-		     the focused cell's own data attributes, never invented. -->
-		<div
-			id="epg-focus-strip"
-			class="shrink-0 rounded-2xl border border-line bg-surface px-4 py-3"
-			hidden>
-			<div class="flex items-baseline gap-3 min-w-0 flex-wrap">
-				<span
-					data-focus-badge
-					data-state="upcoming"
-					class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide"></span>
-				<span
-					data-focus-title
-					class="min-w-0 flex-1 font-serif text-2xl leading-tight text-fg truncate"></span>
-				<span
-					data-focus-time
-					class="text-sm text-fg-3 tabular-nums shrink-0"></span>
-			</div>
-			<div
-				data-focus-channel
-				class="mt-0.5 text-sm text-fg-2 truncate"></div>
-			<div
-				data-focus-desc
-				class="mt-1 text-sm text-fg-2 leading-relaxed line-clamp-2 empty:hidden"></div>
-			<div
-				data-focus-next
-				class="mt-1 text-sm text-fg-3 truncate empty:hidden"></div>
-		</div>
-
-		<!-- Grid container -->
-		<section
-			id="epg-grid"
-			class="hidden flex-1 min-h-0 overflow-auto custom-scroll
-				rounded-2xl border border-line bg-bg">
-
-			<!-- Time header -->
-			<div
-				class="epg-time-head sticky top-0 z-30 flex items-stretch border-b border-line bg-bg/95 backdrop-blur-sm">
-				<div
-					class="shrink-0 sticky left-0 z-30 bg-bg border-r border-line"
-					style="width: 240px; height: 40px;">
-				</div>
-				<div
-					id="epg-time-header-inner"
-					class="relative shrink-0"
-					style="height: 40px;">
-				</div>
-			</div>
-
-			<!-- Body -->
-			<div id="epg-body" class="relative">
-			</div>
-		</section>
+		<TvEpgGrid />
 
 		<CategoryPickerDialog idPrefix="epg-category-picker" showSyncToggle={true} />
 
@@ -178,13 +117,13 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 		<dialog
 			id="epg-map-dialog"
 			aria-labelledby="epg-map-title"
-			class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
+			class="rs-epg__dialog fixed inset-0 m-auto rounded-2xl border text-fg p-0
 				w-[min(46rem,calc(100vw-2rem))] h-[min(85dvh,46rem)]
 				backdrop:bg-black/60">
 			<div class="flex flex-col h-full p-4 gap-3">
 				<div class="flex items-center justify-between gap-3 shrink-0">
 					<div class="flex flex-col gap-0.5 min-w-0">
-						<h2 id="epg-map-title" data-i18n="epg.map.title" class="text-base font-semibold">
+						<h2 id="epg-map-title" data-i18n="epg.map.title" class="rs-epg__dialog-title">
 							Map channels to EPG
 						</h2>
 						<span data-i18n="epg.map.help" class="text-xs text-fg-3 leading-relaxed">
@@ -278,13 +217,13 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 		<dialog
 			id="epg-pick-dialog"
 			aria-labelledby="epg-pick-title"
-			class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
+			class="rs-epg__dialog fixed inset-0 m-auto rounded-2xl border text-fg p-0
 				w-[min(40rem,calc(100vw-2rem))] h-[min(80dvh,42rem)]
 				backdrop:bg-black/60">
 			<div class="flex flex-col h-full p-4 gap-3">
 				<div class="flex items-center justify-between gap-3 shrink-0">
 					<div class="flex flex-col gap-0.5 min-w-0">
-						<h2 id="epg-pick-title" data-i18n="epg.map.pickerTitle" class="text-base font-semibold">
+						<h2 id="epg-pick-title" data-i18n="epg.map.pickerTitle" class="rs-epg__dialog-title">
 							Pick an EPG channel
 						</h2>
 						<span data-i18n="epg.map.pickerHelp" class="text-xs text-fg-3 leading-relaxed">
@@ -316,7 +255,7 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 						type="button"
 						data-i18n="epg.map.clearOverride"
 						class="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-line bg-bg px-2.5 py-1 text-xs text-fg-2
-							hover:bg-surface hover:text-fg focus-visible:bg-surface focus-visible:border-accent transition-colors
+							hover:bg-surface hover:text-fg focus-visible:bg-surface hover:text-fg focus-visible:border-accent transition-colors
 							disabled:opacity-50 disabled:cursor-not-allowed">
 						Clear override
 					</button>
@@ -334,170 +273,115 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 				</div>
 			</div>
 		</dialog>
-	</main>
+	</div>
 
 	<style>
-		/* Nylah Studios v0.2.0 (w3) — EPG grid reskin, controller-first.
-		   Grid cells are rendered at runtime by epg.ts without Astro's
-		   scope attribute, so their rules must be :global(). */
-		/* A focused cell glows, not just rings — it is the controller's
-		   landing target in a dense grid. */
-		:global(.epg-cell:focus-visible) {
-			z-index: 5;
-			box-shadow:
-				0 0 0 2px var(--color-accent),
-				0 0 24px 4px color-mix(in oklch, var(--color-accent) 45%, transparent);
+		.rs-epg {
+			display: flex;
+			flex-direction: column;
+			gap: 1.5rem;
+			flex: 1;
+			min-height: 0;
 		}
-		/* The now-line is the grid's anchor: thicker, with a glow. */
-		:global(.epg-now-line) {
-			width: 2px;
-			box-shadow: 0 0 12px 1px color-mix(in oklch, var(--color-accent) 60%, transparent);
+		.rs-epg__head {
+			display: flex;
+			flex-direction: column;
+			gap: 0.25rem;
+			flex-shrink: 0;
 		}
-		/* The focused row's channel column gets an accent edge, so the eye
-		   can follow the row across the time axis. */
-		:global(.epg-row:has(.epg-cell:focus-visible) > div:first-child) {
-			box-shadow: inset 3px 0 0 var(--color-accent);
+		.rs-epg__toolbar {
+			display: flex;
+			align-items: center;
+			gap: 0.75rem;
+			flex-wrap: wrap;
+			flex-shrink: 0;
 		}
-		/* Focus-strip badge states (badge classes are swapped by epg.ts). */
-		#epg-focus-strip [data-focus-badge][data-state="now"] {
-			background: var(--color-accent);
-			color: var(--color-on-accent, #fff);
+		.rs-epg__toolbtn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.5rem;
+			min-height: 3.5rem;
+			padding: 0.625rem 1rem;
+			border-radius: 0.75rem;
+			border: 1px solid var(--rs-line);
+			background: var(--rs-bg-2);
+			color: var(--rs-text);
+			font-size: 1.25rem;
+			line-height: 1.2;
+			cursor: pointer;
+			white-space: nowrap;
 		}
-		#epg-focus-strip [data-focus-badge][data-state="replay"] {
-			background: var(--color-accent-soft);
-			color: var(--color-accent);
-			box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--color-accent) 50%, transparent);
+		.rs-epg__toolbtn:hover {
+			background: var(--rs-surface-2);
 		}
-		#epg-focus-strip [data-focus-badge][data-state="upcoming"],
-		#epg-focus-strip [data-focus-badge][data-state="past"] {
-			background: var(--color-surface-2);
-			color: var(--color-fg-2);
-			box-shadow: inset 0 0 0 1px var(--color-line);
+		.rs-epg__toolbtn--grow {
+			flex: 1;
+			min-width: 0;
+			justify-content: flex-start;
+			max-width: 22rem;
 		}
-		@media (prefers-reduced-motion: reduce) {
-			:global(.epg-cell:focus-visible),
-			:global(.epg-now-line) {
-				box-shadow: none;
-			}
-			:global(.epg-cell:focus-visible) {
-				box-shadow: 0 0 0 2px var(--color-accent);
-			}
+		.rs-epg__toolbtn--square {
+			padding-inline: 0.75rem;
 		}
-
-		/* Nylah Studios v0.3.0 (w6) — RedSilk treatment. Warm gradients,
-		   serif hero + focus-strip title, lit grid cells, glowing
-		   dialogs. Layout, grid geometry and behavior untouched. */
-		/* Route hero title is a display title: Instrument Serif. */
-		.route-hero__title {
-			font-family: var(--nylah-font-display, var(--font-serif));
+		.rs-epg__toolbtn-label {
+			color: var(--rs-text-2);
+			flex-shrink: 0;
 		}
-		/* Focus strip: warm gradient card with a layered wine shadow;
-		   the title inside is already serif. */
-		#epg-focus-strip {
-			background:
-				linear-gradient(
-					180deg,
-					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
-					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
-				);
-			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		.rs-epg__toolbtn-value {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			flex: 1;
+			min-width: 0;
+			text-align: left;
 		}
-		#epg-focus-strip [data-focus-badge][data-state="now"] {
-			box-shadow:
-				0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent),
-				0 0 16px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+		.rs-epg__toolbtn-icon {
+			width: 1.25rem;
+			height: 1.25rem;
+			flex-shrink: 0;
 		}
-		/* Grid shell: warm wash behind the rows, not a flat fill. */
-		#epg-grid {
-			background:
-				linear-gradient(
-					180deg,
-					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
-					var(--color-bg) 18rem
-				);
-			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		.rs-epg__daylabel {
+			font-size: 1.25rem;
+			font-weight: 600;
+			color: var(--rs-text-2);
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+			padding-inline: 0.25rem;
+			flex-shrink: 0;
 		}
-		.epg-time-head {
-			background: var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350)));
+		/* Mapping + picker dialogs: RedSilk shell, serif titles,
+		   layered wine shadow. Backdrop scrim stays black/60. Rows
+		   inside the lists are rendered by mapping.ts at runtime. */
+		.rs-epg__dialog {
+			background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
+			border-color: var(--rs-line);
+			color: var(--rs-text);
+			box-shadow: var(--rs-shadow-lift);
 		}
-		/* Grid cells (rendered by epg.ts, so :global): the live cell gets
-		   a warm wine gradient + halo instead of a flat accent wash, and
-		   the focused cell uses the strong wine glow. Past/replay cells
-		   keep their dimmer treatment from global.css. */
-		:global(#epg-grid .epg-cell.border-accent) {
-			background: linear-gradient(
-				135deg,
-				color-mix(in oklch, var(--color-accent) 26%, transparent),
-				color-mix(in oklch, var(--nylah-wine-bright, oklch(0.72 0.17 350)) 12%, transparent)
-			);
-			box-shadow:
-				0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent),
-				0 0 18px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
-		}
-		:global(#epg-grid .epg-cell:focus-visible) {
-			box-shadow:
-				0 0 0 2px var(--color-accent),
-				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
-		}
-		/* The focused row's channel column: warm tint behind the accent
-		   edge so the eye can follow the row across the time axis. */
-		:global(#epg-grid .epg-row:has(.epg-cell:focus-visible) > div:first-child) {
-			background: linear-gradient(
-				90deg,
-				color-mix(in oklch, var(--color-accent) 14%, transparent),
-				transparent
-			);
-		}
-		/* Status box (loading / error / empty): warm card, not bare. */
-		#epg-status {
-			background:
-				linear-gradient(
-					180deg,
-					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))),
-					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350)))
-				);
-			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
-		}
-		/* Mapping + picker dialogs: layered wine shadow, serif titles,
-		   warm gradient shell. Backdrop scrim stays black/60. */
-		#epg-map-dialog,
-		#epg-pick-dialog {
-			background:
-				linear-gradient(
-					180deg,
-					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
-					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
-				);
-			box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
-		}
-		#epg-map-title,
-		#epg-pick-title {
-			font-family: var(--nylah-font-display, var(--font-serif));
-			font-size: 1.375rem;
+		.rs-epg__dialog-title {
+			font-family: var(--rs-font-display);
+			font-size: 1.75rem;
+			font-weight: 400;
 			letter-spacing: -0.01em;
+			color: var(--rs-text);
 		}
 		/* Checked filter pill: warm halo, not just a flat fill. */
 		#epg-map-filter [aria-checked="true"] {
 			box-shadow:
-				0 0 0 1px color-mix(in oklch, var(--color-accent) 30%, transparent),
-				0 0 14px 1px color-mix(in oklch, var(--color-accent) 20%, transparent);
+				0 0 0 1px color-mix(in srgb, var(--rs-accent) 30%, transparent),
+				0 0 0.875rem 1px color-mix(in srgb, var(--rs-accent) 20%, transparent);
 		}
 		/* Map/pick list rows are rendered at runtime; a focused row
 		   inside them glows wine. */
 		:global(#epg-map-list [tabindex]:focus-visible),
 		:global(#epg-pick-list [tabindex]:focus-visible) {
 			box-shadow:
-				0 0 0 2px var(--color-accent),
-				0 0 20px 3px color-mix(in oklch, var(--color-accent) 35%, transparent);
+				0 0 0 2px var(--rs-focus),
+				0 0 1.25rem 0.25rem var(--rs-focus-glow);
 		}
 		@media (prefers-reduced-motion: reduce) {
-			:global(#epg-grid .epg-cell.border-accent) {
-				box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent);
-			}
-			:global(#epg-grid .epg-cell:focus-visible) {
-				box-shadow: 0 0 0 2px var(--color-accent);
-			}
-			#epg-focus-strip [data-focus-badge][data-state="now"] {
+			#epg-map-filter [aria-checked="true"] {
 				box-shadow: none;
 			}
 		}
@@ -507,4 +391,4 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 		import "../scripts/epg/epg.ts";
 		import "../scripts/epg/mapping.ts";
 	</script>
-</Layout>
+</CouchLayout>

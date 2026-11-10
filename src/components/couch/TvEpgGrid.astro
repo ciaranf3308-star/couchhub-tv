@@ -1,0 +1,296 @@
+---
+// TvEpgGrid — programme guide grid shell (W3).
+//
+// The grid itself is painted by epg.ts into #epg-grid /
+// #epg-time-header-inner / #epg-body — those ids are epg.ts's, keep
+// them exact. This component provides the shell (couch-sized, RedSilk
+// surfaces) plus the focused-programme strip epg.ts fills from the
+// focused cell's own data attributes.
+//
+// Scale: epg.ts virtualises rows (only the visible window plus
+// overscan rows are built — see OVERSCAN_ROWS there — and capped at
+// MAX_CHANNELS), so a large guide never builds thousands of row
+// nodes. This shell adds CSS content-visibility per row as a second
+// layer, so off-screen rows are not painted either. Geometry stays
+// epg.ts's: 240px channel column, 200px per hour, 6 visible hours —
+// the now-line scroll math in epg.ts is computed against those
+// numbers, so this shell never overrides them.
+---
+
+<div
+  id="epg-status"
+  class="rs-epggrid__status hidden"
+  role="status"
+>
+  Loading…
+</div>
+
+<div
+  id="epg-focus-strip"
+  class="rs-epggrid__focus"
+  hidden
+>
+  <div class="rs-epggrid__focus-top">
+    <span
+      data-focus-badge
+      data-state="upcoming"
+      class="rs-epggrid__badge"
+    ></span>
+    <span
+      data-focus-title
+      class="rs-epggrid__focus-title"
+    ></span>
+    <span
+      data-focus-time
+      class="rs-epggrid__focus-time"
+    ></span>
+  </div>
+  <div
+    data-focus-channel
+    class="rs-epggrid__focus-channel"
+  ></div>
+  <div
+    data-focus-desc
+    class="rs-epggrid__focus-desc"
+  ></div>
+  <div
+    data-focus-next
+    class="rs-epggrid__focus-next"
+  ></div>
+</div>
+
+<section
+  id="epg-grid"
+  class="rs-epggrid hidden flex-1 min-h-0 overflow-auto custom-scroll"
+  aria-label="Programme guide"
+>
+  <div
+    class="epg-time-head sticky top-0 z-30 flex items-stretch border-b"
+  >
+    <div
+      class="shrink-0 sticky left-0 z-30 border-r"
+      style="width: 240px; height: 40px;"
+    >
+    </div>
+    <div
+      id="epg-time-header-inner"
+      class="relative shrink-0"
+      style="height: 40px;"
+    >
+    </div>
+  </div>
+
+  <div id="epg-body" class="relative"></div>
+</section>
+
+<style>
+  .rs-epggrid {
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(
+      180deg,
+      var(--rs-surface) 0%,
+      var(--rs-bg) 18rem
+    );
+    box-shadow: var(--rs-shadow);
+  }
+  .rs-epggrid__status {
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+    box-shadow: var(--rs-shadow);
+    padding: 1.5rem 2rem;
+    font-size: 1.375rem;
+    color: var(--rs-text-2);
+  }
+  .rs-epggrid__status.hidden {
+    display: none;
+  }
+  /* Focus strip: the focused cell's full title / times / description
+     / next programme live here — filled by epg.ts from the cell's own
+     data attributes, never invented. */
+  .rs-epggrid__focus {
+    border: 1px solid var(--rs-line);
+    border-radius: 1.25rem;
+    background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+    box-shadow: var(--rs-shadow);
+    padding: 1.25rem 1.75rem;
+  }
+  .rs-epggrid__focus-top {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .rs-epggrid__badge {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .rs-epggrid__focus-title {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--rs-font-display);
+    font-size: 2rem;
+    line-height: 1.15;
+    color: var(--rs-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-epggrid__focus-time {
+    font-size: 1.25rem;
+    color: var(--rs-text-2);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .rs-epggrid__focus-channel {
+    margin-top: 0.25rem;
+    font-size: 1.25rem;
+    color: var(--rs-text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-epggrid__focus-desc {
+    margin-top: 0.5rem;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--rs-text-2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rs-epggrid__focus-desc:empty {
+    display: none;
+  }
+  .rs-epggrid__focus-next {
+    margin-top: 0.5rem;
+    font-size: 1.25rem;
+    color: var(--rs-text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rs-epggrid__focus-next:empty {
+    display: none;
+  }
+  /* Badge states (swapped by epg.ts). */
+  .rs-epggrid__focus [data-focus-badge][data-state="now"] {
+    background: var(--rs-accent);
+    color: var(--rs-text);
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--rs-accent) 18%, transparent),
+      0 0 1rem 0.125rem var(--rs-focus-glow);
+  }
+  .rs-epggrid__focus [data-focus-badge][data-state="replay"] {
+    background: color-mix(in srgb, var(--rs-accent) 25%, transparent);
+    color: var(--rs-focus);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 50%, transparent);
+  }
+  .rs-epggrid__focus [data-focus-badge][data-state="upcoming"],
+  .rs-epggrid__focus [data-focus-badge][data-state="past"] {
+    background: var(--rs-surface-2);
+    color: var(--rs-text-2);
+    box-shadow: inset 0 0 0 1px var(--rs-line);
+  }
+  /* Time header: warm surface, couch-sized ticks. */
+  .epg-time-head {
+    background: var(--rs-surface);
+    border-color: var(--rs-line);
+  }
+  .epg-time-head > div:first-child {
+    background: var(--rs-surface);
+    border-color: var(--rs-line);
+  }
+  /* Rows are rendered by epg.ts without Astro scope: :global().
+     Second virtualisation layer — off-screen rows are not painted. */
+  :global(#epg-grid .epg-row) {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 4rem;
+    border-color: var(--rs-line);
+  }
+  :global(#epg-grid .epg-row > div:first-child) {
+    background: var(--rs-bg-2);
+    border-color: var(--rs-line);
+  }
+  /* Couch-sized type inside runtime rows: channel names, cell
+     titles and times. Row height (64px × density) is epg.ts's and
+     fits two couch lines. */
+  :global(#epg-grid .epg-row .text-base) {
+    font-size: 1.25rem;
+  }
+  :global(#epg-grid .epg-row .text-xs) {
+    font-size: 1.125rem;
+  }
+  :global(#epg-grid .epg-cell .text-sm) {
+    font-size: 1.25rem;
+  }
+  :global(#epg-grid .epg-cell .text-xs) {
+    font-size: 1.125rem;
+  }
+  :global(#epg-grid .epg-row .logo-skel) {
+    width: 3rem;
+    height: 3rem;
+  }
+  :global(#epg-time-header-inner .text-sm) {
+    font-size: 1.25rem;
+  }
+  :global(#epg-time-header-inner .text-xs) {
+    font-size: 1.125rem;
+  }
+  /* Cells: a focused cell glows (the controller's landing target in
+     a dense grid); the live cell carries a warm wine gradient + halo;
+     past / replay cells keep their dimmer treatment from global.css. */
+  :global(#epg-grid .epg-cell:focus-visible) {
+    z-index: 5;
+    box-shadow:
+      0 0 0 2px var(--rs-focus),
+      0 0 2rem 0.25rem var(--rs-focus-glow);
+  }
+  :global(#epg-grid .epg-cell.border-accent) {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--rs-accent) 26%, transparent),
+      color-mix(in srgb, var(--rs-focus) 12%, transparent)
+    );
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--rs-accent) 45%, transparent),
+      0 0 1.125rem 0.125rem color-mix(in srgb, var(--rs-accent) 22%, transparent);
+  }
+  :global(#epg-grid .epg-cell.border-accent:focus-visible) {
+    box-shadow:
+      0 0 0 2px var(--rs-focus),
+      0 0 2rem 0.25rem var(--rs-focus-glow);
+  }
+  /* The focused row's channel column gets an accent edge + warm tint,
+     so the eye can follow the row across the time axis. */
+  :global(#epg-grid .epg-row:has(.epg-cell:focus-visible) > div:first-child) {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--rs-accent) 14%, transparent),
+      var(--rs-bg-2)
+    );
+    box-shadow: inset 3px 0 0 var(--rs-accent);
+  }
+  /* The now-line is the grid's anchor: thicker, with a glow. */
+  :global(#epg-grid .epg-now-line) {
+    width: 2px;
+    box-shadow: 0 0 0.75rem 1px color-mix(in srgb, var(--rs-accent) 60%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(#epg-grid .epg-cell:focus-visible),
+    :global(#epg-grid .epg-now-line) {
+      box-shadow: none;
+    }
+    :global(#epg-grid .epg-cell:focus-visible) {
+      box-shadow: 0 0 0 2px var(--rs-focus);
+    }
+  }
+</style>

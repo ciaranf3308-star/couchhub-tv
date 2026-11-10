@@ -1,13 +1,32 @@
 ---
-import Layout from "@/layouts/Layout.astro";
+// Live TV — RedSilk Couch rebuild (W3).
+//
+// CouchLayout shell + the W1 shared system. The data / playback wiring
+// is unchanged and stays in stream.ts: this page keeps every DOM id
+// stream.ts owns (player, channel list shell, EPG mini-panel, category
+// picker, search/sort) and reskins the chrome around it.
+//
+// What this page adds on top of stream.ts:
+//   - Favourites / Recently watched rails (TvRail shells; filled by
+//     TvChannelList from the preferences store — never invented),
+//   - the Live OSD (TvOsd shell): channel up/down, previous channel,
+//     pause, mute, fullscreen, guide, quick channels, favourites,
+//     audio / subtitle tracks, home — all dispatched through the
+//     player's own keys / dialogs, never a reimplemented engine.
+//     No seek UI: live streams have no seek to offer.
+import CouchLayout from "@/layouts/CouchLayout.astro";
 import SearchInput from "@/components/SearchInput.astro";
 import SortMenu from "@/components/SortMenu.astro";
 import CategoryPickerDialog from "@/components/CategoryPickerDialog.astro";
 import WelcomeCard from "@/components/WelcomeCard.astro";
+import TvChannelList from "@/components/couch/TvChannelList.astro";
+import TvRail from "@/components/couch/TvRail.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
+import TvOsd from "@/components/couch/TvOsd.astro";
 import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from "@tabler/icons-svelte";
 ---
 
-<Layout pageTitle="Live TV">
+<CouchLayout pageTitle="Live TV" view="livetv">
 	<script is:inline>
 		try {
 			var raw = localStorage.getItem("xt_playlists") || "";
@@ -26,48 +45,42 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 		} catch (e) {}
 	</script>
 
-	<main
-		id="livetv-page-main"
-		class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 md:landscape:pt-6 pb-6
-			flex flex-col gap-4 flex-1 min-h-0">
+	<div class="rs-livetv">
+		<header class="rs-livetv__head">
+			<h1 class="rs-page-title">Live TV</h1>
+			<p class="rs-meta">Live channels from your playlist — pick a channel to start watching.</p>
+		</header>
 
 		<section
 			id="livetv-welcome"
 			aria-labelledby="welcome-heading"
-			class="livetv-welcome hidden flex-1 min-h-0 items-center justify-center py-6">
+			class="rs-livetv__welcome hidden flex-1 min-h-0 items-center justify-center py-6">
 			<WelcomeCard />
 		</section>
 
-		<section
+		<div
 			id="livetv-main"
-			class="flex flex-col md:landscape:flex-row lg:flex-row gap-4 flex-1 min-h-0">
+			class="rs-livetv__main">
 
-			<!-- Channels (bottom on mobile, left column on desktop) -->
-			<aside
-				class="order-2 md:landscape:order-1 lg:order-1
-					md:landscape:w-(--xt-channels-w,24rem) lg:w-(--xt-channels-w,28rem)
-					md:landscape:shrink-0 lg:shrink-0 md:landscape:min-h-0 lg:min-h-0">
-				<div
-					class="livetv-panel rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
-
-					<div class="flex gap-2 shrink-0">
+			<!-- Channel browser (left column) -->
+			<aside class="rs-livetv__browser" aria-label="Channel browser">
+				<div class="rs-livetv__panel">
+					<div class="rs-livetv__toolbar">
 						<button
 							id="category-picker-trigger"
 							type="button"
 							aria-haspopup="dialog"
 							aria-controls="category-picker-dialog"
-							class="rounded-xl border border-line bg-bg px-3.5 py-2 min-h-11 text-sm flex items-center gap-2 text-left flex-1 min-w-0
-								hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-								transition-colors">
-							<span data-i18n="list.category" class="text-fg-3 shrink-0">Category</span>
+							class="rs-livetv__toolbtn rs-livetv__toolbtn--grow">
+							<span class="rs-livetv__toolbtn-label">Category</span>
 							<span
 								id="category-picker-label"
 								data-i18n="list.allCategories"
-								class="text-fg truncate flex-1">All categories</span>
+								class="rs-livetv__toolbtn-value">All categories</span>
 							<IconChevronDown
 								aria-hidden="true"
 								stroke={2}
-								class="size-4 text-fg-3 shrink-0"
+								class="rs-livetv__toolbtn-icon"
 							/>
 						</button>
 						<button
@@ -76,37 +89,30 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 							aria-pressed="true"
 							aria-label="Show EPG for the current channel"
 							title="Show EPG"
-							data-i18n-attr="aria-label:livetv.epgToggle.aria;title:livetv.epgToggle.title"
-							class="rounded-xl border border-line bg-bg px-3.5 py-2 min-h-11 min-w-11 text-sm text-fg-2 inline-flex items-center justify-center gap-2 shrink-0
-								hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-								aria-pressed:border-accent aria-pressed:bg-surface-2 aria-pressed:text-fg
-								transition-colors">
+							class="rs-livetv__toolbtn">
 							<IconCalendarTime
 								aria-hidden="true"
 								stroke={2}
-								class="size-4"
+								class="rs-livetv__toolbtn-icon"
 							/>
-							<span data-i18n="livetv.epgPanelHeading" class="hidden sm:inline">EPG</span>
+							<span>EPG</span>
 						</button>
 						<a
 							href="/epg"
 							aria-label="Open the full EPG schedule grid"
 							title="Open schedule grid"
-							data-i18n-attr="aria-label:livetv.openSchedule.aria;title:livetv.openSchedule.title"
-							class="rounded-xl border border-line bg-bg px-3.5 py-2 min-h-11 min-w-11 text-sm text-fg-2 inline-flex items-center justify-center shrink-0
-								hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-								transition-colors">
+							class="rs-livetv__toolbtn">
 							<IconLayoutGrid
 								aria-hidden="true"
 								stroke={2}
-								class="size-4"
+								class="rs-livetv__toolbtn-icon"
 							/>
-							<span data-i18n="livetv.openSchedule.label" class="sr-only">Schedule grid</span>
+							<span>Guide</span>
 						</a>
 					</div>
 
-					<div class="flex gap-2 shrink-0">
-						<div class="flex-1 min-w-0">
+					<div class="rs-livetv__searchrow">
+						<div class="rs-livetv__search">
 							<SearchInput
 								id="search"
 								label="Search channels"
@@ -115,6 +121,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 								labelKey="list.searchChannels"
 								placeholderKey="list.searchChannelsPlaceholder"
 								clearKey="common.clear"
+								inputClass="rs-livetv__search-input"
 							/>
 						</div>
 						<SortMenu
@@ -130,32 +137,16 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 						/>
 					</div>
 
-					<div
-						id="list"
-						class="relative flex-1 min-h-0 overflow-auto pr-1 custom-scroll
-							max-h-96 md:landscape:max-h-dvh lg:max-h-dvh">
-						<div id="spacer"></div>
-						<div id="viewport" class="absolute inset-x-0 top-0"></div>
-					</div>
-
-					<div
-						id="list-status"
-						data-i18n="list.noPlaylistSelected"
-						class="px-2.5 text-sm text-fg-3 tabular-nums shrink-0">
-						No playlist selected.
-					</div>
+					<TvChannelList />
 				</div>
 			</aside>
 
-			<!-- Player + EPG (top on mobile, right column on desktop/landscape) -->
-			<section
-				class="order-1 md:landscape:order-2 lg:order-2
-					md:landscape:flex-1 lg:flex-1 min-w-0 md:landscape:min-h-0 lg:min-h-0">
-				<div
-					class="livetv-panel rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
+			<!-- Player + EPG (right column) -->
+			<section class="rs-livetv__playercol" aria-label="Player">
+				<div class="rs-livetv__panel">
 					<div
 						id="player-wrap"
-						class="player-wrap aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line flex items-center justify-center shrink-0 relative">
+						class="player-wrap relative aspect-video w-full mx-auto overflow-hidden bg-black flex items-center justify-center shrink-0">
 						<div
 							id="player-empty"
 							class="nylah-art-backdrop--player-empty absolute inset-0 flex flex-col items-center justify-center gap-6 text-center px-6 pointer-events-none">
@@ -234,6 +225,39 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 							</div>
 						</div>
 
+						<!-- Live OSD (TvOsd shell): channel / transport /
+						     guide / track controls over the picture.
+						     Auto-hides on inactivity; never hides under
+						     focus. No seek — live streams have no seek. -->
+						<TvOsd autoHideMs={4500}>
+							<div slot="info" class="rs-livetv-osd__info">
+								<h3 class="rs-osd__title" data-osd-title>Live TV</h3>
+								<p class="rs-osd__subtitle" data-osd-subtitle>Pick a channel to start watching.</p>
+								<div
+									class="rs-livetv-osd__progress"
+									data-osd-progress
+									hidden>
+									<span class="rs-livetv-osd__progress-fill" data-osd-progress-fill style="width: 0%"></span>
+								</div>
+							</div>
+							<p class="rs-livetv-osd__hints">
+								X pause · Y fullscreen · [ ] change channel · G guide · C channels
+							</p>
+							<div slot="controls" class="rs-livetv-osd__controls">
+								<button type="button" class="rs-osd__btn" data-osd-action="channel-down" aria-label="Previous channel">‹ Ch</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="pause-toggle" aria-label="Pause or resume">⏯ Pause</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="channel-up" aria-label="Next channel">Ch ›</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="previous-channel" aria-label="Return to the previous channel">↩ Last</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="guide" aria-label="Open the programme guide">Guide</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="channels" aria-label="Open the quick channel list">Channels</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="favourites" aria-label="Show favourite channels">★ Favourites</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="mute" aria-label="Mute or unmute">Mute</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="fullscreen" aria-label="Toggle fullscreen">Fullscreen</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="audio" aria-label="Audio tracks">Audio</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="subtitles" aria-label="Subtitles">Subtitles</button>
+								<button type="button" class="rs-osd__btn" data-osd-action="home" aria-label="Return to NylahBox Studios Home">Home</button>
+							</div>
+						</TvOsd>
 					</div>
 
 					<div
@@ -245,9 +269,6 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 						</div>
 					</div>
 
-					<!-- Nylah Studios v0.2.0 (w3): now/next strip under the player.
-					     Filled by paintCurrentNowNext() in stream.ts from the same
-					     EPG now/next data as the channel rows — no new fetching. -->
 					<div id="current-nownext" class="shrink-0 px-1" hidden>
 						<div class="flex items-baseline gap-2 min-w-0">
 							<span
@@ -277,8 +298,8 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					<div
 						id="epg"
 						data-epg-collapsed="true"
-						class="border-t border-line overflow-auto custom-scroll min-h-44 md:landscape:flex-1 lg:flex-1 lg:min-h-56">
-						<div class="flex items-center justify-between gap-2 text-sm font-medium text-fg sticky top-0 bg-surface pt-3 pb-2 z-10">
+						class="border-t overflow-auto custom-scroll min-h-44 lg:flex-1 lg:min-h-56">
+						<div class="flex items-center justify-between gap-2 text-sm font-medium text-fg sticky top-0 pt-3 pb-2 z-10">
 							<span data-i18n="livetv.epgPanelHeading" class="ps-1">EPG</span>
 							<div class="flex items-center gap-1 pe-1">
 								<span id="epg-day-indicator" class="text-2xs font-semibold uppercase tracking-wide text-fg-3"></span>
@@ -289,8 +310,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 									aria-label="Show full guide"
 									data-label-expand="Show full guide"
 									data-label-collapse="Show now playing only"
-									data-i18n-attr="aria-label:livetv.epgListExpand;data-label-expand:livetv.epgListExpand;data-label-collapse:livetv.epgListCollapse"
-									class="group md:landscape:hidden lg:hidden -my-1.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-fg-3
+									class="group lg:hidden -my-1.5 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-fg-3
 										hover:bg-surface-2 hover:text-fg focus-visible:bg-surface-2 focus-visible:text-fg
 										outline-none focus-visible:ring-1 focus-visible:ring-accent
 										transition-colors">
@@ -306,29 +326,206 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					</div>
 				</div>
 			</section>
-		</section>
+		</div>
 
-		<!-- Categories popover -->
+		<!-- Favourites / Recently watched rails (filled by TvChannelList
+		     from the preferences store; hidden when empty). -->
+		<TvRail id="livetv-favourites" title="Favourites" />
+		<TvRail id="livetv-recents" title="Recently watched" />
+
 		<CategoryPickerDialog idPrefix="category-picker" />
-	</main>
+	</div>
+
+	<!-- OSD dialogs: quick channels (real favourites / recents only),
+	     audio + subtitle tracks (read live off the <video> element). -->
+	<TvDialog id="livetv-quick-channels" title="Channels">
+		<div class="rs-livetv-dialog">
+			<h3 class="rs-livetv-dialog__sub">Favourites</h3>
+			<div data-couch-quick-list="favourites"></div>
+			<h3 class="rs-livetv-dialog__sub">Recently watched</h3>
+			<div data-couch-quick-list="recents"></div>
+			<button
+				type="button"
+				class="rs-hero__action rs-hero__action--secondary"
+				data-livetv-show-all>
+				Show all channels
+			</button>
+		</div>
+	</TvDialog>
+
+	<TvDialog id="livetv-audio" title="Audio">
+		<div class="rs-livetv-dialog">
+			<p class="rs-livetv-dialog__note">Audio tracks on the current stream. The player's own control bar carries the same choice.</p>
+			<div data-audio-list></div>
+			<button
+				type="button"
+				class="rs-hero__action rs-hero__action--secondary"
+				data-osd-action="mute">
+				Mute / unmute
+			</button>
+		</div>
+	</TvDialog>
+
+	<TvDialog id="livetv-subtitles" title="Subtitles">
+		<div class="rs-livetv-dialog">
+			<p class="rs-livetv-dialog__note">Subtitle tracks on the current stream. The player's own control bar carries the same choice.</p>
+			<div data-subtitle-list></div>
+		</div>
+	</TvDialog>
 
 	<style>
 		html[data-first-run="true"] #livetv-main { display: none; }
 		html[data-first-run="true"] #livetv-welcome { display: flex; }
-		html[data-first-run="true"] #livetv-page-main { min-height: auto; }
+		html[data-first-run="true"] .rs-livetv__head { display: none; }
 
+		.rs-livetv {
+			display: flex;
+			flex-direction: column;
+			gap: 2rem;
+			min-height: 0;
+			flex: 1;
+		}
+		.rs-livetv__head {
+			display: flex;
+			flex-direction: column;
+			gap: 0.25rem;
+		}
+		.rs-livetv__main {
+			display: flex;
+			flex-direction: column;
+			gap: 1.5rem;
+			flex: 1;
+			min-height: 0;
+		}
+		@media (min-width: 1024px) {
+			.rs-livetv__main {
+				flex-direction: row;
+			}
+		}
+		/* Browser column: fixed width on desktop, full width below. */
+		.rs-livetv__browser {
+			flex-shrink: 0;
+			min-width: 0;
+		}
+		@media (min-width: 1024px) {
+			.rs-livetv__browser {
+				width: 30rem;
+			}
+		}
+		.rs-livetv__playercol {
+			flex: 1;
+			min-width: 0;
+			min-height: 0;
+		}
+		/* Panels: warm RedSilk gradient, soft line, layered shadow. */
+		.rs-livetv__panel {
+			background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
+			border: 1px solid var(--rs-line);
+			border-radius: 1.25rem;
+			box-shadow: var(--rs-shadow);
+			padding: 1rem;
+			height: 100%;
+			display: flex;
+			flex-direction: column;
+			gap: 0.75rem;
+			min-height: 0;
+		}
+		.rs-livetv__toolbar {
+			display: flex;
+			gap: 0.75rem;
+			flex-shrink: 0;
+		}
+		.rs-livetv__toolbtn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.5rem;
+			min-height: 3.5rem;
+			padding: 0.625rem 1rem;
+			border-radius: 0.75rem;
+			border: 1px solid var(--rs-line);
+			background: var(--rs-bg-2);
+			color: var(--rs-text);
+			font-size: 1.25rem;
+			line-height: 1.2;
+			cursor: pointer;
+			white-space: nowrap;
+		}
+		.rs-livetv__toolbtn:hover {
+			background: var(--rs-surface-2);
+		}
+		.rs-livetv__toolbtn--grow {
+			flex: 1;
+			min-width: 0;
+			justify-content: flex-start;
+		}
+		.rs-livetv__toolbtn-label {
+			color: var(--rs-text-2);
+			flex-shrink: 0;
+		}
+		.rs-livetv__toolbtn-value {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			flex: 1;
+			min-width: 0;
+			text-align: left;
+		}
+		.rs-livetv__toolbtn-icon {
+			width: 1.25rem;
+			height: 1.25rem;
+			flex-shrink: 0;
+		}
+		.rs-livetv__toolbtn[aria-pressed="true"] {
+			border-color: var(--rs-accent);
+			background: var(--rs-surface-2);
+		}
+		.rs-livetv__searchrow {
+			display: flex;
+			gap: 0.75rem;
+			flex-shrink: 0;
+			align-items: flex-start;
+		}
+		.rs-livetv__search {
+			flex: 1;
+			min-width: 0;
+		}
+		/* Couch-sized search field (SearchInput takes the extra class). */
+		:global(.rs-livetv__search-input) {
+			min-height: 3.5rem !important;
+			font-size: 1.25rem !important;
+			padding-left: 2.75rem !important;
+		}
+		:global(#clear-search) {
+			min-height: 3.5rem !important;
+			font-size: 1.125rem !important;
+			padding-inline: 1rem !important;
+		}
+		/* Couch-sized sort select. */
+		:global(#channel-sort select) {
+			min-height: 3.5rem;
+			font-size: 1.25rem;
+			background: var(--rs-bg-2);
+			border-color: var(--rs-line);
+			color: var(--rs-text);
+			border-radius: 0.75rem;
+		}
+		/* Rails hide when the client fill finds nothing — .rs-rail sets
+		   display:flex, which beats the UA [hidden] rule without this. */
+		:global([data-nylah-rail="livetv-favourites"][hidden]),
+		:global([data-nylah-rail="livetv-recents"][hidden]) {
+			display: none;
+		}
+
+		/* Player caps (v0.2.2 rule, preserved): on desktop/landscape
+		   the player is capped at 46dvh so the EPG panel below it keeps
+		   real room; portrait/mobile keeps 60dvh and the page scrolls. */
 		.player-wrap {
 			max-height: 60dvh;
 			max-width: calc(60dvh * 16 / 9);
+			border-radius: 1rem;
+			border: 1px solid var(--rs-line);
 		}
-
-		/* Nylah Studios v0.2.2: on desktop/landscape the player ate 60dvh
-		   and left the EPG panel ~100px tall in a windowed 850px window —
-		   the guide clipped at the window edge (user report 2026-11-10).
-		   Cap the player tighter where the EPG shares the column, so the
-		   guide always has real room. Portrait/mobile keeps 60dvh: the
-		   EPG sits below the player there and the page scrolls. Radio
-		   mode already overrides max-height below. */
 		@media (min-width: 1024px), (min-width: 768px) and (orientation: landscape) {
 			.player-wrap {
 				max-height: 46dvh;
@@ -336,7 +533,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			}
 		}
 
-		/* Radio mode */
+		/* Radio mode (structure preserved from the classic page). */
 		.radio-display { display: none; }
 		.player-wrap[data-radio-mode="on"] {
 			aspect-ratio: auto;
@@ -347,10 +544,10 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			background:
 				radial-gradient(
 					120% 80% at 50% 0%,
-					color-mix(in oklch, var(--color-accent) 24%, transparent) 0%,
+					color-mix(in srgb, var(--rs-accent) 24%, transparent) 0%,
 					transparent 60%
 				),
-				linear-gradient(180deg, var(--color-surface-2), var(--color-surface));
+				linear-gradient(180deg, var(--rs-surface-2), var(--rs-surface));
 			padding: clamp(1rem, 3vw, 2rem);
 			gap: clamp(1rem, 3vw, 2rem);
 			justify-content: flex-start;
@@ -363,11 +560,6 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			width: 100%;
 			min-width: 0;
 		}
-		/* Collapse the player to a thin control strip at the bottom so the radio
-		   panel is visible above it. The player internals are created at runtime by
-		   video.js / artplayer / shaka, so they carry no Astro scope attribute -
-		   these selectors must be :global() or they never match. !important +
-		   overflow also beat artplayer's inline width/height:100% on its container. */
 		.player-wrap[data-radio-mode="on"] :global(.video-js),
 		.player-wrap[data-radio-mode="on"] :global(#player),
 		.player-wrap[data-radio-mode="on"] :global(.art-video-player) {
@@ -379,7 +571,6 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			background: transparent !important;
 			overflow: visible !important;
 		}
-		/* Let control-bar tooltips overflow the one-control-tall strip upward. */
 		.player-wrap[data-radio-mode="on"] :global(.art-bottom),
 		.player-wrap[data-radio-mode="on"] :global(.art-controls) {
 			overflow: visible !important;
@@ -395,69 +586,59 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			display: none !important;
 		}
 		.player-wrap[data-radio-mode="on"] :global(.vjs-control-bar) {
-			background: color-mix(in oklch, var(--color-bg) 70%, transparent);
-			border-top: 1px solid var(--color-line);
+			background: color-mix(in srgb, var(--rs-bg) 70%, transparent);
+			border-top: 1px solid var(--rs-line);
 			border-radius: 0 0 0.75rem 0.75rem;
 		}
-		/* artplayer keeps its control bar mounted (only the icons fade) and paints
-		   several black layers - force every surface transparent so the collapsed
-		   strip blends into the panel gradient and only the control icons reveal. */
 		.player-wrap[data-radio-mode="on"] :global(.art-video-player),
 		.player-wrap[data-radio-mode="on"] :global(.art-video-player *:not(.art-volume-panel):not(.art-volume-panel *)) {
 			background: transparent !important;
 			border: 0 !important;
 			box-shadow: none !important;
 		}
-		/* The strip has no dark video behind it, so give the volume panel its own legible surface in both themes. */
 		.player-wrap[data-radio-mode="on"] :global(.art-volume-panel .art-volume-inner) {
-			background: color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 94%, transparent);
-			border: 1px solid color-mix(in oklch, var(--nylah-cream, oklch(0.97 0.014 75)) 14%, transparent);
+			background: color-mix(in srgb, var(--rs-bg-2) 94%, transparent);
+			border: 1px solid var(--rs-line);
 			border-radius: 0.625rem;
 			box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
 			-webkit-backdrop-filter: blur(8px);
 			backdrop-filter: blur(8px);
 		}
-		/* Shaka sets the container height inline, so this needs !important to win. */
 		.player-wrap[data-radio-mode="on"] :global(.shaka-video-container) {
 			height: 3.25rem !important;
 		}
 		.player-wrap[data-radio-mode="on"] :global(.shaka-bottom-controls) {
-			background: color-mix(in oklch, var(--color-bg) 70%, transparent);
-			border-top: 1px solid var(--color-line);
+			background: color-mix(in srgb, var(--rs-bg) 70%, transparent);
+			border-top: 1px solid var(--rs-line);
 			border-radius: 0 0 0.75rem 0.75rem;
 		}
-
 		.radio-display__art {
 			width: clamp(7rem, 16vw, 11rem);
 			box-shadow:
-				0 0 0 1px var(--color-line),
-				0 0 40px 8px color-mix(in oklch, var(--color-accent) 38%, transparent),
-				var(--nylah-card-shadow, 0 8px 20px -6px oklch(0.10 0.05 350 / 0.5));
+				0 0 0 1px var(--rs-line),
+				0 0 40px 8px color-mix(in srgb, var(--rs-accent) 38%, transparent),
+				var(--rs-shadow);
 		}
 		.radio-display__art-fallback {
-			color: color-mix(in oklch, var(--color-fg-3) 80%, transparent);
+			color: color-mix(in srgb, var(--rs-text-2) 80%, transparent);
 		}
 		.radio-display__eyebrow::before {
 			content: "";
 			width: 0.375rem;
 			height: 0.375rem;
 			border-radius: 999px;
-			background: var(--color-accent);
+			background: var(--rs-accent);
 			animation: radio-onair-pulse 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 		}
 		@keyframes radio-onair-pulse {
-			0%        { box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-accent) 45%, transparent); }
+			0%        { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rs-accent) 45%, transparent); }
 			70%, 100% { box-shadow: 0 0 0 0.5rem transparent; }
 		}
 		@media (prefers-reduced-motion: reduce) {
 			.radio-display__eyebrow::before {
 				animation: none;
-				box-shadow: 0 0 0 4px var(--color-accent-soft);
+				box-shadow: 0 0 0 4px color-mix(in srgb, var(--rs-accent) 30%, transparent);
 			}
-		}
-		:global(html[data-perf-mode="on"]) .radio-display__eyebrow::before {
-			animation: none;
-			box-shadow: 0 0 0 4px var(--color-accent-soft);
 		}
 		@media (max-width: 480px) {
 			.player-wrap[data-radio-mode="on"] {
@@ -466,19 +647,77 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			}
 		}
 
-		/* Collapsed mobile EPG shows only the now-playing row; status text (loading/empty/error) stays visible.
-		   :global() because #epg-list children are inserted at runtime without Astro's scope attribute. */
+		/* Collapsed mobile EPG shows only the now-playing row. */
 		@media (max-width: 767.98px), (max-width: 1023.98px) and (orientation: portrait) {
 			:global(#epg[data-epg-collapsed="true"] #epg-list > :is([data-epg-idx]:not([data-now-playing="true"]), .epg-day-sep, [data-epg-load-earlier])) {
 				display: none;
 			}
 		}
 
-		/* Nylah Studios v0.2.0 (w3) — player chrome reskin, couch-first.
-		   The library control bars (video.js / artplayer / shaka) keep their
-		   own skins in global.css; this page only reskins the chrome around
-		   them, which is what the controller actually lands on. */
-		/* Bigger status badge + channel line: legible from the couch. */
+		/* Channel rows (rendered by stream.ts, so :global()): couch
+		   type, fitted 3rem logos, glowing focus, warm now-playing
+		   row. Row height itself is stream.ts's (root font-size ×
+		   density — 68px at 16px root, 59px in headless where the
+		   window is shorter) — never overridden, or the virtual
+		   list desyncs. The row content MUST fit inside it, so the
+		   stack is budgeted: 4px button padding + 20px name +
+		   (16px meta OR 22px now-line + 4px progress bar). When a
+		   now/next line is present the meta line ("#n · category")
+		   is hidden — it is the only expendable line, and the
+		   channel number still shows on rows without EPG data. */
+		:global(#list .channel-row .play-btn) {
+			gap: 0.75rem;
+			padding-block: 2px;
+		}
+		:global(#list .channel-row .play-btn > .logo-skel) {
+			width: 3rem;
+			height: 3rem;
+		}
+		:global(#list .channel-row .play-btn .text-sm) {
+			font-size: 1.25rem;
+		}
+		:global(#list .channel-row .play-btn .text-xs) {
+			font-size: 1.125rem;
+		}
+		:global(#list .channel-row:has(.channel-now-slot:not(:empty)) .play-btn .text-xs) {
+			display: none;
+		}
+		:global(#list .channel-row .channel-now) {
+			font-size: 1.125rem;
+			margin-top: 2px;
+		}
+		:global(#list .channel-row .channel-now-bar) {
+			height: 2px;
+			margin-top: 2px;
+		}
+		:global(#list .channel-row .star-btn) {
+			width: 3rem;
+			height: 3rem;
+			font-size: 1.5rem;
+		}
+		:global(#list .channel-row .play-btn:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--rs-focus),
+				0 0 2rem 0.25rem var(--rs-focus-glow);
+			background: var(--rs-surface);
+		}
+		:global(#list .channel-row[data-now-playing="true"] .play-btn) {
+			background: linear-gradient(
+				90deg,
+				color-mix(in srgb, var(--rs-accent) 16%, transparent),
+				color-mix(in srgb, var(--rs-accent) 5%, transparent)
+			);
+			box-shadow:
+				inset 3px 0 0 var(--rs-accent),
+				0 0 1.25rem 0.125rem color-mix(in srgb, var(--rs-accent) 22%, transparent);
+		}
+		:global(#list .channel-row[data-now-playing="true"] .play-btn:focus-visible) {
+			box-shadow:
+				inset 3px 0 0 var(--rs-accent),
+				0 0 0 2px var(--rs-focus),
+				0 0 2rem 0.25rem var(--rs-focus-glow);
+		}
+		/* Bigger status badge + serif channel line under the player. */
 		:global(#current .status-badge) {
 			height: 2rem;
 			width: 2rem;
@@ -488,124 +727,84 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			width: auto;
 			padding-inline: 0.625rem;
 		}
-		/* The channel name inside #current is injected by stream.ts; give
-		   it the RedSilk serif and a larger size. */
 		:global(#current .text-accent) {
-			font-family: var(--nylah-font-display, var(--font-serif));
-			font-size: 1.25rem;
+			font-family: var(--rs-font-display);
+			font-size: 1.5rem;
 			letter-spacing: -0.01em;
 		}
-		/* EPG side-panel rows: a focused row must glow, not just ring —
-		   the row is the controller's landing target under the player. */
+		:global(#current .status-badge--live),
+		:global(#current .status-badge--on) {
+			box-shadow:
+				0 0 0 3px color-mix(in srgb, var(--rs-accent) 18%, transparent),
+				0 0 1.125rem 0.125rem var(--rs-focus-glow);
+		}
+		/* Now/next strip: wine progress, warm track, couch type. */
+		:global(#current-nownext [data-nownext-title]) {
+			font-size: 1.5rem;
+		}
+		:global(#current-nownext [data-nownext-time]),
+		:global(#current-nownext [data-nownext-next]) {
+			font-size: 1.125rem;
+		}
+		:global(#current-nownext [data-nownext-fill]) {
+			background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+		}
+		:global(#current-nownext [data-nownext-barwrap]) {
+			background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
+		}
+		/* EPG side-panel rows: focused rows glow wine, the
+		   now-playing row carries a warm tint + accent edge. */
 		:global(#epg-list .epg-entry:focus-visible) {
 			box-shadow:
-				0 0 0 2px var(--color-accent),
-				0 0 24px 4px color-mix(in oklch, var(--color-accent) 40%, transparent);
+				0 0 0 2px var(--rs-focus),
+				0 0 2rem 0.25rem var(--rs-focus-glow);
 		}
 		:global(#epg-list .epg-entry[data-now-playing="true"]) {
+			background: linear-gradient(
+				90deg,
+				color-mix(in srgb, var(--rs-accent) 14%, transparent),
+				color-mix(in srgb, var(--rs-accent) 4%, transparent)
+			);
 			box-shadow:
-				0 0 0 1px color-mix(in oklch, var(--color-accent) 55%, transparent),
-				0 0 20px 2px color-mix(in oklch, var(--color-accent) 25%, transparent);
+				0 0 0 1px color-mix(in srgb, var(--rs-accent) 55%, transparent),
+				0 0 1.25rem 0.125rem color-mix(in srgb, var(--rs-accent) 25%, transparent);
 		}
 		:global(#epg-list .epg-entry[data-now-playing="true"]:focus-visible) {
 			box-shadow:
-				0 0 0 2px var(--color-accent),
-				0 0 28px 6px color-mix(in oklch, var(--color-accent) 45%, transparent);
+				0 0 0 2px var(--rs-focus),
+				0 0 2rem 0.25rem var(--rs-focus-glow);
 		}
-
-		/* Nylah Studios v0.3.0 (w6) — RedSilk treatment. Warm gradient
-		   panels, a lit empty state, wine-gold now/next, glowing channel
-		   rows. Layout, heights and behavior untouched: the v0.2.2 EPG
-		   min-height (min-h-44 / lg:min-h-56) and the 46dvh player cap
-		   above are preserved exactly. */
-		/* Panels: warm gradient, soft line, layered wine shadow. */
-		#livetv-main .livetv-panel {
-			background:
-				linear-gradient(
-					180deg,
-					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
-					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
-				);
-			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		:global(#epg) {
+			border-color: var(--rs-line);
 		}
-		/* Empty state: the glow is the room's warm lamp — deeper wine,
-		   a brass core, stronger breath. (Base .player-empty-glow lives
-		   in global.css; this page-scoped rule only re-tints it.) */
+		:global(#epg .sticky) {
+			background: var(--rs-bg-2);
+		}
+		/* Empty state: the glow is the room's warm lamp. */
 		.player-empty-glow {
 			background: radial-gradient(
 				50% 60% at 50% 55%,
-				color-mix(in oklch, var(--nylah-wine-bright, oklch(0.72 0.17 350)) 30%, transparent) 0%,
-				color-mix(in oklch, var(--color-accent) 14%, transparent) 45%,
-				color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 6%, transparent) 62%,
+				color-mix(in srgb, var(--rs-focus) 30%, transparent) 0%,
+				color-mix(in srgb, var(--rs-accent) 14%, transparent) 45%,
 				transparent 80%
 			);
 			opacity: 0.85;
 		}
-		/* Radio mode channel name is a display title: serif. */
-		.radio-display__name {
-			font-family: var(--nylah-font-display, var(--font-serif));
+		#player-empty.nylah-art-backdrop--player-empty {
+			background-image: var(--nylah-art-player-empty);
+			background-size: cover;
+			background-position: center;
 		}
-		/* Now/next strip: wine-to-brass progress, warm track. */
-		[data-nownext-fill] {
+		#player-empty.nylah-art-backdrop--player-empty::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
 			background: linear-gradient(
-				90deg,
-				var(--nylah-wine, oklch(0.45 0.19 350)),
-				var(--nylah-wine-bright, oklch(0.72 0.17 350)) 55%,
-				var(--nylah-gold, oklch(0.85 0.16 90))
+				to top,
+				color-mix(in srgb, var(--rs-bg) 78%, transparent) 0%,
+				transparent 60%
 			);
-		}
-		[data-nownext-barwrap] {
-			background: color-mix(in oklch, var(--nylah-wine, oklch(0.45 0.19 350)) 22%, transparent);
-		}
-		/* Live status badge: lit, not flat. */
-		:global(#current .status-badge--live),
-		:global(#current .status-badge--on) {
-			box-shadow:
-				0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent),
-				0 0 18px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
-		}
-		/* Channel list (rows are rendered by stream.ts, so :global):
-		   the focused row glows wine instead of a bare 1px ring, and the
-		   now-playing row carries a warm tint + accent edge. */
-		:global(#list .channel-row .play-btn:focus-visible) {
-			box-shadow:
-				0 0 0 2px var(--color-accent),
-				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
-		}
-		:global(#list .channel-row[data-now-playing="true"] .play-btn) {
-			background: linear-gradient(
-				90deg,
-				color-mix(in oklch, var(--color-accent) 16%, transparent),
-				color-mix(in oklch, var(--color-accent) 5%, transparent)
-			);
-			box-shadow:
-				inset 3px 0 0 var(--color-accent),
-				0 0 20px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
-		}
-		:global(#list .channel-row[data-now-playing="true"] .play-btn:focus-visible) {
-			box-shadow:
-				inset 3px 0 0 var(--color-accent),
-				0 0 0 2px var(--color-accent),
-				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
-		}
-		/* EPG side-panel rows: now-playing row gets a warm wash behind
-		   the glow it already has; focused rows use the strong glow. */
-		:global(#epg-list .epg-entry[data-now-playing="true"]) {
-			background: linear-gradient(
-				90deg,
-				color-mix(in oklch, var(--color-accent) 14%, transparent),
-				color-mix(in oklch, var(--color-accent) 4%, transparent)
-			);
-		}
-		:global(#epg-list .epg-entry:focus-visible) {
-			box-shadow:
-				0 0 0 2px var(--color-accent),
-				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
-		}
-		:global(#epg-list .epg-entry[data-now-playing="true"]:focus-visible) {
-			box-shadow:
-				0 0 0 2px var(--color-accent),
-				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
 		}
 		@media (prefers-reduced-motion: reduce) {
 			.player-empty-glow {
@@ -613,31 +812,76 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 				opacity: 0.7;
 			}
 		}
-	/* v0.3.0 coordinator wiring: curated cinema art behind the idle
-	   player state. Modifier class only — the base .nylah-art-backdrop
-	   sets position:relative, which would break this absolute overlay. */
-	#player-empty.nylah-art-backdrop--player-empty {
-		background-image: var(--nylah-art-player-empty);
-		background-size: cover;
-		background-position: center;
-	}
-	#player-empty.nylah-art-backdrop--player-empty::after {
-		content: "";
-		position: absolute;
-		inset: 0;
-		pointer-events: none;
-		background: linear-gradient(
-			to top,
-			color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 78%, transparent) 0%,
-			transparent 60%
-		);
-	}
+
+		/* OSD extras: programme progress + controller hints + the
+		   wrapping controls row. The TvOsd shell owns the auto-hide. */
+		.rs-livetv-osd__info {
+			display: flex;
+			flex-direction: column;
+			gap: 0.25rem;
+			min-width: 0;
+		}
+		.rs-livetv-osd__progress {
+			height: 0.375rem;
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--rs-text) 22%, transparent);
+			overflow: hidden;
+			margin-top: 0.5rem;
+			max-width: 28rem;
+		}
+		.rs-livetv-osd__progress-fill {
+			display: block;
+			height: 100%;
+			background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
+		}
+		.rs-livetv-osd__hints {
+			font-size: 1.125rem;
+			color: var(--rs-text-2);
+			margin: 0;
+		}
+		.rs-livetv-osd__controls {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.75rem;
+		}
+		/* OSD dialogs. */
+		.rs-livetv-dialog {
+			display: flex;
+			flex-direction: column;
+			gap: 1rem;
+		}
+		.rs-livetv-dialog__sub {
+			font-family: var(--rs-font-display);
+			font-size: 1.75rem;
+			font-weight: 400;
+			margin: 0;
+		}
+		.rs-livetv-dialog__note {
+			font-size: 1.25rem;
+			color: var(--rs-text-2);
+			margin: 0;
+		}
+		:global([data-audio-list] .rs-quicklist__row),
+		:global([data-subtitle-list] .rs-quicklist__row) {
+			cursor: pointer;
+		}
+		:global([data-audio-list] .rs-quicklist__row[aria-pressed="true"]),
+		:global([data-subtitle-list] .rs-quicklist__row[aria-pressed="true"]) {
+			border-color: var(--rs-accent);
+			background: var(--rs-surface);
+		}
 	</style>
 
 	<script>
 		import "../scripts/stream/stream.ts";
 		import "../scripts/updater-startup.js";
 		import { mountPauseOverlay } from "../scripts/lib/pause-overlay.ts";
+		import { goCouch } from "../scripts/lib/couch-nav.ts";
+		import { openCouchDialog } from "../scripts/lib/couch-focus.ts";
+		import {
+			isOsdOwnedKey,
+			livetvOsdActionForKey,
+		} from "../scripts/lib/couch-livetv-epg.ts";
 
 		const playerEl = document.getElementById("player");
 		const playerEmpty = document.getElementById("player-empty");
@@ -652,12 +896,10 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			});
 		}
 
-		// Nylah Studios v0.2.0 (w3): pause overlay — big transport hub over
-		// the picture. Title/subtitle read text already on the page (channel
-		// name in #current, now-playing row in the EPG side panel); nothing
-		// is fetched or invented here. No "more like this" row: Live TV has
-		// no similar-titles data on the page, and plumbing it in would be
-		// new data work, not a reskin.
+		// Pause overlay — big transport hub over the picture. Title /
+		// subtitle read text already on the page (channel name in
+		// #current, now-playing row in the EPG side panel); nothing is
+		// fetched or invented here.
 		const playerWrap = document.getElementById("player-wrap");
 		if (playerWrap) {
 			mountPauseOverlay({
@@ -681,9 +923,6 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					const badge =
 						document.querySelector("#current .status-badge")?.textContent?.trim() ||
 						"";
-					// "ON" is the live badge — the overlay's own LIVE label
-					// covers it; any other badge text (e.g. catch-up) is
-					// passed through verbatim.
 					if (!badge || badge === "ON" || badge === "OFF") return null;
 					return badge;
 				},
@@ -692,6 +931,287 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					!!playerEl && !playerEl.hasAttribute("hidden"),
 			});
 		}
+
+		// ── Live OSD ────────────────────────────────────────────
+		// The OSD never reimplements tuning or transport: channel /
+		// pause / mute / fullscreen buttons dispatch the same keys
+		// stream.ts already handles ("]" / "[" / "\" / space / "m" /
+		// "f"), so the player does the work. Guide / home navigate
+		// through couch-nav; favourites filters through the category
+		// picker's own "xt:cat-changed" contract (detail carries the
+		// pseudo-category, which is what updates the picker's label).
+		const osd = document.querySelector("[data-couch-osd]");
+		const dispatchPlayerKey = (key) => {
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", {
+					key,
+					code: key,
+					bubbles: true,
+					cancelable: true,
+				}),
+			);
+		};
+		const hideOsd = () => {
+			if (osd) osd.setAttribute("data-hidden", "true");
+		};
+		const showOsd = () => {
+			window.dispatchEvent(new Event("couch-osd:show"));
+		};
+		// The TvOsd shell re-shows on its own activity listeners and
+		// on the couch-osd:show window event. A hidden OSD has
+		// pointer-events:none, so pointer movement over the picture
+		// would never reach it: the player wrap forwards activity
+		// (pointer / keys while focus is on the player) as
+		// couch-osd:show, which is the shell's documented re-show
+		// path. Activity in the channel list does not bubble through
+		// the wrap, so browsing never pops the OSD up.
+		if (playerWrap) {
+			for (const evt of ["pointermove", "pointerdown", "keydown"]) {
+				playerWrap.addEventListener(evt, showOsd, { passive: true });
+			}
+		}
+
+		// OSD info mirrors the channel line + now/next strip stream.ts
+		// already paints — real text, copied, never invented.
+		const osdTitle = document.querySelector("[data-osd-title]");
+		const osdSubtitle = document.querySelector("[data-osd-subtitle]");
+		const osdProgress = document.querySelector("[data-osd-progress]");
+		const osdProgressFill = document.querySelector("[data-osd-progress-fill]");
+		const syncOsdInfo = () => {
+			const title =
+				document.querySelector("#current .text-accent")?.textContent?.trim() ||
+				document.querySelector("#current .truncate")?.textContent?.trim() ||
+				"";
+			if (osdTitle) osdTitle.textContent = title || "Live TV";
+			const nowTitle = document
+				.querySelector("[data-nownext-title]")
+				?.textContent?.trim() || "";
+			const nowTime = document
+				.querySelector("[data-nownext-time]")
+				?.textContent?.trim() || "";
+			const nextLine = document
+				.querySelector("[data-nownext-next]")
+				?.textContent?.trim() || "";
+			if (osdSubtitle) {
+				osdSubtitle.textContent =
+					[nowTitle, nowTime].filter(Boolean).join(" · ") ||
+					nextLine ||
+					(title ? "Pick a channel to start watching." : "");
+			}
+			const fill = document.querySelector("[data-nownext-fill]");
+			const width = fill ? fill.style.width || "" : "";
+			if (osdProgress && osdProgressFill) {
+				if (width && width !== "0%") {
+					osdProgress.removeAttribute("hidden");
+					osdProgressFill.style.width = width;
+				} else {
+					osdProgress.setAttribute("hidden", "");
+				}
+			}
+		};
+		syncOsdInfo();
+		const osdMirrorTargets = [
+			document.getElementById("current"),
+			document.getElementById("current-nownext"),
+		].filter(Boolean);
+		if (osdMirrorTargets.length) {
+			const observer = new MutationObserver(syncOsdInfo);
+			for (const target of osdMirrorTargets) {
+				observer.observe(target, {
+					subtree: true,
+					childList: true,
+					characterData: true,
+					attributes: true,
+					attributeFilter: ["style", "hidden"],
+				});
+			}
+		}
+
+		// Audio / subtitle tracks are read live off the <video>
+		// element inside the player wrap (the player's own tech
+		// element) — the same tracks its control bar offers. When a
+		// stream carries no alternate tracks, the dialog says so
+		// instead of inventing entries.
+		const playerVideo = () =>
+			playerWrap?.querySelector("video");
+		const trackRow = (label, active, onSelect) => {
+			const row = document.createElement("button");
+			row.type = "button";
+			row.className = "rs-quicklist__row";
+			row.setAttribute("aria-pressed", String(active));
+			const name = document.createElement("span");
+			name.className = "rs-quicklist__name";
+			name.textContent = label;
+			const hint = document.createElement("span");
+			hint.className = "rs-quicklist__hint";
+			hint.textContent = active ? "Active" : "Select";
+			row.append(name, hint);
+			row.addEventListener("click", onSelect);
+			return row;
+		};
+		const emptyTrackNote = (mount, text) => {
+			const note = document.createElement("p");
+			note.className = "rs-quicklist__empty";
+			note.textContent = text;
+			mount.appendChild(note);
+		};
+		const fillAudioTracks = () => {
+			const mount = document.querySelector("[data-audio-list]");
+			if (!mount) return;
+			mount.replaceChildren();
+			const video = playerVideo();
+			const tracks = video?.audioTracks;
+			if (!tracks || tracks.length === 0) {
+				emptyTrackNote(
+					mount,
+					"No alternate audio tracks on this stream — the current audio is the only one available.",
+				);
+				return;
+			}
+			for (const track of Array.from(tracks)) {
+				mount.appendChild(
+					trackRow(
+						track.label || track.language || "Audio track",
+						!!track.enabled,
+						() => {
+							for (const other of Array.from(tracks)) {
+								other.enabled = other === track;
+							}
+							fillAudioTracks();
+						},
+					),
+				);
+			}
+		};
+		const fillSubtitleTracks = () => {
+			const mount = document.querySelector("[data-subtitle-list]");
+			if (!mount) return;
+			mount.replaceChildren();
+			const video = playerVideo();
+			const tracks = video?.textTracks;
+			if (!tracks || tracks.length === 0) {
+				emptyTrackNote(
+					mount,
+					"No subtitles on this stream.",
+				);
+				return;
+			}
+			mount.appendChild(
+				trackRow("Off", Array.from(tracks).every((t) => t.mode === "disabled"), () => {
+					for (const t of Array.from(tracks)) t.mode = "disabled";
+					fillSubtitleTracks();
+				}),
+			);
+			for (const track of Array.from(tracks)) {
+				mount.appendChild(
+					trackRow(
+						track.label || track.language || "Subtitles",
+						track.mode === "showing",
+						() => {
+							for (const other of Array.from(tracks)) {
+								other.mode = other === track ? "showing" : "disabled";
+							}
+							fillSubtitleTracks();
+						},
+					),
+				);
+			}
+		};
+
+		const runOsdAction = (action) => {
+			switch (action) {
+				case "channel-up":
+					dispatchPlayerKey("]");
+					break;
+				case "channel-down":
+					dispatchPlayerKey("[");
+					break;
+				case "previous-channel":
+					dispatchPlayerKey("\\");
+					break;
+				case "pause-toggle":
+					dispatchPlayerKey(" ");
+					break;
+				case "mute":
+					dispatchPlayerKey("m");
+					break;
+				case "fullscreen":
+					dispatchPlayerKey("f");
+					break;
+				case "guide":
+					goCouch("/epg");
+					break;
+				case "channels":
+					openCouchDialog("livetv-quick-channels");
+					break;
+				case "favourites":
+					// The category picker's own contract: detail carries
+					// the pseudo-category; the picker updates its label
+					// and stream.ts re-filters the list.
+					document.dispatchEvent(
+						new CustomEvent("xt:cat-changed", { detail: "__favorites__" }),
+					);
+					hideOsd();
+					break;
+				case "audio":
+					fillAudioTracks();
+					openCouchDialog("livetv-audio");
+					break;
+				case "subtitles":
+					fillSubtitleTracks();
+					openCouchDialog("livetv-subtitles");
+					break;
+				case "home":
+					goCouch("/");
+					break;
+				case "dismiss":
+					hideOsd();
+					break;
+				default:
+					break;
+			}
+			if (action && action !== "dismiss") showOsd();
+		};
+
+		document.querySelectorAll("[data-osd-action]").forEach((btn) => {
+			btn.addEventListener("click", () => {
+				runOsdAction(btn.getAttribute("data-osd-action"));
+			});
+		});
+
+		// OSD-owned keys (G guide, C channels, V favourites, H home,
+		// Escape dismiss). Tuning / transport keys already have a
+		// global handler in stream.ts and are never intercepted here.
+		document.addEventListener("keydown", (e) => {
+			if (e.ctrlKey || e.altKey || e.metaKey) return;
+			const target = e.target;
+			const tag = target?.tagName?.toLowerCase?.() || "";
+			if (
+				tag === "input" ||
+				tag === "textarea" ||
+				tag === "select" ||
+				target?.isContentEditable
+			) {
+				return;
+			}
+			if (document.querySelector("dialog[open]")) return;
+			if (!isOsdOwnedKey(e.key)) return;
+			const action = livetvOsdActionForKey(e.key);
+			if (!action) return;
+			e.preventDefault();
+			runOsdAction(action);
+		});
+
+		// "Show all channels" closes the quick list and puts focus on
+		// the channel search.
+		document
+			.querySelector("[data-livetv-show-all]")
+			?.addEventListener("click", () => {
+				document
+					.getElementById("livetv-quick-channels")
+					?.close?.();
+				document.getElementById("search")?.focus?.();
+			});
 
 		const epgToggle = /** @type {HTMLButtonElement|null} */ (
 			document.getElementById("epg-toggle")
@@ -768,4 +1288,4 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			});
 		}
 	</script>
-</Layout>
+</CouchLayout>
