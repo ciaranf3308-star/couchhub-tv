@@ -1,31 +1,30 @@
 ---
-import Layout from "@/layouts/Layout.astro"
-import AllWatchlistView from "@/components/AllWatchlistView.svelte"
+// Watch Later — RedSilk Couch (W5). Library behaviour unchanged
+// (preferences watchlist store as-is); CouchLayout + couch cards.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import AllWatchlistView from "@/components/AllWatchlistView.svelte";
 ---
 
-<Layout pageTitle="Watchlist">
-  <main
-    class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 md:landscape:pt-6 pb-6
-           flex flex-col gap-4 flex-1 min-h-0">
+<CouchLayout pageTitle="Watch Later" activeNav="watchlist" view="watchlist">
+  <header class="couch-library-head">
+    <h1 class="rs-page-title">Watch later</h1>
+    <p class="rs-meta">
+      Movies and series saved for later, across all your playlists. Newest first.
+    </p>
+  </header>
 
-    <header class="route-hero route-hero--tv-compact shrink-0">
-      <h1 data-i18n="page.watchlist.heading" class="route-hero__title">Watch later</h1>
-      <p data-i18n="page.watchlist.sub" class="route-hero__sub">
-        Movies and series saved for later, across all your playlists. Newest first.
-      </p>
-    </header>
-
-    <AllWatchlistView client:load />
-  </main>
+  <AllWatchlistView client:load />
 
   <script>
-    import "@/scripts/updater-startup.js"
+    import "@/scripts/updater-startup.js";
   </script>
 
   <style>
-    /* Nylah Studios v0.3.0 (w7) — RedSilk hero: Instrument Serif title. */
-    .route-hero__title {
-      font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    .couch-library-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
     }
   </style>
-</Layout>
+</CouchLayout>

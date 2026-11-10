@@ -1,11 +1,11 @@
 ---
-import Layout from "@/layouts/Layout.astro";
+import CouchLayout from "@/layouts/CouchLayout.astro";
 import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 ---
 
-<Layout pageTitle="Add playlist" showVersion={false}>
+<CouchLayout pageTitle="Add playlist" view="login">
 	<main
-		class="mx-auto px-5 sm:px-6 lg:px-8 pb-16 pt-4 lg:pt-6 max-w-480 w-full nylah-art-backdrop nylah-art-backdrop--login">
+		class="couch-login mx-auto px-5 sm:px-6 lg:px-8 pb-16 pt-4 lg:pt-6 max-w-480 w-full nylah-art-backdrop nylah-art-backdrop--login">
 
 		<div>
 
@@ -552,7 +552,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 
 		</div>
 	</main>
-</Layout>
+</CouchLayout>
 
 <style>
   /* ── Nylah Studios RedSilk treatment (scoped to this page) ─────────
@@ -622,6 +622,42 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
      depth under the palette the script paints. */
   #status {
     box-shadow: 0 8px 24px -12px var(--nylah-focus-halo);
+  }
+  /* Couch (W5): large TV targets on the RedSilk tokens. Auth logic,
+     field ids, and scripts below are untouched. */
+  .couch-login .field-input {
+    min-height: 3.5rem;
+    font-size: 1.375rem;
+    padding: 0.75rem 1rem;
+  }
+  .couch-login [role="tab"] {
+    min-height: 4.5rem;
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+  .couch-login [role="tab"] span:first-child {
+    font-size: 1.25rem;
+  }
+  .couch-login .btn,
+  .couch-login .btn-primary {
+    min-height: 3.5rem;
+    font-size: 1.25rem;
+    padding: 0.75rem 1.5rem;
+  }
+  .couch-login .route-hero__title {
+    font-family: var(--rs-font-display, var(--nylah-font-display, Georgia, serif));
+    font-size: 3.5rem;
+  }
+  .couch-login .route-hero__sub {
+    font-size: 1.375rem;
+    color: var(--rs-text-2);
+  }
+  .couch-login details.group summary {
+    min-height: 3.5rem;
+  }
+  .couch-login .accent-btn {
+    min-width: 3.5rem;
+    min-height: 3.5rem;
   }
 </style>
 

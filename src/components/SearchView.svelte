@@ -30,7 +30,13 @@
   import { searchPeople } from "@/scripts/lib/person-search.ts"
   import { resolvePersonTitleIds } from "@/scripts/lib/person-filter.ts"
   import { isTvDevice } from "@/scripts/lib/tv-detect"
-  import OnScreenKeyboard from "@/components/OnScreenKeyboard.svelte"
+  import { debounce } from "@/scripts/lib/debounce.ts"
+  import { goCouch } from "@/scripts/lib/couch-nav.ts"
+  import {
+    categorizeSearchResults,
+    suggestionsFor,
+  } from "@/scripts/lib/couch-search.ts"
+  import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
 
   /** @type {{ focusOnMount?: boolean }} */
   let { focusOnMount = false } = $props()
@@ -65,13 +71,16 @@
   const kindOptions = ["all", "live", "vod", "series", "actors", "epg"]
   let query = $state(initialFromUrl)
   let queryDebounced = $state(initialFromUrl)
-  let _queryTimer = null
+  // Debounced query sync (shared debounce helper): typing never
+  // re-scores or rewrites the URL per keystroke, and a results
+  // refresh never moves focus — focus only moves on explicit
+  // commit / navigation (see focusFirstResult / goBack).
+  const applyDebouncedQuery = debounce((value) => {
+    queryDebounced = value
+    syncUrl(value)
+  }, 150)
   function setQueryDebounced(value) {
-    if (_queryTimer) clearTimeout(_queryTimer)
-    _queryTimer = setTimeout(() => {
-      queryDebounced = value
-      syncUrl(value)
-    }, 80)
+    applyDebouncedQuery(value)
   }
 
   /** @type {{name: string, tmdbId: number|null}|null} */
@@ -466,6 +475,79 @@
 
   let kindCounts = $derived({ ...scoredAll.counts, actors: actorResults.length })
 
+  // Couch categories for the "all" view: Channels / Films / Series /
+  // Programmes / People, in display order. Filtered views keep the
+  // flat grid below.
+  let groupedResults = $derived(
+    kindFilter === "all" ? categorizeSearchResults(results) : null,
+  )
+  let groupedSections = $derived.by(() => {
+    if (!groupedResults) return []
+    const sections = [
+      {
+        id: "channels",
+        label: tr("search.results.live"),
+        items: groupedResults.channels,
+        kindFilter: "live",
+      },
+      {
+        id: "films",
+        label: tr("search.results.vod"),
+        items: groupedResults.films,
+        kindFilter: "vod",
+      },
+      {
+        id: "series",
+        label: tr("search.results.series"),
+        items: groupedResults.series,
+        kindFilter: "series",
+      },
+      {
+        id: "programmes",
+        label: tr("search.results.programmes"),
+        items: groupedResults.programmes,
+        kindFilter: "epg",
+      },
+      {
+        id: "people",
+        label: tr("search.actors"),
+        items: groupedResults.people,
+        kindFilter: "actors",
+      },
+    ]
+    return sections.filter((section) => section.items.length > 0)
+  })
+
+  // Suggestion chips while typing: matching recent searches first,
+  // then top result names. Pure helper — no invented content.
+  let suggestions = $derived(
+    personMode
+      ? []
+      : suggestionsFor(
+          query,
+          recentSearches.map((recent) => recent.text),
+          scoredAll.items.slice(0, 10).map((entry) => entry.item.name),
+        ),
+  )
+
+  // Back / close: return to the screen search was opened from when
+  // there is one, otherwise Home. B / Escape with an empty query
+  // lands here (see onKey); a non-empty query clears first.
+  function goBack() {
+    if (typeof window === "undefined") return
+    if (window.history.length > 1) window.history.back()
+    else goCouch("/")
+  }
+
+  function applySuggestion(text) {
+    if (personMode) exitPersonMode()
+    query = text
+    queryDebounced = text
+    syncUrl(text)
+    scheduleActorSearch(text)
+    inputEl?.focus()
+  }
+
   $effect(() => {
     void results
     if (activeIndex >= results.length) activeIndex = 0
@@ -497,10 +579,6 @@
   }
 
   function selectRecentSearch(text) {
-    if (_queryTimer) {
-      clearTimeout(_queryTimer)
-      _queryTimer = null
-    }
     if (personMode) exitPersonMode()
     query = text
     queryDebounced = text
@@ -539,7 +617,7 @@
   // controller user can keep going with the D-pad, or back to the input
   // when there is nothing to open.
   function focusFirstResult() {
-    const first = document.querySelector(".search-result-card")
+    const first = document.querySelector(".couch-search__results .rs-card")
     if (first) {
       first.focus()
       return
@@ -597,6 +675,11 @@
         query = ""
         queryDebounced = ""
         syncUrl("")
+      } else {
+        // Empty query + Escape/B = leave search, restoring the
+        // previous screen (history) or Home.
+        ev.preventDefault()
+        goBack()
       }
     }
   }
@@ -638,27 +721,39 @@
       document.removeEventListener(LOCALE_EVENT, onLocale)
       document.removeEventListener(EVT_SEARCH_RECENT_CHANGED, onSearchRecentChanged)
       window.removeEventListener("keydown", onKey, true)
-      if (_queryTimer) clearTimeout(_queryTimer)
       if (_personSearchTimer) clearTimeout(_personSearchTimer)
     }
   })
 </script>
 
-<section class="search-view flex flex-col gap-4 flex-1 min-h-0">
-  <div class="flex flex-col gap-3 shrink-0">
-    <div data-focus-glide="off" class="search-input-wrap flex items-center gap-2 px-3 py-2 rounded-xl border border-line bg-surface focus-within:border-accent transition-[border-color,box-shadow] duration-200 ease-out">
-      <svg xmlns="http://www.w3.org/2000/svg" width="1.125rem" height="1.125rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="text-fg-3 shrink-0">
+<section class="couch-search" data-couch-view="search">
+  <div class="couch-search__head">
+    <button
+      type="button"
+      onclick={goBack}
+      data-nylah-item
+      class="couch-search__back"
+      aria-label={tr("common.back")}>
+      ← {tr("common.back")}
+    </button>
+    <h1 class="rs-page-title">{tr("page.search.heading")}</h1>
+    <p class="rs-meta">{tr("page.search.subPrefix")}<kbd class="couch-search__kbd">{tr("search.shortcut")}</kbd>{tr("page.search.subSuffix")}</p>
+  </div>
+
+  <div class="couch-search__controls">
+    <div data-focus-glide="off" class="couch-search__input-wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" width="1.5rem" height="1.5rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="couch-search__icon">
         <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
       </svg>
       {#if personMode}
-        <span class="person-chip inline-flex items-center gap-1.5 min-h-9 pl-2.5 pr-1 py-1 rounded-lg bg-accent-soft text-accent text-sm max-w-[55%] shrink-0">
+        <span class="person-chip">
           <span class="truncate">{personMode.name}</span>
           <button
             type="button"
             onclick={exitPersonMode}
             aria-label={tr("search.personChipRemove", { name: personMode.name })}
-            class="person-chip-remove size-7 shrink-0 inline-flex items-center justify-center rounded-md text-accent hover:bg-surface-2/60 focus-visible:bg-surface-2/60 outline-none transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="0.8rem" height="0.8rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            class="person-chip-remove">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1rem" height="1rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
         </span>
       {/if}
@@ -677,7 +772,7 @@
         aria-label={tr("common.search")}
         autocomplete="off"
         spellcheck="false"
-        class="flex-1 min-w-0 bg-transparent text-fg placeholder:text-fg-3 outline-none py-2 text-lg" />
+        class="couch-search__input" />
       {#if query && !personMode}
         <button
           type="button"
@@ -693,215 +788,268 @@
             inputEl?.focus()
           }}
           aria-label={tr("search.clear")}
-          class="search-clear size-7 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-2 outline-none focus-visible:bg-surface-2 transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1rem" height="1rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          class="search-clear">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1.25rem" height="1.25rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       {/if}
     </div>
 
-    <div class="flex items-center gap-1 overflow-x-auto custom-scroll -mx-1 px-1">
+    <!-- Result categories: Films / Series / Channels (+ Programmes, People). -->
+    <div class="couch-search__filters" role="group" aria-label={tr("common.search")}>
       {#each kindOptions as kindOption}
         <button
           type="button"
+          data-nylah-item
           onclick={() => (kindFilter = kindOption)}
           aria-pressed={kindFilter === kindOption}
-          class="filter-chip rounded-lg px-3 py-1.5 text-sm whitespace-nowrap transition-colors outline-none border"
-          class:bg-accent-soft={kindFilter === kindOption}
-          class:text-accent={kindFilter === kindOption}
-          class:border-accent={kindFilter === kindOption}
-          class:text-fg-2={kindFilter !== kindOption}
-          class:border-line={kindFilter !== kindOption}
-          class:hover:bg-surface-2={kindFilter !== kindOption}>
+          class="filter-chip"
+          class:is-active={kindFilter === kindOption}>
           {kindOption === "all"
             ? tr("common.all")
             : kindOption === "vod"
-            ? tr("nav.movies")
+            ? tr("search.results.vod")
             : kindOption === "live"
-            ? tr("nav.livetv")
+            ? tr("search.results.live")
             : kindOption === "epg"
-            ? tr("nav.epg")
+            ? tr("search.results.programmes")
             : kindOption === "actors"
             ? tr("search.actors")
-            : tr("nav.series")}
+            : tr("search.results.series")}
           {#if queryDebounced.trim()}
-            <span class="ml-1.5 text-2xs tabular-nums opacity-70">{kindCounts[kindOption]}</span>
+            <span class="filter-chip__count">{kindCounts[kindOption]}</span>
           {/if}
         </button>
       {/each}
     </div>
 
+    {#if suggestions.length}
+      <div class="couch-search__suggestions" aria-label={tr("search.suggestions")}>
+        <span class="couch-search__suggestions-label">{tr("search.suggestions")}</span>
+        {#each suggestions as suggestion (suggestion)}
+          <button
+            type="button"
+            data-nylah-item
+            onclick={() => applySuggestion(suggestion)}
+            class="suggestion-chip">
+            {suggestion}
+          </button>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears. -->
-    <OnScreenKeyboard
+    <TvKeyboard
       bind:value={query}
       onInput={onOskInput}
       onCommit={focusFirstResult} />
   </div>
 
+  {#snippet resultCard(result, idx)}
+    {#if result.kind === "person"}
+      <button
+        type="button"
+        data-nylah-item
+        data-couch-key={"person:" + result.id}
+        onmouseenter={() => (activeIndex = idx)}
+        onfocus={() => (activeIndex = idx)}
+        onclick={() => enterPersonMode(result.candidate)}
+        class="rs-card rs-card--poster result-row">
+        <span class="rs-card__media couch-search__media couch-search__media--poster">
+          <span class="couch-search__person">
+            {#if result.profileUrl}
+              <img
+                use:cachedImg={{ url: result.profileUrl, kind: "poster" }}
+                alt=""
+                loading="lazy" fetchpriority="low"
+                decoding="async"
+                referrerpolicy="no-referrer"
+                width="80" height="80"
+                class="couch-search__person-img" />
+            {:else}
+              {personInitials(result.name)}
+            {/if}
+          </span>
+          <span class="rs-card__badge">{tr("search.actorGeneric")}</span>
+        </span>
+        <span class="rs-card__body">
+          <span class="rs-card__title">{result.name}</span>
+          <span class="rs-card__subtitle">{result.knownFor || tr("search.actorGeneric")}</span>
+        </span>
+      </button>
+    {:else}
+      <a
+        href={result.href}
+        use:lazySeasons={result}
+        data-nylah-item
+        data-couch-key={result.kind + ":" + result.id}
+        onmouseenter={() => (activeIndex = idx)}
+        onfocus={() => (activeIndex = idx)}
+        onclick={commitSearch}
+        class="rs-card result-row"
+        class:rs-card--poster={result.kind !== "live" && result.kind !== "epg"}
+        class:rs-card--channel={result.kind === "live"}
+        class:rs-card--landscape={result.kind === "epg"}>
+        <span
+          class="rs-card__media couch-search__media"
+          class:couch-search__media--poster={result.kind !== "live" && result.kind !== "epg"}
+          class:couch-search__media--wide={result.kind === "live" || result.kind === "epg"}>
+          {#if result.logo}
+            <img
+              use:cachedImg={{ url: result.logo, kind: result.kind === "live" ? "logo" : "poster" }}
+              alt=""
+              loading="lazy" fetchpriority="low"
+              decoding="async"
+              referrerpolicy="no-referrer"
+              width="200" height="300"
+              class="couch-search__media-img"
+              class:couch-search__media-img--contain={result.kind === "live"} />
+          {:else}
+            <span class="couch-search__media-fallback">{kl(result.kind)[0]}</span>
+          {/if}
+          <span class="rs-card__badge">{kl(result.kind)}</span>
+        </span>
+        <span class="rs-card__body">
+          <span class="rs-card__title">{result.name}</span>
+          <span class="rs-card__subtitle">{displaySubtitle(result)}</span>
+        </span>
+      </a>
+    {/if}
+  {/snippet}
+
   {#snippet warming(hint)}
-    <div class="flex items-center justify-center gap-2 mb-2">
-      <svg viewBox="0 0 24 24" width="1rem" height="1rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="animate-spin">
+    <div class="couch-search__warming">
+      <svg viewBox="0 0 24 24" width="1.5rem" height="1.5rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" class="couch-search__spin">
         <path d="M21 12a9 9 0 1 1-6.2-8.55"/>
       </svg>
       <span>{tr("search.loadingCatalog")}</span>
     </div>
-    <div class="text-2xs">{hint}</div>
+    <div class="rs-meta">{hint}</div>
   {/snippet}
 
-  <div class="flex-1 min-h-0 overflow-auto custom-scroll">
+  <div class="couch-search__results">
     {#if !personMode && !queryDebounced.trim()}
       {#if showRecentSearches}
-        <div bind:this={recentSectionEl} class="recent-searches pt-3 pb-2">
-          <div class="flex items-baseline justify-between gap-2 mb-1 px-2.5">
-            <span class="text-eyebrow font-medium uppercase tracking-wide text-fg-3">{tr("search.recentHeading")}</span>
+        <div bind:this={recentSectionEl} class="couch-search__recent">
+          <div class="couch-search__recent-head">
+            <span class="rs-section-title">{tr("search.recentHeading")}</span>
             <button
               type="button"
+              data-nylah-item
               onclick={clearAllRecentSearches}
-              class="inline-flex items-center min-h-9 px-2 rounded-lg text-xs text-fg-3 hover:text-fg focus-visible:text-fg underline-offset-2 hover:underline outline-none pointer-coarse:min-h-11">
+              class="couch-search__recent-clear">
               {tr("search.recentClear")}
             </button>
           </div>
-          <ul class="flex flex-col gap-1">
+          <ul class="couch-search__recent-list">
             {#each recentSearches as recent (recent.text)}
-              <li class="flex items-center gap-1">
+              <li class="couch-search__recent-row">
                 <button
                   type="button"
+                  data-nylah-item
                   onclick={() => selectRecentSearch(recent.text)}
-                  class="recent-search-row flex-1 min-w-0 min-h-11 rounded-lg px-2.5 flex items-center gap-2 text-left text-fg-2 hover:bg-surface-2 focus-visible:bg-surface-2 outline-none transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="1rem" height="1rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0 text-fg-3">
+                  class="recent-search-row">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="1.25rem" height="1.25rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="couch-search__recent-icon">
                     <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>
                   </svg>
-                  <span class="truncate text-sm">{recent.text}</span>
+                  <span class="truncate">{recent.text}</span>
                 </button>
                 <button
                   type="button"
+                  data-nylah-item
                   onclick={() => removeOneRecentSearch(recent.text)}
                   aria-label={tr("search.recentRemove", { query: recent.text })}
-                  class="size-9 pointer-coarse:size-11 shrink-0 inline-flex items-center justify-center rounded-md text-fg-3 hover:text-fg hover:bg-surface-2 focus-visible:bg-surface-2 outline-none transition-colors">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="0.875rem" height="0.875rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  class="couch-search__recent-remove">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="1.25rem" height="1.25rem" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
               </li>
             {/each}
           </ul>
         </div>
       {/if}
-      <div class="search-landing nylah-art-panel px-4 text-center text-sm text-fg-3 max-w-md mx-auto" class:py-12={!showRecentSearches} class:py-6={showRecentSearches}>
+      <div class="rs-empty couch-search__landing">
         {#if isWarming}
           {@render warming(tr("search.warmingHint"))}
         {:else}
-          <p class="font-serif text-lg text-fg-2 mb-1">{tr("search.helpHeading")}</p>
-          <p class="text-2xs">{tr("search.helpKbd")}</p>
-          <p class="text-2xs mt-1">{tr("search.keyboardHint")}</p>
+          <h2 class="rs-empty__title">{tr("search.helpHeading")}</h2>
+          <p class="rs-empty__message">{tr("search.helpKbd")}</p>
+          <p class="rs-empty__message">{tr("search.keyboardHint")}</p>
         {/if}
       </div>
     {:else if personMode && personTitleIds === null}
-      <ul class="flex flex-col gap-1 pt-3 pb-4" aria-hidden="true">
+      <ul class="couch-search__person-loading" aria-hidden="true">
         {#each Array.from({ length: 6 }) as _, i (i)}
-          <li class="flex items-center gap-3 px-2.5 py-2">
-            <span class="size-12 shrink-0 rounded-full skel" style:--skel-delay={i * 90 + "ms"}></span>
-            <span class="flex-1 min-w-0 flex flex-col gap-1.5">
-              <span class="h-3 rounded skel" style:width={60 + ((i * 7) % 30) + "%"} style:--skel-delay={i * 90 + 70 + "ms"}></span>
-              <span class="h-2.5 rounded skel" style:width={30 + ((i * 5) % 25) + "%"} style:--skel-delay={i * 90 + 140 + "ms"}></span>
+          <li class="couch-search__person-loading-row">
+            <span class="rs-skeleton rs-skeleton--poster couch-search__person-loading-thumb"></span>
+            <span class="couch-search__person-loading-lines">
+              <span class="rs-skeleton rs-skeleton--line"></span>
+              <span class="rs-skeleton rs-skeleton--line couch-search__person-loading-line--short"></span>
             </span>
           </li>
         {/each}
       </ul>
     {:else if !results.length}
-      <div class="search-no-results nylah-art-panel nylah-art-panel--empty-search px-4 py-12 text-center text-sm text-fg-3 max-w-md mx-auto">
+      <div class="rs-empty couch-search__empty">
         {#if personMode}
-          <p class="search-no-results-text">{tr("search.noResultsForPerson", { name: personMode.name })}</p>
+          <h2 class="rs-empty__title">{tr("search.noResultsForPerson", { name: personMode.name })}</h2>
         {:else if isWarming}
           {@render warming(tr("search.warmingResultsHint"))}
         {:else}
-          <p class="search-no-results-text">{tr("search.noResults", { query: queryDebounced.trim() })}</p>
-          {#if kindFilter !== "all" && kindCounts.all > 0}
+          <h2 class="rs-empty__title">{tr("search.noResults", { query: queryDebounced.trim() })}</h2>
+          <div class="couch-search__empty-actions">
+            {#if kindFilter !== "all" && kindCounts.all > 0}
+              <button
+                type="button"
+                data-nylah-item
+                onclick={() => (kindFilter = "all")}
+                class="couch-search__action">
+                {tr("search.showAllKinds", { n: kindCounts.all })}
+              </button>
+            {/if}
             <button
               type="button"
-              onclick={() => (kindFilter = "all")}
-              class="mt-4 inline-flex items-center justify-center min-h-11 px-3.5 rounded-lg border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors outline-none">
-              {tr("search.showAllKinds", { n: kindCounts.all })}
+              data-nylah-item
+              onclick={clearQuery}
+              class="couch-search__action couch-search__action--secondary">
+              {tr("search.clear")}
             </button>
-          {/if}
-          <button
-            type="button"
-            onclick={clearQuery}
-            class="mt-4 ml-2 inline-flex items-center justify-center min-h-11 px-3.5 rounded-lg border border-line bg-surface text-sm text-fg hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent transition-colors outline-none">
-            {tr("search.clear")}
-          </button>
+          </div>
         {/if}
       </div>
+    {:else if groupedSections.length}
+      {#each groupedSections as section (section.id)}
+        <section class="rs-rail" data-nylah-rail={"search-" + section.id} aria-label={section.label}>
+          <div class="rs-rail__head">
+            <h2 class="rs-section-title">{section.label} <span class="couch-search__rail-count">({section.items.length})</span></h2>
+            {#if section.items.length > 8}
+              <button
+                type="button"
+                data-nylah-item
+                onclick={() => (kindFilter = section.kindFilter)}
+                class="rs-rail__more">
+                {tr("search.showAllKinds", { n: section.items.length })} ›
+              </button>
+            {/if}
+          </div>
+          <div class="rs-rail__row">
+            {#each section.items.slice(0, 8) as result (result.kind + ":" + result.id)}
+              {@render resultCard(result, results.indexOf(result))}
+            {/each}
+          </div>
+        </section>
+      {/each}
+      {#if scoredAll.items.length >= 500}
+        <p class="couch-search__cap">
+          {tr("search.showingTop", { n: results.length })}
+        </p>
+      {/if}
     {:else}
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4 pb-4">
+      <div class="rs-grid" data-couch-grid role="group" aria-label={tr("common.search")}>
         {#each results as result, idx (result.kind + ":" + result.id)}
-          {#if result.kind === "person"}
-            <button
-              type="button"
-              onmouseenter={() => (activeIndex = idx)}
-              onfocus={() => (activeIndex = idx)}
-              onclick={() => enterPersonMode(result.candidate)}
-              style:--enter-delay={Math.min(idx, 12) * 18 + "ms"}
-              class="search-result-card result-row group relative rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line outline-none text-left transition-[transform,box-shadow] duration-150 hover:ring-accent hover:[transform:translateY(-2px)] focus-visible:ring-accent focus-visible:[transform:translateY(-2px)]">
-              <span class="flex aspect-[2/3] w-full items-center justify-center bg-surface-2 relative">
-                <span class="size-20 shrink-0 rounded-full bg-surface-3 ring-1 ring-line overflow-hidden flex items-center justify-center text-lg font-medium uppercase text-fg-3">
-                  {#if result.profileUrl}
-                    <img
-                      use:cachedImg={{ url: result.profileUrl, kind: "poster" }}
-                      alt=""
-                      loading="lazy" fetchpriority="low"
-                      decoding="async"
-                      referrerpolicy="no-referrer"
-                      width="80" height="80"
-                      class="h-full w-full object-cover" />
-                  {:else}
-                    {personInitials(result.name)}
-                  {/if}
-                </span>
-                <span class="absolute bottom-1.5 left-1.5 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold uppercase tracking-wide">
-                  {tr("search.actorGeneric")}
-                </span>
-              </span>
-              <span class="block px-2 py-2 min-w-0">
-                <span class="block truncate text-sm font-medium text-fg">{result.name}</span>
-                <span class="block truncate text-2xs text-fg-3">{result.knownFor || tr("search.actorGeneric")}</span>
-              </span>
-            </button>
-          {:else}
-            <a
-              href={result.href}
-              use:lazySeasons={result}
-              onmouseenter={() => (activeIndex = idx)}
-              onfocus={() => (activeIndex = idx)}
-              onclick={commitSearch}
-              style:--enter-delay={Math.min(idx, 12) * 18 + "ms"}
-              class="search-result-card result-row group relative rounded-xl overflow-hidden bg-surface-2 ring-1 ring-line outline-none text-left transition-[transform,box-shadow] duration-150 hover:ring-accent hover:[transform:translateY(-2px)] focus-visible:ring-accent focus-visible:[transform:translateY(-2px)]">
-              <span class="block aspect-[2/3] w-full bg-surface-2 overflow-hidden relative">
-                {#if result.logo}
-                  <img
-                    use:cachedImg={{ url: result.logo, kind: result.kind === "live" ? "logo" : "poster" }}
-                    alt=""
-                    loading="lazy" fetchpriority="low"
-                    decoding="async"
-                    referrerpolicy="no-referrer"
-                    width="200" height="300"
-                    class="h-full w-full"
-                    class:object-cover={result.kind !== "live"}
-                    class:object-contain={result.kind === "live"} />
-                {:else}
-                  <span class="flex h-full w-full items-center justify-center font-serif text-3xl text-fg-3">{kl(result.kind)[0]}</span>
-                {/if}
-                <span class="absolute bottom-1.5 left-1.5 rounded-md px-1.5 py-0.5 bg-black/55 backdrop-blur-sm ring-1 ring-white/10 text-white/90 text-2xs font-semibold uppercase tracking-wide">
-                  {kl(result.kind)}
-                </span>
-              </span>
-              <span class="block px-2 py-2 min-w-0">
-                <span class="block truncate text-sm font-medium text-fg">{result.name}</span>
-                <span class="block truncate text-2xs text-fg-3">{displaySubtitle(result)}</span>
-              </span>
-            </a>
-          {/if}
+          {@render resultCard(result, idx)}
         {/each}
       </div>
       {#if scoredAll.items.length >= 500}
-        <p class="px-3 py-3 text-center text-2xs text-fg-3 italic">
+        <p class="couch-search__cap">
           {tr("search.showingTop", { n: results.length })}
         </p>
       {/if}
@@ -910,122 +1058,417 @@
 </section>
 
 <style>
+  /* Couch search — RedSilk tokens only (couch.css owns .rs-*; this
+     file only lays out this screen's own chrome around them). */
+  .couch-search {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    flex: 1;
+    min-height: 0;
+  }
+  .couch-search__head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .couch-search__back {
+    align-self: flex-start;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--rs-text-2);
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+    border-radius: 0.75rem;
+    padding: 0.625rem 1.25rem;
+    cursor: pointer;
+  }
+  .couch-search__back:hover {
+    color: var(--rs-text);
+    background: var(--rs-bg-2);
+  }
+  .couch-search__kbd {
+    font-size: 1.125rem;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--rs-line);
+    border-radius: 0.375rem;
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    font-family: inherit;
+  }
+  .couch-search__controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex-shrink: 0;
+  }
+  .couch-search__input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: 1rem;
+    border: 1px solid var(--rs-line);
+    background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+    box-shadow: var(--rs-shadow);
+  }
+  .couch-search__input-wrap:focus-within {
+    border-color: var(--rs-focus);
+    box-shadow:
+      0 0 0 3px var(--rs-focus),
+      0 0 2rem 0.25rem var(--rs-focus-glow);
+  }
+  .couch-search__input-wrap input:focus-visible {
+    outline: none;
+  }
+  .couch-search__icon {
+    color: var(--rs-text-2);
+    flex-shrink: 0;
+  }
+  .couch-search__input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    color: var(--rs-text);
+    border: 0;
+    outline: none;
+    padding: 0.5rem 0;
+    font-size: 1.5rem;
+  }
+  .couch-search__input::placeholder {
+    color: var(--rs-text-2);
+  }
+  .person-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 3rem;
+    padding-left: 1rem;
+    padding-right: 0.25rem;
+    border-radius: 0.75rem;
+    background: var(--rs-accent);
+    color: var(--rs-text);
+    font-size: 1.25rem;
+    max-width: 55%;
+    flex-shrink: 0;
+  }
+  .person-chip-remove {
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    color: var(--rs-text);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .search-clear {
+    width: 3rem;
+    height: 3rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    color: var(--rs-text-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .search-clear:hover {
+    color: var(--rs-text);
+    background: var(--rs-surface);
+  }
+  .couch-search__filters {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding: 0.25rem;
+    scrollbar-width: none;
+  }
+  .couch-search__filters::-webkit-scrollbar {
+    display: none;
+  }
+  .filter-chip {
+    font-size: 1.25rem;
+    font-weight: 600;
+    white-space: nowrap;
+    min-height: 3.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 999px;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text-2);
+    cursor: pointer;
+  }
+  .filter-chip:hover {
+    color: var(--rs-text);
+    background: var(--rs-bg-2);
+  }
+  .filter-chip.is-active {
+    background: var(--rs-accent);
+    border-color: var(--rs-accent);
+    color: var(--rs-text);
+    box-shadow: 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .filter-chip__count {
+    margin-left: 0.5rem;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+  .couch-search__suggestions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .couch-search__suggestions-label {
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rs-text-2);
+  }
+  .suggestion-chip {
+    font-size: 1.25rem;
+    min-height: 3rem;
+    padding: 0.5rem 1.25rem;
+    border-radius: 999px;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-bg-2);
+    color: var(--rs-text);
+    cursor: pointer;
+  }
+  .suggestion-chip:hover {
+    border-color: var(--rs-focus);
+  }
+  .couch-search__results {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding-bottom: 2rem;
+  }
+  .couch-search__warming {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    font-size: 1.375rem;
+  }
+  .couch-search__spin {
+    animation: couch-spin 1s linear infinite;
+  }
+  @keyframes couch-spin {
+    to { transform: rotate(360deg); }
+  }
+  .couch-search__recent {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .couch-search__recent-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0 0.25rem;
+  }
+  .couch-search__recent-clear {
+    font-size: 1.125rem;
+    color: var(--rs-text-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    min-height: 2.75rem;
+    padding: 0 0.5rem;
+  }
+  .couch-search__recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .couch-search__recent-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .recent-search-row {
+    flex: 1;
+    min-width: 0;
+    min-height: 3.5rem;
+    border-radius: 0.75rem;
+    padding: 0 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    text-align: left;
+    font-size: 1.25rem;
+    color: var(--rs-text-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .recent-search-row:hover {
+    background: var(--rs-surface);
+    color: var(--rs-text);
+  }
+  .couch-search__recent-icon {
+    color: var(--rs-text-2);
+    flex-shrink: 0;
+  }
+  .couch-search__recent-remove {
+    width: 3rem;
+    height: 3rem;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.75rem;
+    color: var(--rs-text-2);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .couch-search__recent-remove:hover {
+    color: var(--rs-text);
+    background: var(--rs-surface);
+  }
+  .couch-search__landing,
+  .couch-search__empty {
+    max-width: 44rem;
+    margin: 0 auto;
+    width: 100%;
+  }
+  .couch-search__empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 0.5rem;
+  }
+  .couch-search__action {
+    font-size: 1.375rem;
+    font-weight: 600;
+    min-height: 3.5rem;
+    padding: 0.75rem 1.75rem;
+    border-radius: 0.75rem;
+    background: var(--rs-accent);
+    color: var(--rs-text);
+    border: 0;
+    cursor: pointer;
+  }
+  .couch-search__action--secondary {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+  }
+  .couch-search__rail-count {
+    color: var(--rs-text-2);
+    font-size: 1.5rem;
+  }
+  .couch-search__cap {
+    text-align: center;
+    font-size: 1.125rem;
+    font-style: italic;
+    color: var(--rs-text-2);
+    padding: 0.75rem;
+  }
+  /* Result media: TvCard's aspect comes from TvImage in Astro; in
+     Svelte the media span carries it instead. */
+  .couch-search__media {
+    display: block;
+    overflow: hidden;
+    background: var(--rs-bg-2);
+  }
+  .couch-search__media--poster {
+    aspect-ratio: 2 / 3;
+  }
+  .couch-search__media--wide {
+    aspect-ratio: 16 / 9;
+  }
+  .couch-search__media-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .couch-search__media-img--contain {
+    object-fit: contain;
+    padding: 1rem;
+    background: var(--rs-surface);
+  }
+  .couch-search__media-fallback {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--rs-font-display);
+    font-size: 3rem;
+    color: var(--rs-text-2);
+  }
+  .couch-search__person {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+  .couch-search__person-img {
+    width: 6rem;
+    height: 6rem;
+    border-radius: 999px;
+    object-fit: cover;
+  }
+  .couch-search__person-loading {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .couch-search__person-loading-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0 0.5rem;
+  }
+  .couch-search__person-loading-thumb {
+    width: 4rem;
+    height: 4rem;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+  .couch-search__person-loading-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .couch-search__person-loading-line--short {
+    width: 40%;
+  }
   .result-row {
     animation: result-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
-    animation-delay: var(--enter-delay, 0ms);
   }
   @keyframes result-enter {
     from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    to { opacity: 1; transform: translateY(0); }
   }
-
-  /* Nylah Studios v0.3.0 (w7) — RedSilk search treatment: warm gradient
-     field + cards, strong wine focus glow, serif landing / no-results. */
-  .search-input-wrap {
-    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
-    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-  }
-  .search-input-wrap:focus-within {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 24px 2px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-  /* The wrapper carries the focus ring; Layout's global input outline would draw a second, inner one. */
-  .search-input-wrap input:focus-visible {
-    outline: none;
-  }
-
-  .filter-chip[aria-pressed="true"] {
-    box-shadow: 0 0 16px -2px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-  .filter-chip:focus-visible {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-
-  /* Result cards: warm gradient + layered shadow, same language as the
-     poster cards; focused card lifts + halo. */
-  .search-result-card {
-    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
-    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-  }
-  .search-result-card:hover {
-    box-shadow:
-      0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
-      var(--nylah-card-shadow-lift, 0 18px 44px -16px var(--nylah-focus-glow));
-  }
-
-  /* Glowing focus ring on result cards, same language as the poster
-     cards: accent ring plus a soft accent halo, legible from the couch. */
-  .search-result-card:focus-visible {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 24px 4px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-
-  .recent-search-row:focus-visible {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-
-  /* Landing + no-results are surfaces too: warm panels, serif voice.
-     The v0.2.2 Clear-search escape hatch in the no-results state is
-     unchanged — only its frame is graded. */
-  .search-landing,
-  .search-no-results {
-    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
-    border: 1px solid var(--color-line);
-    border-radius: 1rem;
-    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-  }
-  .search-no-results-text {
-    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
-    font-size: 1.0625rem;
-    color: var(--color-fg-2);
-  }
-  .search-no-results button:focus-visible {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
-  }
-
-  @media (pointer: coarse) {
-    .search-clear,
-    .person-chip-remove {
-      width: 2.75rem;
-      height: 2.75rem;
-    }
-    .filter-chip {
-      padding-top: 0.5rem;
-      padding-bottom: 0.5rem;
-      min-height: 2.5rem;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .result-row { animation: none; }
-    .search-input-wrap { transition: none; }
-    .search-input-wrap,
-    .search-result-card,
-    .search-landing,
-    .search-no-results {
-      box-shadow: none;
-    }
-  }
-
-  /* v0.3.0 coordinator wiring: curated art in the landing + no-results
-     panels. The scoped `background:` shorthand above would reset the art
-     image, so re-assert it here (later + more specific). */
-  .search-landing.nylah-art-panel {
-    background-image: var(--nylah-art-hero);
-    background-size: cover;
-    background-position: center;
-  }
-  .search-no-results.nylah-art-panel--empty-search {
-    background-image: var(--nylah-art-empty-search);
-    background-size: cover;
-    background-position: center;
+    .couch-search__spin { animation: none; }
   }
 </style>

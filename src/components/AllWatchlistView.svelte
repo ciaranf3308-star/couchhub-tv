@@ -194,8 +194,8 @@
   })
 </script>
 
-<div class="flex flex-col gap-3 shrink-0">
-  <div class="flex flex-wrap gap-2" role="tablist" aria-label={tr("watchlist.heading")}>
+<div class="couch-library__filters">
+  <div class="couch-library__chips" role="tablist" aria-label={tr("watchlist.heading")}>
     {#each [
       { id: "all", key: "favorites.filter.all" },
       { id: "vod", key: "favorites.filter.vod" },
@@ -204,30 +204,29 @@
       <button
         type="button"
         role="tab"
+        data-nylah-item
         aria-selected={filter === chip.id}
         onclick={() => setFilter(chip.id)}
-        class:active={filter === chip.id}
-        class="filter-chip rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm
-               hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
-               transition-colors">
+        class="filter-chip"
+        class:is-active={filter === chip.id}>
         {tr(chip.key)}
-        <span class="ml-1.5 text-fg-3 tabular-nums">{counts[chip.id]}</span>
+        <span class="filter-chip__count">{counts[chip.id]}</span>
       </button>
     {/each}
   </div>
 
   {#if loading && !entries.length}
-    <div class="text-sm text-fg-3 px-1">{tr("common.loading")}</div>
+    <div class="rs-meta">{tr("common.loading")}</div>
   {:else if !entries.length}
-    <div class="w7-empty nylah-art-panel nylah-art-panel--empty-library rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
-      {tr("watchlist.helperEmpty")}
+    <div class="rs-empty">
+      <p class="rs-empty__message">{tr("watchlist.helperEmpty")}</p>
     </div>
   {:else if !visible.length}
-    <div class="w7-empty rounded-2xl border border-line bg-surface px-5 py-8 text-sm text-fg-2">
-      {tr("watchlist.helperFiltered")}
+    <div class="rs-empty">
+      <p class="rs-empty__message">{tr("watchlist.helperFiltered")}</p>
     </div>
   {:else}
-    <div class="px-1 text-xs text-fg-3 tabular-nums">
+    <div class="rs-meta">
       {tr("strip.itemCount", { count: visible.length })}
     </div>
   {/if}
@@ -235,24 +234,19 @@
 
 {#if visible.length}
   <section
-    class="fav-grid flex-1 min-h-0 overflow-auto custom-scroll
-           grid gap-3 sm:gap-4
-           grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]
-           sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]
-           lg:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))]
-           auto-rows-min content-start
-           p-2 pb-4">
+    class="rs-grid"
+    data-couch-grid
+    role="group"
+    aria-label={tr("watchlist.heading")}>
     {#each visible as entry, idx (entry.playlistId + ":" + entry.kind + ":" + entry.id)}
       <a
         href={entry.href}
         onclick={(event) => openCard(event, entry)}
+        data-nylah-item
+        data-couch-key={entry.playlistId + ":" + entry.kind + ":" + entry.id}
         aria-label={tr("watchlist.cardAriaLabel", { name: entry.name, playlist: entry.playlistTitle })}
-        class="fav-card group relative rounded-xl overflow-hidden bg-surface-2
-               ring-1 ring-line
-               transition-[transform,box-shadow] duration-150
-               hover:ring-1 hover:ring-accent hover:[transform:translateY(-2px)]
-               focus-visible:ring-1 focus-visible:ring-accent focus-visible:[transform:translateY(-2px)]">
-        <div class="aspect-2/3 w-full bg-surface-2 overflow-hidden relative">
+        class="rs-card rs-card--poster">
+        <span class="rs-card__media couch-library__media couch-library__media--poster">
           {#if entry.logo}
             <img
               use:cachedImg={{ url: entry.logo, kind: "poster" }}
@@ -261,90 +255,149 @@
               decoding="async"
               referrerpolicy="no-referrer"
               width="200" height="300"
-              class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+              class="couch-library__media-img" />
           {:else}
-            <div class="h-full w-full flex flex-col items-center justify-center gap-2 px-3
-                        text-fg-3 bg-linear-to-br from-surface-2 to-surface-3">
-              <span class="size-7 opacity-60 inline-flex items-center justify-center" aria-hidden="true">{@html KIND_ICON_SVG[entry.kind]}</span>
-              <span class="font-serif text-xs text-center truncate max-w-full">{entry.name}</span>
-            </div>
+            <span class="couch-library__media-fallback">
+              <span class="couch-library__media-fallback-icon" aria-hidden="true">{@html KIND_ICON_SVG[entry.kind]}</span>
+              <span class="couch-library__media-fallback-name">{entry.name}</span>
+            </span>
           {/if}
 
-          <span
-            class="absolute top-1.5 left-1.5 text-label font-medium uppercase tracking-wide
-                   rounded-md px-1.5 py-0.5 bg-black/55 text-white/85 backdrop-blur-sm ring-1 ring-white/10">
+          <span class="rs-card__badge">
             {kl(entry.kind)}
           </span>
-        </div>
+        </span>
 
-        <div class="px-2 py-2 min-w-0">
-          <div class="truncate text-sm font-medium text-fg">
+        <span class="rs-card__body">
+          <span class="rs-card__title">
             {entry.name}
-          </div>
-          <div class="truncate text-2xs text-fg-3 flex items-center gap-1">
+          </span>
+          <span class="rs-card__subtitle">
             {#if entry.isCrossPlaylist}
-              <IconExternalLink aria-hidden="true" class="h-3 w-3 shrink-0 text-accent" />
+              <IconExternalLink aria-hidden="true" class="couch-library__x-icon" />
             {/if}
-            <span class="truncate">{entry.playlistTitle}</span>
-          </div>
-        </div>
+            {entry.playlistTitle}
+          </span>
+        </span>
       </a>
     {/each}
   </section>
 {/if}
 
 <style>
-  /* Nylah Studios v0.3.0 (w7) — RedSilk treatment: warm gradient cards,
-     layered wine shadow, lit active chips, serif empty panels. */
-  .fav-card {
-    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface-2)), var(--nylah-surface-2-warm, var(--color-surface)));
-    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+  /* Couch library — RedSilk tokens only (couch.css owns .rs-*). */
+  .couch-library__filters {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex-shrink: 0;
+    margin-bottom: 1.5rem;
   }
-  .fav-card:hover,
-  .fav-card:focus-visible {
-    box-shadow:
-      0 0 0 1px var(--nylah-focus-ring, var(--color-accent)),
-      var(--nylah-card-shadow-lift, 0 18px 44px -16px var(--nylah-focus-glow));
+  .couch-library__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
   }
-  .filter-chip.active {
-    background: var(--color-accent-soft);
-    border-color: var(--nylah-focus-ring, var(--color-accent));
-    color: var(--color-fg);
-    box-shadow: 0 0 16px -2px var(--nylah-focus-glow, var(--color-accent-soft));
+  .filter-chip {
+    font-size: 1.25rem;
+    font-weight: 600;
+    white-space: nowrap;
+    min-height: 3.5rem;
+    padding: 0.625rem 1.25rem;
+    border-radius: 999px;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text-2);
+    cursor: pointer;
   }
-  .filter-chip:focus-visible {
-    box-shadow:
-      0 0 0 2px var(--nylah-focus-ring, var(--color-accent)),
-      0 0 16px 2px var(--nylah-focus-glow, var(--color-accent-soft));
+  .filter-chip:hover {
+    color: var(--rs-text);
+    background: var(--rs-bg-2);
   }
-  .w7-empty {
-    background: linear-gradient(180deg, var(--nylah-surface-warm, var(--color-surface)), var(--nylah-surface-2-warm, var(--color-surface-2)));
-    box-shadow: var(--nylah-card-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
-    font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
-    font-size: 1.0625rem;
+  .filter-chip.is-active {
+    background: var(--rs-accent);
+    border-color: var(--rs-accent);
+    color: var(--rs-text);
+    box-shadow: 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .filter-chip__count {
+    margin-left: 0.5rem;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+  .couch-library__media {
+    display: block;
+    overflow: hidden;
+    background: var(--rs-bg-2);
+  }
+  .couch-library__media--poster {
+    aspect-ratio: 2 / 3;
+  }
+  .couch-library__media--wide {
+    aspect-ratio: 16 / 9;
+  }
+  .couch-library__media-img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .couch-library__logo-wrap {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .couch-library__logo {
+    position: relative;
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+  }
+  .couch-library__media-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    width: 100%;
+    height: 100%;
+    padding: 1rem;
+    color: var(--rs-text-2);
+    background: linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 70%, var(--rs-bg) 100%);
+  }
+  .couch-library__media-fallback-icon {
+    width: 2rem;
+    height: 2rem;
+    opacity: 0.6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .couch-library__media-fallback-name {
+    font-family: var(--rs-font-display);
+    font-size: 1.25rem;
     text-align: center;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
   }
-  /* Touch / TV-remote: bump chip to 44px tap target. */
-  @media (pointer: coarse) {
-    .filter-chip {
-      padding-top: 0.5rem;
-      padding-bottom: 0.5rem;
-      min-height: 2.75rem;
-    }
+  .couch-library__x-icon {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    color: var(--rs-focus);
+    vertical-align: -0.125rem;
+  }
+  .couch-library__card--unavailable {
+    opacity: 0.5;
   }
   @media (prefers-reduced-motion: reduce) {
-    .fav-card,
-    .filter-chip.active {
+    .filter-chip.is-active {
       box-shadow: none;
     }
-  }
-
-  /* v0.3.0 coordinator wiring: curated art in the empty panel. The
-     scoped `background:` shorthand above would reset the art image, so
-     re-assert it here. */
-  .w7-empty.nylah-art-panel--empty-library {
-    background-image: var(--nylah-art-empty-library);
-    background-size: cover;
-    background-position: center;
   }
 </style>

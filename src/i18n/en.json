@@ -1954,5 +1954,6 @@
   "tv.downloads.defaultFolder": "/Download/Extreme InfiniTV/ (default)",
   "tv.aria.open": "Open {name}",
   "tv.aria.watch": "Watch {name}",
-  "tv.aria.resume": "Resume {name}"
+  "tv.aria.resume": "Resume {name}",
+  "search.suggestions": "Suggestions"
 }
