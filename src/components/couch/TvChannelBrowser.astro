@@ -1,5 +1,5 @@
 ---
-// TvChannelBrowser — Channel Browser shell (W1, canonical owner).
+// TvChannelBrowser — Channel Browser shell (W1 engine, 0.9.0 W2 rebuild).
 //
 // Renders the mount point; the client script mounts the browser
 // from the cached playlist (mountCachedChannelBrowser — no fetch).
@@ -7,26 +7,63 @@
 // mountChannelBrowser / mountCachedChannelBrowser directly from
 // src/scripts/lib/livetv-browser.ts instead of using this shell.
 //
+// Two uses, one component:
+//   - Home inline "All Channels" (default): browserId "home",
+//     screenMode off — the collapsed section under the Home rails.
+//   - 0.9.0 Channel Browser screen: screenMode on (the shell
+//     renders this instance inside the "browser" mode mount with
+//     browserId "browser"). The screen instance follows
+//     `livetv:mode` {mode:"browser", browserFilter?, openSearch?}
+//     entries, auto-highlights the first channel so the contextual
+//     panel is populated, and B / Escape exits to landing via
+//     `livetv:mode` {mode:"landing"}.
+//
+// Entry is accepted from BOTH sources: the mount's data attributes
+// (data-browser-filter-kind / data-browser-filter-value /
+// data-open-search — the shell may set them when it shows the
+// screen) AND the last `livetv:mode` browser event (buffered here
+// in case it arrives before the async mount resolves; the module
+// itself handles later mode events). A mode event wins over the
+// dataset when both name an entry, because it is the later signal.
+//
 // Props: initialCategoryId? (a group id, "favourites", "recents" or
 // "all"), initialFocusId? (channel id to return focus to),
 // browserId? (answers `livetv:browser-category` for this id;
-// Home uses "home").
-// Watch on a row dispatches the livetv:tune handoff by default;
-// highlight never tunes.
+// Home uses "home", the screen uses "browser"), screenMode?
+// (0.9.0 screen instance), entryFilterKind? / entryFilterValue? /
+// openSearch? (static entry, rendered as data attributes).
+// Watch dispatches the livetv:tune handoff by default; highlight
+// never tunes.
 interface Props {
   initialCategoryId?: string;
   initialFocusId?: string | number;
   browserId?: string;
+  screenMode?: boolean;
+  entryFilterKind?: "all" | "favourites" | "recents" | "category";
+  entryFilterValue?: string;
+  openSearch?: boolean;
 }
-const { initialCategoryId, initialFocusId, browserId = "home" } = Astro.props;
+const {
+  initialCategoryId,
+  initialFocusId,
+  browserId = "home",
+  screenMode = false,
+  entryFilterKind,
+  entryFilterValue,
+  openSearch = false,
+} = Astro.props;
 ---
 
 <div
   class="rs-livetv-browser-host"
   data-livetv-browser-mount
   data-browser-id={browserId}
+  data-screen-mode={screenMode ? "1" : undefined}
   data-initial-category={initialCategoryId}
   data-initial-focus={initialFocusId != null ? String(initialFocusId) : undefined}
+  data-browser-filter-kind={entryFilterKind}
+  data-browser-filter-value={entryFilterValue}
+  data-open-search={openSearch ? "1" : undefined}
 >
   <div class="rs-livetv-browser-host__loading" data-livetv-browser-loading>
     Loading channels…
@@ -34,26 +71,86 @@ const { initialCategoryId, initialFocusId, browserId = "home" } = Astro.props;
 </div>
 
 <script>
-  import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
+  import {
+    mountCachedChannelBrowser,
+    type BrowserEntryFilter,
+    type ChannelBrowserHandle,
+  } from "@/scripts/lib/livetv-browser";
 
   const host = document.querySelector<HTMLElement>("[data-livetv-browser-mount]");
   if (host && !host.dataset.browserArmed) {
     host.dataset.browserArmed = "1";
+    const screenMode = host.dataset.screenMode === "1";
     const initialCategoryId = host.dataset.initialCategory || undefined;
     const initialFocusRaw = host.dataset.initialFocus || undefined;
     const initialFocusId = initialFocusRaw
       ? (/^\d+$/.test(initialFocusRaw) ? Number(initialFocusRaw) : initialFocusRaw)
       : undefined;
+
+    // Buffer the last `livetv:mode` browser entry: it may arrive
+    // before the async mount resolves (the shell dispatches the
+    // mode as it shows the screen). The module handles later mode
+    // events itself; this buffer covers only the pre-mount window.
+    let pendingModeEntry: {
+      browserFilter?: BrowserEntryFilter;
+      openSearch?: boolean;
+    } | null = null;
+    if (screenMode) {
+      window.addEventListener("livetv:mode", (event) => {
+        const detail = (event as CustomEvent).detail as
+          | { mode?: string; browserFilter?: BrowserEntryFilter; openSearch?: boolean }
+          | undefined;
+        if (detail?.mode === "browser") {
+          pendingModeEntry = {
+            browserFilter: detail.browserFilter,
+            openSearch: detail.openSearch,
+          };
+        }
+      });
+    }
+
+    // Dataset entry (the shell may set data-browser-filter-kind /
+    // data-browser-filter-value / data-open-search when it shows
+    // the screen). A buffered mode event wins: it is the later
+    // signal.
+    const datasetEntry: BrowserEntryFilter | null =
+      host.dataset.browserFilterKind &&
+      ["all", "favourites", "recents", "category"].includes(host.dataset.browserFilterKind)
+        ? {
+            kind: host.dataset.browserFilterKind as BrowserEntryFilter["kind"],
+            value: host.dataset.browserFilterValue || undefined,
+          }
+        : null;
+    const datasetOpenSearch = host.dataset.openSearch === "1";
+
     void mountCachedChannelBrowser(host, {
       browserId: host.dataset.browserId || undefined,
       initialCategoryId,
       initialFocusId,
-    }).then((handle) => {
+      acceptModeEntry: screenMode,
+      autoHighlightFirst: screenMode,
+      onClose: screenMode
+        ? () => {
+            window.dispatchEvent(
+              new CustomEvent("livetv:mode", { detail: { mode: "landing" } }),
+            );
+          }
+        : undefined,
+    }).then((handle: ChannelBrowserHandle | null) => {
       if (!handle) {
         const loading = host.querySelector("[data-livetv-browser-loading]");
         if (loading) {
           loading.textContent = "No live playlist connected — add a playlist to browse live channels.";
         }
+        return;
+      }
+      if (!screenMode) return;
+      if (pendingModeEntry) {
+        handle.applyEntry(pendingModeEntry.browserFilter, {
+          openSearch: pendingModeEntry.openSearch,
+        });
+      } else if (datasetEntry || datasetOpenSearch) {
+        handle.applyEntry(datasetEntry, { openSearch: datasetOpenSearch });
       }
     });
   }
