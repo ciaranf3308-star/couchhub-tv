@@ -1,0 +1,23 @@
+---
+// TvGrid — virtualised grid for large catalogues.
+// Props: columns? (default 6 at 1920x1080), label?
+// Children are the grid's cards. Rows far from the viewport are not
+// painted (CSS content-visibility: auto, see couch.css). JS-rendered
+// grids should use computeVisibleWindow() from couch-grid.ts to only
+// build the visible window + overscan rows.
+interface Props {
+  columns?: number;
+  label?: string;
+}
+const { columns = 6, label } = Astro.props;
+---
+
+<div
+  class="rs-grid"
+  data-couch-grid
+  role={label ? "group" : undefined}
+  aria-label={label}
+  style={`--rs-grid-cols: ${columns}`}
+>
+  <slot />
+</div>

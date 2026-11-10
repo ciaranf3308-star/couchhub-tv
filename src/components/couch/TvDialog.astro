@@ -1,0 +1,73 @@
+---
+// TvDialog — overlay dialog built on dialog-spatial-nav.ts.
+// Props: id (required, unique per page), title.
+// Behaviour: traps spatial nav while open (attachDialogSpatialNav),
+// closes on B/Escape (native <dialog> cancel), returns focus to the
+// invoker (openCouchDialog/closeCouchDialog in couch-focus.ts), and
+// NEVER requires a mouse to close — the Close button is a normal
+// focusable and B/Escape always work.
+// Open from anywhere: <button data-couch-dialog-open="<id>"> or
+// openCouchDialog("<id>", invokerEl). Close: [data-couch-dialog-close]
+// or closeCouchDialog("<id>").
+interface Props {
+  id: string;
+  title: string;
+}
+const { id, title } = Astro.props;
+---
+
+<dialog
+  id={id}
+  class="rs-dialog"
+  data-nylah-dialog
+  aria-labelledby={`${id}-title`}
+>
+  <div class="rs-dialog__inner">
+    <div class="rs-dialog__head">
+      <h2 class="rs-dialog__title" id={`${id}-title`}>{title}</h2>
+      <button type="button" class="rs-dialog__close" data-couch-dialog-close>
+        Close
+      </button>
+    </div>
+    <div class="rs-dialog__body">
+      <slot />
+    </div>
+  </div>
+</dialog>
+
+<script define:vars={{ dialogId: id }}>
+  import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.ts";
+  import {
+    openCouchDialog,
+    closeCouchDialog,
+  } from "@/scripts/lib/couch-focus.ts";
+
+  const dlg = document.getElementById(dialogId);
+  if (dlg instanceof HTMLDialogElement) {
+    attachDialogSpatialNav(dlg);
+    // Native close (B/Escape) still needs focus returned to the
+    // invoker — the dialog's own close event is the hook. The
+    // invoker map is populated by openCouchDialog; a dialog opened
+    // any other way simply restores nothing.
+    dlg.addEventListener("close", () => {
+      closeCouchDialog(dialogId);
+    });
+    dlg
+      .querySelectorAll("[data-couch-dialog-close]")
+      .forEach((btn) =>
+        btn.addEventListener("click", () => closeCouchDialog(dialogId)),
+      );
+  }
+  document
+    .querySelectorAll(`[data-couch-dialog-open="${dialogId}"]`)
+    .forEach((trigger) =>
+      trigger.addEventListener("click", (event) =>
+        openCouchDialog(
+          dialogId,
+          event.currentTarget instanceof HTMLElement
+            ? event.currentTarget
+            : null,
+        ),
+      ),
+    );
+</script>

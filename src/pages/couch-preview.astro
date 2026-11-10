@@ -1,0 +1,210 @@
+---
+// DEV PREVIEW PAGE ONLY — renders every W1 shared-UI component with
+// SYNTHETIC fixtures so the system can be rendered + screenshotted.
+// It will be REMOVED at release integration. NEVER put real catalogue
+// data or hardcoded film listings in production code; synthetic
+// fixtures live only here and in tests/couch-shared.test.ts.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvHero from "@/components/couch/TvHero.astro";
+import TvRail from "@/components/couch/TvRail.astro";
+import TvCard from "@/components/couch/TvCard.astro";
+import TvGrid from "@/components/couch/TvGrid.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
+import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
+import TvSkeleton from "@/components/couch/TvSkeleton.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
+import TvOsd from "@/components/couch/TvOsd.astro";
+
+// Synthetic fixtures — invented preview titles, no real catalogue data.
+const posterItems = Array.from({ length: 10 }, (_, i) => ({
+  title: `Preview Film ${i + 1}`,
+  subtitle: `Preview Studio ${i + 1}`,
+  meta: `202${i % 10} · Drama`,
+  itemKey: `preview-film-${i + 1}`,
+  image: i === 2 ? "https://example.invalid/broken-poster.jpg" : undefined,
+  progress: i === 0 ? 0.42 : undefined,
+  badge: i === 1 ? "New" : undefined,
+}));
+const landscapeItems = Array.from({ length: 8 }, (_, i) => ({
+  title: `Preview Episode ${i + 1}`,
+  subtitle: `Preview Series ${i + 1}`,
+  meta: `S1 E${i + 1} · 42 min`,
+  itemKey: `preview-ep-${i + 1}`,
+  progress: i === 3 ? 0.75 : undefined,
+}));
+const channelItems = Array.from({ length: 8 }, (_, i) => ({
+  title: `Preview Channel ${i + 1}`,
+  subtitle: i === 0 ? "Now: Preview Show" : "Preview Channel",
+  meta: i === 0 ? "20:00 – 21:00" : undefined,
+  itemKey: `preview-channel-${i + 1}`,
+  badge: i === 0 ? "Live" : undefined,
+}));
+const gridItems = Array.from({ length: 120 }, (_, i) => ({
+  title: `Grid Title ${i + 1}`,
+  subtitle: `Preview Studio ${((i % 5) + 1)}`,
+  meta: `202${i % 10}`,
+  itemKey: `grid-${i + 1}`,
+}));
+---
+
+<CouchLayout pageTitle="Couch Preview" activeNav="home" view="preview">
+  <p class="rs-preview-note">
+    DEV PREVIEW ONLY — synthetic fixtures, removed at release integration.
+    Every component below is part of the W1 shared UI system.
+  </p>
+
+  <TvHero
+    title="Preview Feature Title"
+    eyebrow="Featured Preview"
+    meta="2026 · Drama · 2h 14m · ★ 8.4"
+    description="A synthetic preview hero: cinematic backdrop, serif title at the Couch scale, and primary / secondary actions. No real catalogue data is shown on this page."
+    backdrop="/art/hero-backdrop.jpg"
+    primaryAction={{ label: "Play Preview", href: "#preview-play" }}
+    secondaryAction={{ label: "More Info", href: "#preview-info" }}
+  />
+
+  <TvRail id="preview-continue" title="Continue Watching" href="#preview-all">
+    {
+      posterItems.slice(0, 6).map((item) => (
+        <TvCard
+          title={item.title}
+          subtitle={item.subtitle}
+          meta={item.meta}
+          kind="poster"
+          itemKey={item.itemKey}
+          image={item.image}
+          progress={item.progress}
+          badge={item.badge}
+          href="#preview-detail"
+        />
+      ))
+    }
+  </TvRail>
+
+  <TvRail id="preview-episodes" title="Preview Episodes">
+    {
+      landscapeItems.map((item) => (
+        <TvCard
+          title={item.title}
+          subtitle={item.subtitle}
+          meta={item.meta}
+          kind="landscape"
+          itemKey={item.itemKey}
+          progress={item.progress}
+          href="#preview-detail"
+        />
+      ))
+    }
+  </TvRail>
+
+  <TvRail id="preview-channels" title="Preview Channels">
+    {
+      channelItems.map((item) => (
+        <TvCard
+          title={item.title}
+          subtitle={item.subtitle}
+          meta={item.meta}
+          kind="channel"
+          itemKey={item.itemKey}
+          badge={item.badge}
+          href="#preview-detail"
+        />
+      ))
+    }
+  </TvRail>
+
+  <section aria-label="Dialog demo">
+    <h2 class="rs-section-title">Dialog</h2>
+    <p class="rs-body-text">
+      <button
+        type="button"
+        class="rs-hero__action rs-hero__action--secondary"
+        data-couch-dialog-open="preview-dialog"
+      >
+        Open preview dialog
+      </button>
+    </p>
+    <TvDialog id="preview-dialog" title="Preview Dialog">
+      <p>
+        This dialog traps spatial navigation while open, closes on
+        B/Escape, and returns focus to the button that opened it — no
+        mouse required.
+      </p>
+      <p>
+        <button
+          type="button"
+          class="rs-hero__action"
+          data-couch-dialog-close
+        >
+          Got it
+        </button>
+      </p>
+    </TvDialog>
+  </section>
+
+  <section aria-label="Keyboard demo">
+    <h2 class="rs-section-title">On-screen keyboard</h2>
+    <TvKeyboard client:load placeholder="Type a preview query…" />
+  </section>
+
+  <section aria-label="Skeleton demo">
+    <h2 class="rs-section-title">Loading skeleton</h2>
+    <TvSkeleton kind="poster" count={6} />
+  </section>
+
+  <section aria-label="Empty states demo">
+    <h2 class="rs-section-title">Empty states</h2>
+    <TvEmpty
+      title="Nothing here yet"
+      message="A synthetic empty state with curated art. Real screens show this when a list is genuinely empty — never invented titles."
+      art="library"
+      actionLabel="Browse Preview"
+      actionHref="#preview-browse"
+    />
+  </section>
+
+  <section aria-label="OSD demo">
+    <h2 class="rs-section-title">Playback OSD</h2>
+    <div
+      style="position: relative; aspect-ratio: 16 / 9; border-radius: 1.25rem; overflow: hidden; background: #24131E;"
+    >
+      <img
+        src="/art/hero-backdrop.jpg"
+        alt=""
+        style="width: 100%; height: 100%; object-fit: cover;"
+      />
+      <TvOsd autoHideMs={4500}>
+        <h3 slot="info" class="rs-osd__title">Preview Playback Title</h3>
+        <p slot="info" class="rs-osd__subtitle">
+          S1 E1 · Preview Episode · 12:34 / 42:00
+        </p>
+        <button slot="controls" type="button" class="rs-osd__btn">⏮ −10s</button>
+        <button slot="controls" type="button" class="rs-osd__btn">⏯ Pause</button>
+        <button slot="controls" type="button" class="rs-osd__btn">+10s ⏭</button>
+      </TvOsd>
+    </div>
+    <p class="rs-meta">
+      The OSD auto-hides after ~4.5s of inactivity and reappears on any
+      pointer, key or controller input. (In this static screenshot it is
+      visible.)
+    </p>
+  </section>
+
+  <section aria-label="Grid demo">
+    <h2 class="rs-section-title">Large catalogue grid (120 synthetic items)</h2>
+    <TvGrid columns={6} label="Preview grid">
+      {
+        gridItems.map((item) => (
+          <TvCard
+            title={item.title}
+            subtitle={item.subtitle}
+            meta={item.meta}
+            kind="poster"
+            itemKey={item.itemKey}
+            href="#preview-detail"
+          />
+        ))
+      }
+    </TvGrid>
+  </section>
+</CouchLayout>

@@ -1,0 +1,71 @@
+---
+// TvHero — cinematic hero.
+// Props: title, meta?, description?, backdrop?, backdropAlt?,
+// eyebrow?, primaryAction? { label, href }, secondaryAction? { label, href }.
+// Title is 48–64px at 1920x1080 (see couch.css .rs-hero-title).
+import TvImage from "./TvImage.astro";
+
+interface HeroAction {
+  label: string;
+  href: string;
+}
+interface Props {
+  title: string;
+  meta?: string;
+  description?: string;
+  backdrop?: string;
+  backdropAlt?: string;
+  eyebrow?: string;
+  primaryAction?: HeroAction;
+  secondaryAction?: HeroAction;
+}
+const {
+  title,
+  meta,
+  description,
+  backdrop,
+  backdropAlt,
+  eyebrow,
+  primaryAction,
+  secondaryAction,
+} = Astro.props;
+---
+
+<section class="rs-hero" data-nylah-hero aria-label={title}>
+  <div class="rs-hero__backdrop" aria-hidden="true">
+    <TvImage
+      src={backdrop}
+      alt={backdropAlt ?? ""}
+      kind="backdrop"
+      title={title}
+      eager
+    />
+  </div>
+  <div class="rs-hero__scrim" aria-hidden="true"></div>
+  <div class="rs-hero__content">
+    {eyebrow && <span class="rs-hero__eyebrow">{eyebrow}</span>}
+    <h1 class="rs-hero-title">{title}</h1>
+    {meta && <p class="rs-hero__meta">{meta}</p>}
+    {description && <p class="rs-hero__description">{description}</p>}
+    {
+      (primaryAction || secondaryAction) && (
+        <div class="rs-hero__actions">
+          {primaryAction && (
+            <a class="rs-hero__action" data-nylah-item href={primaryAction.href}>
+              ▶ {primaryAction.label}
+            </a>
+          )}
+          {secondaryAction && (
+            <a
+              class="rs-hero__action rs-hero__action--secondary"
+              data-nylah-item
+              href={secondaryAction.href}
+            >
+              {secondaryAction.label}
+            </a>
+          )}
+        </div>
+      )
+    }
+  </div>
+</section>

@@ -1,0 +1,23 @@
+---
+// TvRail — horizontal rail, registered as a gamepad section.
+// Props: id (rail id for data-nylah-rail + focus memory), title,
+// href? ("See all" link — a plain link, deliberately NOT a rail item
+// so D-pad left/right stays on the cards).
+// Children are the rail's cards (TvCard, each data-nylah-item).
+interface Props {
+  id: string;
+  title: string;
+  href?: string;
+}
+const { id, title, href } = Astro.props;
+---
+
+<section class="rs-rail" data-nylah-rail={id} aria-label={title}>
+  <div class="rs-rail__head">
+    <h2 class="rs-section-title">{title}</h2>
+    {href && <a class="rs-rail__more" href={href}>See all ›</a>}
+  </div>
+  <div class="rs-rail__row">
+    <slot />
+  </div>
+</section>

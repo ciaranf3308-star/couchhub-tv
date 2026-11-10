@@ -1,0 +1,48 @@
+---
+// TvImage — aspect-correct image with an elegant fallback.
+// Props: src, alt, kind ('poster' | 'backdrop' | 'logo' | 'thumb'),
+// title (for the fallback title block / logo mark).
+// Lazy by default. NEVER renders a broken-image icon: on error (or an
+// empty src) the <img> hides and the branded fallback shows instead
+// (see couch-image.ts — the same code the tests exercise).
+import { fallbackMarkFor, isUsableImageSrc } from "@/scripts/lib/couch-image.ts";
+import type { TvImageKind } from "@/scripts/lib/couch-image.ts";
+
+interface Props {
+  src?: string;
+  alt?: string;
+  kind?: TvImageKind;
+  title?: string;
+  eager?: boolean;
+}
+const { src, alt = "", kind = "poster", title = "", eager = false } = Astro.props;
+const usable = isUsableImageSrc(src);
+const mark = fallbackMarkFor(kind, title);
+---
+
+<div
+  class={`rs-image rs-image--${kind}${usable ? "" : " is-fallback"}`}
+  data-tv-image
+  data-kind={kind}
+>
+  {
+    usable && (
+      <img
+        src={src}
+        alt={alt || title}
+        loading={eager ? "eager" : "lazy"}
+        decoding="async"
+        data-tv-image-img
+      />
+    )
+  }
+  <div class="rs-image__fallback" aria-hidden="true">
+    <span class="rs-image__fallback-mark">{mark}</span>
+    {title && <span class="rs-image__fallback-title">{title}</span>}
+  </div>
+</div>
+
+<script>
+  import { armTvImageFallbacks } from "@/scripts/lib/couch-image.ts";
+  armTvImageFallbacks(document);
+</script>

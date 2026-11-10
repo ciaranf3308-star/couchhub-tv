@@ -1,0 +1,118 @@
+---
+// CouchLayout — the RedSilk Couch TV app shell.
+//
+// Horizontal TOP navigation (no sidebar, no desktop chrome), content
+// occupying most of the screen. Props: pageTitle, activeNav (nav id —
+// defaults to couchNavIdFor(Astro.url.pathname)), view (data-couch-view
+// marker for screen workers).
+//
+// Bootstraps the focus layer + gamepad + return-home:
+//   - spatial-navigation.js (arrow-key spatial nav, incl. the "main"
+//     section the dialog trap suspends),
+//   - gamepad.ts (controller -> keyboard events + rail model),
+//   - return-home.ts (View+Menu 2s / Ctrl+Alt+Home -> launcher),
+//   - couch-focus.ts (focus memory, scroll-into-view, replacement).
+// Couch Mode only — there is no legacy/desktop toggle.
+//
+// Styles: global.css FIRST (Tailwind utilities + @theme tokens, needed
+// by reused Svelte pieces such as OnScreenKeyboard), then couch.css,
+// which is scoped under html[data-couch] and forces color-scheme: dark
+// so no light/white surface can ever show through.
+import "../styles/global.css";
+import "../styles/couch.css";
+import pkg from "../../package.json";
+import {
+  COUCH_NAV_PRIMARY,
+  COUCH_NAV_LIBRARY,
+  COUCH_NAV_SETTINGS,
+  couchNavIdFor,
+} from "@/scripts/lib/couch-nav.ts";
+
+interface Props {
+  pageTitle?: string;
+  activeNav?: string;
+  view?: string;
+}
+const { pageTitle, activeNav, view } = Astro.props;
+const path = Astro.url.pathname.replace(/\/+$/, "") || "/";
+const active = activeNav ?? couchNavIdFor(path) ?? "home";
+const documentTitle = pageTitle
+  ? `${pageTitle} | Nylah Studios`
+  : "Nylah Studios";
+---
+
+<!doctype html>
+<html lang="en" data-couch="1">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>{documentTitle}</title>
+    <meta name="x-app-version" content={pkg.version} />
+    <meta name="theme-color" content="#160D14" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+
+  <body class="rs-body">
+    <header class="rs-topnav" data-couch-nav>
+      <a class="rs-brand" href="/" aria-label="Nylah Studios — Home">
+        Nylah <em>Studios</em>
+      </a>
+      <nav class="rs-nav" aria-label="Primary">
+        <div class="rs-nav__row" data-nylah-rail="couch-nav">
+          {
+            COUCH_NAV_PRIMARY.map((item) => (
+              <a
+                class={`rs-nav__link${active === item.id ? " is-active" : ""}`}
+                data-nylah-item
+                href={item.href}
+                aria-current={active === item.id ? "page" : undefined}
+              >
+                {item.label}
+              </a>
+            ))
+          }
+          <span class="rs-nav__group" role="group" aria-label="Library">
+            <span class="rs-nav__group-label" aria-hidden="true">Library</span>
+            {
+              COUCH_NAV_LIBRARY.map((item) => (
+                <a
+                  class={`rs-nav__link${active === item.id ? " is-active" : ""}`}
+                  data-nylah-item
+                  href={item.href}
+                  aria-current={active === item.id ? "page" : undefined}
+                >
+                  {item.label}
+                </a>
+              ))
+            }
+          </span>
+          <a
+            class={`rs-nav__settings${active === COUCH_NAV_SETTINGS.id ? " is-active" : ""}`}
+            data-nylah-item
+            href={COUCH_NAV_SETTINGS.href}
+            aria-current={active === COUCH_NAV_SETTINGS.id ? "page" : undefined}
+          >
+            ⚙ {COUCH_NAV_SETTINGS.label}
+          </a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main" class="rs-main" data-couch-view={view ?? active}>
+      <slot />
+    </main>
+
+    <script>
+      import "@/scripts/spatial-navigation";
+      import { mountGamepad } from "@/scripts/lib/gamepad";
+      import { mountReturnHome } from "@/scripts/lib/return-home";
+      import { initCouchFocus } from "@/scripts/lib/couch-focus";
+      mountGamepad();
+      mountReturnHome();
+      initCouchFocus();
+    </script>
+  </body>
+</html>

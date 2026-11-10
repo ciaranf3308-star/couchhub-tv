@@ -1,0 +1,30 @@
+---
+// TvSkeleton — loading shimmer, all dark RedSilk.
+// Props: kind ('poster' | 'landscape' | 'hero' | 'line'), count?
+// Reduced-motion safe (animation removed in couch.css).
+interface Props {
+  kind?: "poster" | "landscape" | "hero" | "line";
+  count?: number;
+}
+const { kind = "poster", count = 6 } = Astro.props;
+---
+
+{
+  kind === "hero" ? (
+    <div class="rs-skeleton rs-skeleton--hero" aria-hidden="true" />
+  ) : (
+    <div
+      class="rs-skeleton-row"
+      style="display: flex; gap: 1.25rem;"
+      aria-hidden="true"
+      aria-label="Loading"
+    >
+      {Array.from({ length: count }, (_, i) => (
+        <div
+          class={`rs-skeleton rs-skeleton--${kind}`}
+          style={`flex: 1 1 0; min-width: 0; animation-delay: ${i * 90}ms;`}
+        />
+      ))}
+    </div>
+  )
+}
