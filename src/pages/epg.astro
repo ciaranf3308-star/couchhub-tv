@@ -155,7 +155,7 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 
 			<!-- Time header -->
 			<div
-				class="sticky top-0 z-30 flex items-stretch border-b border-line bg-bg/95 backdrop-blur-sm">
+				class="epg-time-head sticky top-0 z-30 flex items-stretch border-b border-line bg-bg/95 backdrop-blur-sm">
 				<div
 					class="shrink-0 sticky left-0 z-30 bg-bg border-r border-line"
 					style="width: 240px; height: 40px;">
@@ -381,6 +381,124 @@ import { IconRefresh, IconArrowLeft, IconChevronDown, IconChevronLeft, IconChevr
 			}
 			:global(.epg-cell:focus-visible) {
 				box-shadow: 0 0 0 2px var(--color-accent);
+			}
+		}
+
+		/* Nylah Studios v0.3.0 (w6) — RedSilk treatment. Warm gradients,
+		   serif hero + focus-strip title, lit grid cells, glowing
+		   dialogs. Layout, grid geometry and behavior untouched. */
+		/* Route hero title is a display title: Instrument Serif. */
+		.route-hero__title {
+			font-family: var(--nylah-font-display, var(--font-serif));
+		}
+		/* Focus strip: warm gradient card with a layered wine shadow;
+		   the title inside is already serif. */
+		#epg-focus-strip {
+			background:
+				linear-gradient(
+					180deg,
+					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+				);
+			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		}
+		#epg-focus-strip [data-focus-badge][data-state="now"] {
+			box-shadow:
+				0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent),
+				0 0 16px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+		}
+		/* Grid shell: warm wash behind the rows, not a flat fill. */
+		#epg-grid {
+			background:
+				linear-gradient(
+					180deg,
+					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+					var(--color-bg) 18rem
+				);
+			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		}
+		.epg-time-head {
+			background: var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350)));
+		}
+		/* Grid cells (rendered by epg.ts, so :global): the live cell gets
+		   a warm wine gradient + halo instead of a flat accent wash, and
+		   the focused cell uses the strong wine glow. Past/replay cells
+		   keep their dimmer treatment from global.css. */
+		:global(#epg-grid .epg-cell.border-accent) {
+			background: linear-gradient(
+				135deg,
+				color-mix(in oklch, var(--color-accent) 26%, transparent),
+				color-mix(in oklch, var(--nylah-wine-bright, oklch(0.72 0.17 350)) 12%, transparent)
+			);
+			box-shadow:
+				0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent),
+				0 0 18px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
+		}
+		:global(#epg-grid .epg-cell:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+		}
+		/* The focused row's channel column: warm tint behind the accent
+		   edge so the eye can follow the row across the time axis. */
+		:global(#epg-grid .epg-row:has(.epg-cell:focus-visible) > div:first-child) {
+			background: linear-gradient(
+				90deg,
+				color-mix(in oklch, var(--color-accent) 14%, transparent),
+				transparent
+			);
+		}
+		/* Status box (loading / error / empty): warm card, not bare. */
+		#epg-status {
+			background:
+				linear-gradient(
+					180deg,
+					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))),
+					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350)))
+				);
+			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		}
+		/* Mapping + picker dialogs: layered wine shadow, serif titles,
+		   warm gradient shell. Backdrop scrim stays black/60. */
+		#epg-map-dialog,
+		#epg-pick-dialog {
+			background:
+				linear-gradient(
+					180deg,
+					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+				);
+			box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+		}
+		#epg-map-title,
+		#epg-pick-title {
+			font-family: var(--nylah-font-display, var(--font-serif));
+			font-size: 1.375rem;
+			letter-spacing: -0.01em;
+		}
+		/* Checked filter pill: warm halo, not just a flat fill. */
+		#epg-map-filter [aria-checked="true"] {
+			box-shadow:
+				0 0 0 1px color-mix(in oklch, var(--color-accent) 30%, transparent),
+				0 0 14px 1px color-mix(in oklch, var(--color-accent) 20%, transparent);
+		}
+		/* Map/pick list rows are rendered at runtime; a focused row
+		   inside them glows wine. */
+		:global(#epg-map-list [tabindex]:focus-visible),
+		:global(#epg-pick-list [tabindex]:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				0 0 20px 3px color-mix(in oklch, var(--color-accent) 35%, transparent);
+		}
+		@media (prefers-reduced-motion: reduce) {
+			:global(#epg-grid .epg-cell.border-accent) {
+				box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 45%, transparent);
+			}
+			:global(#epg-grid .epg-cell:focus-visible) {
+				box-shadow: 0 0 0 2px var(--color-accent);
+			}
+			#epg-focus-strip [data-focus-badge][data-state="now"] {
+				box-shadow: none;
 			}
 		}
 	</style>

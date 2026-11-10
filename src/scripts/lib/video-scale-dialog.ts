@@ -8,6 +8,43 @@ import { ICON_ASPECT_RATIO } from "@/scripts/lib/icons.ts"
 import { VIDEO_SCALE_MODES, type VideoScaleMode } from "@/scripts/lib/video-scale.ts"
 
 const DIALOG_ID = "xt-video-scale-dialog"
+const STYLE_ID = "nylah-video-scale-dialog-style"
+
+// Nylah Studios v0.3.0 (w6) — RedSilk treatment: warm gradient shell,
+// layered wine shadow, serif title, the selected mode row glows wine
+// instead of sitting flat. Layout and behavior untouched.
+function ensureDialogStyle(): void {
+  if (typeof document === "undefined") return
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = STYLE_ID
+  style.textContent = `
+#${DIALOG_ID} {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+  );
+  box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+#${DIALOG_ID} [data-role="mode-btn"][aria-checked="true"] {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklch, var(--color-accent) 18%, transparent),
+    color-mix(in oklch, var(--color-accent) 6%, transparent)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--color-accent) 40%, transparent),
+    0 0 20px 2px color-mix(in oklch, var(--color-accent) 25%, transparent);
+}
+#${DIALOG_ID} [data-role="mode-btn"]:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+}
+`
+  document.head.appendChild(style)
+}
 
 let dlg: HTMLDialogElement | null = null
 let resolveFn: ((value: VideoScaleDialogResult | null) => void) | null = null
@@ -59,6 +96,7 @@ export function videoScaleModeLabelKey(mode: VideoScaleMode): string {
 
 function ensureDialog(): HTMLDialogElement {
   if (dlg) return dlg
+  ensureDialogStyle()
   const node = document.createElement("dialog")
   node.id = DIALOG_ID
   node.setAttribute("aria-labelledby", `${DIALOG_ID}-title`)
@@ -90,7 +128,7 @@ function ensureDialog(): HTMLDialogElement {
     <div class="flex flex-col flex-auto min-h-0 gap-4 p-5 overflow-y-auto">
       <header class="flex items-center gap-3">
         <span class="icon-mark" aria-hidden="true">${ICON_ASPECT_RATIO}</span>
-        <h2 id="${DIALOG_ID}-title" data-role="title" class="text-base font-semibold"></h2>
+        <h2 id="${DIALOG_ID}-title" data-role="title" class="font-serif text-xl font-semibold"></h2>
       </header>
       <div data-role="list" role="radiogroup" aria-labelledby="${DIALOG_ID}-title" class="flex flex-col gap-2">${rows}</div>
       <label class="flex items-center gap-2.5 min-h-11 text-sm text-fg-2 px-3 py-2 rounded-lg cursor-pointer select-none hover:text-fg focus-within:text-fg">

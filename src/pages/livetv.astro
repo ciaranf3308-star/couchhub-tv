@@ -48,7 +48,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 					md:landscape:w-(--xt-channels-w,24rem) lg:w-(--xt-channels-w,28rem)
 					md:landscape:shrink-0 lg:shrink-0 md:landscape:min-h-0 lg:min-h-0">
 				<div
-					class="rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
+					class="livetv-panel rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
 
 					<div class="flex gap-2 shrink-0">
 						<button
@@ -152,7 +152,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 				class="order-1 md:landscape:order-2 lg:order-2
 					md:landscape:flex-1 lg:flex-1 min-w-0 md:landscape:min-h-0 lg:min-h-0">
 				<div
-					class="rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
+					class="livetv-panel rounded-2xl border border-line bg-surface p-3 h-full flex flex-col gap-3 md:landscape:min-h-0 lg:min-h-0">
 					<div
 						id="player-wrap"
 						class="player-wrap aspect-video w-full mx-auto overflow-hidden rounded-xl bg-black ring-1 ring-line flex items-center justify-center shrink-0 relative">
@@ -170,7 +170,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 									<span aria-hidden="true" class="size-1.5 rounded-full bg-accent shadow-[0_0_0_4px_var(--color-accent-soft)]"></span>
 									<span data-i18n="livetv.idle">Idle</span>
 								</span>
-								<p data-i18n="livetv.pickChannel" class="text-fg leading-[0.95] tracking-[-0.03em] font-bold"
+								<p data-i18n="livetv.pickChannel" class="font-serif text-fg leading-[0.95] tracking-[-0.03em] font-bold"
 									style="font-size: clamp(1.75rem, 3vw + 1rem, 3.5rem);">
 									Pick a channel.
 								</p>
@@ -410,8 +410,8 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 		}
 		/* The strip has no dark video behind it, so give the volume panel its own legible surface in both themes. */
 		.player-wrap[data-radio-mode="on"] :global(.art-volume-panel .art-volume-inner) {
-			background: rgba(15, 18, 25, 0.94);
-			border: 1px solid rgba(255, 255, 255, 0.14);
+			background: color-mix(in oklch, var(--nylah-wine-deep, oklch(0.155 0.045 350)) 94%, transparent);
+			border: 1px solid color-mix(in oklch, var(--nylah-cream, oklch(0.97 0.014 75)) 14%, transparent);
 			border-radius: 0.625rem;
 			box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.7);
 			-webkit-backdrop-filter: blur(8px);
@@ -432,7 +432,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			box-shadow:
 				0 0 0 1px var(--color-line),
 				0 0 40px 8px color-mix(in oklch, var(--color-accent) 38%, transparent),
-				0 8px 20px -6px oklch(0.13 0.02 265 / 0.5);
+				var(--nylah-card-shadow, 0 8px 20px -6px oklch(0.10 0.05 350 / 0.5));
 		}
 		.radio-display__art-fallback {
 			color: color-mix(in oklch, var(--color-fg-3) 80%, transparent);
@@ -491,7 +491,7 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 		/* The channel name inside #current is injected by stream.ts; give
 		   it the RedSilk serif and a larger size. */
 		:global(#current .text-accent) {
-			font-family: var(--font-serif);
+			font-family: var(--nylah-font-display, var(--font-serif));
 			font-size: 1.25rem;
 			letter-spacing: -0.01em;
 		}
@@ -511,6 +511,107 @@ import { IconDeviceTv, IconChevronDown, IconCalendarTime, IconLayoutGrid } from 
 			box-shadow:
 				0 0 0 2px var(--color-accent),
 				0 0 28px 6px color-mix(in oklch, var(--color-accent) 45%, transparent);
+		}
+
+		/* Nylah Studios v0.3.0 (w6) — RedSilk treatment. Warm gradient
+		   panels, a lit empty state, wine-gold now/next, glowing channel
+		   rows. Layout, heights and behavior untouched: the v0.2.2 EPG
+		   min-height (min-h-44 / lg:min-h-56) and the 46dvh player cap
+		   above are preserved exactly. */
+		/* Panels: warm gradient, soft line, layered wine shadow. */
+		#livetv-main .livetv-panel {
+			background:
+				linear-gradient(
+					180deg,
+					var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+					var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+				);
+			box-shadow: var(--nylah-card-shadow, 0 10px 36px oklch(0.10 0.05 350 / 0.45));
+		}
+		/* Empty state: the glow is the room's warm lamp — deeper wine,
+		   a brass core, stronger breath. (Base .player-empty-glow lives
+		   in global.css; this page-scoped rule only re-tints it.) */
+		.player-empty-glow {
+			background: radial-gradient(
+				50% 60% at 50% 55%,
+				color-mix(in oklch, var(--nylah-wine-bright, oklch(0.72 0.17 350)) 30%, transparent) 0%,
+				color-mix(in oklch, var(--color-accent) 14%, transparent) 45%,
+				color-mix(in oklch, var(--nylah-gold, oklch(0.85 0.16 90)) 6%, transparent) 62%,
+				transparent 80%
+			);
+			opacity: 0.85;
+		}
+		/* Radio mode channel name is a display title: serif. */
+		.radio-display__name {
+			font-family: var(--nylah-font-display, var(--font-serif));
+		}
+		/* Now/next strip: wine-to-brass progress, warm track. */
+		[data-nownext-fill] {
+			background: linear-gradient(
+				90deg,
+				var(--nylah-wine, oklch(0.45 0.19 350)),
+				var(--nylah-wine-bright, oklch(0.72 0.17 350)) 55%,
+				var(--nylah-gold, oklch(0.85 0.16 90))
+			);
+		}
+		[data-nownext-barwrap] {
+			background: color-mix(in oklch, var(--nylah-wine, oklch(0.45 0.19 350)) 22%, transparent);
+		}
+		/* Live status badge: lit, not flat. */
+		:global(#current .status-badge--live),
+		:global(#current .status-badge--on) {
+			box-shadow:
+				0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent),
+				0 0 18px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
+		}
+		/* Channel list (rows are rendered by stream.ts, so :global):
+		   the focused row glows wine instead of a bare 1px ring, and the
+		   now-playing row carries a warm tint + accent edge. */
+		:global(#list .channel-row .play-btn:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+		}
+		:global(#list .channel-row[data-now-playing="true"] .play-btn) {
+			background: linear-gradient(
+				90deg,
+				color-mix(in oklch, var(--color-accent) 16%, transparent),
+				color-mix(in oklch, var(--color-accent) 5%, transparent)
+			);
+			box-shadow:
+				inset 3px 0 0 var(--color-accent),
+				0 0 20px 2px color-mix(in oklch, var(--color-accent) 22%, transparent);
+		}
+		:global(#list .channel-row[data-now-playing="true"] .play-btn:focus-visible) {
+			box-shadow:
+				inset 3px 0 0 var(--color-accent),
+				0 0 0 2px var(--color-accent),
+				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+		}
+		/* EPG side-panel rows: now-playing row gets a warm wash behind
+		   the glow it already has; focused rows use the strong glow. */
+		:global(#epg-list .epg-entry[data-now-playing="true"]) {
+			background: linear-gradient(
+				90deg,
+				color-mix(in oklch, var(--color-accent) 14%, transparent),
+				color-mix(in oklch, var(--color-accent) 4%, transparent)
+			);
+		}
+		:global(#epg-list .epg-entry:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+		}
+		:global(#epg-list .epg-entry[data-now-playing="true"]:focus-visible) {
+			box-shadow:
+				0 0 0 2px var(--color-accent),
+				var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.player-empty-glow {
+				animation: none;
+				opacity: 0.7;
+			}
 		}
 	</style>
 

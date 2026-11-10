@@ -18,6 +18,45 @@ import { ICON_EXTERNAL_LINK } from "@/scripts/lib/icons.ts"
 import type { AndroidVideoApp } from "@/scripts/lib/player-runtime.ts"
 
 const DIALOG_ID = "android-player-picker"
+const STYLE_ID = "nylah-android-player-picker-style"
+
+// Nylah Studios v0.3.0 (w6) — RedSilk treatment: warm gradient shell,
+// layered wine shadow, serif title, warm icon tiles, glowing app-row
+// focus. Layout and behavior untouched.
+function ensureDialogStyle(): void {
+  if (typeof document === "undefined") return
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = STYLE_ID
+  style.textContent = `
+#${DIALOG_ID} {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+  );
+  box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+#${DIALOG_ID} [data-role="app-btn"] > :first-child {
+  background: linear-gradient(
+    135deg,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))),
+    color-mix(in oklch, var(--color-accent) 14%, transparent)
+  );
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 22%, transparent);
+}
+#${DIALOG_ID} [data-role="app-btn"]:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+}
+#${DIALOG_ID} [data-role="empty"] {
+  font-family: var(--nylah-font-display, var(--font-serif));
+  font-size: 1.125rem;
+}
+`
+  document.head.appendChild(style)
+}
 
 let dlg: HTMLDialogElement | null = null
 
@@ -32,6 +71,7 @@ function escapeHtml(value: string): string {
 
 function ensureDialog(): HTMLDialogElement | null {
   if (typeof document === "undefined") return null
+  ensureDialogStyle()
   if (dlg && document.body.contains(dlg)) return dlg
   const existing = document.getElementById(DIALOG_ID)
   if (existing instanceof HTMLDialogElement) {
@@ -141,7 +181,7 @@ export function openAndroidPlayerPicker(
 
     const bodyHtml = apps.length
       ? `<div data-role="list" class="flex flex-col gap-2.5 overflow-y-auto min-h-0">${appButtons}</div>`
-      : `<div class="text-sm text-fg-3 text-center py-8 px-4">${escapeHtml(emptyLabel)}</div>`
+      : `<div data-role="empty" class="text-sm text-fg-3 text-center py-8 px-4">${escapeHtml(emptyLabel)}</div>`
 
     const rememberCheckboxHtml = apps.length
       ? `
@@ -164,7 +204,7 @@ export function openAndroidPlayerPicker(
         <header class="flex items-start gap-3.5 shrink-0 px-3">
           <span class="icon-mark icon-mark--lg" aria-hidden="true">${ICON_EXTERNAL_LINK}</span>
           <div class="flex flex-col gap-1 min-w-0 pt-0.5">
-            <h2 id="${DIALOG_ID}-title" class="text-lg font-semibold leading-tight tracking-tight">${escapeHtml(headerTitle)}</h2>
+            <h2 id="${DIALOG_ID}-title" class="font-serif text-xl font-semibold leading-tight tracking-tight">${escapeHtml(headerTitle)}</h2>
             ${subtitle}
           </div>
         </header>

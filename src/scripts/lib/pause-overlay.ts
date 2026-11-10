@@ -78,13 +78,17 @@ function ensureStyle(): void {
   padding: 1.5rem 1.75rem;
   border-radius: 1.25rem;
   border: 1px solid var(--color-line);
-  background: color-mix(in oklch, var(--color-bg) 82%, transparent);
+  background: linear-gradient(
+    160deg,
+    color-mix(in oklch, var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 88%, transparent),
+    color-mix(in oklch, var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 88%, transparent)
+  );
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow:
     0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent),
     0 0 48px 4px color-mix(in oklch, var(--color-accent) 30%, transparent),
-    0 24px 64px -16px rgb(0 0 0 / 0.6);
+    var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
 }
 .nylah-pause-badge {
   align-self: flex-start;
@@ -98,7 +102,7 @@ function ensureStyle(): void {
   padding: 0.3rem 0.75rem;
 }
 .nylah-pause-title {
-  font-family: var(--font-serif);
+  font-family: var(--nylah-font-display, var(--font-serif));
   font-size: clamp(1.75rem, 3.4vw, 2.75rem);
   line-height: 1.05;
   letter-spacing: -0.02em;
@@ -130,7 +134,12 @@ function ensureStyle(): void {
   height: 100%;
   width: 0%;
   border-radius: 999px;
-  background: var(--color-accent);
+  background: linear-gradient(
+    90deg,
+    var(--nylah-wine, oklch(0.45 0.19 350)),
+    var(--nylah-wine-bright, oklch(0.72 0.17 350)) 55%,
+    var(--nylah-gold, oklch(0.85 0.16 90))
+  );
   transition: width 200ms linear;
 }
 .nylah-pause-transport {
@@ -162,7 +171,7 @@ function ensureStyle(): void {
   border-color: var(--color-accent);
   box-shadow:
     0 0 0 2px var(--color-accent),
-    0 0 24px 4px color-mix(in oklch, var(--color-accent) 45%, transparent);
+    var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
 }
 .nylah-pause-btn:active { transform: scale(0.97); }
 .nylah-pause-btn--primary {
@@ -171,6 +180,9 @@ function ensureStyle(): void {
   border-color: var(--color-accent);
   color: var(--color-on-accent, #fff);
   font-size: 1.125rem;
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--color-accent) 18%, transparent),
+    0 0 24px 2px var(--nylah-focus-glow, oklch(0.72 0.17 350 / 0.5));
 }
 .nylah-pause-btn--primary:hover { opacity: 0.92; background: var(--color-accent); }
 .nylah-pause-hints {

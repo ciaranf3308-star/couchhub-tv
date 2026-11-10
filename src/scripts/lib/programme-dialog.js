@@ -4,6 +4,7 @@ import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
 
 const DIALOG_ID = "programme-dialog"
+const STYLE_ID = "nylah-programme-dialog-style"
 
 /** @type {HTMLDialogElement | null} */
 let dlg = null
@@ -11,6 +12,31 @@ let dlg = null
  *  translated bits (status, "untitled", "no description") if the locale
  *  changes while the dialog is open. */
 let lastOpts = null
+
+// Nylah Studios v0.3.0 (w6) — RedSilk treatment: warm gradient shell,
+// layered wine shadow, serif title, glowing close focus. Layout and
+// behavior untouched; tokens consumed with warm fallbacks so the look
+// holds before W5's extended tokens land.
+function ensureDialogStyle() {
+  if (typeof document === "undefined") return
+  if (document.getElementById(STYLE_ID)) return
+  const style = document.createElement("style")
+  style.id = STYLE_ID
+  style.textContent = `
+#${DIALOG_ID} {
+  background: linear-gradient(
+    180deg,
+    var(--nylah-surface-warm, light-dark(oklch(0.97 0.014 75), oklch(0.21 0.045 350))) 0%,
+    var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))) 100%
+  );
+  box-shadow: var(--nylah-card-shadow-lift, 0 18px 48px oklch(0.10 0.05 350 / 0.55));
+}
+#${DIALOG_ID} [data-role="close"]:focus-visible {
+  box-shadow: var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+}
+`
+  document.head.appendChild(style)
+}
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
@@ -59,6 +85,7 @@ function fmtDuration(start, stop) {
 function ensureDialog() {
   if (dlg) return dlg
   if (typeof document === "undefined") return null
+  ensureDialogStyle()
   const existing = document.getElementById(DIALOG_ID)
   if (existing instanceof HTMLDialogElement) {
     dlg = existing
@@ -79,7 +106,7 @@ function ensureDialog() {
       <header class="flex items-start justify-between gap-3 shrink-0">
         <div class="flex flex-col gap-1 min-w-0">
           <div data-role="meta" class="text-eyebrow font-medium uppercase tracking-widest text-fg-3"></div>
-          <h2 id="${DIALOG_ID}-title" data-role="title" class="text-xl font-semibold tracking-[-0.01em]"></h2>
+          <h2 id="${DIALOG_ID}-title" data-role="title" class="font-serif text-2xl font-semibold tracking-[-0.01em]"></h2>
           <div data-role="time" class="text-sm text-fg-2 tabular-nums"></div>
         </div>
         <button

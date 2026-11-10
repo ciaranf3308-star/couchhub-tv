@@ -56,12 +56,12 @@
             aria-hidden="true"
             loading="eager"
             decoding="sync"
-            class="shrink-0 w-8 h-8 rounded-lg object-contain bg-surface-2"
+            class="android-player-tile shrink-0 w-8 h-8 rounded-lg object-contain bg-surface-2"
           />
         {:else}
           <span
             aria-hidden="true"
-            class="shrink-0 w-8 h-8 rounded-lg bg-surface-2 grid place-items-center text-fg-3 text-xs font-semibold">
+            class="android-player-tile shrink-0 w-8 h-8 rounded-lg bg-surface-2 grid place-items-center text-fg-3 text-xs font-semibold">
             {(remembered.label || remembered.pkg).charAt(0).toUpperCase()}
           </span>
         {/if}
@@ -81,3 +81,23 @@
     </div>
   </div>
 {/if}
+
+<!-- Nylah Studios v0.3.0 (w6) — RedSilk treatment, code-grade only:
+     this card only renders on Android Tauri when a default player is
+     remembered, unverifiable on desktop. Warm icon tile; the clear
+     button glows wine on focus. -->
+<style>
+  .android-player-tile {
+    background: linear-gradient(
+      135deg,
+      var(--nylah-surface-2-warm, light-dark(oklch(0.89 0.032 75), oklch(0.26 0.05 350))),
+      color-mix(in oklch, var(--color-accent) 14%, transparent)
+    );
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-accent) 22%, transparent);
+  }
+  #android-default-player-section .btn:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--color-accent),
+      var(--nylah-focus-glow-strong, 0 0 32px 4px oklch(0.72 0.17 350 / 0.5));
+  }
+</style>
