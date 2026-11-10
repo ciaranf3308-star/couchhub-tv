@@ -82,6 +82,7 @@ const navStructure: NavSection[] = [
     { id: "discord-rpc-section",   labelKey: "settings.discord.title", label: "Discord Rich Presence", conditional: true },
     { id: "card-casting",          labelKey: "settings.casting.title", label: "Casting", conditional: true },
     { id: "card-tmdb",             labelKey: "settings.tmdb.title",    label: "Metadata enrichment" },
+    { id: "card-ai-discovery",     labelKey: "settings.ai.title",     label: "AI Discovery" },
     { id: "card-net-log",          labelKey: "settings.netLog.title",  label: "Network log", conditional: true },
   ]},
   { id: "settings-library", labelKey: "settings.group.library", label: "Library", cards: [
@@ -1458,6 +1459,155 @@ const navStructure: NavSection[] = [
           </p>
         </div>
 
+        <!-- Surface: AI Discovery (optional) -->
+        <div id="card-ai-discovery" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconSparkles aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.ai.title" class="text-base font-semibold">AI Discovery (optional)</h3>
+          </div>
+          <p data-i18n="settings.ai.helper" class="settings-surface__helper text-xs text-fg-3">
+            Optional AI-powered ranking for Discover. Your search text, a short list of candidate titles and your taste summary go to your chosen AI provider. Your watch history, IPTV credentials and stream links are never sent.
+          </p>
+          <div class="settings-rows">
+
+            <!-- Enable AI Discovery -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.enable" class="text-sm font-medium leading-snug">Enable AI Discovery</h3>
+                <p data-i18n="settings.ai.enableHelper" class="text-xs text-fg-3">
+                  Off by default. Discover works fully without AI, using the local engine.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-enabled"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Enable AI Discovery"
+                  data-i18n-attr="aria-label:settings.ai.enable">
+                  <button type="button" data-ai="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="ai-enabled-btn btn">On</button>
+                  <button type="button" data-ai="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="ai-enabled-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var aiEnabledRaw = localStorage.getItem("xt_ai_enabled");
+                  var aiEnabledOn = aiEnabledRaw === "1";
+                  var aiEnabledGroup = document.getElementById("settings-ai-enabled");
+                  if (aiEnabledGroup) {
+                    var aiEnabledBtns = aiEnabledGroup.querySelectorAll(".ai-enabled-btn");
+                    for (var aIdx = 0; aIdx < aiEnabledBtns.length; aIdx++) {
+                      var aiEnabledBtnOn = aiEnabledBtns[aIdx].getAttribute("data-ai") === "on";
+                      aiEnabledBtns[aIdx].setAttribute("aria-pressed", aiEnabledBtnOn === aiEnabledOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Provider endpoint -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.endpoint" class="text-sm font-medium leading-snug">Provider endpoint</h3>
+                <p data-i18n="settings.ai.endpointHelper" class="text-xs text-fg-3">
+                  OpenAI-compatible API base URL.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+                <input
+                  id="settings-ai-endpoint"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://api.openai.com/v1"
+                  class="field-input font-mono flex-1 min-w-0"
+                />
+              </div>
+            </div>
+
+            <!-- Model -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.model" class="text-sm font-medium leading-snug">Model</h3>
+                <p data-i18n="settings.ai.modelHelper" class="text-xs text-fg-3">
+                  Model name on your provider, e.g. gpt-4o-mini.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+                <input
+                  id="settings-ai-model"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="e.g. gpt-4o-mini"
+                  class="field-input font-mono flex-1 min-w-0"
+                />
+              </div>
+            </div>
+
+            <!-- API key -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.apiKey" class="text-sm font-medium leading-snug">API key</h3>
+                <p class="text-xs text-fg-3">
+                  <span data-i18n="settings.ai.apiKeyHelper">Stored in your device's credential store (Windows Credential Manager on this PC), never in the app's files. It is never shown back in full.</span>
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <input
+                    id="settings-ai-key"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="field-input font-mono flex-1 min-w-0"
+                  />
+                  <button
+                    id="settings-ai-reveal"
+                    type="button"
+                    class="btn flex-none w-11 justify-center p-0"
+                    aria-label="Show key"
+                    data-i18n-attr="aria-label:settings.ai.reveal">
+                    <IconEye aria-hidden="true" class="btn-icon" data-ai-reveal-icon="show" />
+                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-ai-reveal-icon="hide" />
+                  </button>
+                  <button id="settings-ai-clear" type="button" class="btn flex-none w-auto justify-center">
+                    <span data-i18n="settings.ai.clearKey">Clear key</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-ai-key-status"
+                  aria-live="polite"
+                  class="text-xs text-fg-3"></span>
+              </div>
+            </div>
+
+            <!-- Test connection -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.test" class="text-sm font-medium leading-snug">Test connection</h3>
+                <p data-i18n="settings.ai.testHelper" class="text-xs text-fg-3">
+                  Checks the saved key against the endpoint above.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <button id="settings-ai-test" type="button" class="btn flex-none w-auto justify-center">
+                    <span data-i18n="settings.ai.test">Test connection</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-ai-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
         <!-- Network log: developer-mode only, unhidden by the script below -->
         <details id="card-net-log" data-settings-item class="changelog-outer settings-surface icon-mark-host group hidden scroll-mt-6 lg:scroll-mt-20">
           <summary class="settings-surface__header cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden pb-5 sm:pb-6">
@@ -2536,8 +2686,16 @@ const navStructure: NavSection[] = [
       setTmdbEnabled,
       getTvdbEnabled,
       setTvdbEnabled,
+      getAiEndpoint,
+      setAiEndpoint,
+      getAiModel,
+      setAiModel,
+      getAiEnabled,
+      setAiEnabled,
     } from "@/scripts/lib/app-settings.js"
     import { validateTmdbKey } from "@/scripts/lib/tmdb.ts"
+    import { saveAiKey, deleteAiKey, hasAiKey, testAiConnection } from "@/scripts/lib/ai/keystore.ts"
+    import { initAI } from "@/scripts/lib/ai/init.ts"
     import { bindExternalLinks } from "@/scripts/lib/external-link.js"
     import { bindBackupRestore } from "@/scripts/lib/restore-backup.js"
     import {
@@ -5174,6 +5332,147 @@ const navStructure: NavSection[] = [
         }
       } finally {
         setLoading(tmdbTestBtn, false)
+      }
+    })
+
+    // -------------------------------------------------------------------
+    // AI Discovery (optional) — key lives in the OS credential store,
+    // never in localStorage; the field is never filled back from it.
+    // -------------------------------------------------------------------
+    const aiEnabledGroup = document.getElementById("settings-ai-enabled")
+    const aiEndpointInput = /** @type {HTMLInputElement|null} */ (
+      document.getElementById("settings-ai-endpoint")
+    )
+    const aiModelInput = /** @type {HTMLInputElement|null} */ (
+      document.getElementById("settings-ai-model")
+    )
+    const aiKeyInput = /** @type {HTMLInputElement|null} */ (
+      document.getElementById("settings-ai-key")
+    )
+    const aiRevealBtn = /** @type {HTMLButtonElement|null} */ (
+      document.getElementById("settings-ai-reveal")
+    )
+    const aiClearBtn = /** @type {HTMLButtonElement|null} */ (
+      document.getElementById("settings-ai-clear")
+    )
+    const aiTestBtn = /** @type {HTMLButtonElement|null} */ (
+      document.getElementById("settings-ai-test")
+    )
+    const aiKeyStatusEl = document.getElementById("settings-ai-key-status")
+    const aiMsgEl = document.getElementById("settings-ai-msg")
+
+    function syncAiEnabled() {
+      if (!aiEnabledGroup) return
+      const enabled = getAiEnabled()
+      for (const btn of aiEnabledGroup.querySelectorAll(".ai-enabled-btn")) {
+        const isOn = btn.getAttribute("data-ai") === "on"
+        btn.setAttribute("aria-pressed", isOn === enabled ? "true" : "false")
+      }
+    }
+    syncAiEnabled()
+
+    aiEnabledGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-enabled-btn")
+      if (!btn) return
+      setAiEnabled(btn.getAttribute("data-ai") === "on")
+      syncAiEnabled()
+    })
+
+    async function syncAiKeyStatus() {
+      if (!aiKeyStatusEl) return
+      const has = await hasAiKey()
+      aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
+      if (aiClearBtn) aiClearBtn.disabled = !has
+    }
+    syncAiKeyStatus()
+
+    function bindAiTextInput(input, getter, setter) {
+      if (!input) return
+      input.value = getter()
+      let saveTimer = null
+      input.addEventListener("input", () => {
+        if (saveTimer) window.clearTimeout(saveTimer)
+        saveTimer = window.setTimeout(() => setter(input.value), 350)
+      })
+      input.addEventListener("blur", () => {
+        if (saveTimer) {
+          window.clearTimeout(saveTimer)
+          saveTimer = null
+        }
+        if (input.value !== getter()) setter(input.value)
+      })
+    }
+    bindAiTextInput(aiEndpointInput, getAiEndpoint, setAiEndpoint)
+    bindAiTextInput(aiModelInput, getAiModel, setAiModel)
+
+    aiRevealBtn?.addEventListener("click", () => {
+      if (!aiKeyInput) return
+      const revealed = aiKeyInput.type === "text"
+      aiKeyInput.type = revealed ? "password" : "text"
+      aiRevealBtn.setAttribute("aria-label", t(revealed ? "settings.ai.reveal" : "settings.ai.conceal"))
+      aiRevealBtn.querySelector('[data-ai-reveal-icon="show"]')?.classList.toggle("hidden", !revealed)
+      aiRevealBtn.querySelector('[data-ai-reveal-icon="hide"]')?.classList.toggle("hidden", revealed)
+    })
+
+    // Save on blur (and on Test): the field is cleared on success so the
+    // key is never left sitting in the page, and never read back.
+    async function saveTypedAiKey() {
+      const typed = (aiKeyInput?.value || "").trim()
+      if (!typed) return false
+      await saveAiKey(typed)
+      aiKeyInput.value = ""
+      await initAI()
+      await syncAiKeyStatus()
+      return true
+    }
+
+    aiKeyInput?.addEventListener("blur", async () => {
+      try {
+        if (await saveTypedAiKey()) flashMsg(aiMsgEl, t("settings.ai.keySaved"))
+      } catch (error) {
+        flashMsg(
+          aiMsgEl,
+          t(error?.kind === "unsupported" ? "settings.ai.storageUnavailable" : "settings.ai.keySaveFailed")
+        )
+      }
+    })
+
+    aiClearBtn?.addEventListener("click", async () => {
+      await deleteAiKey()
+      await initAI()
+      await syncAiKeyStatus()
+      flashMsg(aiMsgEl, t("settings.ai.keyCleared"))
+    })
+
+    aiTestBtn?.addEventListener("click", async () => {
+      setLoading(aiTestBtn, true)
+      try {
+        try {
+          await saveTypedAiKey()
+        } catch (error) {
+          flashMsg(
+            aiMsgEl,
+            t(error?.kind === "unsupported" ? "settings.ai.storageUnavailable" : "settings.ai.keySaveFailed")
+          )
+          return
+        }
+        const result = await testAiConnection(getAiEndpoint(), getAiModel())
+        if (result.ok) {
+          flashMsg(aiMsgEl, t("settings.ai.testOk"))
+          flashSuccess(aiTestBtn)
+        } else if (result.error === "no_key") {
+          flashMsg(aiMsgEl, t("settings.ai.testNoKey"))
+        } else if (result.error === "invalid_key") {
+          flashMsg(aiMsgEl, t("settings.ai.testInvalidKey"))
+        } else if (result.error === "rate_limited") {
+          flashMsg(aiMsgEl, t("settings.ai.testRateLimited"))
+        } else if (result.error === "invalid_endpoint" || result.error === "invalid_model") {
+          flashMsg(aiMsgEl, t("settings.ai.testInvalidEndpoint"))
+        } else {
+          flashMsg(aiMsgEl, t("settings.ai.testUnavailable"))
+        }
+      } finally {
+        setLoading(aiTestBtn, false)
       }
     })
 

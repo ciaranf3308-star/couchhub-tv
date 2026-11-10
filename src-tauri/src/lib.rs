@@ -22,6 +22,8 @@ mod http_range;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod matroska;
 
+mod ai_keyring;
+
 mod receiver;
 
 mod receiver_store;
@@ -251,6 +253,11 @@ pub fn run() {
         .manage(vod_audio_proxy::VodAudioProxyState::default())
         .manage(vod_proxy::VodProxyState::default())
         .invoke_handler(tauri::generate_handler![
+            ai_keyring::ai_key_set,
+            ai_keyring::ai_key_get,
+            ai_keyring::ai_key_has,
+            ai_keyring::ai_key_delete,
+            ai_keyring::ai_test_connection,
             audio_proxy::audio_transcode_available,
             audio_proxy::register_audio_transcode,
             audio_proxy::unregister_audio_transcode,
@@ -304,6 +311,11 @@ pub fn run() {
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        ai_keyring::ai_key_set,
+        ai_keyring::ai_key_get,
+        ai_keyring::ai_key_has,
+        ai_keyring::ai_key_delete,
+        ai_keyring::ai_test_connection,
         receiver::receiver_start,
         receiver::receiver_stop,
         receiver::receiver_status,

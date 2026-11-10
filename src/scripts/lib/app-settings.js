@@ -37,6 +37,14 @@ const KEY_CAPTIONS_AUTO = "xt_captions_auto"
 const KEY_TMDB_KEY = "xt_tmdb_key"
 const KEY_TMDB_ENABLED = "xt_tmdb_enabled"
 const KEY_TVDB_ENABLED = "xt_tvdb_enabled"
+// AI Discovery (optional, Discover only). Endpoint + model are non-secret
+// and live here like any other setting. The API key NEVER lives here —
+// it is held in the OS credential store via the ai_keyring Rust commands
+// (see src/scripts/lib/ai/keystore.ts).
+const KEY_AI_ENDPOINT = "xt_ai_endpoint"
+const KEY_AI_MODEL = "xt_ai_model"
+const KEY_AI_ENABLED = "xt_ai_enabled"
+export const DEFAULT_AI_ENDPOINT = "https://api.openai.com/v1"
 const KEY_DEV_MODE = "xt_dev_mode"
 const KEY_RECEIVER_MODE = "xt_receiver_mode"
 const KEY_RECEIVER_BOOT = "xt_receiver_boot"
@@ -1169,4 +1177,46 @@ export function isTmdbActive() {
 
 export function isEnrichmentActive() {
   return getTvdbEnabled() || isTmdbActive()
+}
+
+export const AI_SETTINGS_EVENT = "xt:ai-settings-changed"
+
+// AI Discovery settings (non-secret). The toggle is an explicit opt-in
+// and defaults OFF; the endpoint defaults to the OpenAI-compatible
+// default below; the model has no default — the user types their own
+// (e.g. gpt-4o-mini) and no pricing/subscription is assumed.
+export function getAiEndpoint() {
+  const stored = readLS(KEY_AI_ENDPOINT, "").trim()
+  return stored || DEFAULT_AI_ENDPOINT
+}
+
+export function setAiEndpoint(endpoint) {
+  const value = typeof endpoint === "string" ? endpoint.trim().slice(0, 256) : ""
+  writeLS(KEY_AI_ENDPOINT, value)
+  document.dispatchEvent(
+    new CustomEvent(AI_SETTINGS_EVENT, { detail: { key: "endpoint", value } })
+  )
+}
+
+export function getAiModel() {
+  return readLS(KEY_AI_MODEL, "").trim()
+}
+
+export function setAiModel(model) {
+  const value = typeof model === "string" ? model.trim().slice(0, 128) : ""
+  writeLS(KEY_AI_MODEL, value)
+  document.dispatchEvent(
+    new CustomEvent(AI_SETTINGS_EVENT, { detail: { key: "model", value } })
+  )
+}
+
+export function getAiEnabled() {
+  return readLS(KEY_AI_ENABLED, "") === "1"
+}
+
+export function setAiEnabled(enabled) {
+  writeLS(KEY_AI_ENABLED, enabled ? "1" : "0")
+  document.dispatchEvent(
+    new CustomEvent(AI_SETTINGS_EVENT, { detail: { key: "enabled", value: !!enabled } })
+  )
 }
