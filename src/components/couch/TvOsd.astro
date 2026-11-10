@@ -1,30 +1,45 @@
 ---
-// TvOsd — Live TV lower-third OSD (W2 rewrite).
+// TvOsd — Live TV lower-third OSD (0.9.0 restyle).
 //
-// Auto-hiding translucent lower third over fullscreen playback: it
-// covers only the bottom of the video, never the majority of it, and
-// reads over bright AND dark video via a bottom gradient scrim —
-// never a solid panel. It never triggers a stream reconnect: opening
-// or closing it touches no player state.
+// ONE restrained floating surface over fullscreen playback: a single
+// rounded translucent panel (soft gradient + blur), never nested
+// cards, never a solid slab. It covers only the bottom of the video.
+// Reads over bright AND dark video via the gradient scrim. It never
+// triggers a stream reconnect: opening or closing it touches no
+// player state.
 //
-// Content: channel logo + name, LIVE indicator, current programme
-// title + time, progress indicator, Up Next, favourite state,
-// controller shortcuts. Transport buttons do NOT reimplement the
-// player: each dispatches the synthetic keydown stream.ts already
-// handles (see couch-livetv-epg.ts OSD action table — `[`/`]`
-// channel down/up, `\` previous, space pause, `m` mute, `f`
-// fullscreen; OSD-owned `g`/`c`/`v`/`h`/Escape are dispatched as
-// `livetv:overlay` / `livetv:mode` window events instead).
+// Layout (mockups): logo + channel (number, name, LIVE, favourite)
+// | current programme (title, time range, progress) | Up Next
+// (title + times), then one quiet row of ghost actions — transport
+// first (Pause / Mute / Previous), then Info, Favourite, Subtitles,
+// Audio, Restart (only where catch-up honestly offers it), Settings,
+// Guide, Channels, Back. Channel stepping lives in Quick Surf
+// (↑↓); the player still honours the [ ] keys.
+//
+// Transport buttons do NOT reimplement the player: each dispatches
+// the synthetic keydown stream.ts already handles (see
+// couch-livetv-epg.ts OSD action table). Info / Restart dispatch
+// `livetv:programme` (stream.ts resolves catch-up honestly —
+// nothing plays where catch-up is not supported). Subtitles / Audio
+// click the player's OWN control-bar menu buttons (video.js
+// audioTrackButton / subsCapsButton via findPlayerMenuButton) — the
+// OSD never reimplements track selection; where the mount has no
+// such button it reveals the player control bar instead. Favourite
+// goes to the shell (livetv:osd-action, which owns the playlist).
+// Back dispatches livetv:back with context playback — the shell
+// resolves the three-step B sequence.
 //
 // Props: channel?, nowTitle?, nowStartMs?, nowStopMs?, progress?,
-// nextTitle?, favourite?, autoHideMs? (default 5000 — see
-// OSD_AUTO_HIDE_MS in livetv-playback.ts). The shell updates the
-// text content live via [data-osd-*] hooks; these props are the
-// first paint only. Named slots "info" / "controls" from the old
-// shell are kept for compatibility but the lower third renders its
-// own content first.
+// nextTitle?, nextStartMs?, nextStopMs?, favourite?, autoHideMs?
+// (default 5000 — see OSD_AUTO_HIDE_MS in livetv-playback.ts). The
+// shell updates the text content live via the shared TvProgrammeRow
+// hooks ([data-programme-*]); these props are the first paint only.
+// The programme zone (Now title/times/progress + Up Next) IS a
+// TvProgrammeRow without its channel column — the OSD already shows
+// the channel beside it — so the Now/Next typography, spacing and
+// progress treatment are identical to the Guide's rows.
 import TvImage from "./TvImage.astro";
-import { programmeProgress, epgTimeRangeLabel } from "@/scripts/lib/couch-livetv-epg";
+import TvProgrammeRow from "./TvProgrammeRow.astro";
 
 interface Props {
   channel?: {
@@ -39,6 +54,8 @@ interface Props {
   nowStopMs?: number;
   progress?: number;
   nextTitle?: string;
+  nextStartMs?: number;
+  nextStopMs?: number;
   favourite?: boolean;
   autoHideMs?: number;
 }
@@ -49,20 +66,12 @@ const {
   nowStopMs,
   progress,
   nextTitle,
+  nextStartMs,
+  nextStopMs,
   favourite = false,
   autoHideMs = 5000,
 } = Astro.props;
 const label = channel ? channel.displayName || channel.name || "" : "";
-const pct =
-  typeof progress === "number" && Number.isFinite(progress)
-    ? Math.max(0, Math.min(1, progress))
-    : nowStartMs !== undefined && nowStopMs !== undefined
-      ? programmeProgress(nowStartMs, nowStopMs)
-      : null;
-const timeLabel =
-  nowStartMs !== undefined && nowStopMs !== undefined
-    ? epgTimeRangeLabel(nowStartMs, nowStopMs, "en-IE")
-    : "";
 ---
 
 <div
@@ -70,6 +79,8 @@ const timeLabel =
   data-couch-osd
   data-livetv-osd
   data-autohide-ms={autoHideMs}
+  data-osd-channel-id={channel?.id != null ? String(channel.id) : ""}
+  data-osd-now-start={nowStartMs != null ? String(nowStartMs) : ""}
   data-hidden="true"
   role="status"
   aria-label="Now playing"
@@ -86,113 +97,121 @@ const timeLabel =
         )
       }
     </span>
-    <span class="rs-livetv-play-osd__main">
+    <span class="rs-livetv-play-osd__channel-block">
       <span class="rs-livetv-play-osd__channel">
-        {channel?.chno != null && <span data-osd-chno>{channel.chno}</span>}
+        <span data-osd-chno>{channel?.chno != null ? channel.chno : ""}</span>
         <span data-osd-channel-name>{label}</span>
         <span class="rs-livetv-play-osd__live" data-osd-live>LIVE</span>
-        {
-          favourite && (
-            <span class="rs-livetv-play-osd__fav" data-osd-fav aria-label="Favourite">
-              ♥
-            </span>
-          )
-        }
+        <span class="rs-livetv-play-osd__fav" data-osd-fav aria-label="Favourite" hidden={!(favourite)}>
+          ♥
+        </span>
       </span>
-      <span class="rs-livetv-play-osd__now" data-osd-now-title>{nowTitle ?? ""}</span>
-      {
-        timeLabel && (
-          <span class="rs-livetv-play-osd__time" data-osd-now-time>
-            {timeLabel}
-          </span>
-        )
-      }
-      {
-        nextTitle && (
-          <span class="rs-livetv-play-osd__next" data-osd-next-title>
-            Up next: {nextTitle}
-          </span>
-        )
-      }
-      <slot name="info" />
     </span>
+    <TvProgrammeRow
+      showChannel={false}
+      nowTitle={nowTitle}
+      nowStartMs={nowStartMs}
+      nowStopMs={nowStopMs}
+      progress={progress}
+      nextTitle={nextTitle}
+      nextStartMs={nextStartMs}
+      nextStopMs={nextStopMs}
+      nextLabel="Up Next"
+    />
   </div>
-  {
-    pct !== null && (
-      <span class="rs-livetv-play-osd__progress" aria-hidden="true">
-        <span data-osd-progress style={`width: ${Math.round(pct * 100)}%`} />
-      </span>
-    )
-  }
   <div class="rs-livetv-play-osd__controls" data-osd-controls>
-    <slot name="controls" />
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-key=" " data-focus-key="livetv-osd-pause">⏸ Pause</button>
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="m" data-focus-key="livetv-osd-mute">Mute</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="[" data-focus-key="livetv-osd-ch-down">‹ Ch</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="]" data-focus-key="livetv-osd-ch-up">Ch ›</button>
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="\\" data-focus-key="livetv-osd-prev">Previous</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="f" data-focus-key="livetv-osd-fullscreen">Fullscreen</button>
+    <span class="rs-livetv-play-osd__sep" aria-hidden="true"></span>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="info" data-focus-key="livetv-osd-info">Info</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="favourite" data-focus-key="livetv-osd-favourite">Favourite</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="subtitles" data-focus-key="livetv-osd-subtitles">Subtitles</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="audio" data-focus-key="livetv-osd-audio">Audio</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="restart" data-focus-key="livetv-osd-restart" data-osd-restart hidden>Restart</button>
+    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="settings" data-focus-key="livetv-osd-settings">Settings</button>
+    <span class="rs-livetv-play-osd__sep" aria-hidden="true"></span>
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="guide" data-focus-key="livetv-osd-guide">Guide</button>
     <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="browser" data-focus-key="livetv-osd-channels">Channels</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="home" data-focus-key="livetv-osd-home">Live TV Home</button>
+    <button type="button" class="rs-livetv-play-osd__btn rs-livetv-play-osd__btn--back" data-osd-action="back" data-focus-key="livetv-osd-back"><span class="rs-livetv-play-osd__glyph-b" aria-hidden="true">B</span> Back</button>
   </div>
   <p class="rs-livetv-play-osd__shortcuts" aria-hidden="true">
     A confirm · B back · ↑↓ surf · X guide · Y channels · Menu options
   </p>
-  <slot />
 </div>
 
 <script>
-  // TvOsd auto-hide + transport wiring. A plain <script> (bundled as
-  // a module): the old <script define:vars> was inlined verbatim by
-  // Astro, so the TypeScript casts below shipped raw to the browser
-  // and threw a SyntaxError on every /livetv load — the OSD script
-  // never ran. define:vars is gone: the per-instance delay now comes
-  // only from the element's own data-autohide-ms attribute (the
-  // component renders autoHideMs there; 5000 fallback). One script
-  // instance arms every [data-livetv-osd] on the page, guarded so a
-  // second instance never double-attaches.
-  // One OSD per player wrap; the script is bundled once per page and
-  // arms every [data-livetv-osd] on it. Auto-hide ~5s after the last
-  // activity (pointer, key, focus, gamepad input as synthetic keys,
-  // or a `couch-osd:show` / `livetv:overlay` window event). Focus
-  // inside the OSD cancels the hide so keyboard/controller users are
-  // never locked out of controls they are tabbing through; hiding
-  // resumes once focus leaves. Showing/hiding never touches the
-  // player — no reconnect, no retune.
+  // TvOsd auto-hide + transport wiring (0.9.0). Timing lives in
+  // livetv-playback.ts `createOsdAutoHide` (vitest fake timers assert
+  // it); this script owns only the DOM rules: never hide while focus
+  // is inside the OSD, show on `couch-osd:show` / `livetv:overlay`
+  // "osd", and the action wiring below. Showing/hiding never touches
+  // the player — no reconnect, no retune.
+  import {
+    createOsdAutoHide,
+    findPlayerMenuButton,
+    LIVETV_LANDING_MODE,
+  } from "@/scripts/lib/livetv-playback";
+
   const osds = Array.from(document.querySelectorAll("[data-livetv-osd]"));
   for (const osd of osds) {
     const el = osd;
     if (el.dataset.osdArmed) continue;
     el.dataset.osdArmed = "1";
     const delay = Number(el.getAttribute("data-autohide-ms")) || 5000;
-    let timer = 0;
-    const show = () => {
-      el.setAttribute("data-hidden", "false");
-      window.clearTimeout(timer);
-      timer = window.setTimeout(hide, delay);
-    };
-    const hide = () => {
+    const autoHide = createOsdAutoHide(() => {
+      // Focus inside the OSD cancels the hide so keyboard/controller
+      // users are never locked out of controls they are tabbing
+      // through; hiding resumes once focus leaves.
       if (el.contains(document.activeElement)) {
-        timer = window.setTimeout(hide, delay);
+        autoHide.show();
         return;
       }
       el.setAttribute("data-hidden", "true");
+    }, delay);
+    const show = () => {
+      el.setAttribute("data-hidden", "false");
+      autoHide.show();
     };
     const onActivity = () => show();
     for (const evt of ["pointermove", "pointerdown", "keydown", "focusin"]) {
       el.addEventListener(evt, onActivity, { passive: true });
     }
     el.addEventListener("focusout", () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(hide, delay);
+      autoHide.show();
     });
     window.addEventListener("couch-osd:show", onActivity);
     window.addEventListener("livetv:overlay", (ev) => {
       if ((ev as CustomEvent).detail?.overlay === "osd") show();
     });
+
+    const programmeDetail = () => {
+      const channelId = el.getAttribute("data-osd-channel-id") || "";
+      const startMs = Number(el.getAttribute("data-osd-now-start"));
+      if (!channelId || !Number.isFinite(startMs)) return null;
+      return { channelId, startMs };
+    };
+
+    const openPlayerMenu = (kind: "audio" | "subtitles") => {
+      // The player's own menu button: the menu that opens is the
+      // engine's, not a reimplementation. Where the mount has no
+      // such button, reveal the player control bar instead so the
+      // user can still reach the tracks from there.
+      const button = findPlayerMenuButton(kind);
+      if (button) {
+        button.click();
+        return;
+      }
+      const wrap = document.querySelector("#player-wrap");
+      wrap?.dispatchEvent(new PointerEvent("pointermove", { bubbles: true }));
+      show();
+    };
+
     // Transport buttons dispatch the synthetic keydown stream.ts
     // already handles — the OSD never reimplements tuning/transport.
+    // OSD-owned actions dispatch window events the shell / engine
+    // consume (guide / channels / home / info / restart / settings /
+    // favourite / back).
     el.addEventListener("click", (ev) => {
       const btn = (ev.target as HTMLElement | null)?.closest?.(
         "[data-osd-key],[data-osd-action]",
@@ -217,7 +236,34 @@ const timeLabel =
         );
       } else if (action === "home") {
         window.dispatchEvent(
-          new CustomEvent("livetv:mode", { detail: { mode: "home" } }),
+          new CustomEvent("livetv:mode", { detail: { mode: LIVETV_LANDING_MODE } }),
+        );
+      } else if (action === "info" || action === "restart") {
+        // Info opens programme detail; Restart replays the current
+        // programme from its start. Both go through the engine's
+        // `livetv:programme` path, which resolves catch-up honestly
+        // (and toasts instead of playing where it is not supported).
+        const detail = programmeDetail();
+        if (detail) {
+          window.dispatchEvent(new CustomEvent("livetv:programme", { detail }));
+        }
+      } else if (action === "favourite") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:osd-action", {
+            detail: { action: "favourite", channelId: el.getAttribute("data-osd-channel-id") || "" },
+          }),
+        );
+      } else if (action === "subtitles") {
+        openPlayerMenu("subtitles");
+      } else if (action === "audio") {
+        openPlayerMenu("audio");
+      } else if (action === "settings") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
+        );
+      } else if (action === "back") {
+        window.dispatchEvent(
+          new CustomEvent("livetv:back", { detail: { context: "playback" } }),
         );
       }
       show();

@@ -80,37 +80,47 @@ describe("redirect — epg.astro still sends /epg to /livetv?mode=guide", () => 
   });
 });
 
+// INTEGRATION (0.9.0): W3 and W5 both built TvChannelRow /
+// TvProgrammeRow. W3's versions won the reconciliation — they are
+// mockup-matched (soft tiles, not flat divider lists) and
+// render-verified — so the contract below is W3's: flat scalar
+// props + [data-row-*] / [data-programme-*] paint hooks, rows as
+// <button>s. W5's object-prop contract (channel / nowProgramme /
+// variant + catch-up gating inside the component) is retired; Guide
+// catch-up badges live in W4's inline row builder instead.
 describe("shared components — TvChannelRow / TvProgrammeRow", () => {
-  it("TvChannelRow takes the contract props and renders via TvImage", () => {
+  it("TvChannelRow takes the W3 contract props and paint hooks", () => {
     const src = read("src/components/couch/TvChannelRow.astro");
-    expect(src).toContain("nowProgramme?");
-    expect(src).toContain("nextProgramme?");
-    expect(src).toContain("selected?: boolean");
-    expect(src).toContain("focused?: boolean");
-    expect(src).toContain("TvImage");
-    expect(src).toContain('kind="logo"');
-    expect(src).toContain('media="channel"');
-    expect(src).toContain("formatTimeRange");
+    expect(src).toContain("nowTitle?");
+    expect(src).toContain("nextTitle?");
+    expect(src).toContain("highlighted?: boolean");
+    expect(src).toContain("favourite?: boolean");
+    expect(src).toContain("data-row-num");
+    expect(src).toContain("data-row-name");
+    expect(src).toContain("data-row-now");
+    expect(src).toContain("data-row-progress");
+    expect(src).toContain("rs-channel-row--highlighted");
   });
 
-  it("TvProgrammeRow takes the contract props and gates catch-up honestly", () => {
+  it("TvProgrammeRow takes the W3 contract props and paint hooks", () => {
     const src = read("src/components/couch/TvProgrammeRow.astro");
-    expect(src).toContain('variant: "now" | "tonight" | "channel"');
-    expect(src).toContain("catchupActionForProgramme");
-    expect(src).toContain("catchupBadgeLabel");
-    expect(src).toContain("programmeProgress");
-    expect(src).toContain("TvImage");
+    expect(src).toContain("showChannel?: boolean");
+    expect(src).toContain("nowTitle?");
+    expect(src).toContain("nowStartMs?");
+    expect(src).toContain("nextTitle?");
+    expect(src).toContain("data-programme-now-title");
+    expect(src).toContain("data-programme-now-time");
+    expect(src).toContain("data-programme-progress");
+    expect(src).toContain("data-programme-next-title");
   });
 
-  it("rows separate with subtle dividers, never borders-in-borders", () => {
+  it("rows are soft tiles with gaps, never flat divider lists", () => {
     for (const file of [
       "src/components/couch/TvChannelRow.astro",
       "src/components/couch/TvProgrammeRow.astro",
     ]) {
       const src = read(file);
-      expect(src).toContain("border-bottom: 1px solid var(--rs-line-soft)");
-      // No boxed-card border on the row itself.
-      expect(src).not.toMatch(/\.rs-tv-(channel|programme)-row\s*\{[^}]*border:\s*1px/);
+      expect(src).not.toContain("border-bottom: 1px solid var(--rs-line-soft)");
     }
   });
 });

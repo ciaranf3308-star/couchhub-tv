@@ -1,22 +1,32 @@
 ---
-// TvQuickSurf — Quick Surf overlay for fullscreen Live TV playback (W2).
+// TvQuickSurf — Quick Surf overlay for fullscreen Live TV playback (0.9.0).
 //
 // Controller-first, INSIDE fullscreen playback (not a page). Up/Down
 // browses ADJACENT channels while the current video KEEPS PLAYING:
 // the highlight and the tuned channel are SEPARATE state — moving
 // the highlight never connects to a stream. A (Enter) tunes to the
-// highlighted channel; B (Escape) dismisses WITHOUT changing
-// channels. A failed tune leaves the current stream playing; the
-// shell's error overlay (not Quick Surf) offers the retry.
+// highlighted channel; B (Escape / `livetv:back`) dismisses WITHOUT
+// changing channels. A failed tune leaves the current stream
+// playing; the shell's error overlay (not Quick Surf) offers the
+// retry.
+//
+// 0.9.0 shape (mockup): ONE compact floating panel docked right,
+// video visible behind it — a short window of nearby channels (two
+// before, highlighted, two after) as shared TvChannelRow tiles
+// (rounded, hairline border, gap between rows), never cards-in-
+// cards. Header names the panel and shows the highlight's position
+// in the full list ("5 / 11"). Each row: number, logo, name,
+// current programme; the highlighted row also shows the next
+// programme. A row click highlights; clicking the highlighted row
+// tunes. Category + Guide via the contextual shortcuts below the
+// list. Confirmed switches go through `switchChannel` — the prior
+// stream is released before the
+// replacement opens.
 //
 // Opens on `livetv:overlay {overlay:"quicksurf"}` and on ArrowUp /
 // ArrowDown while playback is active with no overlay open. Channel
 // data is cache-only (livetv-data.ts) — no fetch, no invented EPG.
-// The highlighted card is painted by the client script from that
-// cached data, mirroring TvChannelCard's
-// `article[data-channel-card][data-channel-id][data-focus-key]`
-// shape (the card component itself is static Astro markup, so the
-// live highlight is painted into the same shape here).
+import TvChannelRow from "./TvChannelRow.astro";
 ---
 
 <section
@@ -27,45 +37,43 @@
   hidden
 >
   <div class="rs-livetv-play-quicksurf__panel">
-    <p class="rs-livetv-play-quicksurf__eyebrow">Quick Surf — current channel keeps playing</p>
-    <article
-      class="rs-livetv-channel-card rs-livetv-channel-card--large"
-      data-channel-card
-      data-qs-card
-      data-channel-id=""
-      data-focus-key="livetv-quicksurf-card"
-      tabindex="-1"
-    >
-      <span class="rs-livetv-channel-card__logo" data-qs-logo></span>
-      <span class="rs-livetv-channel-card__body">
-        <span class="rs-livetv-channel-card__name">
-          <span class="rs-livetv-channel-card__num" data-qs-chno></span>
-          <span data-qs-name>—</span>
-        </span>
-        <span class="rs-livetv-channel-card__now" data-qs-now></span>
-        <span class="rs-livetv-channel-card__next" data-qs-next></span>
-      </span>
-      <span class="rs-livetv-channel-card__fav" data-qs-fav hidden aria-label="Favourite">♥</span>
-      <span class="rs-livetv-channel-card__progress" aria-hidden="true">
-        <span data-qs-progress style="width: 0%"></span>
-      </span>
-    </article>
-    <p class="rs-livetv-play-quicksurf__desc" data-qs-desc hidden></p>
+    <div class="rs-livetv-play-quicksurf__header">
+      <p class="rs-livetv-play-quicksurf__eyebrow">» Quick Surf</p>
+      <p class="rs-livetv-play-quicksurf__position" data-qs-position aria-label="Position in channel list"></p>
+    </div>
+    <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="-1" aria-label="Previous channel">⌃</button>
+    <div class="rs-livetv-play-quicksurf__list" data-qs-list role="listbox" aria-label="Nearby channels"></div>
+    <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="1" aria-label="Next channel">⌄</button>
+    <p class="rs-livetv-play-quicksurf__note" aria-hidden="true">Current channel keeps playing — A watches the highlighted channel</p>
     <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
     <div class="rs-livetv-play-quicksurf__actions">
       <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="tune" data-focus-key="livetv-quicksurf-tune">Watch (A)</button>
       <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="previous" data-focus-key="livetv-quicksurf-previous">Previous channel</button>
       <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="favourite" data-focus-key="livetv-quicksurf-favourite">Favourite</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="programme" data-focus-key="livetv-quicksurf-programme">Programme info</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="browser" data-focus-key="livetv-quicksurf-browser">Channel Browser (Y)</button>
       <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="guide" data-focus-key="livetv-quicksurf-guide">Full Guide (X)</button>
-      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="home" data-focus-key="livetv-quicksurf-home">Live TV Home</button>
+      <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="browser" data-focus-key="livetv-quicksurf-browser">Channels (Y)</button>
       <button type="button" class="rs-livetv-play-osd__btn" data-qs-action="dismiss" data-focus-key="livetv-quicksurf-dismiss">Back (B)</button>
     </div>
     <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
       ↑↓ browse · A watch · B back · ←→ programme info
     </p>
   </div>
+
+  <!-- Row template: the shared TvChannelRow, cloned per channel by
+       paintRow (see the script). Rendered with placeholder props so
+       every [data-row-*] hook exists in the clone; paintRow fills
+       them and drops the parts a row does not need. -->
+  <template data-qs-row-template>
+    <TvChannelRow
+      id=""
+      chno={null}
+      name="—"
+      nowTitle=""
+      nextTitle="—"
+      progress={0}
+      highlighted={true}
+    />
+  </template>
 </section>
 
 <script>
@@ -73,8 +81,10 @@
     stepHighlight,
     confirmHighlight,
     previousChannelTarget,
+    recordTune,
     toggleFavourite,
-    tuneToChannel,
+    switchChannel,
+    surfWindow,
     windowPlaybackEngine,
   } from "@/scripts/lib/livetv-playback";
   import {
@@ -106,9 +116,6 @@
     const surfList = () =>
       category ? channels.filter((c) => c.category === category) : channels;
 
-    const tunedChannel = () =>
-      channels.find((c) => String(c.id) === String(tunedId)) ?? null;
-
     const highlightedChannel = () =>
       channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
 
@@ -124,60 +131,104 @@
       if (fromPrev !== undefined && fromPrev !== "") previousId = fromPrev;
     };
 
-    const paint = () => {
-      const channel = highlightedChannel();
-      const card = $("[data-qs-card]");
-      if (!channel || !card) return;
-      card.dataset.channelId = String(channel.id);
-      const logo = $("[data-qs-logo]");
-      if (logo) {
-        logo.innerHTML = "";
+    const isFavourite = (channel: LivetvChannel) => {
+      try {
+        return playlistId ? getFavorites(playlistId, "live").has(Number(channel.id)) : false;
+      } catch {
+        return false;
+      }
+    };
+
+    // Rows come from the shared TvChannelRow template (one source
+    // of truth for row markup): clone it, fill the [data-row-*]
+    // hooks, drop the parts this row does not need (Next + progress
+    // only exist on the highlighted row; the favourite heart only
+    // where the channel is one). Never build row markup by hand.
+    const rowTemplate = root.querySelector<HTMLTemplateElement>(
+      "[data-qs-row-template]",
+    );
+
+    const paintRow = (channel: LivetvChannel, isHighlighted: boolean) => {
+      const tpl = rowTemplate?.content?.querySelector<HTMLElement>("[data-channel-row]");
+      const row = (
+        tpl ? (tpl.cloneNode(true) as HTMLElement) : document.createElement("button")
+      ) as HTMLButtonElement;
+      row.type = "button";
+      row.classList.toggle("rs-channel-row--highlighted", isHighlighted);
+      row.dataset.qsRow = "";
+      row.dataset.channelId = String(channel.id);
+      row.setAttribute("aria-selected", isHighlighted ? "true" : "false");
+      if (isHighlighted) row.setAttribute("aria-current", "true");
+      else row.removeAttribute("aria-current");
+
+      const setText = (sel: string, text: string) => {
+        const el = row.querySelector<HTMLElement>(sel);
+        if (el) el.textContent = text;
+      };
+      setText("[data-row-num]", channel.chno != null ? String(channel.chno) : "");
+      const logoSlot = row.querySelector<HTMLElement>("[data-row-logo]");
+      if (logoSlot) {
+        logoSlot.innerHTML = "";
         if (channel.logo) {
           const img = document.createElement("img");
           img.src = channel.logo;
           img.alt = "";
           img.loading = "lazy";
-          logo.appendChild(img);
+          logoSlot.appendChild(img);
         } else {
           const initial = document.createElement("span");
-          initial.className = "rs-livetv-channel-card__initial";
+          initial.className = "rs-channel-row__initial";
           initial.textContent = (channel.displayName || channel.name || "?").slice(0, 1);
-          logo.appendChild(initial);
+          logoSlot.appendChild(initial);
         }
       }
-      const chno = $("[data-qs-chno]");
-      if (chno) chno.textContent = channel.chno != null ? String(channel.chno) : "";
-      const name = $("[data-qs-name]");
-      if (name) name.textContent = channel.displayName || channel.name || `#${channel.id}`;
+      setText("[data-row-name]", channel.displayName || channel.name || `#${channel.id}`);
       const nn = nowNextForChannel(channel, programmes, playlistId);
-      const nowEl = $("[data-qs-now]");
-      if (nowEl) nowEl.textContent = nn.current?.title ?? "";
-      const nextEl = $("[data-qs-next]");
-      if (nextEl) nextEl.textContent = nn.next?.title ? `Up next: ${nn.next.title}` : "";
-      const progressEl = $("[data-qs-progress]") as HTMLElement | null;
-      if (progressEl && nn.current) {
-        progressEl.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
-      } else if (progressEl) {
-        progressEl.style.width = "0%";
+      setText("[data-row-now]", nn.current?.title ? `Now: ${nn.current.title}` : "");
+      const nextEl = row.querySelector<HTMLElement>("[data-row-next]");
+      if (isHighlighted && nn.next?.title) {
+        if (nextEl) nextEl.textContent = `Next: ${nn.next.title}`;
+      } else {
+        nextEl?.remove();
       }
-      const favEl = $("[data-qs-fav]");
-      if (favEl) {
-        let isFav = false;
-        try {
-          isFav = playlistId ? getFavorites(playlistId, "live").has(Number(channel.id)) : false;
-        } catch {}
-        favEl.hidden = !isFav;
+      const favEl = row.querySelector<HTMLElement>("[data-row-fav]");
+      if (isFavourite(channel)) {
+        if (!favEl) {
+          const fav = document.createElement("span");
+          fav.className = "rs-channel-row__fav";
+          fav.textContent = "♥";
+          fav.setAttribute("aria-label", "Favourite");
+          row.appendChild(fav);
+        }
+      } else {
+        favEl?.remove();
       }
-      const descEl = $("[data-qs-desc]") as HTMLElement | null;
-      if (descEl) {
-        if (nn.current?.desc) {
-          descEl.textContent = nn.current.desc;
-          descEl.hidden = false;
-        } else {
-          descEl.hidden = true;
+      const bar = row.querySelector<HTMLElement>("[data-row-progress]");
+      if (isHighlighted && nn.current) {
+        if (bar) {
+          bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
+        }
+      } else {
+        bar?.closest(".rs-channel-row__progress")?.remove();
+      }
+      return row;
+    };
+
+    const paint = () => {
+      const list = surfList();
+      const { entries, position, total } = surfWindow(list, highlightedId, 5);
+      const listEl = $("[data-qs-list]");
+      if (listEl) {
+        listEl.innerHTML = "";
+        for (const channel of entries) {
+          listEl.appendChild(
+            paintRow(channel, String(channel.id) === String(highlightedId)),
+          );
         }
       }
-      // Category chips (from the catalog, not invented).
+      const posEl = $("[data-qs-position]");
+      if (posEl) posEl.textContent = total > 0 ? `${position} / ${total}` : "";
+      // Category shortcuts (from the catalog, not invented).
       const catsEl = $("[data-qs-categories]");
       if (catsEl) {
         catsEl.innerHTML = "";
@@ -203,8 +254,8 @@
           chip.setAttribute("aria-pressed", category === cat ? "true" : "false");
           chip.addEventListener("click", () => {
             category = cat;
-            const list = surfList();
-            highlightedId = list.length ? list[0].id : tunedId;
+            const filtered = surfList();
+            highlightedId = filtered.length ? filtered[0].id : tunedId;
             paint();
           });
           catsEl.appendChild(chip);
@@ -221,8 +272,8 @@
       root.hidden = false;
       root.dataset.hidden = "false";
       emitOverlay("quicksurf");
-      const card = $("[data-qs-card]") as HTMLElement | null;
-      card?.focus?.({ preventScroll: true });
+      const first = root.querySelector<HTMLElement>(".rs-channel-row--highlighted, [data-focus-key='livetv-quicksurf-tune']");
+      first?.focus?.({ preventScroll: true });
     };
 
     const hide = (dispatch = true) => {
@@ -260,15 +311,50 @@
     const tuneHighlighted = () => {
       const target = confirmHighlight(highlightedId);
       if (target === null) return;
-      // A tune, not a highlight move: only now does the engine connect.
-      if (tuneToChannel(windowPlaybackEngine, target)) {
-        previousId = tunedId;
-        tunedId = target;
+      // A tune, not a highlight move: only now does the engine
+      // connect — and the prior stream is released first
+      // (switchChannel), so the one-stream limit is never exceeded.
+      // tunedId/previousId update via the `livetv:tune` listener
+      // below (the event dispatches synchronously) — updating them
+      // here too would overwrite previousId with the new tune.
+      if (switchChannel(windowPlaybackEngine, tunedId, target)) {
+        hide();
+      }
+    };
+
+    const tuneTo = (target: string | number) => {
+      if (switchChannel(windowPlaybackEngine, tunedId, target)) {
         hide();
       }
     };
 
     root.addEventListener("click", async (ev) => {
+      // Step chevrons (^ / v above and below the list): move the
+      // highlight one adjacent channel, never a tune.
+      const stepBtn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-step]") as HTMLElement | null;
+      if (stepBtn) {
+        const delta = stepBtn.dataset.qsStep === "-1" ? -1 : 1;
+        const next = stepHighlight(surfList(), highlightedId, delta as 1 | -1);
+        if (next !== null) {
+          highlightedId = next;
+          paint();
+        }
+        return;
+      }
+      // Row click: highlight only — unless the row is already the
+      // highlight, in which case the click confirms (tunes).
+      const row = (ev.target as HTMLElement | null)?.closest?.("[data-qs-row]") as HTMLElement | null;
+      if (row?.dataset.channelId) {
+        const id = row.dataset.channelId;
+        const canonical = channels.find((c) => String(c.id) === id)?.id ?? id;
+        if (String(highlightedId) === id) {
+          tuneTo(canonical);
+        } else {
+          highlightedId = canonical;
+          paint();
+        }
+        return;
+      }
       const btn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-action]") as HTMLElement | null;
       if (!btn) return;
       const action = btn.dataset.qsAction;
@@ -276,35 +362,17 @@
       else if (action === "dismiss") hide();
       else if (action === "previous") {
         const target = previousChannelTarget(tunedId, previousId);
-        if (target !== null) {
-          previousId = tunedId;
-          tunedId = target;
-          tuneToChannel(windowPlaybackEngine, target);
-          hide();
-        }
+        if (target !== null) tuneTo(target);
       } else if (action === "favourite") {
         const channel = highlightedChannel();
         if (channel) {
           await toggleFavourite(playlistId, channel);
           paint();
         }
-      } else if (action === "programme") {
-        const channel = highlightedChannel();
-        const nn = channel ? nowNextForChannel(channel, programmes, playlistId) : null;
-        if (channel && nn?.current) {
-          window.dispatchEvent(
-            new CustomEvent("livetv:programme", {
-              detail: { channelId: channel.id, startMs: nn.current.start },
-            }),
-          );
-          emitOverlay("programme");
-        }
       } else if (action === "browser") {
         emitOverlay("browser");
       } else if (action === "guide") {
         window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "guide" } }));
-      } else if (action === "home") {
-        window.dispatchEvent(new CustomEvent("livetv:mode", { detail: { mode: "home" } }));
       }
     });
 
@@ -317,8 +385,9 @@
     window.addEventListener("livetv:tune", (ev) => {
       const id = (ev as CustomEvent).detail?.channelId;
       if (id !== undefined && id !== null) {
-        previousId = tunedId;
-        tunedId = id;
+        const record = recordTune(tunedId, previousId, id);
+        tunedId = record.tunedId;
+        previousId = record.previousId;
       }
     });
 
@@ -337,8 +406,8 @@
             paint();
           }
         } else if (ev.key === "Enter") {
-          // A on a focused button clicks it; Enter with focus on the
-          // card / panel confirms the highlight.
+          // A on a focused button clicks it; Enter with focus on a
+          // row / panel confirms the highlight.
           const target = ev.target as HTMLElement | null;
           if (target && target.closest("button")) return;
           ev.preventDefault();
