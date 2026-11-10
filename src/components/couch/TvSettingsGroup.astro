@@ -1,0 +1,85 @@
+---
+// TvSettingsGroup — a Couch settings section (W5).
+//
+// Props: id?, title, description?, variant ('default' | 'advanced').
+// The 'advanced' variant is the clearly labelled home for EVERY
+// existing setting: same controls, same storage keys, same behaviour
+// — only the frame is new. Frequently used settings live in a plain
+// group above it (large anchor cards, no duplicated controls).
+interface Props {
+  id?: string;
+  title: string;
+  description?: string;
+  variant?: "default" | "advanced";
+}
+const { id, title, description, variant = "default" } = Astro.props;
+---
+
+<section
+  class={`rs-settings-group${variant === "advanced" ? " rs-settings-group--advanced" : ""}`}
+  data-nylah-settings-group={id}
+  id={id}
+  aria-label={title}
+>
+  <div class="rs-settings-group__head">
+    <h2 class="rs-section-title">{title}</h2>
+    {
+      variant === "advanced" && (
+        <span class="rs-settings-group__tag">Advanced</span>
+      )
+    }
+  </div>
+  {
+    description && (
+      <p class="rs-settings-group__desc">{description}</p>
+    )
+  }
+  <div class="rs-settings-group__body">
+    <slot />
+  </div>
+</section>
+
+<style>
+  .rs-settings-group {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+  }
+  .rs-settings-group__head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    padding: 0 0.25rem;
+  }
+  .rs-settings-group__tag {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    background: var(--rs-accent);
+    color: var(--rs-text);
+  }
+  .rs-settings-group__desc {
+    font-size: 1.25rem;
+    line-height: 1.45;
+    color: var(--rs-text-2);
+    margin: 0;
+    padding: 0 0.25rem;
+    max-width: 60rem;
+  }
+  .rs-settings-group__body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    min-width: 0;
+  }
+  .rs-settings-group--advanced .rs-settings-group__body {
+    background: var(--rs-bg-2);
+    border: 1px solid var(--rs-line-soft);
+    border-radius: 1.25rem;
+    padding: 1.5rem;
+  }
+</style>

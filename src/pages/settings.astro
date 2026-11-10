@@ -1,5 +1,6 @@
 ---
-import Layout from "@/layouts/Layout.astro"
+import CouchLayout from "@/layouts/CouchLayout.astro"
+import TvSettingsGroup from "@/components/couch/TvSettingsGroup.astro"
 import {
   IconRefresh,
   IconTrash,
@@ -112,7 +113,7 @@ const navStructure: NavSection[] = [
 ]
 ---
 
-<Layout pageTitle="Settings" showVersion={false}>
+<CouchLayout pageTitle="Settings" activeNav="settings" view="settings">
   <main class="flex-1 min-h-0 overflow-y-auto overflow-x-clip custom-scroll">
     <div
       class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 pb-12 flex flex-col gap-6 lg:gap-8">
@@ -124,6 +125,48 @@ const navStructure: NavSection[] = [
       </p>
     </header>
 
+    <!-- Couch (W5): frequently used settings as large TV targets.
+         These are anchor cards only — no duplicated controls, no new
+         storage keys. Every real setting lives in Advanced below. -->
+    <TvSettingsGroup
+      id="settings-quick"
+      title="Quick settings"
+      description="The settings used most often on the TV. Everything else — every playlist, playback, metadata, AI, backup and diagnostics option — lives in Advanced below, unchanged.">
+      <div class="couch-quick-grid">
+        <a class="couch-quick-card" data-nylah-item href="#settings-playlists">
+          <span class="couch-quick-card__title" data-i18n="settings.group.playlists">Playlists</span>
+          <span class="couch-quick-card__desc">Add, refresh and switch playlists</span>
+        </a>
+        <a class="couch-quick-card" data-nylah-item href="#card-display">
+          <span class="couch-quick-card__title" data-i18n="settings.section.display">Display</span>
+          <span class="couch-quick-card__desc">Language, theme, accent and text size</span>
+        </a>
+        <a class="couch-quick-card" data-nylah-item href="#playback-section">
+          <span class="couch-quick-card__title" data-i18n="settings.playback.title">Playback</span>
+          <span class="couch-quick-card__desc">Players, audio and captions</span>
+        </a>
+        <a class="couch-quick-card" data-nylah-item href="#card-followed">
+          <span class="couch-quick-card__title" data-i18n="settings.followed.title">Followed Series</span>
+          <span class="couch-quick-card__desc">New-episode checks and notifications</span>
+        </a>
+        <a class="couch-quick-card" data-nylah-item href="#card-ai-discovery">
+          <span class="couch-quick-card__title" data-i18n="settings.ai.title">AI Discovery</span>
+          <span class="couch-quick-card__desc">Discovery AI endpoint, model and key</span>
+        </a>
+        <a class="couch-quick-card" data-nylah-item href="#update-section">
+          <span class="couch-quick-card__title" data-i18n="settings.nav.appUpdate">App update</span>
+          <span class="couch-quick-card__desc">Version, channel and update checks</span>
+        </a>
+      </div>
+    </TvSettingsGroup>
+
+    <!-- Couch (W5): Advanced retains ALL existing configuration —
+         same controls, same ids, same storage keys and scripts. -->
+    <TvSettingsGroup
+      id="settings-advanced"
+      title="Advanced"
+      variant="advanced"
+      description="Every setting, as before. Nothing was removed — provider and playlist options, backup, playback, metadata, AI integrations, update controls and diagnostics are all here.">
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
 
     <div class="settings-nav-scroller -mx-4 sm:-mx-6 lg:m-0 lg:contents">
@@ -2578,6 +2621,7 @@ const navStructure: NavSection[] = [
 
     </div><!-- /settings-stack -->
     </div><!-- /lg:flex two-column wrapper -->
+    </TvSettingsGroup>
 
     </div><!-- /page wrap -->
   </main>
@@ -5965,6 +6009,63 @@ const navStructure: NavSection[] = [
         0 0 0 2px var(--color-accent-soft),
         0 0 16px var(--color-accent-soft);
     }
+    /* ── Couch (W5) — TV targets + RedSilk tokens ────────────────
+       Quick cards and larger controls only. No setting is moved,
+       renamed, or rewired here. */
+    .couch-quick-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+      gap: 1rem;
+    }
+    .couch-quick-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.375rem;
+      min-height: 6.5rem;
+      padding: 1.25rem 1.5rem;
+      border-radius: 1rem;
+      border: 1px solid var(--rs-line, var(--color-line));
+      background: linear-gradient(165deg, var(--rs-surface, var(--color-surface)), var(--rs-bg-2, var(--color-surface-2)));
+      color: var(--rs-text, var(--color-fg));
+      text-decoration: none;
+      box-shadow: var(--rs-shadow, 0 10px 28px -14px var(--nylah-focus-glow));
+    }
+    .couch-quick-card:hover {
+      border-color: var(--rs-focus, var(--color-accent));
+    }
+    .couch-quick-card__title {
+      font-family: var(--rs-font-display, var(--font-serif, Georgia, serif));
+      font-size: 1.5rem;
+      font-weight: 400;
+      line-height: 1.2;
+    }
+    .couch-quick-card__desc {
+      font-size: 1.125rem;
+      line-height: 1.4;
+      color: var(--rs-text-2, var(--color-fg-3));
+    }
+    /* TV-sized controls across the retained settings: bigger targets,
+       same behaviour. */
+    .settings-stack .btn,
+    .settings-stack .btn-primary,
+    .settings-stack .btn-danger {
+      min-height: 3.25rem;
+      font-size: 1.125rem;
+    }
+    .settings-nav-link {
+      min-height: 3rem;
+      font-size: 1.125rem;
+    }
+    .settings-stack .field-input,
+    .settings-stack select.field-input {
+      min-height: 3.25rem;
+      font-size: 1.25rem;
+    }
+    .settings-stack .settings-seg > .btn {
+      min-height: 3rem;
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }
   </style>
 
   <script>
@@ -6342,4 +6443,4 @@ const navStructure: NavSection[] = [
   <script>
     import "@/scripts/settings/followed-card.ts"
   </script>
-</Layout>
+</CouchLayout>

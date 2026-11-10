@@ -1,32 +1,31 @@
 ---
-import Layout from "@/layouts/Layout.astro"
-import AllFavoritesView from "@/components/AllFavoritesView.svelte"
+// Favourites — RedSilk Couch (W5). Library behaviour unchanged
+// (preferences favourites store as-is); CouchLayout + couch cards.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import AllFavoritesView from "@/components/AllFavoritesView.svelte";
 ---
 
-<Layout pageTitle="Favorites">
-  <main
-    class="w-full max-w-480 mx-auto px-4 md:px-6 lg:px-8 pt-4 lg:pt-6 md:landscape:pt-6 pb-6
-           flex flex-col gap-4 flex-1 min-h-0">
+<CouchLayout pageTitle="Favourites" activeNav="favorites" view="favorites">
+  <header class="couch-library-head">
+    <h1 class="rs-page-title">Favourites</h1>
+    <p class="rs-meta">
+      Every starred channel, movie, and series across all your playlists.
+      Opening a favourite from a different playlist switches you over first.
+    </p>
+  </header>
 
-    <header class="route-hero route-hero--tv-compact shrink-0">
-      <h1 data-i18n="page.favorites.heading" class="route-hero__title">Favorites</h1>
-      <p data-i18n="page.favorites.sub" class="route-hero__sub">
-        Every starred channel, movie, and series across all your playlists.
-        Opening a favorite from a different playlist switches you over first.
-      </p>
-    </header>
-
-    <AllFavoritesView client:load />
-  </main>
+  <AllFavoritesView client:load />
 
   <script>
-    import "@/scripts/updater-startup.js"
+    import "@/scripts/updater-startup.js";
   </script>
 
   <style>
-    /* Nylah Studios v0.3.0 (w7) — RedSilk hero: Instrument Serif title. */
-    .route-hero__title {
-      font-family: var(--nylah-font-display, var(--font-serif, Georgia, "Times New Roman", serif));
+    .couch-library-head {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
     }
   </style>
-</Layout>
+</CouchLayout>
