@@ -346,7 +346,7 @@ pub fn run() {
     ]);
 
     let app = builder
-        .setup(|app| {
+        .setup(move |app| {
             install_panic_hook();
             log_session_banner(app);
             #[cfg(target_os = "android")]
