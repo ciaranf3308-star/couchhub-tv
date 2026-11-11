@@ -54,7 +54,7 @@ import TvChannelRow from "./TvChannelRow.astro";
          category filter stays: it changes what is surfable. -->
     <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
     <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
-      ↑↓ browse · A watch · B back · ←→ programme info
+      ↑↓ browse · A watch · B back · X guide · ←→ programme info
     </p>
   </div>
 
@@ -82,7 +82,9 @@ import TvChannelRow from "./TvChannelRow.astro";
     recordTune,
     switchChannel,
     surfWindow,
+    artworkUrlForSurf,
     windowPlaybackEngine,
+    type SurfProgrammeArtwork,
   } from "@/scripts/lib/livetv-playback";
   import {
     loadLivetvChannels,
@@ -116,6 +118,122 @@ import TvChannelRow from "./TvChannelRow.astro";
 
     const highlightedChannel = () =>
       channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
+
+    // ── Highlighted-row programme artwork (0.11.0 W5) ──────────
+    // W2's enrichment module (`livetv-enrichment.ts`) is loaded
+    // through import.meta.glob with an ABSOLUTE-from-root pattern:
+    // a relative glob silently resolves empty inside an Astro
+    // component script (see W6's guide loader), so the relative
+    // form must not be used here. Only the HIGHLIGHTED row is ever
+    // enriched (never the whole surf list): a cache peek paints
+    // instantly, the async enrich fires only after the highlight
+    // settles 250 ms, and a highlight move / close cancels the
+    // pending work via the generation counter — moving the highlight
+    // never fires a request and never paints onto a moved highlight.
+    type EnrichmentModule = {
+      enrichProgramme?: (req: {
+        title: string;
+        channelName?: string;
+        startMs?: number;
+        endMs?: number;
+      }) => Promise<SurfProgrammeArtwork | null>;
+      getProgrammeArtworkSync?: (title: string) => SurfProgrammeArtwork | null;
+    };
+    const enrichmentLoaders = import.meta.glob(
+      "/src/scripts/lib/livetv-enrichment.ts",
+    ) as Record<string, () => Promise<unknown>>;
+    let enrichmentModule: EnrichmentModule | null | undefined;
+    const loadEnrichment = async (): Promise<EnrichmentModule | null> => {
+      if (enrichmentModule !== undefined) return enrichmentModule;
+      const loader = Object.values(enrichmentLoaders)[0];
+      if (!loader) {
+        enrichmentModule = null;
+        return null;
+      }
+      try {
+        enrichmentModule = (await loader()) as EnrichmentModule;
+      } catch {
+        enrichmentModule = null;
+      }
+      return enrichmentModule;
+    };
+
+    let artGeneration = 0;
+    let artTimer: ReturnType<typeof setTimeout> | null = null;
+    let highlightedArtKey = "";
+    let highlightedArtUrl: string | null = null;
+
+    const paintHighlightedArt = (url: string | null) => {
+      root.querySelectorAll("[data-row-art]").forEach((n) => n.remove());
+      if (!url) return;
+      const row = root.querySelector<HTMLElement>(".rs-channel-row--highlighted");
+      if (!row) return;
+      const span = document.createElement("span");
+      span.className = "rs-channel-row__art";
+      span.dataset.rowArt = "";
+      span.setAttribute("aria-hidden", "true");
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      span.appendChild(img);
+      row.appendChild(span);
+    };
+
+    const scheduleHighlightedArt = () => {
+      const gen = ++artGeneration;
+      if (artTimer !== null) {
+        clearTimeout(artTimer);
+        artTimer = null;
+      }
+      const channel = highlightedChannel();
+      const nn = channel ? nowNextForChannel(channel, programmes, playlistId) : null;
+      const title = nn?.current?.title ?? "";
+      const key = channel && title ? `${String(channel.id)}::${title}` : "";
+      // Same highlight, art already resolved: paint() rebuilt the
+      // rows and wiped the thumb — repaint it, no new request.
+      if (key && key === highlightedArtKey && highlightedArtUrl) {
+        paintHighlightedArt(highlightedArtUrl);
+        return;
+      }
+      highlightedArtKey = key;
+      highlightedArtUrl = null;
+      paintHighlightedArt(null);
+      if (!channel || !title) return;
+      void loadEnrichment().then((mod) => {
+        if (!mod || gen !== artGeneration || !open) return;
+        try {
+          const cached = mod.getProgrammeArtworkSync?.(title) ?? null;
+          const url = artworkUrlForSurf(cached);
+          if (url) {
+            highlightedArtUrl = url;
+            paintHighlightedArt(url);
+            return;
+          }
+        } catch {}
+        artTimer = setTimeout(() => {
+          artTimer = null;
+          void Promise.resolve(
+            mod.enrichProgramme?.({
+              title,
+              channelName: channel.displayName || channel.name,
+              startMs: nn.current?.start,
+              endMs: nn.current?.stop,
+            }),
+          )
+            .then((art) => {
+              if (gen !== artGeneration || !open) return;
+              const url = artworkUrlForSurf(art ?? null);
+              if (url) {
+                highlightedArtUrl = url;
+                paintHighlightedArt(url);
+              }
+            })
+            .catch(() => {});
+        }, 250);
+      });
+    };
 
     const readTunedFromShell = () => {
       // Integration 0.7.0: the tuned/previous ids live on the
@@ -226,6 +344,10 @@ import TvChannelRow from "./TvChannelRow.astro";
       }
       const posEl = $("[data-qs-position]");
       if (posEl) posEl.textContent = total > 0 ? `${position} / ${total}` : "";
+      // Enrich the highlighted row's current programme artwork only
+      // (never the whole list) — scheduleHighlightedArt is a no-op
+      // until W2's module lands.
+      scheduleHighlightedArt();
       // Category shortcuts (from the catalog, not invented).
       const catsEl = $("[data-qs-categories]");
       if (catsEl) {
@@ -276,6 +398,11 @@ import TvChannelRow from "./TvChannelRow.astro";
 
     const hide = (dispatch = true) => {
       open = false;
+      artGeneration++; // cancel any pending highlighted-row enrichment
+      if (artTimer !== null) {
+        clearTimeout(artTimer);
+        artTimer = null;
+      }
       root.hidden = true;
       root.dataset.hidden = "true";
       if (dispatch) emitOverlay("none");

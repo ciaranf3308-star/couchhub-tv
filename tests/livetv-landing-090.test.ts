@@ -45,7 +45,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
 const couchCss = readFileSync(join(repo, "src/styles/couch.css"), "utf8");
 const landingCss = couchCss.slice(
-  couchCss.indexOf("/* Live TV 0.9.0 — Landing */"),
+  couchCss.indexOf("/* Live TV 0.11.0 — Landing (W3) */"),
 );
 const heroAstro = readFileSync(
   join(repo, "src/components/couch/TvLiveHero.astro"),
@@ -306,18 +306,21 @@ describe("category tiles", () => {
     }
   });
 
-  it("tile DOM has fixed dimensions in CSS (bounded width AND height, never auto height)", () => {
-    expect(landingCss).toContain("/* Live TV 0.9.0 — Landing */");
+  it("tile DOM has fixed height in CSS (bounded width via the six-across grid, never auto height)", () => {
+    expect(landingCss).toContain("/* Live TV 0.11.0 — Landing (W3) */");
     const tileRule = landingCss.match(
       /\.rs-livetv-landing-category-tile\s*\{[^}]*\}/,
     )?.[0];
     expect(tileRule).toBeTruthy();
-    expect(tileRule).toContain("width: 18.75rem");
     expect(tileRule).toContain("height: 10.625rem");
     expect(tileRule).not.toContain("height: auto");
+    // Six-across grid, not a horizontal scroller.
+    expect(landingCss).toContain("repeat(auto-fit, minmax(16rem, 1fr))");
+    // The giant-initial motif is gone.
+    expect(landingCss).not.toContain("rs-livetv-landing-category-tile__motif");
   });
 
-  it("tile markup has NO stacked logos: no <img>, no channel card, no logo list", () => {
+  it("tile markup has NO stacked logos and NO giant initial: a small glyph, no <img> without artwork", () => {
     const cat: LandingCategory = {
       id: "sports",
       label: "Sports",
@@ -335,21 +338,26 @@ describe("category tiles", () => {
     expect(tile.querySelector(".rs-livetv-landing-category-tile__label")?.textContent).toBe("Sports");
     expect(tile.querySelector(".rs-livetv-landing-category-tile__count")?.textContent).toBe("142 channels");
     expect(tile.querySelector(".rs-livetv-landing-category-tile__now")?.textContent).toContain("Match Live");
-    // The motif is a single initial, not artwork.
-    expect(tile.querySelector(".rs-livetv-landing-category-tile__motif")?.textContent).toBe("S");
+    // Small glyph accent, not a giant initial motif.
+    expect(tile.querySelector(".rs-livetv-landing-category-tile__motif")).toBeNull();
+    expect(tile.querySelector(".rs-livetv-landing-category-tile__glyph")?.textContent).toBe("⚽");
+    // Contextual artwork swaps the glyph for one <img>.
+    const withArt = buildCategoryTileElement({ ...cat, artworkUrl: "https://x/art.jpg" });
+    expect(withArt.querySelectorAll("img")).toHaveLength(1);
+    expect(withArt.querySelector(".rs-livetv-landing-category-tile__glyph")).toBeNull();
   });
 
-  it("the Astro tile twin renders the same contract (same classes, no <img>)", () => {
+  it("the Astro tile twin renders the same contract (art layer + glyph, no giant initial)", () => {
     expect(tileAstro).toContain("rs-livetv-landing-category-tile");
     expect(tileAstro).toContain("data-focus-key");
-    // Strip the header comment (it names <img>/logo in prose) so
-    // the assertion only sees live markup.
-    const tileMarkup = tileAstro.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^---[\s\S]*?---/m, "");
-    expect(tileMarkup).not.toContain("<img");
-    expect(tileMarkup).not.toContain("logo");
+    expect(tileAstro).not.toContain("__motif");
+    expect(tileAstro).toContain("rs-livetv-landing-category-tile__art");
+    expect(tileAstro).toContain("categoryGlyphFor");
     const heroMarkup = heroAstro.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^---[\s\S]*?---/m, "");
     expect(heroAstro).toContain("data-hero-logo");
     expect(heroMarkup).not.toContain("<img");
+    expect(heroAstro).toContain("data-hero-art");
+    expect(heroAstro).toContain("TvProgrammeArt");
     expect(landingAstro).toContain("data-landing-action");
     expect(landingAstro).toContain("Browse by Category");
   });
@@ -382,15 +390,17 @@ describe("quick-access dispatches", () => {
     }
   });
 
-  it("Favourites / All Channels / Guide / Search each emit the contracted mode + detail", () => {
+  it("Favourites / Recently Watched / All Channels / Guide / Search each emit the contracted mode + detail", () => {
     const { events, stop } = collectEvents(["livetv:mode"]);
     try {
       performLandingQuickAction("favourites");
+      performLandingQuickAction("recent");
       performLandingQuickAction("all");
       performLandingQuickAction("guide");
       performLandingQuickAction("search");
       expect(events).toEqual([
         { type: "livetv:mode", detail: { mode: "browser", browserFilter: { kind: "favourites" } } },
+        { type: "livetv:mode", detail: { mode: "browser", browserFilter: { kind: "recents" } } },
         { type: "livetv:mode", detail: { mode: "browser", browserFilter: { kind: "all" } } },
         { type: "livetv:mode", detail: { mode: "guide" } },
         { type: "livetv:mode", detail: { mode: "browser", browserFilter: { kind: "all" }, openSearch: true } },
@@ -510,12 +520,14 @@ describe("mountLivtvLanding", () => {
     host.setAttribute("data-livetv-landing", "");
     host.innerHTML = `
       <section data-livetv-hero hidden>
+        <div data-hero-art><div data-programme-art data-art-state="placeholder"></div></div>
         <div data-hero-logo></div>
         <p data-hero-eyebrow></p>
         <h2 data-hero-title></h2>
         <p data-hero-programme-title></p>
         <p data-hero-programme-time></p>
         <div data-hero-progress-wrap hidden><div data-hero-progress-fill></div></div>
+        <p data-hero-description hidden></p>
         <p data-hero-next hidden></p>
         <button data-hero-watch></button>
         <button data-hero-guide></button>
@@ -523,6 +535,7 @@ describe("mountLivtvLanding", () => {
       <nav data-nylah-rail="livetv-landing-quick">
         <button data-landing-action="continue" hidden><span data-landing-sublabel-for="continue"></span></button>
         <button data-landing-action="favourites"><span data-landing-sublabel-for="favourites"></span></button>
+        <button data-landing-action="recent" hidden><span data-landing-sublabel-for="recent"></span></button>
         <button data-landing-action="all"><span data-landing-sublabel-for="all"></span></button>
         <button data-landing-action="guide"><span data-landing-sublabel-for="guide"></span></button>
         <button data-landing-action="search"><span data-landing-sublabel-for="search"></span></button>
@@ -570,9 +583,12 @@ describe("mountLivtvLanding", () => {
       const tiles = host.querySelectorAll("[data-landing-categories] button");
       expect(tiles.length).toBeGreaterThan(0);
       expect(host.querySelectorAll("[data-landing-categories] img")).toHaveLength(0);
-      // Continue Watching stays hidden with no history.
+      // Continue Watching and Recently Watched stay hidden with no history.
       expect(
         host.querySelector('[data-landing-action="continue"]')?.hasAttribute("hidden"),
+      ).toBe(true);
+      expect(
+        host.querySelector('[data-landing-action="recent"]')?.hasAttribute("hidden"),
       ).toBe(true);
       // Favourites sublabel is a real count.
       expect(

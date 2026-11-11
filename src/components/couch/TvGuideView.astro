@@ -4,17 +4,26 @@
 // Four modes, one screen (default On Now — the timeline grid is
 // demoted to the secondary "Full Guide" tab, never the default):
 //
-//   On Now     — clean readable listings: channel logo + name,
-//                current programme + progress, next programme.
+//   On Now     — mockup 3's composition: featured programme on
+//                the left (art + title + times + synopsis, following
+//                the focused row) and a compact channel Now/Next
+//                list on the right. Polished TV listings, not a
+//                data table and never stacked full-width rows.
 //   Tonight    — RTÉ Guide-style evening (17:00–23:00 local):
-//                featured programme + gated sections, all from real
-//                EPG metadata (see livetv-tonight.ts). No artwork is
-//                invented: the EPG carries no programme art, so the
-//                featured panel uses the channel logo.
+//                art-led featured programme + gated sections, all
+//                from real EPG metadata (see livetv-tonight.ts).
+//                Featured art comes only from W2's enrichment API
+//                (enrichProgramme, featured programmes only) —
+//                never invented; without it the featured slot is a
+//                channel-branded gradient, never a giant initial.
 //   By Channel — one channel's schedule as a simple chronological
 //                sequence; LB/RB moves days (-7..+14).
 //   Full Guide — the 0.8.0 timeline grid, unchanged engine, kept
-//                only as the secondary tab.
+//                only as the secondary tab. 0.11.0 W6 fixed its
+//                rendering: the grid's rows/cells/ticks are injected
+//                by the client script, so their rules are :global
+//                in the <style> below — scoped selectors never
+//                matched them and the tab rendered empty.
 //
 // Mounts into `#livetv-mode-guide` on livetv.astro (this component's
 // root carries `data-livetv-guide-root`, NOT the mount id, so there
@@ -150,18 +159,31 @@ const nowMs = Date.now();
     </label>
   </div>
 
-  <!-- MODE A — On Now (default): readable listings, not a table. -->
+  <!-- MODE A — On Now (default): mockup 3's Guide composition —
+       featured programme on the left (photo + title + times +
+       synopsis), channel Now/Next list on the right. Never a
+       stacked full-width list. -->
   <div
-    class="rs-guide-panel"
+    class="rs-guide-panel rs-guide-panel--now"
     data-guide-panel="now"
     role="tabpanel"
     aria-label="On now"
   >
-    <div class="rs-guide-list" data-guide-now-list></div>
-    <p class="rs-guide-panel-empty" data-guide-now-empty hidden>
-      Nothing on now — the guide hasn't loaded yet. Open Live TV first
-      so the channel list and programme data load.
-    </p>
+    <div class="rs-guide-now">
+      <div class="rs-guide-now-featured" data-guide-now-featured hidden></div>
+      <div class="rs-guide-now-listwrap">
+        <div class="rs-guide-now-head" aria-hidden="true">
+          <span class="rs-guide-now-head__channel">Channel</span>
+          <span class="rs-guide-now-head__now">Now</span>
+          <span class="rs-guide-now-head__next">Next</span>
+        </div>
+        <div class="rs-guide-list rs-guide-now-list" data-guide-now-list></div>
+        <p class="rs-guide-panel-empty" data-guide-now-empty hidden>
+          Nothing on now — the guide hasn't loaded yet. Open Live TV first
+          so the channel list and programme data load.
+        </p>
+      </div>
+    </div>
   </div>
 
   <!-- MODE B — Tonight: featured programme + gated sections. -->
@@ -462,7 +484,16 @@ const nowMs = Date.now();
     flex-shrink: 0;
     height: 40px;
   }
-  .rs-livetv-guide__tick {
+  /* Grid rules below are :global — the grid's rows, cells and
+     ticks are injected by the client script (innerHTML), so they
+     never carry Astro's scope attribute and scoped selectors
+     would never match them (0.11.0 W6: the Full Guide tab rendered
+     completely empty — cells in the DOM, no styles applied —
+     because of exactly that; the 0.9.0/0.10.0 passes never
+     screenshotted the grid, so it went unnoticed). Static grid
+     chrome (toolbar, scroll, track, head, body, nowline) stays
+     scoped. */
+  :global(.rs-livetv-guide__tick) {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -476,7 +507,7 @@ const nowMs = Date.now();
   .rs-livetv-guide__body {
     position: relative;
   }
-  .rs-livetv-guide__row {
+  :global(.rs-livetv-guide__row) {
     position: absolute;
     left: 0;
     right: 0;
@@ -486,7 +517,7 @@ const nowMs = Date.now();
     content-visibility: auto;
     contain-intrinsic-size: auto 4.75rem;
   }
-  .rs-livetv-guide__channel {
+  :global(.rs-livetv-guide__channel) {
     position: sticky;
     left: 0;
     z-index: 10;
@@ -500,7 +531,7 @@ const nowMs = Date.now();
     border-right: 1px solid var(--rs-line);
     min-width: 0;
   }
-  .rs-livetv-guide__channel--focused {
+  :global(.rs-livetv-guide__channel--focused) {
     background: linear-gradient(
       90deg,
       color-mix(in srgb, var(--rs-accent) 14%, transparent),
@@ -508,7 +539,7 @@ const nowMs = Date.now();
     );
     box-shadow: inset 3px 0 0 var(--rs-accent);
   }
-  .rs-livetv-guide__logo {
+  :global(.rs-livetv-guide__logo) {
     width: 3rem;
     height: 3rem;
     object-fit: contain;
@@ -516,7 +547,7 @@ const nowMs = Date.now();
     border-radius: 0.5rem;
     background: var(--rs-surface-2);
   }
-  .rs-livetv-guide__logo--fallback {
+  :global(.rs-livetv-guide__logo--fallback) {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -524,7 +555,7 @@ const nowMs = Date.now();
     font-weight: 700;
     color: var(--rs-text);
   }
-  .rs-livetv-guide__channel-name {
+  :global(.rs-livetv-guide__channel-name) {
     flex: 1;
     min-width: 0;
     font-size: 1.2rem;
@@ -534,7 +565,7 @@ const nowMs = Date.now();
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .rs-livetv-guide__catchup-dot {
+  :global(.rs-livetv-guide__catchup-dot) {
     flex-shrink: 0;
     border-radius: 999px;
     padding: 0.15rem 0.55rem;
@@ -546,11 +577,11 @@ const nowMs = Date.now();
     color: var(--rs-focus);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 50%, transparent);
   }
-  .rs-livetv-guide__cells {
+  :global(.rs-livetv-guide__cells) {
     position: relative;
     flex-shrink: 0;
   }
-  .rs-livetv-guide__cell {
+  :global(.rs-livetv-guide__cell) {
     position: absolute;
     top: 0.375rem;
     bottom: 0.375rem;
@@ -567,13 +598,13 @@ const nowMs = Date.now();
     overflow: hidden;
     cursor: pointer;
   }
-  .rs-livetv-guide__cell-title {
+  :global(.rs-livetv-guide__cell-title) {
     display: block;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .rs-livetv-guide__cell-time {
+  :global(.rs-livetv-guide__cell-time) {
     display: block;
     font-size: 0.95rem;
     color: var(--rs-text-2);
@@ -582,7 +613,7 @@ const nowMs = Date.now();
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .rs-livetv-guide__cell--now {
+  :global(.rs-livetv-guide__cell--now) {
     background: linear-gradient(
       135deg,
       color-mix(in srgb, var(--rs-accent) 26%, transparent),
@@ -592,10 +623,10 @@ const nowMs = Date.now();
       0 0 0 1px color-mix(in srgb, var(--rs-accent) 45%, transparent),
       0 0 1.125rem 0.125rem color-mix(in srgb, var(--rs-accent) 22%, transparent);
   }
-  .rs-livetv-guide__cell--past {
+  :global(.rs-livetv-guide__cell--past) {
     opacity: 0.62;
   }
-  .rs-livetv-guide__cell--catchup::after {
+  :global(.rs-livetv-guide__cell--catchup)::after {
     content: "↺";
     position: absolute;
     top: 0.2rem;
@@ -603,14 +634,14 @@ const nowMs = Date.now();
     font-size: 1rem;
     color: var(--rs-focus);
   }
-  .rs-livetv-guide__cell:focus-visible {
+  :global(.rs-livetv-guide__cell):focus-visible {
     z-index: 5;
     outline: none;
     box-shadow:
       0 0 0 2px var(--rs-focus),
       0 0 2rem 0.25rem var(--rs-focus-glow);
   }
-  .rs-livetv-guide__cell--selected {
+  :global(.rs-livetv-guide__cell--selected) {
     box-shadow: 0 0 0 2px var(--rs-focus);
   }
   .rs-livetv-guide__nowline {
@@ -679,11 +710,11 @@ const nowMs = Date.now();
     display: none;
   }
   @media (prefers-reduced-motion: reduce) {
-    .rs-livetv-guide__cell:focus-visible,
+    :global(.rs-livetv-guide__cell):focus-visible,
     .rs-livetv-guide__nowline {
       box-shadow: none;
     }
-    .rs-livetv-guide__cell:focus-visible {
+    :global(.rs-livetv-guide__cell):focus-visible {
       box-shadow: 0 0 0 2px var(--rs-focus);
     }
   }
@@ -715,6 +746,7 @@ const nowMs = Date.now();
     normaliseCategoryLabel,
     nowNextRows,
     parseGuideMode,
+    pickNowFeatured,
     programmesForGuideDay,
     sanitiseGuideProgrammes,
     stableGuideSelection,
@@ -723,6 +755,7 @@ const nowMs = Date.now();
     buildTonightSections,
     chronologicalTonight,
     eveningWindowMs,
+    pickTonightFeatured,
   } from "@/scripts/lib/livetv-tonight.ts";
   import {
     catchupBadgeLabel,
@@ -778,6 +811,7 @@ const nowMs = Date.now();
     const panelEls = [...root.querySelectorAll("[data-guide-panel]")];
     const nowListEl = root.querySelector("[data-guide-now-list]");
     const nowEmptyEl = root.querySelector("[data-guide-now-empty]");
+    const nowFeaturedEl = root.querySelector("[data-guide-now-featured]");
     const tonightFeaturedEl = root.querySelector("[data-guide-tonight-featured]");
     const tonightSectionsEl = root.querySelector("[data-guide-tonight-sections]");
     const tonightEmptyEl = root.querySelector("[data-guide-tonight-empty]");
@@ -822,6 +856,121 @@ const nowMs = Date.now();
     /** By Channel: selected channel id (string) or null. */
     let selectedChannelId = null;
     let renderQueued = false;
+    /** Featured programme keys per slot (On Now / Tonight) — the
+     *  programme the featured art belongs to. */
+    let nowFeaturedKey = null;
+    let tonightFeaturedKey = null;
+    /** Enriched art URLs by programme key (backdrop/still only). */
+    const featuredArtCache = new Map();
+    let featuredArtTimer = null;
+
+    // ── Featured programme art (Live TV 0.11.0, W6) ─────────────
+    // W2's enrichment module (src/scripts/lib/livetv-enrichment.ts)
+    // is loaded through import.meta.glob, so the Guide builds and
+    // runs with its branded placeholder while the module is not in
+    // the tree yet, and picks it up the moment it lands — no static
+    // import of a file another worker owns. Only the featured
+    // programme is ever enriched (never a list, never on scroll);
+    // a 350ms settle delay keeps arrowing through rows from firing
+    // a lookup per row. Art is used only when the module returns a
+    // non-placeholder source at confidence >= 0.6; anything else
+    // keeps the channel-branded placeholder (logo on a burgundy
+    // gradient, never a giant initial letter).
+    const ENRICHMENT_GLOB_KEY = "/src/scripts/lib/livetv-enrichment.ts";
+    const FEATURED_ART_CONFIDENCE_MIN = 0.6;
+    /** undefined = unresolved, null = module absent. */
+    let enrichmentLoader = undefined;
+    function getEnrichmentLoader() {
+      if (enrichmentLoader !== undefined) return enrichmentLoader;
+      try {
+        // Absolute-from-root pattern: a relative glob does not
+        // resolve inside an Astro component <script> (the compiled
+        // script's location is not the .astro file's), so the map
+        // came back empty. The leading-/ form is project-root
+        // relative and matches the module when W2 lands it.
+        const loaders = import.meta.glob("/src/scripts/lib/livetv-enrichment.ts");
+        // Look the loader up by value, not by key: the bundler
+        // normalises the glob key and the literal key above does
+        // not always match it.
+        const load = loaders[ENRICHMENT_GLOB_KEY] ?? Object.values(loaders)[0];
+        enrichmentLoader = typeof load === "function" ? load : null;
+      } catch {
+        enrichmentLoader = null;
+      }
+      return enrichmentLoader;
+    }
+    /** A usable wide-art URL from an enrichment result, or null. */
+    function usableArtUrl(art) {
+      if (!art || art.source === "placeholder") return null;
+      if (
+        typeof art.confidence !== "number" ||
+        art.confidence < FEATURED_ART_CONFIDENCE_MIN
+      ) {
+        return null;
+      }
+      return art.backdropUrl || art.stillUrl || null;
+    }
+    /** The art slot's content: enriched photo when cached, else the
+     *  channel-branded placeholder (logo, or the channel name). */
+    function featuredArtHtml(programme, channel) {
+      const key = guideProgrammeKey(String(channel.id), programme.startMs);
+      const cached = featuredArtCache.get(key);
+      if (cached) {
+        return `<img class="rs-guide-featured__art-img" src="${escapeAttr(cached)}" alt="" loading="lazy" />`;
+      }
+      const logo = channel.logo ? String(channel.logo) : "";
+      const name = escapeHtml(channel.displayName || channel.name || "");
+      if (logo) {
+        return `<img class="rs-guide-featured__art-logo" src="${escapeAttr(logo)}" alt="" loading="lazy" />`;
+      }
+      return `<span class="rs-guide-featured__art-name">${name}</span>`;
+    }
+    function scheduleFeaturedArt(slot, programme, channel) {
+      if (!programme || !channel) return;
+      const key = guideProgrammeKey(String(channel.id), programme.startMs);
+      if (featuredArtCache.has(key)) return;
+      if (featuredArtTimer !== null) clearTimeout(featuredArtTimer);
+      featuredArtTimer = setTimeout(() => {
+        featuredArtTimer = null;
+        void paintFeaturedArt(slot, programme, channel);
+      }, 350);
+    }
+    async function paintFeaturedArt(slot, programme, channel) {
+      const key = guideProgrammeKey(String(channel.id), programme.startMs);
+      const currentKey = slot === "now" ? nowFeaturedKey : tonightFeaturedKey;
+      if (currentKey !== key) return;
+      const loader = getEnrichmentLoader();
+      if (!loader) return;
+      try {
+        const mod = await loader();
+        if (typeof mod.getProgrammeArtworkSync === "function") {
+          const url = usableArtUrl(mod.getProgrammeArtworkSync(programme.title));
+          if (url) return finishFeaturedArt(slot, key, url);
+        }
+        if (typeof mod.enrichProgramme !== "function") return;
+        const art = await mod.enrichProgramme({
+          title: programme.title,
+          channelName: channel.displayName || channel.name || "",
+          startMs: programme.startMs,
+          endMs: programme.stopMs,
+        });
+        const url = usableArtUrl(art);
+        if (!url) return;
+        finishFeaturedArt(slot, key, url);
+      } catch {
+        // Enrichment is best-effort; the placeholder stays.
+      }
+    }
+    function finishFeaturedArt(slot, key, url) {
+      const currentKey = slot === "now" ? nowFeaturedKey : tonightFeaturedKey;
+      if (currentKey !== key) return;
+      featuredArtCache.set(key, url);
+      const container = slot === "now" ? nowFeaturedEl : tonightFeaturedEl;
+      const artEl = container?.querySelector("[data-guide-featured-art]");
+      if (artEl instanceof HTMLElement) {
+        artEl.innerHTML = `<img class="rs-guide-featured__art-img" src="${escapeAttr(url)}" alt="" loading="lazy" />`;
+      }
+    }
 
     const dayWidthPx = () => (GUIDE_DAY_MS / HOUR_MS) * PX_PER_HOUR;
     const dayStartMs = () => startOfLocalDayMs(liveState.guideDateMs);
@@ -1081,31 +1230,138 @@ const nowMs = Date.now();
       }
     }
 
-    /** MODE A — On Now: channels actually on air, with next up. */
-    function renderNow() {
-      if (!(nowListEl instanceof HTMLElement)) return;
+    /** On Now rows for the current category/search filter. */
+    function currentNowEntries() {
       const nowMs = Date.now();
       const visibleIds = new Set(visibleChannels.map((c) => String(c.id)));
       const filtered = new Map(
         [...programmesByChannel].filter(([id]) => visibleIds.has(id)),
       );
-      let rows = nowNextRows(filtered, nowMs).map((row) => ({
-        programme: row.current,
-        channel: channelsById.get(row.channelId),
-        next: row.next,
-      })).filter((row) => row.channel);
-      rows = filterGuideRows(searchableRows(rows), searchQuery);
-      nowListEl.innerHTML = rows
-        .map((row) =>
-          programmeRowHtml({
-            programme: row.programme,
-            channel: row.channel,
-            variant: "now",
-            next: row.next,
-          }),
-        )
-        .join("");
-      if (nowEmptyEl) nowEmptyEl.hidden = rows.length > 0;
+      let entries = nowNextRows(filtered, nowMs)
+        .map((row) => ({
+          row,
+          channel: channelsById.get(row.channelId),
+        }))
+        .filter((entry) => entry.channel);
+      if (searchQuery.trim()) {
+        const needle = searchQuery.trim().toLowerCase();
+        entries = entries.filter(({ row, channel }) =>
+          `${channel.displayName || channel.name || ""} ${row.current.title} ${row.current.desc ?? ""} ${row.next?.title ?? ""}`
+            .toLowerCase()
+            .includes(needle),
+        );
+      }
+      return entries;
+    }
+
+    /** One Now/Next list row: channel | now (title, times,
+     *  progress) | next (title, times). The synopsis lives in the
+     *  featured panel, not repeated down the list. */
+    function nowNextRowHtml({ row, channel }) {
+      const key = guideProgrammeKey(String(channel.id), row.current.startMs);
+      const logo = channel.logo ? String(channel.logo) : "";
+      const initial = (channel.displayName || channel.name || "?").trim().charAt(0).toUpperCase();
+      const nowLabel = epgTimeRangeLabel(row.current.startMs, row.current.stopMs);
+      const nextLabel = row.next
+        ? epgTimeRangeLabel(row.next.startMs, row.next.stopMs)
+        : "";
+      const progress = Math.round(row.progress * 100);
+      return (
+        `<button type="button" class="rs-guide-row rs-guide-row--nownav" data-guide-row ` +
+        `data-focus-key="guide:programme:${key}" data-channel-id="${escapeAttr(String(channel.id))}" ` +
+        `data-start-ms="${row.current.startMs}" data-variant="now" ` +
+        `aria-label="${escapeAttr(row.current.title)}, ${escapeAttr(nowLabel)}">` +
+        `<span class="rs-guide-nownav__channel">` +
+        (logo
+          ? `<img class="rs-guide-nownav__logo" src="${escapeAttr(logo)}" alt="" loading="lazy" />`
+          : `<span class="rs-guide-nownav__logo rs-guide-nownav__logo--fallback" aria-hidden="true">${escapeHtml(initial)}</span>`) +
+        `<span class="rs-guide-nownav__name">${escapeHtml(channel.displayName || channel.name || "")}</span>` +
+        `</span>` +
+        `<span class="rs-guide-nownav__now">` +
+        `<span class="rs-guide-nownav__title">${escapeHtml(row.current.title)} <span class="rs-guide-row__live">LIVE</span></span>` +
+        `<span class="rs-guide-nownav__time">${nowLabel}</span>` +
+        `<span class="rs-guide-row__progress" aria-hidden="true"><span style="width:${progress}%"></span></span>` +
+        `</span>` +
+        `<span class="rs-guide-nownav__next">` +
+        (row.next
+          ? `<span class="rs-guide-nownav__title rs-guide-nownav__title--next">${escapeHtml(row.next.title)}</span>` +
+            `<span class="rs-guide-nownav__time">${nextLabel}</span>`
+          : `<span class="rs-guide-nownav__title rs-guide-nownav__title--next">—</span>`) +
+        `</span></button>`
+      );
+    }
+
+    /** The On Now featured panel: art + channel + title + times +
+     *  progress + synopsis + next up. Follows the focused row. */
+    function renderNowFeatured(entry) {
+      if (!(nowFeaturedEl instanceof HTMLElement)) return;
+      if (!entry) {
+        nowFeaturedEl.hidden = true;
+        nowFeaturedKey = null;
+        return;
+      }
+      const { row, channel } = entry;
+      const programme = row.current;
+      nowFeaturedKey = guideProgrammeKey(String(channel.id), programme.startMs);
+      const timeLabel = epgTimeRangeLabel(programme.startMs, programme.stopMs);
+      const progress = Math.round(row.progress * 100);
+      const nextLine = row.next
+        ? `Next: ${escapeHtml(row.next.title)} · ${epgTimeRangeLabel(row.next.startMs, row.next.stopMs)}`
+        : "";
+      nowFeaturedEl.innerHTML =
+        `<button type="button" class="rs-guide-featured rs-guide-featured--now" data-guide-row ` +
+        `data-focus-key="guide:programme:${nowFeaturedKey}" ` +
+        `data-channel-id="${escapeAttr(String(channel.id))}" data-start-ms="${programme.startMs}" data-variant="now">` +
+        `<span class="rs-guide-featured__art" data-guide-featured-art>${featuredArtHtml(programme, channel)}</span>` +
+        `<span class="rs-guide-featured__main">` +
+        `<span class="rs-guide-featured__eyebrow">On Now · ${escapeHtml(channel.displayName || channel.name || "")}</span>` +
+        `<span class="rs-guide-featured__title">${escapeHtml(programme.title)}</span>` +
+        `<span class="rs-guide-featured__time">${timeLabel}</span>` +
+        `<span class="rs-guide-featured__progress" aria-hidden="true"><span style="width:${progress}%"></span></span>` +
+        (programme.desc
+          ? `<span class="rs-guide-featured__desc">${escapeHtml(programme.desc)}</span>`
+          : "") +
+        (nextLine ? `<span class="rs-guide-featured__next">${nextLine}</span>` : "") +
+        `</span></button>`;
+      nowFeaturedEl.hidden = false;
+      scheduleFeaturedArt("now", programme, channel);
+    }
+
+    /** Re-render only the featured panel when focus moves to
+     *  another Now row (the list itself is untouched, so focus
+     *  stays where the user put it). */
+    function refreshNowFeaturedFromSelection() {
+      if (!(nowFeaturedEl instanceof HTMLElement)) return;
+      const entries = currentNowEntries();
+      const featured = pickNowFeatured(
+        entries.map((entry) => entry.row),
+        selectedKey,
+      );
+      if (!featured) return;
+      if (
+        guideProgrammeKey(featured.channelId, featured.current.startMs) ===
+        nowFeaturedKey
+      ) {
+        return;
+      }
+      const entry = entries.find((candidate) => candidate.row === featured);
+      if (entry) renderNowFeatured(entry);
+    }
+
+    /** MODE A — On Now: featured programme (left) + Now/Next
+     *  list (right), the mockup's composition. */
+    function renderNow() {
+      if (!(nowListEl instanceof HTMLElement)) return;
+      const entries = currentNowEntries();
+      const featured = pickNowFeatured(
+        entries.map((entry) => entry.row),
+        selectedKey,
+      );
+      renderNowFeatured(
+        featured ? entries.find((entry) => entry.row === featured) || null : null,
+      );
+      nowListEl.innerHTML = entries.map((entry) => nowNextRowHtml(entry)).join("");
+      if (nowEmptyEl) nowEmptyEl.hidden = entries.length > 0;
     }
 
     /** MODE B — Tonight: featured + gated sections, or the plain
@@ -1139,24 +1395,24 @@ const nowMs = Date.now();
         return;
       }
       if (tonightEmptyEl) tonightEmptyEl.hidden = true;
-      // Featured: first highlight, else first starting soon, else
-      // the first evening programme. Channel logo only — the EPG
-      // carries no programme artwork, and none is invented.
-      const featured =
-        built.sections.find((s) => s.id === "highlights")?.items[0] ||
-        built.sections.find((s) => s.id === "starting-soon")?.items[0] ||
-        evening[0];
+      // Featured: the strongest highlight (a premiere first),
+      // else the first programme starting soon, else the first
+      // evening programme (pickTonightFeatured, tested). Art comes
+      // only from the enrichment API — never invented; without it
+      // the slot is the channel-branded placeholder.
+      const featured = pickTonightFeatured(built, evening);
       if (tonightFeaturedEl && featured) {
         const timeLabel = epgTimeRangeLabel(featured.programme.startMs, featured.programme.stopMs);
-        const logo = featured.channel.logo || "";
-        const initial = (featured.channel.displayName || "?").trim().charAt(0).toUpperCase();
+        const featuredChannel = channelsById.get(featured.channel.id) || featured.channel;
+        tonightFeaturedKey = guideProgrammeKey(
+          featured.channel.id,
+          featured.programme.startMs,
+        );
         tonightFeaturedEl.innerHTML =
-          `<button type="button" class="rs-guide-featured" data-guide-row ` +
-          `data-focus-key="guide:programme:${guideProgrammeKey(featured.channel.id, featured.programme.startMs)}" ` +
+          `<button type="button" class="rs-guide-featured rs-guide-featured--art" data-guide-row ` +
+          `data-focus-key="guide:programme:${tonightFeaturedKey}" ` +
           `data-channel-id="${escapeAttr(featured.channel.id)}" data-start-ms="${featured.programme.startMs}" data-variant="tonight">` +
-          (logo
-            ? `<img class="rs-guide-featured__logo" src="${escapeAttr(logo)}" alt="" loading="lazy" />`
-            : `<span class="rs-guide-featured__logo rs-guide-featured__logo--fallback" aria-hidden="true">${escapeHtml(initial)}</span>`) +
+          `<span class="rs-guide-featured__art" data-guide-featured-art>${featuredArtHtml(featured.programme, featuredChannel)}</span>` +
           `<span class="rs-guide-featured__main">` +
           `<span class="rs-guide-featured__eyebrow">Tonight · ${escapeHtml(featured.channel.displayName)}</span>` +
           `<span class="rs-guide-featured__title">${escapeHtml(featured.programme.title)}</span>` +
@@ -1166,6 +1422,10 @@ const nowMs = Date.now();
             : "") +
           `</span></button>`;
         tonightFeaturedEl.hidden = false;
+        scheduleFeaturedArt("tonight", featured.programme, featuredChannel);
+      } else if (tonightFeaturedEl) {
+        tonightFeaturedEl.hidden = true;
+        tonightFeaturedKey = null;
       }
       let html = "";
       if (built.hasEditorialSignal) {
@@ -1226,12 +1486,16 @@ const nowMs = Date.now();
             : null) ||
           (visibleChannels[0] ? String(visibleChannels[0].id) : null);
       }
+      const nowMs = Date.now();
       channelListEl.innerHTML = visibleChannels
         .map((channel) => {
           const id = String(channel.id);
           const logo = channel.logo ? String(channel.logo) : "";
           const initial = (channel.displayName || channel.name || "?").trim().charAt(0).toUpperCase();
           const isSelected = id === selectedChannelId;
+          const onNow = (programmesByChannel.get(id) || []).find(
+            (p) => programmeState(p.startMs, p.stopMs, nowMs) === "now",
+          );
           return (
             `<button type="button" class="rs-guide-channel-pick${isSelected ? " rs-guide-channel-pick--selected" : ""}" ` +
             `data-guide-channel-pick="${escapeAttr(id)}" data-focus-key="guide:channel:${escapeAttr(id)}" ` +
@@ -1239,11 +1503,57 @@ const nowMs = Date.now();
             (logo
               ? `<img class="rs-guide-channel-pick__logo" src="${escapeAttr(logo)}" alt="" loading="lazy" />`
               : `<span class="rs-guide-channel-pick__logo rs-guide-channel-pick__logo--fallback" aria-hidden="true">${escapeHtml(initial)}</span>`) +
+            `<span class="rs-guide-channel-pick__text">` +
             `<span class="rs-guide-channel-pick__name">${escapeHtml(channel.displayName || channel.name || "")}</span>` +
-            `</button>`
+            (onNow
+              ? `<span class="rs-guide-channel-pick__now">${escapeHtml(onNow.title)}</span>`
+              : "") +
+            `</span></button>`
           );
         })
         .join("");
+    }
+
+    /** One By Channel schedule row: time-led, no repeated logo or
+     *  channel name — the channel is already picked on the left.
+     *  The programme on now carries its progress + LIVE mark;
+     *  catch-up appears only where the engine confirms it. */
+    function channelScheduleRowHtml({ programme, channel }) {
+      const key = guideProgrammeKey(String(channel.id), programme.startMs);
+      const timeLabel = epgTimeRangeLabel(programme.startMs, programme.stopMs);
+      const startLabel = new Date(programme.startMs).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const endLabel = new Date(programme.stopMs).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      });
+      const nowMs = Date.now();
+      const state = programmeState(programme.startMs, programme.stopMs, nowMs);
+      const progress = programmeProgress(programme.startMs, programme.stopMs, nowMs);
+      const vm = guideCellViewModel(programme, channel, nowMs);
+      const badge = vm.badge
+        ? `<span class="rs-guide-row__badge">${vm.badge}</span>`
+        : "";
+      return (
+        `<button type="button" class="rs-guide-row rs-guide-row--channel" data-guide-row ` +
+        `data-focus-key="guide:programme:${key}" data-channel-id="${escapeAttr(String(channel.id))}" ` +
+        `data-start-ms="${programme.startMs}" data-variant="channel" ` +
+        `aria-label="${escapeAttr(programme.title)}, ${escapeAttr(timeLabel)}">` +
+        `<span class="rs-guide-channelrow__time">${startLabel}<span class="rs-guide-channelrow__end">– ${endLabel}</span></span>` +
+        `<span class="rs-guide-row__main">` +
+        `<span class="rs-guide-row__title">${escapeHtml(programme.title)}${state === "now" ? ` <span class="rs-guide-row__live">LIVE</span>` : ""}${badge}</span>` +
+        (programme.desc
+          ? `<span class="rs-guide-row__desc">${escapeHtml(programme.desc)}</span>`
+          : "") +
+        (state === "now"
+          ? `<span class="rs-guide-row__progress" aria-hidden="true"><span style="width:${Math.round(progress * 100)}%"></span></span>`
+          : "") +
+        `</span></button>`
+      );
     }
 
     function renderChannelSchedule() {
@@ -1267,13 +1577,7 @@ const nowMs = Date.now();
         rows = filterGuideRows(searchableRows(rows), searchQuery);
       }
       channelScheduleEl.innerHTML = rows
-        .map((row) =>
-          programmeRowHtml({
-            programme: row.programme,
-            channel: row.channel,
-            variant: "channel",
-          }),
-        )
+        .map((row) => channelScheduleRowHtml(row))
         .join("");
       if (channelEmptyEl) channelEmptyEl.hidden = rows.length > 0;
     }
@@ -1765,9 +2069,10 @@ const nowMs = Date.now();
       persistLivetvState(liveState);
       active = false;
       root.hidden = true;
-      if (document.documentElement.dataset.livetvMode === "guide") {
-        delete document.documentElement.dataset.livetvMode;
-      }
+      // 0.11.0 integration (R9): the shell (livetv.astro setMode)
+      // is the single writer of html[data-livetv-mode]; the Guide
+      // used to delete it here, but requestLivetvMode below makes
+      // the shell write the return mode synchronously.
       requestLivetvMode(returnTo);
       const key = liveState.returnFocusKey;
       if (key) {
@@ -1868,24 +2173,28 @@ const nowMs = Date.now();
           : null;
       // Seed shared guideMode from the request (or the persisted
       // tab) and record where to return to — both live in shared
-      // state from here on; the local copy follows liveState.
+      // state from here on; the local copy follows liveState. The
+      // return mode goes through enterGuide's guideReturnTo param
+      // (0.11.0 integration: the post-enterGuide spread that used
+      // to set it here is gone — enterGuide is the single writer).
       liveState = enterGuide(
         persisted,
         invokerKey,
         requestedMode !== undefined
           ? parseGuideMode(requestedMode, persisted.guideMode)
           : undefined,
+        enteredFrom === "playback" ? "playback" : "landing",
       );
-      liveState = {
-        ...liveState,
-        guideReturnTo: enteredFrom === "playback" ? "playback" : "landing",
-      };
       guideMode = liveState.guideMode;
       persistLivetvState(liveState);
       active = true;
       activationFinished = false;
       root.hidden = false;
-      document.documentElement.dataset.livetvMode = "guide";
+      // 0.11.0 integration (R9): html[data-livetv-mode] is written
+      // only by the shell (livetv.astro setMode) — on the same
+      // livetv:mode event that triggers this activation, and on
+      // load by the shell init for ?mode=guide deep links. The
+      // Guide no longer writes it behind the shell's back.
       // The tab follows the request NOW, not after data loads: the
       // old code switched tabs only at the end of activate, so a
       // ?guideMode=tonight deep link stayed on On Now whenever the
@@ -1927,9 +2236,10 @@ const nowMs = Date.now();
         catalogRetryTimer = null;
       }
       root.hidden = true;
-      if (document.documentElement.dataset.livetvMode === "guide") {
-        delete document.documentElement.dataset.livetvMode;
-      }
+      // 0.11.0 integration (R9): the shell owns
+      // html[data-livetv-mode] — this used to delete it, but the
+      // shell's setMode on the same livetv:mode event writes the
+      // new mode, so there is nothing for the Guide to clean up.
     }
 
     // ── Events ────────────────────────────────────────────────
@@ -1942,6 +2252,16 @@ const nowMs = Date.now();
       const row = event.target.closest("[data-guide-row]");
       if (row instanceof HTMLElement) {
         selectProgramme(row.dataset.channelId || "", Number(row.dataset.startMs), { openDetail: false });
+        // On Now: the featured panel follows the focused row (the
+        // featured button itself is excluded — it already shows
+        // this programme, and re-rendering it would steal focus).
+        if (
+          guideMode === "now" &&
+          row.dataset.variant === "now" &&
+          !row.closest("[data-guide-now-featured]")
+        ) {
+          refreshNowFeaturedFromSelection();
+        }
       }
     });
     root.addEventListener("click", (event) => {
@@ -2045,7 +2365,27 @@ const nowMs = Date.now();
         // D-pad Up/Down/Left/Right arrive as plain arrows here.
         const row = document.activeElement?.closest?.("[data-guide-row]");
         const tab = document.activeElement?.closest?.("[data-guide-tab]");
+        const featured = document.activeElement?.closest?.(
+          "[data-guide-now-featured], [data-guide-tonight-featured]",
+        );
         if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          if (featured) {
+            // From a featured panel: Down enters the list, Up
+            // returns to the mode tabs.
+            event.preventDefault();
+            if (event.key === "ArrowDown") {
+              const first = root.querySelector(
+                guideMode === "now"
+                  ? "[data-guide-now-list] [data-guide-row]"
+                  : "[data-guide-tonight-sections] [data-guide-row]",
+              );
+              if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+            } else {
+              const activeTab = tabEls.find((t) => t.dataset.guideTab === guideMode);
+              if (activeTab instanceof HTMLElement) activeTab.focus({ preventScroll: true });
+            }
+            return;
+          }
           if (row) {
             event.preventDefault();
             moveRowFocus(event.key === "ArrowUp" ? "move-up" : "move-down");
@@ -2056,6 +2396,16 @@ const nowMs = Date.now();
           if (tab) {
             event.preventDefault();
             stepGuideMode(event.key === "ArrowLeft" ? -1 : 1);
+          } else if (featured && guideMode === "now" && event.key === "ArrowRight") {
+            // From the On Now featured panel: Right enters the list.
+            event.preventDefault();
+            const first = root.querySelector("[data-guide-now-list] [data-guide-row]");
+            if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+          } else if (row && guideMode === "now" && event.key === "ArrowLeft") {
+            // From an On Now row: Left enters the featured panel.
+            event.preventDefault();
+            const featuredBtn = nowFeaturedEl?.querySelector("[data-guide-row]");
+            if (featuredBtn instanceof HTMLElement) featuredBtn.focus({ preventScroll: true });
           } else if (row && guideMode === "channel") {
             // Left/Right moves between the channel picker and the schedule.
             if (event.key === "ArrowLeft" && row) {
@@ -2113,7 +2463,15 @@ const nowMs = Date.now();
       const mode = event.detail?.mode;
       if (mode === "guide") {
         void activate(event.detail?.guideMode);
-      } else if (mode === "home" || mode === "playback") {
+      } else if (mode === "home" || mode === "landing" || mode === "playback") {
+        // INTEGRATION 0.11.0 — "landing" is the 0.11.0 name for
+        // the 0.9.0 "home" mode (setMode maps home→landing before
+        // dispatching, so the "home" branch is dead): without it,
+        // leaving the Guide for the landing via the top nav left
+        // `active` true, and re-entering the Guide early-returned
+        // from activate() without capturing the invoker's focus
+        // key — B then restored focus to a stale key (or the
+        // nav fallback) instead of the invoker.
         deactivate();
       }
     });

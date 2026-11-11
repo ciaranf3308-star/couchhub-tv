@@ -203,6 +203,25 @@ html[data-couch] .rs-main {
   gap: 2.5rem;
 }
 
+/* INTEGRATION 0.11.0 — viewport-fit the Browser + Guide screens.
+   The flex chain below the mode mounts (flex:1 + min-height:0)
+   can only shrink into a DEFINITE height; body is min-height:
+   100dvh, so without this the document grew to 1252px (browser)
+   / 1475px (guide) at 1080p, the lists sized to content and never
+   scrolled, and the last row sat half-cut under the fixed hints
+   bar. Capping body at exactly 100dvh in these two modes (the
+   shell writes html[data-livetv-mode]) gives the chain its
+   definite height: main/home/mounts shrink, the lists scroll
+   internally, and the 4.5rem bottom padding clears the last row
+   above the hints bar. Landing/playback are not capped — the
+   landing has no internal scroller and fits, and playback is an
+   overlay. */
+html[data-couch][data-livetv-mode="browser"] body,
+html[data-couch][data-livetv-mode="guide"] body {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* ── Type scale (px values are at 1920x1080, root 16px) ────────── */
 
 html[data-couch] .rs-hero-title {
@@ -1227,6 +1246,10 @@ html[data-couch] .rs-preview-note {
    this rule, and the shell's overlays sit above it. No permanent
    panel, border, or page chrome around the video. */
 
+/* 0.11.0 W1: max-width + border-radius are cleared here too — the
+   scoped .player-wrap cap in livetv.astro is 46dvh-wide with a 1rem
+   radius, and the separate later override rule that used to clear
+   them is deleted (folded in here). */
 html[data-couch][data-livetv-mode="playback"] #player-wrap {
   position: fixed;
   inset: 0;
@@ -1234,6 +1257,8 @@ html[data-couch][data-livetv-mode="playback"] #player-wrap {
   width: 100%;
   height: 100%;
   max-height: none;
+  max-width: none;
+  border-radius: 0;
   aspect-ratio: auto;
   margin: 0;
   background: #000;
@@ -1258,21 +1283,30 @@ html[data-couch] .rs-livetv-play-shell > * {
   pointer-events: auto;
 }
 
-/* OSD: translucent lower third, gradient scrim (readable over
-   bright AND dark video), never a solid panel, never more than
-   the bottom ~third of the screen. */
+/* OSD: a single floating rounded panel (0.9.0: soft gradient +
+   blur, faint red bottom glow, no nested cards), readable over
+   bright AND dark video. 0.11.0 W1: the 0.9.0 overrides are folded
+   in here — this is the single canonical OSD definition. */
 html[data-couch] .rs-livetv-play-osd {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 1.5rem;
+  right: 1.5rem;
+  bottom: 1.5rem;
   z-index: 30;
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
-  max-height: 34vh;
-  padding: 2.5rem 2.5rem 1.5rem;
-  background: linear-gradient(0deg, rgb(13 4 6 / 0.92) 0%, rgb(13 4 6 / 0.55) 55%, transparent 100%);
+  max-height: 38vh;
+  padding: 1.5rem 2rem 1.25rem;
+  border-radius: 1.25rem;
+  border: 1px solid rgb(255 255 255 / 0.08);
+  background:
+    linear-gradient(180deg, rgb(31 10 15 / 0.82) 0%, rgb(13 4 6 / 0.9) 100%);
+  box-shadow:
+    0 1.5rem 3rem rgb(0 0 0 / 0.45),
+    0 0 2.5rem rgb(200 16 46 / 0.14);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--rs-text);
   opacity: 1;
   transition: opacity 200ms ease;
@@ -1283,7 +1317,7 @@ html[data-couch] .rs-livetv-play-osd[data-hidden="true"] {
 }
 html[data-couch] .rs-livetv-play-osd__row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 1.25rem;
   min-width: 0;
 }
@@ -1308,17 +1342,13 @@ html[data-couch] .rs-livetv-play-osd__initial {
   font-weight: 800;
   color: #42101d;
 }
-html[data-couch] .rs-livetv-play-osd__main {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  min-width: 0;
-}
+/* Mockup 1 hierarchy: the programme title is the dominant text in
+   the lower third, the channel line secondary. */
 html[data-couch] .rs-livetv-play-osd__channel {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  font-size: 1.75rem;
+  font-size: 1.375rem;
   font-weight: 700;
   line-height: 1.15;
 }
@@ -1335,51 +1365,30 @@ html[data-couch] .rs-livetv-play-osd__fav {
   color: #ff5c7a;
   font-size: 1.5rem;
 }
-html[data-couch] .rs-livetv-play-osd__now {
-  font-size: 1.375rem;
-  font-weight: 600;
-  color: var(--rs-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-html[data-couch] .rs-livetv-play-osd__time,
-html[data-couch] .rs-livetv-play-osd__next {
-  font-size: 1.125rem;
-  color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-play-osd__progress {
-  display: block;
-  height: 0.375rem;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.25);
-  overflow: hidden;
-}
-html[data-couch] .rs-livetv-play-osd__progress > span {
-  display: block;
-  height: 100%;
-  background: var(--rs-accent);
-  border-radius: 999px;
-}
 html[data-couch] .rs-livetv-play-osd__controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
 }
+/* Ghost actions: one quiet row, no boxes — focus is the accent
+   outline from the focus rule above. */
 html[data-couch] .rs-livetv-play-osd__btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  font-size: 1.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 1.125rem;
   font-weight: 600;
-  padding: 0.75rem 1.25rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--rs-line);
-  background: color-mix(in srgb, var(--rs-surface) 85%, transparent);
+  border: 0;
+  border-radius: 0.625rem;
+  background: transparent;
   color: var(--rs-text);
   cursor: pointer;
+}
+html[data-couch] .rs-livetv-play-osd__btn:hover {
+  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
 }
 html[data-couch] .rs-livetv-play-osd__btn:focus-visible,
 html[data-couch] .rs-livetv-play-quicksurf__chip:focus-visible,
@@ -1395,42 +1404,46 @@ html[data-couch] .rs-livetv-play-quicksurf__shortcuts {
   color: var(--rs-text-2);
 }
 
-/* Quick Surf: centred panel over the still-playing video. */
+/* Quick Surf: compact right-docked panel, video visible behind
+   (0.9.0: the overlay is only a soft right-side scrim — no dimming
+   slab over the video). 0.11.0 W1: the 0.9.0 overrides are folded
+   in here — this is the single canonical Quick Surf definition. */
 html[data-couch] .rs-livetv-play-quicksurf {
   position: absolute;
   inset: 0;
   z-index: 35;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  background: rgb(13 4 6 / 0.45);
+  justify-content: flex-end;
+  padding: 2rem 1.5rem;
+  background: linear-gradient(270deg, rgb(13 4 6 / 0.55) 0%, transparent 46%);
 }
 html[data-couch] .rs-livetv-play-quicksurf[hidden] {
   display: none;
 }
 html[data-couch] .rs-livetv-play-quicksurf__panel {
-  width: min(64rem, 100%);
+  width: min(36rem, 46vw);
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1.75rem 2rem;
-  border-radius: 1rem;
-  background: rgb(31 10 15 / 0.92);
-  border: 1px solid var(--rs-line);
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-radius: 1.25rem;
+  background:
+    linear-gradient(180deg, rgb(31 10 15 / 0.88) 0%, rgb(13 4 6 / 0.92) 100%);
+  border: 1px solid rgb(255 255 255 / 0.08);
+  box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   color: var(--rs-text);
 }
 html[data-couch] .rs-livetv-play-quicksurf__eyebrow {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1.625rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-play-quicksurf__desc {
-  margin: 0;
-  font-size: 1.25rem;
+  text-transform: none;
   color: var(--rs-text-2);
 }
 html[data-couch] .rs-livetv-play-quicksurf__categories {
@@ -1438,159 +1451,42 @@ html[data-couch] .rs-livetv-play-quicksurf__categories {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+/* Category shortcuts as a flat text row, not pills. */
 html[data-couch] .rs-livetv-play-quicksurf__chip {
+  padding: 0.375rem 0.5rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: var(--rs-text-2);
   font-size: 1.125rem;
   font-weight: 600;
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
-  border: 1px solid var(--rs-line);
-  background: transparent;
-  color: var(--rs-text);
   cursor: pointer;
 }
 html[data-couch] .rs-livetv-play-quicksurf__chip[aria-pressed="true"] {
-  background: var(--rs-accent);
-  border-color: var(--rs-accent);
+  background: transparent;
+  border-color: transparent;
+  color: var(--rs-text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--rs-accent);
+  text-decoration-thickness: 2px;
 }
-html[data-couch] .rs-livetv-play-quicksurf__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
+/* (No __actions rule: TvQuickSurf renders no actions row —
+   livetv-quicksurf.test.ts pins the component against it — so both
+   the centred-panel and docked-panel __actions rules are deleted.) */
 
-/* Channel card (W1 contract shape, painted by Quick Surf). */
-html[data-couch] .rs-livetv-channel-card {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
-  border-radius: 0.875rem;
-  border: 1px solid var(--rs-line);
-  background: color-mix(in srgb, var(--rs-surface) 80%, transparent);
-  color: var(--rs-text);
-}
-html[data-couch] .rs-livetv-channel-card--large {
-  padding: 1.25rem 1.5rem;
-}
-html[data-couch] .rs-livetv-channel-card__link {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  min-width: 0;
-  flex: 1;
-  color: inherit;
-  text-decoration: none;
-}
-html[data-couch] .rs-livetv-channel-card__logo {
-  flex: 0 0 auto;
-  width: 4rem;
-  height: 4rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.5rem;
-  background: rgb(255 255 255 / 0.92);
-  overflow: hidden;
-}
-html[data-couch] .rs-livetv-channel-card__logo img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-html[data-couch] .rs-livetv-channel-card__initial {
-  font-size: 2rem;
-  font-weight: 800;
-  color: #42101d;
-}
-html[data-couch] .rs-livetv-channel-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  min-width: 0;
-  flex: 1;
-}
-html[data-couch] .rs-livetv-channel-card__name {
-  font-size: 1.5rem;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-html[data-couch] .rs-livetv-channel-card__num {
-  color: var(--rs-text-2);
-  margin-right: 0.5rem;
-}
-html[data-couch] .rs-livetv-channel-card__now {
-  font-size: 1.25rem;
-  color: var(--rs-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-html[data-couch] .rs-livetv-channel-card__next {
-  font-size: 1.125rem;
-  color: var(--rs-text-2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-html[data-couch] .rs-livetv-channel-card__fav {
-  color: #ff5c7a;
-  font-size: 1.5rem;
-}
-html[data-couch] .rs-livetv-channel-card__catchup {
-  font-size: 1rem;
-  color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-channel-card__progress {
-  position: absolute;
-  left: 1.25rem;
-  right: 1.25rem;
-  bottom: 0.5rem;
-  height: 0.25rem;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.2);
-  overflow: hidden;
-}
-html[data-couch] .rs-livetv-channel-card__progress > span {
-  display: block;
-  height: 100%;
-  background: var(--rs-accent);
-}
+/* Channel card — see the SINGLE canonical definition in the
+   "Live TV shared (W1)" block below (0.11.0 W1 merge). The
+   horizontal-row definition that used to live here is deleted: it
+   disagreed with the canonical vertical card on every property and
+   only survived as a cascade chimera. (Its header also
+   misattributed the card to Quick Surf, which renders TvChannelRow,
+   not this card.) */
 
-/* Programme meta (W1 contract shape). */
-html[data-couch] .rs-livetv-programme-meta__title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--rs-text);
-}
-html[data-couch] .rs-livetv-programme-meta__live {
-  font-size: 0.875rem;
-  font-weight: 800;
-  padding: 0.25rem 0.625rem;
-  border-radius: 0.375rem;
-  background: #c8102e;
-  color: #fff;
-  margin-right: 0.5rem;
-}
-html[data-couch] .rs-livetv-programme-meta__time,
-html[data-couch] .rs-livetv-programme-meta__desc {
-  font-size: 1.125rem;
-  color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-programme-meta__progress {
-  display: block;
-  height: 0.375rem;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.25);
-  overflow: hidden;
-}
-html[data-couch] .rs-livetv-programme-meta__progress > span {
-  display: block;
-  height: 100%;
-  background: var(--rs-accent);
-}
+/* Programme meta — single canonical definition in the "Live TV
+   shared (W1)" block below (0.11.0 W1 merge). The first definition
+   that used to live here is deleted: every one of its declarations
+   was overridden by the later block. */
 
 /* Options + error overlays (centred panels over the video). */
 html[data-couch] .rs-livetv-play-options,
@@ -1666,12 +1562,13 @@ html[data-couch] .rs-livetv-play-browser .rs-livetv-browser {
   min-height: 0;
 }
 
-/* ── Merge note (0.7.0 integration) ────────────────────────────── */
-/* W1's shared Live TV block below is appended AFTER the W2/W3
-   blocks on purpose: the overlapping .rs-livetv-channel-card /
-   .rs-livetv-programme-meta selectors are W1's canonical versions
-   (they match W1's canonical TvChannelCard/TvProgrammeMeta) and
-   win by cascade order. */
+/* ── Merge note (0.11.0 W1 — supersedes the 0.7.0 note) ────────── */
+/* The 0.7.0 integration appended W1's shared block AFTER the W2/W3
+   blocks so the overlapping .rs-livetv-channel-card /
+   .rs-livetv-programme-meta selectors would win by cascade order.
+   0.11.0 folds the duplicates into single canonical definitions
+   (identical computed values — later block wins per property), so
+   nothing below relies on cascade order any more. */
 
 /* ── Live TV shared (W1) ───────────────────────────────────────── */
 /* TvChannelCard / TvProgrammeMeta / Channel Browser. Dark RedSilk
@@ -1679,32 +1576,56 @@ html[data-couch] .rs-livetv-play-browser .rs-livetv-browser {
    layout lives in livetv.astro (.rs-livetv-home-*); these shared
    classes are what W2/W3 render against too. */
 
-/* Channel card (TvChannelCard.astro + buildChannelCardElement). */
+/* Channel card (TvChannelCard.astro + buildChannelCardElement).
+   0.11.0 W1: SINGLE canonical definition — the union of the two
+   blocks that used to define these selectors (a horizontal row
+   above, a vertical card here), later block winning per property,
+   so the computed render is unchanged. */
 html[data-couch] .rs-livetv-channel-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   flex-shrink: 0;
   width: 20rem;
+  padding: 1rem 1.25rem;
   border-radius: 1rem;
   border: 1px solid var(--rs-line);
   background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
   box-shadow: var(--rs-shadow);
+  color: var(--rs-text);
   overflow: hidden;
 }
 html[data-couch] .rs-livetv-channel-card--large {
   width: 24rem;
+  padding: 1.25rem 1.5rem;
 }
 html[data-couch] .rs-livetv-channel-card__link {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+  height: 100%;
   padding: 1rem;
   color: var(--rs-text);
   text-decoration: none;
-  height: 100%;
 }
+/* NOTE (0.11.0 W1 audit): `height: 4rem` here is load-bearing and
+   must not be "cleaned up": the first block set it and the second
+   never overrode it, so the live logo is a 4rem strip and the
+   `aspect-ratio: 16 / 9` beside it never applies (both dimensions
+   are definite). The 16/9 logo the canonical block describes never
+   rendered — a design decision for a later pass, not this merge. */
 html[data-couch] .rs-livetv-channel-card__logo {
+  flex: 0 0 auto;
   display: block;
   width: 100%;
+  height: 4rem;
   aspect-ratio: 16 / 9;
+  align-items: center;
+  justify-content: center;
   border-radius: 0.75rem;
   background: color-mix(in srgb, var(--rs-bg) 60%, transparent);
   border: 1px solid var(--rs-line);
@@ -1717,6 +1638,8 @@ html[data-couch] .rs-livetv-channel-card__logo .rs-image {
 html[data-couch] .rs-livetv-channel-card__logo img {
   width: 100%;
   height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   padding: 0.5rem;
 }
@@ -1734,6 +1657,7 @@ html[data-couch] .rs-livetv-channel-card__body {
   flex-direction: column;
   gap: 0.25rem;
   min-width: 0;
+  flex: 1;
 }
 html[data-couch] .rs-livetv-channel-card__name {
   font-size: 1.375rem;
@@ -1780,6 +1704,10 @@ html[data-couch] .rs-livetv-channel-card__catchup {
   padding: 0.125rem 0.625rem;
 }
 html[data-couch] .rs-livetv-channel-card__progress {
+  position: absolute;
+  left: 1.25rem;
+  right: 1.25rem;
+  bottom: 0.5rem;
   display: block;
   height: 0.375rem;
   border-radius: 999px;
@@ -1790,9 +1718,6 @@ html[data-couch] .rs-livetv-channel-card__progress > span {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
-}
-html[data-couch] .rs-livetv-channel-card {
-  position: relative;
 }
 html[data-couch] .rs-livetv-channel-card:focus-visible,
 html[data-couch] .rs-livetv-channel-card__link:focus-visible {
@@ -1870,14 +1795,16 @@ html[data-couch] .rs-livetv-browser {
   gap: 1rem;
   min-height: 0;
 }
+/* Toolbar: search sits top-right (mockup), sort beside it. */
 html[data-couch] .rs-livetv-browser__toolbar {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+  justify-content: flex-end;
 }
 html[data-couch] .rs-livetv-browser__search {
-  flex: 1;
-  min-width: 0;
+  flex: 0 1 26rem;
+  min-width: 12rem;
   min-height: 3.5rem;
   padding: 0.625rem 1rem;
   border-radius: 0.75rem;
@@ -1936,14 +1863,15 @@ html[data-couch] .rs-livetv-browser__close:focus-visible {
     0 0 0 2px var(--rs-focus),
     0 0 1.5rem 0.25rem var(--rs-focus-glow);
 }
+/* The list is borderless: hairline separators only, no panel box. */
 html[data-couch] .rs-livetv-browser__list {
   position: relative;
   height: 32rem;
   max-height: 60vh;
   overflow-y: auto;
-  border-radius: 1rem;
-  border: 1px solid var(--rs-line);
-  background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
+  border: none;
+  background: transparent;
+  border-radius: 0;
 }
 html[data-couch] .rs-livetv-browser__viewport {
   position: absolute;
@@ -1951,12 +1879,13 @@ html[data-couch] .rs-livetv-browser__viewport {
   top: 0;
 }
 html[data-couch] .rs-livetv-browser__row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 3.25rem minmax(10rem, 1.15fr) minmax(0, 1.5fr) minmax(0, 1.05fr);
   gap: 1rem;
+  align-items: center;
   height: 4.75rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--rs-line);
+  padding: 0.5rem 0.75rem 0.5rem 0;
+  border-bottom: 1px solid var(--rs-line-soft);
   cursor: pointer;
 }
 /* INTEGRATION 0.9.0 — mockup 1: the highlighted row carries a
@@ -2002,13 +1931,6 @@ html[data-couch] .rs-livetv-browser__initial {
   font-weight: 800;
   color: var(--rs-text-2);
 }
-html[data-couch] .rs-livetv-browser__body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
 html[data-couch] .rs-livetv-browser__name {
   font-size: 1.375rem;
   font-weight: 700;
@@ -2017,8 +1939,9 @@ html[data-couch] .rs-livetv-browser__name {
   white-space: nowrap;
 }
 html[data-couch] .rs-livetv-browser__num {
-  color: var(--rs-text-2);
+  font-size: 1.25rem;
   font-weight: 600;
+  color: var(--rs-text-2);
   margin-right: 0.5rem;
 }
 html[data-couch] .rs-livetv-browser__now,
@@ -2031,7 +1954,7 @@ html[data-couch] .rs-livetv-browser__next {
 }
 html[data-couch] .rs-livetv-browser__progress {
   display: block;
-  height: 2px;
+  height: 0.25rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
   overflow: hidden;
@@ -2045,27 +1968,6 @@ html[data-couch] .rs-livetv-browser__fav {
   flex-shrink: 0;
   color: var(--rs-accent);
   font-size: 1.375rem;
-}
-html[data-couch] .rs-livetv-browser__catchup {
-  flex-shrink: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--rs-accent);
-  border: 1px solid color-mix(in srgb, var(--rs-accent) 55%, transparent);
-  border-radius: 999px;
-  padding: 0.125rem 0.625rem;
-}
-html[data-couch] .rs-livetv-browser__watch {
-  flex-shrink: 0;
-  min-height: 3rem;
-  padding: 0.5rem 1.25rem;
-  border-radius: 0.75rem;
-  border: 1px solid var(--rs-accent);
-  background: color-mix(in srgb, var(--rs-accent) 16%, transparent);
-  color: var(--rs-text);
-  font-size: 1.25rem;
-  font-weight: 700;
-  cursor: pointer;
 }
 html[data-couch] .rs-livetv-browser__watch:focus-visible {
   outline: none;
@@ -2151,16 +2053,11 @@ html[data-couch] .rs-tv-row-list {
    (TvOsd / TvQuickSurf / livetv-playback.ts) and are NOT restyled
    here. */
 
-/* 1. Truly full-bleed video. The 0.7.0 fullscreen rule (above) sets
-   position fixed / inset 0 / width+height 100% / max-height none —
-   but never clears the scoped .player-wrap cap
-   (max-width: calc(46dvh * 16 / 9) = 883px at 1920×1080) or its
-   1rem radius, so playback was an 883×1080 column with rounded
-   corners. This later, same-specificity rule clears both. */
-html[data-couch][data-livetv-mode="playback"] #player-wrap {
-  max-width: none;
-  border-radius: 0;
-}
+/* 1. Truly full-bleed video (the 883px-column bug: the scoped
+   .player-wrap cap is max-width calc(46dvh * 16 / 9) with a 1rem
+   radius). 0.11.0 W1: the clearing that used to live in a second,
+   later rule here is folded into the fullscreen rule above — one
+   full-bleed rule instead of two that must agree. */
 
 /* 2. No application chrome over fullscreen video. The 0.8.0 shell
    already promises "during normal playback ALL application controls
@@ -2183,13 +2080,22 @@ html[data-couch][data-livetv-mode="playback"] #current-nownext {
   display: none;
 }
 
-/* Live TV 0.9.0 — Landing */
+/* Live TV 0.11.0 — Landing (W3) */
 /* Cinematic Live TV landing (TvLiveLanding / TvLiveHero /
-   TvCategoryTile). NO rectangles inside rectangles: the landing is
-   one flowing column — a full-bleed hero band, a text-button quick
-   row divided by hairlines, a horizontal category row — no outer
-   panel containing smaller panels, no giant logo columns. Hierarchy
-   via spacing, typography, gradients and focus states only.
+   TvCategoryTile / TvProgrammeArt). Programme-led hero: real
+   programme artwork forms the right-hand composition of the band
+   with gradient fades preserving readability; the branded
+   TvProgrammeArt placeholder stands when no artwork resolves.
+   Quick access is a hierarchy — one primary Continue Watching
+   pill, then quieter pills — not a toolbar of equal buttons.
+   Category tiles are a bounded grid (up to six across, fewer
+   groups spread evenly — no horizontal scroll, no giant-column
+   bug): fixed height, flexible width, contextual programme
+   artwork or a gradient + one small glyph — never a giant
+   initial, never stacked channel logos.
+   No rectangles inside rectangles: the landing is one flowing
+   column — hero band, pill row, category grid — hierarchy via
+   spacing, typography, gradients and focus states only.
    All sizes are rem on the existing root scaling (design canvas
    1920×1080), so 4K stays proportional. No new colour literals:
    every colour is a --rs-* token or color-mix off one, so the
@@ -2198,29 +2104,26 @@ html[data-couch][data-livetv-mode="playback"] #current-nownext {
 html[data-couch] .rs-livetv-landing {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: 1.75rem;
   min-height: 0;
   flex: 1;
 }
 
-/* (A) Hero — full-width cinematic band. The art layer is a branded
-   burgundy gradient (the EPG carries no programme artwork, so none
-   is fabricated); the channel logo sits large at the right. No
-   border, no card: the band bleeds to the content edges and is
-   closed by a single hairline. Fixed band height keeps the landing
-   inside 1920×1080 with the quick row + category row below it. */
+/* (A) Hero — full-width cinematic band. The art layer is the
+   programme artwork (or the branded placeholder); fades pull the
+   near-black background over the left and bottom so the text
+   stays readable. No border, no card: the band bleeds to the
+   content edges and is closed by a single hairline. Fixed band
+   height keeps the landing inside 1920×1080 with the quick row +
+   category grid below it. */
 html[data-couch] .rs-livetv-landing-hero {
   position: relative;
   display: flex;
   align-items: flex-end;
-  min-height: 24rem;
-  padding: 2.5rem 2.5rem 2rem;
+  min-height: 27rem;
   overflow: hidden;
   border-bottom: 1px solid var(--rs-line-soft);
-  background:
-    radial-gradient(90% 130% at 88% 10%, color-mix(in srgb, var(--rs-accent) 38%, transparent) 0%, transparent 55%),
-    radial-gradient(70% 100% at 10% 100%, color-mix(in srgb, var(--rs-accent) 18%, transparent) 0%, transparent 60%),
-    linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+  background: var(--rs-bg);
 }
 html[data-couch] .rs-livetv-landing-hero[hidden] {
   display: none;
@@ -2228,43 +2131,30 @@ html[data-couch] .rs-livetv-landing-hero[hidden] {
 html[data-couch] .rs-livetv-landing-hero__art {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 3rem;
   pointer-events: none;
 }
-html[data-couch] .rs-livetv-landing-hero__logo {
-  width: 20rem;
-  height: 11.25rem;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-  opacity: 0.92;
-}
-html[data-couch] .rs-livetv-landing-hero__logo img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  padding: 1rem;
-  filter: drop-shadow(0 0.5rem 1.5rem rgb(0 0 0 / 0.5));
-}
-html[data-couch] .rs-livetv-landing-hero__logo-fallback {
-  font-size: 6rem;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--rs-focus);
-  text-shadow: 0 0 2rem var(--rs-focus-glow);
+html[data-couch] .rs-livetv-landing-hero__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, var(--rs-bg) 0%, color-mix(in srgb, var(--rs-bg) 88%, transparent) 30%, color-mix(in srgb, var(--rs-bg) 22%, transparent) 58%, transparent 72%),
+    linear-gradient(0deg, var(--rs-bg) 0%, transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--rs-bg) 45%, transparent) 0%, transparent 28%);
 }
 html[data-couch] .rs-livetv-landing-hero__body {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  max-width: 52rem;
+  gap: 0.625rem;
+  max-width: 48rem;
   min-width: 0;
+  padding: 2.5rem 2.5rem 2rem;
 }
 html[data-couch] .rs-livetv-landing-hero__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
   margin: 0;
   font-size: 0.875rem;
   font-weight: 700;
@@ -2272,18 +2162,64 @@ html[data-couch] .rs-livetv-landing-hero__eyebrow {
   text-transform: uppercase;
   color: var(--rs-focus);
 }
+html[data-couch] .rs-livetv-landing-hero__eyebrow::before {
+  content: "";
+  width: 0.5625rem;
+  height: 0.5625rem;
+  border-radius: 50%;
+  background: var(--rs-accent);
+  box-shadow: 0 0 0.75rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-landing-hero__channel {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-landing-hero__logo {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  max-width: 11rem;
+  height: 3rem;
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-landing-hero__logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0.25rem 0.75rem color-mix(in srgb, var(--rs-bg) 85%, transparent));
+}
+html[data-couch] .rs-livetv-landing-hero__logo-fallback {
+  padding: 0.375rem 0.875rem;
+  border: 1px solid var(--rs-line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--rs-surface) 60%, transparent);
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: var(--rs-focus);
+  white-space: nowrap;
+}
 html[data-couch] .rs-livetv-landing-hero__title {
   margin: 0;
-  font-size: clamp(2rem, 4vw, 3.25rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  font-weight: 800;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.375rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--rs-text-2);
 }
 html[data-couch] .rs-livetv-landing-hero__programme {
-  margin: 0.25rem 0 0;
-  font-size: 1.5rem;
-  font-weight: 700;
-  line-height: 1.25;
+  margin: 0.125rem 0 0;
+  font-size: clamp(2.125rem, 3.4vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0.125rem 1.25rem color-mix(in srgb, var(--rs-bg) 85%, transparent);
 }
 /* Live TV 0.9.0 — Browser */
 /* Channel Browser utility screen (0.9.0, mockup 1000017108_1_hcjs.png).
@@ -2318,20 +2254,17 @@ html[data-couch] .rs-livetv-browser[data-browser-screen] .rs-livetv-browser__lis
   min-height: 0;
   height: auto;
   max-height: none;
+  /* INTEGRATION 0.11.0 — the shell's fixed hints bar overlays the
+     bottom ~45px of the viewport; without this the last row (9th of
+     9 at 1080p) scrolls only to half-hidden under the bar. The
+     padding grows the scrollable area so every row can clear it. */
+  padding-bottom: 4.5rem;
 }
 
-/* Toolbar: search sits top-right (mockup), sort beside it. */
-html[data-couch] .rs-livetv-browser__toolbar {
-  justify-content: flex-end;
-}
-html[data-couch] .rs-livetv-browser__search {
-  flex: 0 1 26rem;
-  min-width: 12rem;
-}
 
-/* Column header shares the row grid exactly. */
-html[data-couch] .rs-livetv-browser__head,
-html[data-couch] .rs-livetv-browser__row {
+/* Column header shares the row grid exactly (the row itself
+   carries the same grid in the base block above). */
+html[data-couch] .rs-livetv-browser__head {
   display: grid;
   grid-template-columns: 3.25rem minmax(10rem, 1.15fr) minmax(0, 1.5fr) minmax(0, 1.05fr);
   column-gap: 1rem;
@@ -2352,22 +2285,6 @@ html[data-couch] .rs-livetv-browser__head-cell {
   white-space: nowrap;
 }
 
-/* The list is borderless: hairline separators only, no panel box. */
-html[data-couch] .rs-livetv-browser__list {
-  border: none;
-  background: transparent;
-  border-radius: 0;
-}
-html[data-couch] .rs-livetv-browser__row {
-  height: 4.75rem;
-  padding: 0.5rem 0.75rem 0.5rem 0;
-  border-bottom: 1px solid var(--rs-line-soft);
-}
-html[data-couch] .rs-livetv-browser__num {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--rs-text-2);
-}
 html[data-couch] .rs-livetv-browser__channel {
   display: flex;
   align-items: center;
@@ -2405,9 +2322,6 @@ html[data-couch] .rs-livetv-browser__time {
 html[data-couch] .rs-livetv-browser__now--muted,
 html[data-couch] .rs-livetv-browser__next--muted {
   color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-browser__progress {
-  height: 0.25rem;
 }
 
 /* Compact contextual panel: ≤ ~32% width, one left hairline, no box. */
@@ -2492,6 +2406,113 @@ html[data-couch] .rs-livetv-browser__detail-title {
   font-weight: 700;
   line-height: 1.25;
 }
+
+/* ── Channel Browser 0.11.0 (W4) ───────────────────────────────────
+   Mockup 1 (1000017108_0_mo5o.png): title + search share one header
+   row; category pills carry one icon each and the active pill has a
+   full glowing red border; the contextual panel (≤30%) earns its
+   space with 16:9 programme art for the selected channel only, and
+   stays compact with no art area at all when there is no EPG; the
+   Xbox hints legend closes the screen. Tokens only — no colour
+   literals here, so the hue regression (achromatic or wine
+   340–355°) cannot trip. */
+html[data-couch] .rs-livetv-browser__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+}
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__toolbar {
+  flex: 0 0 auto;
+  padding-bottom: 0.25rem;
+}
+/* The header must not squeeze the search: the input keeps its
+   full 26rem basis (the mockup's search reads in full), the sort
+   and Close take what is left. */
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__search {
+  flex: 0 0 26rem;
+}
+html[data-couch] .rs-livetv-browser__search:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-livetv-browser__category-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser__category.is-active {
+  border-color: var(--rs-accent);
+  background: color-mix(in srgb, var(--rs-accent) 16%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--rs-accent),
+    0 0 1.25rem 0.125rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__category.is-active .rs-livetv-browser__category-icon {
+  color: var(--rs-focus);
+}
+/* Detail programme art: 16:9, art only when enrichment found some;
+   otherwise the branded placeholder (channel logo on a burgundy
+   gradient, never a giant initial, never an empty rectangle). */
+html[data-couch] .rs-livetv-browser__detail-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-browser__detail-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo {
+  width: 7rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+  filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 0.5));
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo .rs-livetv-browser__initial {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--rs-focus);
+}
+/* In-list empty state: the visible no-match / empty-category
+   feedback (the status line sits below the list). */
+html[data-couch] .rs-livetv-browser__empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser__empty[hidden] {
+  display: none;
+}
 html[data-couch] .rs-livetv-landing-hero__time {
   margin: 0;
   font-size: var(--rs-meta-size);
@@ -2502,10 +2523,10 @@ html[data-couch] .rs-livetv-landing-hero__time:empty {
   display: none;
 }
 html[data-couch] .rs-livetv-landing-hero__progress {
-  width: 22rem;
+  width: 26rem;
   max-width: 100%;
   height: 0.25rem;
-  margin-top: 0.5rem;
+  margin-top: 0.375rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--rs-accent) 25%, transparent);
   overflow: hidden;
@@ -2519,8 +2540,22 @@ html[data-couch] .rs-livetv-landing-hero__progress-fill {
   background: linear-gradient(90deg, var(--rs-accent), var(--rs-focus));
   transition: width 500ms ease;
 }
+html[data-couch] .rs-livetv-landing-hero__description {
+  margin: 0.25rem 0 0;
+  max-width: 42rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  color: var(--rs-text-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html[data-couch] .rs-livetv-landing-hero__description[hidden] {
+  display: none;
+}
 html[data-couch] .rs-livetv-landing-hero__next {
-  margin: 0.5rem 0 0;
+  margin: 0.375rem 0 0;
   font-size: var(--rs-meta-size);
   color: var(--rs-text-2);
 }
@@ -2531,7 +2566,7 @@ html[data-couch] .rs-livetv-landing-hero__actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
-  margin-top: 1rem;
+  margin-top: 0.875rem;
 }
 html[data-couch] .rs-livetv-landing-hero__action {
   padding: 0.875rem 1.75rem;
@@ -2546,56 +2581,111 @@ html[data-couch] .rs-livetv-landing-hero__action--primary {
   background: var(--rs-accent);
   color: var(--rs-text);
 }
+html[data-couch] .rs-livetv-landing-hero__action--primary::before {
+  content: "▶ ";
+  font-size: 1rem;
+}
 html[data-couch] .rs-livetv-landing-hero__action--secondary {
   border: 1px solid var(--rs-line);
-  background: transparent;
+  background: color-mix(in srgb, var(--rs-bg) 55%, transparent);
   color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-landing-hero__action:hover {
+  filter: brightness(1.12);
 }
 html[data-couch] .rs-livetv-landing-hero__action:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--rs-bg), 0 0 0 4px var(--rs-focus);
 }
 
-/* (B) Quick access — restrained text-button row, not a panel of
-   panels: transparent buttons, hairline dividers, focus ring only.
-   The row wraps rather than overflowing; sublabels carry the real
-   counts / channel name in secondary text. */
+/* Programme art (TvProgrammeArt) — the shared artwork mount.
+   Hero variant fills its positioned parent; the <img> covers
+   the layer, focal point right-of-centre where the composition
+   puts the imagery. The branded placeholder is layered burgundy
+   gradients + small channel branding text — never a giant empty
+   rectangle, never a giant initial. Feature / thumb / card
+   variants sit in normal flow with a 16:9 frame. */
+html[data-couch] .rs-livetv-programme-art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 130% at 88% 10%, color-mix(in srgb, var(--rs-accent) 38%, transparent) 0%, transparent 55%),
+    radial-gradient(70% 100% at 10% 100%, color-mix(in srgb, var(--rs-accent) 18%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-programme-art--feature,
+html[data-couch] .rs-livetv-programme-art--thumb,
+html[data-couch] .rs-livetv-programme-art--card {
+  position: relative;
+  inset: auto;
+  aspect-ratio: 16 / 9;
+  min-height: 8rem;
+}
+html[data-couch] .rs-livetv-programme-art__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 68% center;
+}
+html[data-couch] .rs-livetv-programme-art__brand {
+  position: absolute;
+  right: 2.5rem;
+  bottom: 1.5rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--rs-text) 55%, transparent);
+  white-space: nowrap;
+}
+/* (B) Quick access — a hierarchy, not a toolbar of equals:
+   Continue Watching is the one primary pill (red outline, soft
+   accent wash); the rest are quiet pills with real counts /
+   channel names as sublabels. The row wraps rather than
+   overflowing. Focus ring only — no permanent control bar. */
 html[data-couch] .rs-livetv-landing-quick {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 0;
+  gap: 0.875rem;
 }
 html[data-couch] .rs-livetv-landing-quick__action {
   display: flex;
   align-items: center;
   gap: 0.875rem;
-  padding: 0.75rem 1.75rem;
-  border: 0;
-  border-left: 1px solid var(--rs-line-soft);
-  border-radius: 0.75rem;
+  padding: 0.875rem 1.5rem;
+  border: 1px solid var(--rs-line);
+  border-radius: 999px;
   background: transparent;
   color: var(--rs-text);
   font-family: var(--rs-font-body);
   text-align: left;
   cursor: pointer;
 }
-html[data-couch] .rs-livetv-landing-quick__action:first-child {
-  border-left: 0;
-  padding-left: 0.25rem;
+html[data-couch] .rs-livetv-landing-quick__action--primary {
+  border-color: var(--rs-accent);
+  background: color-mix(in srgb, var(--rs-accent) 16%, transparent);
+  box-shadow: 0 0 1.5rem color-mix(in srgb, var(--rs-accent) 22%, transparent);
 }
 html[data-couch] .rs-livetv-landing-quick__action[hidden] {
   display: none;
 }
 html[data-couch] .rs-livetv-landing-quick__action:hover {
+  border-color: var(--rs-accent);
   background: color-mix(in srgb, var(--rs-surface) 55%, transparent);
+}
+html[data-couch] .rs-livetv-landing-quick__action--primary:hover {
+  background: color-mix(in srgb, var(--rs-accent) 24%, transparent);
 }
 html[data-couch] .rs-livetv-landing-quick__action:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--rs-focus), 0 0 2rem 0.25rem var(--rs-focus-glow);
+  box-shadow: 0 0 0 2px var(--rs-bg), 0 0 0 4px var(--rs-focus);
 }
 html[data-couch] .rs-livetv-landing-quick__glyph {
-  font-size: 1.5rem;
+  font-size: 1.375rem;
   line-height: 1;
   color: var(--rs-focus);
 }
@@ -2621,14 +2711,17 @@ html[data-couch] .rs-livetv-landing-quick__sub:empty {
   display: none;
 }
 
-/* (C) Browse by Category — horizontal row of FIXED-SIZE tiles:
-   18.75rem × 10.625rem (300×170px at 1920×1080), rem-scaled.
-   The tile height is fixed, never auto: artwork is bounded inside
-   the tile and can never drive the parent's height. Artwork is a
-   deterministic burgundy gradient variant + one large initial
-   motif — deliberately sized, consistent, and NEVER a stack of
-   channel logos (tiles contain no <img> at all). The row scrolls
-   horizontally instead of wrapping into a wall of tiles. */
+/* (C) Browse by Category — a bounded grid (never a horizontal
+   scroller, never a wall of tiles): up to six tiles share the
+   row, fewer groups spread evenly instead of leaving dead
+   columns. Each tile keeps its FIXED height (10.625rem) and a
+   flexible width (≥16rem). Artwork is bounded inside the tile
+   and can never drive the parent's height: the art layer is
+   absolute, the text sits above it on a bottom fade. Artwork is
+   contextual programme art for the tile's now-playing programme,
+   or the deterministic burgundy gradient variant + one small
+   glyph (≤1.5rem, a texture accent — never a giant initial,
+   never a stack of channel logos). */
 html[data-couch] .rs-livetv-landing-categories {
   display: flex;
   flex-direction: column;
@@ -2646,18 +2739,17 @@ html[data-couch] .rs-livetv-landing-categories__title {
   line-height: 1.1;
 }
 html[data-couch] .rs-livetv-landing-categories__row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
   gap: 1.25rem;
-  overflow-x: auto;
-  padding-bottom: 0.5rem;
-  scrollbar-width: thin;
+  min-width: 0;
 }
 html[data-couch] .rs-livetv-landing-category-tile {
   position: relative;
-  flex: 0 0 auto;
-  width: 18.75rem;
+  width: 100%;
   height: 10.625rem;
-  padding: 1.25rem;
+  min-width: 0;
+  padding: 1.125rem 1.25rem;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -2681,32 +2773,53 @@ html[data-couch] .rs-livetv-landing-category-tile:focus-visible {
   border-color: var(--rs-focus);
   box-shadow: 0 0 0 2px var(--rs-focus), 0 0 2rem 0.25rem var(--rs-focus-glow);
 }
-html[data-couch] .rs-livetv-landing-category-tile__motif {
+html[data-couch] .rs-livetv-landing-category-tile__art {
   position: absolute;
-  top: -1.75rem;
-  right: 0.75rem;
-  font-size: 8rem;
-  font-weight: 800;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+html[data-couch] .rs-livetv-landing-category-tile__art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(0deg, color-mix(in srgb, var(--rs-bg) 88%, transparent) 0%, color-mix(in srgb, var(--rs-bg) 40%, transparent) 55%, transparent 78%),
+    linear-gradient(180deg, color-mix(in srgb, var(--rs-bg) 30%, transparent) 0%, transparent 30%);
+}
+html[data-couch] .rs-livetv-landing-category-tile__art-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+html[data-couch] .rs-livetv-landing-category-tile__glyph {
+  position: absolute;
+  top: 0.875rem;
+  right: 1rem;
+  font-size: 1.5rem;
   line-height: 1;
-  color: color-mix(in srgb, var(--rs-focus) 22%, transparent);
+  color: color-mix(in srgb, var(--rs-text) 55%, transparent);
   pointer-events: none;
 }
 html[data-couch] .rs-livetv-landing-category-tile__label {
   position: relative;
-  font-size: 1.5rem;
+  font-size: 1.375rem;
   font-weight: 800;
   letter-spacing: -0.01em;
   line-height: 1.1;
 }
 html[data-couch] .rs-livetv-landing-category-tile__count {
   position: relative;
-  font-size: 1.125rem;
+  font-size: 1rem;
   color: var(--rs-text-2);
 }
 html[data-couch] .rs-livetv-landing-category-tile__now {
   position: relative;
-  margin-top: 0.375rem;
-  font-size: 1rem;
+  margin-top: 0.25rem;
+  font-size: 0.95rem;
   line-height: 1.3;
   color: var(--rs-text-2);
   display: -webkit-box;
@@ -2817,31 +2930,15 @@ html[data-couch] .rs-livetv-browser__guide:focus-visible {
      unit; highlight is a red tint + red border across all columns.
    The OSD is a single floating rounded panel (soft gradient + blur,
    faint red bottom glow, no nested cards); Quick Surf is one compact
-   panel docked right with the video visible behind it. Same
-   selectors as the 0.8.0 rules above, later in the file, so these win
-   at equal specificity. Colour discipline
+   panel docked right with the video visible behind it. 0.11.0 W1:
+   the OSD / Quick Surf overrides that used to re-define the 0.8.0
+   selectors here are folded into the canonical definitions above
+   (identical computed values) — this section now holds only the
+   rules that are new here (channel/programme rows, Quick Surf
+   header/steps, OSD channel-block). Colour discipline
    (couch-visual-identity.test.ts): only token vars, color-mix,
    transparent, and rgb() literals in the burgundy family
    (hue 340–355°) or achromatic — no new hex, no purple. */
-html[data-couch] .rs-livetv-play-osd {
-  left: 1.5rem;
-  right: 1.5rem;
-  bottom: 1.5rem;
-  max-height: 38vh;
-  padding: 1.5rem 2rem 1.25rem;
-  border-radius: 1.25rem;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  background:
-    linear-gradient(180deg, rgb(31 10 15 / 0.82) 0%, rgb(13 4 6 / 0.9) 100%);
-  box-shadow:
-    0 1.5rem 3rem rgb(0 0 0 / 0.45),
-    0 0 2.5rem rgb(200 16 46 / 0.14);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-html[data-couch] .rs-livetv-play-osd__row {
-  align-items: stretch;
-}
 html[data-couch] .rs-livetv-play-osd__channel-block {
   display: flex;
   flex: 0 0 auto;
@@ -2859,12 +2956,6 @@ html[data-couch] .rs-livetv-play-osd .rs-programme-row__next {
   border-left: 1px solid rgb(255 255 255 / 0.12);
   padding-left: 1.5rem;
 }
-/* Mockup 1 hierarchy: the programme title is the dominant text in
-   the lower third, the channel line secondary; the progress bar
-   spans the Now column. */
-html[data-couch] .rs-livetv-play-osd__channel {
-  font-size: 1.375rem;
-}
 html[data-couch] .rs-livetv-play-osd .rs-programme-row__title {
   font-size: 1.75rem;
 }
@@ -2873,20 +2964,6 @@ html[data-couch] .rs-livetv-play-osd .rs-programme-row__progress {
 }
 html[data-couch] .rs-livetv-play-osd [data-osd-chno]:empty {
   display: none;
-}
-/* Ghost actions: one quiet row, no boxes — focus is the accent
-   outline from the 0.8.0 rule, which stays in force. This restyles
-   the shared .rs-livetv-play-osd__btn class, so the options / error
-   / Quick Surf buttons in playback read the same way. */
-html[data-couch] .rs-livetv-play-osd__btn {
-  padding: 0.5rem 0.75rem;
-  font-size: 1.125rem;
-  border: 0;
-  border-radius: 0.625rem;
-  background: transparent;
-}
-html[data-couch] .rs-livetv-play-osd__btn:hover {
-  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
 }
 html[data-couch] .rs-livetv-play-osd__sep {
   flex: 0 0 auto;
@@ -3113,35 +3190,11 @@ html[data-couch] .rs-programme-row__progress > span {
 /* Quick Surf: compact right-docked panel, video visible behind.
    The overlay itself is only a soft right-side scrim — no dimming
    slab over the video. Rows are the shared TvChannelRow tiles. */
-html[data-couch] .rs-livetv-play-quicksurf {
-  align-items: center;
-  justify-content: flex-end;
-  padding: 2rem 1.5rem;
-  background: linear-gradient(270deg, rgb(13 4 6 / 0.55) 0%, transparent 46%);
-}
-html[data-couch] .rs-livetv-play-quicksurf__panel {
-  width: min(36rem, 46vw);
-  max-height: calc(100vh - 4rem);
-  overflow-y: auto;
-  gap: 0.75rem;
-  padding: 1.25rem 1.5rem;
-  border-radius: 1.25rem;
-  background:
-    linear-gradient(180deg, rgb(31 10 15 / 0.88) 0%, rgb(13 4 6 / 0.92) 100%);
-  border: 1px solid rgb(255 255 255 / 0.08);
-  box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 0.45);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
 html[data-couch] .rs-livetv-play-quicksurf__header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
-}
-html[data-couch] .rs-livetv-play-quicksurf__eyebrow {
-  font-size: 1.625rem;
-  text-transform: none;
 }
 html[data-couch] .rs-livetv-play-quicksurf__position {
   margin: 0;
@@ -3178,26 +3231,6 @@ html[data-couch] .rs-livetv-play-quicksurf__note {
   margin: 0;
   font-size: 1rem;
   color: var(--rs-text-2);
-}
-/* Category shortcuts as a flat text row, not pills. */
-html[data-couch] .rs-livetv-play-quicksurf__chip {
-  padding: 0.375rem 0.5rem;
-  border: 0;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--rs-text-2);
-}
-html[data-couch] .rs-livetv-play-quicksurf__chip[aria-pressed="true"] {
-  background: transparent;
-  border-color: transparent;
-  color: var(--rs-text);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  text-decoration-color: var(--rs-accent);
-  text-decoration-thickness: 2px;
-}
-html[data-couch] .rs-livetv-play-quicksurf__actions {
-  gap: 0.25rem 0.5rem;
 }
 /* Live TV 0.9.0 — Guide (W4) ────────────────────────────────────
  * Styles for the rebuilt TvGuideView modes (On Now / Tonight /
@@ -3290,6 +3323,17 @@ html[data-couch] .rs-guide-list {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+}
+/* INTEGRATION 0.11.0 — guide scroll containers (On Now list, By
+   Channel schedule, Tonight sections, featured column) all end at
+   the viewport bottom under the shell's fixed hints bar; without
+   this the last row scrolls only to half-hidden under the bar —
+   the same defect as the browser's 9th row. The padding grows each
+   scrollable area so every row can clear the bar. */
+html[data-couch] .rs-guide-list,
+html[data-couch] .rs-guide-tonight-sections,
+html[data-couch] .rs-guide-now-featured {
+  padding-bottom: 4.5rem;
 }
 html[data-couch] .rs-guide-panel-empty {
   padding: 2rem;
@@ -3620,6 +3664,247 @@ html[data-couch] .rs-guide-channel-dayhint {
   }
 }
 
+/* Live TV 0.11.0 — Guide composition (W6) ───────────────────────
+ * Mockup 3's Guide panel: On Now is featured-left + Now/Next
+ * list-right (never stacked full-width rows); Tonight's featured
+ * programme is art-led (photo, no enclosing rectangle); By
+ * Channel rows are time-led (no repeated logo/channel per row).
+ * Burgundy 346–351° tokens only; no new colours, no nested
+ * panels — the featured art image is the visual, not a box. */
+/* On Now: featured column + Now/Next list column. */
+html[data-couch] .rs-guide-now {
+  display: flex;
+  gap: 2rem;
+  flex: 1;
+  min-height: 0;
+}
+html[data-couch] .rs-guide-now-featured {
+  flex: 0 0 34%;
+  min-width: 24rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+html[data-couch] .rs-guide-now-featured[hidden] {
+  display: none;
+}
+html[data-couch] .rs-guide-now-listwrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+html[data-couch] .rs-guide-now-head {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  padding: 0.25rem 1.25rem 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-text-2);
+  flex-shrink: 0;
+}
+/* Featured programme — art-led, no enclosing rectangle. The
+   --now variant stacks art over text (narrow left column); the
+   --art variant (Tonight) puts art left of the text. */
+html[data-couch] .rs-guide-featured--now,
+html[data-couch] .rs-guide-featured--art {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-couch] .rs-guide-featured--now {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+}
+html[data-couch] .rs-guide-featured--art {
+  flex-direction: row;
+  gap: 1.5rem;
+}
+html[data-couch] .rs-guide-featured--art .rs-guide-featured__art {
+  flex: 0 0 30rem;
+}
+html[data-couch] .rs-guide-featured__art {
+  display: block;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 1rem;
+  overflow: hidden;
+  /* INTEGRATION 0.11.0 — the flat two-stop wash read as a giant
+     empty mauve slab when no key is configured; mirror the browser
+     detail placeholder's richer treatment (radial accent glow over
+     a dark surface gradient) so every placeholder reads intentional. */
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+  flex-shrink: 0;
+}
+html[data-couch] .rs-guide-featured__art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-couch] .rs-guide-featured__art-logo {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: 55%;
+  max-height: 55%;
+  object-fit: contain;
+}
+html[data-couch] .rs-guide-featured__art-name {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-guide-featured__progress {
+  display: block;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--rs-surface-2);
+  overflow: hidden;
+}
+html[data-couch] .rs-guide-featured__progress > span {
+  display: block;
+  height: 100%;
+  background: var(--rs-accent);
+  border-radius: 999px;
+}
+html[data-couch] .rs-guide-featured__next {
+  font-size: 1.15rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On Now list rows: channel | now | next. */
+html[data-couch] .rs-guide-row--nownav {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+html[data-couch] .rs-guide-nownav__channel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+html[data-couch] .rs-guide-nownav__logo {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-guide-nownav__logo--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-guide-nownav__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-guide-nownav__now,
+html[data-couch] .rs-guide-nownav__next {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+html[data-couch] .rs-guide-nownav__title {
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-guide-nownav__title--next {
+  font-family: var(--rs-font-body);
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-guide-nownav__time {
+  font-size: 1.1rem;
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* By Channel: time-led schedule rows + "on now" picker lines. */
+html[data-couch] .rs-guide-row--channel {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+html[data-couch] .rs-guide-channelrow__time {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-guide-channelrow__end {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-guide-channel-pick__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+html[data-couch] .rs-guide-channel-pick__now {
+  font-size: 1.05rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 75rem) {
+  html[data-couch] .rs-guide-now {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  html[data-couch] .rs-guide-now-featured {
+    flex: none;
+    min-width: 0;
+    overflow: visible;
+  }
+  html[data-couch] .rs-guide-featured--art {
+    flex-direction: column;
+  }
+  html[data-couch] .rs-guide-featured--art .rs-guide-featured__art {
+    flex: none;
+  }
+}
+
 /* ── INTEGRATION 0.9.0 — browser screen title + shell head ───── */
 /* Mockup 1's browser carries its own "Channel Browser" title, and
    mockup 3's guide carries its tabs — neither shows the shell's
@@ -3689,9 +3974,102 @@ html[data-couch] .rs-livetv-play-topbar__clock {
    playback (mockup 2/3): the OSD carries its own hint line, so
    the app-wide legend pill would double it over the video. The
    pill is the layout-level <nav class="rs-button-hints">
-   (TvButtonHints in CouchLayout), NOT the empty
-   [data-livetv-legend] mount in the Live TV head — hiding the
-   mount alone leaves the pill visible. */
+   (TvButtonHints in CouchLayout) — the single legend; the empty
+   [data-livetv-legend] mount that used to sit in the Live TV head
+   was deleted in 0.11.0 W1 because nothing ever filled it. */
 html[data-couch][data-livetv-mode="playback"] .rs-button-hints {
   display: none;
+}
+
+/* ── 0.11.0 W5 playback ──────────────────────────────────────────
+ * Fullscreen playback + Quick Surf (mockups 1000017107 and
+ * 1000017106 bottom-left). OSD action row trimmed to the mockup's
+ * seven icon actions; top bar carries the full lockup + 24-hour
+ * clock; error overlay's engine-classified reason line; Quick Surf
+ * highlighted-row artwork thumb. Burgundy 346–351°, near-black,
+ * Manrope; no rectangles inside rectangles, no permanent bars. */
+html[data-couch] .rs-livetv-play-topbar__divider {
+  width: 1px;
+  height: 1.75rem;
+  background: rgb(255 255 255 / 0.25);
+}
+html[data-couch] .rs-livetv-play-topbar__clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+}
+html[data-couch] .rs-livetv-play-topbar__time {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+html[data-couch] .rs-livetv-play-topbar__date {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--rs-text-2);
+}
+/* OSD icon actions: the mockup's seven, icon over label, ghost
+   buttons — no boxes, no text jungle. */
+html[data-couch] .rs-livetv-play-osd__controls {
+  justify-content: space-evenly;
+  gap: 0.25rem 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgb(255 255 255 / 0.08);
+}
+html[data-couch] .rs-livetv-play-osd__btn.rs-livetv-play-osd__btn--icon {
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 5.75rem;
+  padding: 0.625rem 0.5rem 0.5rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: transparent;
+}
+html[data-couch] .rs-livetv-play-osd__btn.rs-livetv-play-osd__btn--icon:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+html[data-couch] .rs-livetv-play-osd__btn--icon .rs-livetv-play-osd__icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-play-osd__btn-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-play-osd__btn--icon:hover .rs-livetv-play-osd__btn-label,
+html[data-couch] .rs-livetv-play-osd__btn--icon:focus-visible .rs-livetv-play-osd__btn-label {
+  color: var(--rs-text);
+}
+html[data-couch] .rs-livetv-play-osd__btn--icon.is-favourite .rs-livetv-play-osd__icon {
+  fill: #ff5c7a;
+  stroke: #ff5c7a;
+}
+html[data-couch] .rs-livetv-play-osd__btn--icon.is-favourite .rs-livetv-play-osd__btn-label {
+  color: #ff8ba0;
+}
+/* Error overlay: the engine-classified reason line. */
+html[data-couch] .rs-livetv-play-error__reason {
+  margin: 0.75rem 0 0;
+  font-size: 1.125rem;
+  line-height: 1.45;
+  color: var(--rs-text-2);
+  text-align: center;
+}
+/* Quick Surf highlighted-row artwork thumb (enrichment, W2 API):
+   a small still at the row's end — never a placeholder rectangle. */
+html[data-couch] .rs-channel-row__art {
+  flex: 0 0 auto;
+  width: 6rem;
+  height: 3.375rem;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: rgb(255 255 255 / 0.06);
+}
+html[data-couch] .rs-channel-row__art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

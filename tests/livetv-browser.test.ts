@@ -12,8 +12,12 @@ import {
   BROWSER_ROW_HEIGHT,
   applyBrowserFilter,
   browserCategories,
+  browserCategoryIcon,
   browserFilterFromEntry,
+  buildBrowserSearchIndex,
   mountChannelBrowser,
+  normalizeBrowserQuery,
+  searchBrowserChannels,
 } from "@/scripts/lib/livetv-browser";
 import type { LivetvChannel, LivetvNowNext } from "@/scripts/lib/livetv-data";
 
@@ -100,6 +104,72 @@ describe("applyBrowserFilter", () => {
   });
 });
 
+describe("normalizeBrowserQuery", () => {
+  it("drops redundant provider prefixes but keeps the tokens that name the channel", () => {
+    expect(normalizeBrowserQuery("BBC One HD")).toBe("bbc one");
+    expect(normalizeBrowserQuery("UK BBC")).toBe("bbc");
+    expect(normalizeBrowserQuery("F1")).toBe("f1");
+    expect(normalizeBrowserQuery("Sky Sports F1 HD")).toBe("sky sports f1");
+    expect(normalizeBrowserQuery("Ireland RTÉ One")).toBe("rte one");
+    expect(normalizeBrowserQuery("  BBC   TWO  4K ")).toBe("bbc two");
+  });
+
+  it("never strips brand names", () => {
+    expect(normalizeBrowserQuery("Sky News")).toBe("sky news");
+    expect(normalizeBrowserQuery("ITV 1")).toBe("itv 1");
+  });
+
+  it("an all-redundant query normalises to no filter", () => {
+    expect(normalizeBrowserQuery("HD")).toBe("");
+    expect(normalizeBrowserQuery("UK")).toBe("");
+    expect(normalizeBrowserQuery("")).toBe("");
+    expect(normalizeBrowserQuery(null)).toBe("");
+  });
+});
+
+describe("searchBrowserChannels", () => {
+  it('"BBC One HD" and "UK BBC" find BBC channels; "F1" finds F1 channels', () => {
+    const bbc = [
+      ch({ id: 201, name: "BBC One HD", categoryId: "Entertainment" }),
+      ch({ id: 202, name: "BBC Two HD", categoryId: "Entertainment" }),
+      ch({ id: 203, name: "ITV 1 HD", categoryId: "Entertainment" }),
+    ];
+    expect(searchBrowserChannels(bbc, "BBC One HD").map((c) => c.id)).toEqual([201]);
+    expect(searchBrowserChannels(bbc, "UK BBC").map((c) => c.id)).toEqual([201, 202]);
+    expect(searchBrowserChannels(bbc, "BBC").map((c) => c.id)).toEqual([201, 202]);
+    expect(searchBrowserChannels(bbc, "ITV").map((c) => c.id)).toEqual([203]);
+    const f1 = [
+      ch({ id: 101, name: "Sky Sports F1 HD", categoryId: "Sports" }),
+      ch({ id: 102, name: "Sky Sports Premier League HD", categoryId: "Sports" }),
+    ];
+    expect(searchBrowserChannels(f1, "F1").map((c) => c.id)).toEqual([101]);
+  });
+
+  it("never invents matches: surviving tokens must all match", () => {
+    const list = [ch({ id: 1, name: "BBC One", categoryId: "Entertainment" })];
+    expect(searchBrowserChannels(list, "BBC Three")).toEqual([]);
+    expect(searchBrowserChannels(list, "Sky Sports")).toEqual([]);
+  });
+
+  it("a digits-only token matches channel number by prefix", () => {
+    const list = [
+      ch({ id: 1, name: "BBC One", categoryId: "Entertainment", chno: 101 }),
+      ch({ id: 2, name: "BBC Two", categoryId: "Entertainment", chno: 102 }),
+      ch({ id: 3, name: "ITV 1", categoryId: "Entertainment", chno: 201 }),
+    ];
+    expect(searchBrowserChannels(list, "10").map((c) => c.id)).toEqual([1, 2]);
+    expect(searchBrowserChannels(list, "201").map((c) => c.id)).toEqual([3]);
+  });
+
+  it("an all-redundant query is no filter", () => {
+    expect(searchBrowserChannels(CHANNELS, "HD").map((c) => c.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("caches the searchable-label index per channel array", () => {
+    expect(buildBrowserSearchIndex(CHANNELS)).toBe(buildBrowserSearchIndex(CHANNELS));
+    expect(buildBrowserSearchIndex(CHANNELS).get("2")).toContain("alpha sports");
+  });
+});
 describe("browserFilterFromEntry", () => {
   it("maps entry filters onto category ids", () => {
     expect(browserFilterFromEntry({ kind: "all" })).toBe("all");
@@ -113,9 +183,9 @@ describe("browserFilterFromEntry", () => {
 });
 
 describe("browserCategories", () => {
-  it("lists Favourites, Recents, then groups, All Channels last", () => {
+  it("lists Favourites, headline groups in mockup order, Recents, All Channels last", () => {
     const cats = browserCategories(CHANNELS, [1, 2]);
-    expect(cats.map((c) => c.id)).toEqual(["favourites", "recents", "sports", "news", "movies", "all"]);
+    expect(cats.map((c) => c.id)).toEqual(["favourites", "sports", "movies", "news", "recents", "all"]);
     expect(cats.find((c) => c.id === "all")?.count).toBe(4);
     expect(cats.find((c) => c.id === "favourites")?.count).toBe(2);
     expect(cats.find((c) => c.id === "recents")?.count).toBe(2);
@@ -123,9 +193,19 @@ describe("browserCategories", () => {
 
   it("always lists Favourites / Recents, even at count 0", () => {
     const cats = browserCategories([ch({ id: 1, name: "A", categoryId: "News" })], []);
-    expect(cats.map((c) => c.id)).toEqual(["favourites", "recents", "news", "all"]);
+    expect(cats.map((c) => c.id)).toEqual(["favourites", "news", "recents", "all"]);
     expect(cats.find((c) => c.id === "favourites")?.count).toBe(0);
     expect(cats.find((c) => c.id === "recents")?.count).toBe(0);
+  });
+
+  it("every pill carries a text glyph icon", () => {
+    const cats = browserCategories(CHANNELS, [1, 2]);
+    for (const cat of cats) {
+      expect(cat.icon.length).toBeGreaterThan(0);
+      expect(browserCategoryIcon(cat.id)).toBe(cat.icon);
+    }
+    expect(browserCategoryIcon("favourites")).toBe("★");
+    expect(browserCategoryIcon("all")).toBe("▦");
   });
 });
 
@@ -300,7 +380,7 @@ describe("mountChannelBrowser", () => {
     handle.destroy();
   });
 
-  it("LB/RB cycle categories in selector order ([ / ])", () => {
+  it("LB/RB cycle categories in mockup selector order ([ / ])", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS, recentIds: [1, 2] });
     const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
     expect(handle.getCategoryId()).toBe("all");
@@ -308,11 +388,19 @@ describe("mountChannelBrowser", () => {
     expect(handle.getCategoryId()).toBe("favourites");
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
     keyOn(list, "]");
+    expect(handle.getCategoryId()).toBe("sports");
+    keyOn(list, "]");
+    expect(handle.getCategoryId()).toBe("movies");
+    keyOn(list, "]");
+    expect(handle.getCategoryId()).toBe("news");
+    keyOn(list, "]");
+    expect(handle.getCategoryId()).toBe("recents");
+    keyOn(list, "]");
+    expect(handle.getCategoryId()).toBe("all");
+    keyOn(list, "[");
     expect(handle.getCategoryId()).toBe("recents");
     keyOn(list, "[");
-    expect(handle.getCategoryId()).toBe("favourites");
-    keyOn(list, "[");
-    expect(handle.getCategoryId()).toBe("all");
+    expect(handle.getCategoryId()).toBe("news");
     handle.destroy();
   });
 
@@ -526,6 +614,177 @@ describe("mountChannelBrowser", () => {
   it("inline / overlay instances carry no screen title", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
     expect(root.querySelector(".rs-livetv-browser__title-text")).toBeNull();
+    handle.destroy();
+  });
+
+  it("screen mode puts title and search on one header row and adds no duplicate hints legend", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS, acceptModeEntry: true });
+    const header = root.querySelector<HTMLElement>(".rs-livetv-browser__header")!;
+    expect(header).not.toBeNull();
+    expect(header.contains(root.querySelector(".rs-livetv-browser__title-text"))).toBe(true);
+    expect(header.contains(root.querySelector("[data-browser-search]"))).toBe(true);
+    // The shell's global Xbox hints bar already renders the legend
+    // in browser mode (A Watch / B Back / LB RB / LT RT / X / Y) —
+    // a second legend here would duplicate it and sit below the fold.
+    expect(root.querySelector("[data-browser-hints]")).toBeNull();
+    handle.destroy();
+  });
+
+  it("inline instances carry no header row", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    expect(root.querySelector(".rs-livetv-browser__header")).toBeNull();
+    handle.destroy();
+  });
+
+  it("a no-match search shows the empty state inside the list", () => {
+    vi.useFakeTimers();
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
+    input.value = "zzz-no-such-channel";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    vi.advanceTimersByTime(200);
+    const empty = root.querySelector<HTMLElement>("[data-browser-empty]")!;
+    expect(empty.hidden).toBe(false);
+    expect(empty.textContent).toContain("No channels match");
+    handle.destroy();
+  });
+
+  it("category pills show their icon glyphs", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS, recentIds: [1, 2] });
+    const pills = [...root.querySelectorAll<HTMLElement>("[data-browser-category]")];
+    expect(pills.map((p) => p.textContent)).toEqual(
+      expect.arrayContaining(["★Favourites", "▦All Channels"]),
+    );
+    expect(pills[0]?.querySelector(".rs-livetv-browser__category-icon")?.textContent).toBe("★");
+    handle.destroy();
+  });
+
+  it("Enter in search applies the query and jumps to the first match", () => {
+    vi.useFakeTimers();
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
+    input.value = "BBC";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    // The debounce has not fired yet — Enter applies it now.
+    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("4 channels");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("No channels match");
+    expect(handle.getHighlightedId()).toBeNull();
+    input.value = "sports";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
+    expect(handle.getHighlightedId()).toBe(2);
+    handle.destroy();
+  });
+
+  it("screen mode follows the visible list when a category change drops the highlight", () => {
+    const handle = mountChannelBrowser(root, {
+      channels: CHANNELS,
+      autoHighlightFirst: true,
+      acceptModeEntry: true,
+    });
+    expect(handle.getHighlightedId()).toBe(1); // Zebra News
+    handle.applyEntry({ kind: "category", value: "sports" });
+    expect(handle.getHighlightedId()).toBe(2); // first sports channel
+    expect(root.querySelector("[data-browser-detail]")?.textContent).toContain("Alpha Sports");
+    handle.destroy();
+  });
+
+  it("enrichment runs for the selected channel only, and paints real art", async () => {
+    const enrich = vi.fn(async () => ({
+      backdropUrl: "https://fixtures.invalid/art/f1.jpg",
+      posterUrl: null,
+      stillUrl: null,
+      source: "tmdb-series" as const,
+      confidence: 0.9,
+      matchedTitle: "F1: Brazilian Grand Prix — Qualifying",
+      synopsis: "Live from Interlagos.",
+      genres: ["Sport"],
+    }));
+    const handle = mountChannelBrowser(root, {
+      channels: CHANNELS,
+      nowNextFor: (channel) => NOW_NEXT[Number(channel.id)] ?? { current: null, next: null },
+      enrichProgramme: enrich,
+    });
+    handle.highlightChannel(2);
+    await vi.waitFor(() => {
+      expect(root.querySelector("[data-browser-detail-art-img]")).not.toBeNull();
+    });
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(enrich).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "F1: Brazilian Grand Prix — Qualifying" }),
+    );
+    // Scroll re-renders must not re-enrich the same programme.
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    list.dispatchEvent(new Event("scroll"));
+    list.dispatchEvent(new Event("scroll"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(enrich).toHaveBeenCalledTimes(1);
+    handle.destroy();
+  });
+
+  it("placeholder art (no enrichment) shows the branded logo area, never an empty panel", async () => {
+    const enrich = vi.fn(async () => ({
+      backdropUrl: null,
+      posterUrl: null,
+      stillUrl: null,
+      source: "placeholder" as const,
+      confidence: 0,
+      matchedTitle: null,
+      synopsis: null,
+      genres: [],
+    }));
+    const handle = mountChannelBrowser(root, {
+      channels: CHANNELS,
+      nowNextFor: (channel) => NOW_NEXT[Number(channel.id)] ?? { current: null, next: null },
+      enrichProgramme: enrich,
+    });
+    handle.highlightChannel(2);
+    await vi.waitFor(() => {
+      expect(root.querySelector("[data-browser-detail-art]")).not.toBeNull();
+    });
+    expect(root.querySelector("[data-browser-detail-art-img]")).toBeNull();
+    expect(root.querySelector("[data-browser-detail-art] .rs-livetv-browser__detail-art-logo")).not.toBeNull();
+    handle.destroy();
+  });
+
+  it("with no EPG the detail panel has no art area and stays compact", () => {
+    const handle = mountChannelBrowser(root, {
+      channels: CHANNELS,
+      nowNextFor: () => ({ current: null, next: null }),
+    });
+    handle.highlightChannel(2);
+    const detail = root.querySelector<HTMLElement>("[data-browser-detail]")!;
+    expect(detail.querySelector("[data-browser-detail-art]")).toBeNull();
+    expect(detail.textContent).toContain("No programme information for this channel yet.");
+    handle.destroy();
+  });
+
+  it("an enrichment synopsis fills the slot only when the EPG has no description", async () => {
+    const enrich = vi.fn(async () => ({
+      backdropUrl: null,
+      posterUrl: null,
+      stillUrl: null,
+      source: "tmdb-series" as const,
+      confidence: 0.9,
+      matchedTitle: "F1: Brazilian Grand Prix — Qualifying",
+      synopsis: "TMDB synopsis text.",
+      genres: [],
+    }));
+    const noDesc: LivetvNowNext = {
+      current: { title: "F1: Brazilian Grand Prix — Qualifying", start: 17_300, stop: 19_000, desc: "" },
+      next: null,
+    };
+    const handle = mountChannelBrowser(root, {
+      channels: CHANNELS,
+      nowNextFor: (channel) => (Number(channel.id) === 2 ? noDesc : { current: null, next: null }),
+      enrichProgramme: enrich,
+    });
+    handle.highlightChannel(2);
+    await vi.waitFor(() => {
+      expect(root.querySelector("[data-browser-detail-synopsis]")?.textContent).toBe("TMDB synopsis text.");
+    });
     handle.destroy();
   });
 });

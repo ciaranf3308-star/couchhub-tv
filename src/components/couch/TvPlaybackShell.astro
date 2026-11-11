@@ -49,23 +49,33 @@ import TvLogo from "./TvLogo.astro";
   hidden
   aria-label="Live TV playback"
 >
-  <!-- Slim playback top bar (INTEGRATION 0.9.0 — mockup 2/3): the
-       full top nav is hidden in playback, but the mockups keep a
-       slim brand bar over the video (mark + "Live TV" left, clock
-       right). Persistent while playback is active; pointer-events
-       none — chrome, not a control. -->
+  <!-- Slim playback top bar (0.11.0 W5 — mockup 2/3): the full
+       top nav is hidden in playback, but the mockups keep a slim
+       brand bar over the video (full lockup + "Live TV" left, live
+       clock right, 24-hour "18:24 / Tue 10 Nov"). Persistent while
+       playback is active; pointer-events none — chrome, not a
+       control. -->
   <div class="rs-livetv-play-topbar" data-livetv-play-topbar aria-hidden="true">
     <span class="rs-livetv-play-topbar__brand">
-      <TvLogo variant="mark" size="nav" />
+      <TvLogo variant="lockup" size="nav" />
+      <span class="rs-livetv-play-topbar__divider" aria-hidden="true"></span>
       <span class="rs-livetv-play-topbar__label">Live TV</span>
     </span>
-    <span class="rs-livetv-play-topbar__clock" data-play-clock></span>
+    <span class="rs-livetv-play-topbar__clock" data-play-clock>
+      <span class="rs-livetv-play-topbar__time" data-play-clock-time></span>
+      <span class="rs-livetv-play-topbar__date" data-play-clock-date></span>
+    </span>
   </div>
   <TvOsd />
   <TvQuickSurf />
 
   <!-- Options overlay (Menu). Transport lives in the engine; these
-       buttons dispatch the same synthetic keys / events as the OSD. -->
+       buttons dispatch the same synthetic keys / events as the OSD.
+       This is also where the OSD's trimmed actions live: Pause,
+       Mute, Previous channel and Restart (catch-up, only where the
+       provider honestly offers it) — reachable from the OSD's
+       Settings icon as well as the Menu key, so mouse users are
+       never stranded without transport. -->
   <div
     class="rs-livetv-play-options"
     data-livetv-options
@@ -83,6 +93,8 @@ import TvLogo from "./TvLogo.astro";
       <div class="rs-livetv-play-options__actions">
         <button type="button" class="rs-livetv-play-osd__btn" data-play-key=" " data-focus-key="livetv-options-pause">Pause / resume</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-play-key="m" data-focus-key="livetv-options-mute">Mute / unmute</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="previous" data-focus-key="livetv-options-previous">Previous channel</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-play-action="restart" data-focus-key="livetv-options-restart" data-options-restart hidden>Restart from start</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-play-key="f" data-focus-key="livetv-options-fullscreen">Fullscreen</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-play-action="guide" data-focus-key="livetv-options-guide">Full Guide (X)</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-play-action="browser" data-focus-key="livetv-options-browser">Channel Browser (Y)</button>
@@ -93,7 +105,16 @@ import TvLogo from "./TvLogo.astro";
   </div>
 
   <!-- Stream-failure overlay. Sits over the still-playing previous
-       stream where one exists; never blanks the player. -->
+       stream where one exists; never blanks the player. Recovery
+       actions are kind-aware (0.11.0 W5): the legacy failure panel's
+       HEVC-enable and external-player recoveries were unreachable in
+       0.9.0 because the panel is suppressed while this shell is
+       active — they live here now, offered only for the failure
+       kinds they can actually fix. Audio has no button on purpose:
+       the engine auto-attempts its one-shot audio-proxy fix before
+       the panel (stream.ts fixAudioNow, no public seam), so by the
+       time this overlay shows the fix has already run once; Retry
+       stays the audio path. -->
   <div
     class="rs-livetv-play-error"
     data-livetv-error
@@ -106,10 +127,12 @@ import TvLogo from "./TvLogo.astro";
       <TvEmpty
         title="This channel isn't playing right now"
         message="Your previous channel keeps playing underneath. Try this channel again, or go back to it."
-        art="player"
       />
+      <p class="rs-livetv-play-error__reason" data-error-reason hidden></p>
       <div class="rs-livetv-play-error__actions">
         <button type="button" class="rs-livetv-play-osd__btn" data-error-action="retry" data-focus-key="livetv-error-retry">Retry channel</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-error-action="hevc" data-focus-key="livetv-error-hevc" hidden>Enable HEVC playback</button>
+        <button type="button" class="rs-livetv-play-osd__btn" data-error-action="external" data-focus-key="livetv-error-external" hidden>Open in external player</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-error-action="previous" data-focus-key="livetv-error-previous">Previous channel</button>
         <button type="button" class="rs-livetv-play-osd__btn" data-error-action="home" data-focus-key="livetv-error-home">Live TV Home</button>
       </div>
@@ -145,6 +168,7 @@ import TvLogo from "./TvLogo.astro";
     switchChannel,
     catchupActionForPlaybackChannel,
     toggleFavourite,
+    recoveryActionsForFailureKind,
     windowPlaybackEngine,
   } from "@/scripts/lib/livetv-playback";
   import {
@@ -158,6 +182,12 @@ import TvLogo from "./TvLogo.astro";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
   import { getFavorites } from "@/scripts/lib/preferences.js";
   import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
+  // Recovery actions the legacy failure panel used to own (0.11.0
+  // W5): HEVC install via the public lib, external-player launch
+  // via the engine's own button (see showError). The audio fix has
+  // no public seam — the engine auto-attempts it before the panel.
+  import { ensureHevcDecodable, isWindowsDesktop } from "@/scripts/lib/hevc-extension.ts";
+  import { hasAvailableExternalPlayer } from "@/scripts/lib/external-player-button.ts";
 
   const shell = document.querySelector<HTMLElement>("[data-livetv-playback]");
   if (shell && !shell.dataset.playArmed) {
@@ -170,17 +200,35 @@ import TvLogo from "./TvLogo.astro";
     let previousId: string | number | null = null;
     let lastWorkingId: string | number | null = null;
     let failedId: string | number | null = null;
+    // Start of the current programme on the tuned channel (for the
+    // Options-overlay Restart action); null when unknown.
+    let currentStartMs: number | null = null;
     let returnFocusKey: string | null = null;
 
-    // Slim top-bar clock (INTEGRATION 0.9.0 — mockup 2: "18:24 Tue
-    // 10 Nov"). Device-local time; ticks every 15 s, page lifetime.
-    const clockEl = shell.querySelector<HTMLElement>("[data-play-clock]");
+    // Slim top-bar clock (0.11.0 W5 — mockup 2: "18:24 / Tue
+    // 10 Nov", 24-hour, two lines). Device-local time; ticks every
+    // 15 s, page lifetime.
+    const clockTimeEl = shell.querySelector<HTMLElement>("[data-play-clock-time]");
+    const clockDateEl = shell.querySelector<HTMLElement>("[data-play-clock-date]");
     const paintClock = () => {
-      if (!clockEl) return;
       const now = new Date();
-      const time = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      const date = now.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-      clockEl.textContent = `${time} ${date}`;
+      if (clockTimeEl) {
+        clockTimeEl.textContent = now.toLocaleTimeString("en-IE", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        });
+      }
+      if (clockDateEl) {
+        // en-IE gives "Wed, 11 Nov"; the mockup reads "Wed 11 Nov".
+        clockDateEl.textContent = now
+          .toLocaleDateString("en-IE", {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+          })
+          .replace(",", "");
+      }
     };
     paintClock();
     setInterval(paintClock, 15000);
@@ -367,13 +415,21 @@ import TvLogo from "./TvLogo.astro";
       try {
         isFav = !!playlistId && !!channel && getFavorites(playlistId, "live").has(Number(channel.id));
       } catch {}
-      const favEl = osd.querySelector<HTMLElement>("[data-osd-fav]");
-      if (favEl) favEl.hidden = !isFav;
-      // Restart (catch-up) is offered only where the provider
-      // honestly offers it for the current programme — the button
-      // stays hidden otherwise, never a dead control.
-      const restartBtn = osd.querySelector<HTMLElement>("[data-osd-restart]");
+      // 0.11.0 W5 — the favourite state lives on the OSD's Favourite
+      // icon button (filled star + aria-pressed), not a heart glyph
+      // in the channel line.
+      const favBtn = osd.querySelector<HTMLElement>("[data-osd-fav-btn]");
+      if (favBtn) {
+        favBtn.setAttribute("aria-pressed", isFav ? "true" : "false");
+        favBtn.classList.toggle("is-favourite", isFav);
+      }
+      // Restart (catch-up) lives in the Options overlay now (the
+      // OSD row is the mockup's seven icons) and is offered only
+      // where the provider honestly offers it for the current
+      // programme — hidden otherwise, never a dead control.
+      const restartBtn = shell.querySelector<HTMLElement>("[data-options-restart]");
       if (restartBtn) restartBtn.hidden = true;
+      currentStartMs = null;
       if (channel) {
         const nn = nowNextForChannel(channel, programmes, playlistId);
         setText("[data-programme-now-title]", nn.current?.title ?? "");
@@ -402,6 +458,7 @@ import TvLogo from "./TvLogo.astro";
           bar.style.width = `${Math.round(programmeProgress(nn.current.start, nn.current.stop) * 100)}%`;
         }
         if (restartBtn && nn.current) {
+          currentStartMs = nn.current.start;
           restartBtn.hidden =
             catchupActionForPlaybackChannel(channel, nn.current.start, nn.current.stop) !==
             "watch-from-start";
@@ -433,18 +490,67 @@ import TvLogo from "./TvLogo.astro";
       }
     };
 
+    // One honest line per engine-classified failure kind (the kind
+    // comes from stream.ts's classifier, never guessed). Shown only
+    // when the engine actually classified the failure.
+    const FAILURE_REASONS: Record<string, string> = {
+      hevc: "This channel uses HEVC video, which needs Microsoft's HEVC Video Extensions on this device.",
+      "hevc-likely":
+        "This channel looks like HEVC video, which needs Microsoft's HEVC Video Extensions on this device.",
+      codec: "This channel uses a video format this device can't decode in the app.",
+      audio: "The audio on this channel couldn't be decoded in the app.",
+      parse: "This channel's stream couldn't be read.",
+      "connection-limit": "The provider refused another connection.",
+    };
+
+    // The engine's own external-player launch button, created by
+    // stream.ts on tune and wired with the real stream URL +
+    // headers. The shell never rebuilds that launch — it only
+    // clicks the button when it exists and is usable.
+    const engineExternalButton = () => {
+      const btn = document.getElementById("external-launch-btn") as HTMLButtonElement | null;
+      return btn && !btn.hidden ? btn : null;
+    };
+
     const showError = (streamId: string | number | null, kind: string | null) => {
       if (!errorEl) return;
       failedId = streamId;
       errorEl.dataset.errorKey = errorKeyForFailureKind(kind);
       errorEl.hidden = false;
       errorEl.dataset.hidden = "false";
+      const reasonEl = errorEl.querySelector<HTMLElement>("[data-error-reason]");
+      const reason = kind ? FAILURE_REASONS[kind] : undefined;
+      if (reasonEl) {
+        reasonEl.textContent = reason ?? "";
+        reasonEl.hidden = !reason;
+      }
       const retryBtn = errorEl.querySelector<HTMLElement>("[data-error-action='retry']");
       // No retry target (nothing ever played) -> hide Retry, Home is the way out.
       if (retryBtn) retryBtn.hidden = retryTarget(failedId, lastWorkingId) === null;
       const prevBtn = errorEl.querySelector<HTMLElement>("[data-error-action='previous']");
       if (prevBtn) prevBtn.hidden = previousChannelTarget(tunedId, previousId) === null;
-      retryBtn?.focus?.({ preventScroll: true });
+      // Kind-aware recovery (0.11.0 W5): HEVC install and the
+      // external player are offered only for the kinds they can
+      // fix, and only when they are actually usable here.
+      const recovery = recoveryActionsForFailureKind(kind);
+      const hevcBtn = errorEl.querySelector<HTMLElement>("[data-error-action='hevc']");
+      if (hevcBtn) hevcBtn.hidden = !(recovery.hevc && isWindowsDesktop());
+      const extBtn = errorEl.querySelector<HTMLElement>("[data-error-action='external']");
+      if (extBtn) {
+        let usable = false;
+        try {
+          usable = recovery.external && hasAvailableExternalPlayer() && engineExternalButton() !== null;
+        } catch {
+          usable = false;
+        }
+        extBtn.hidden = !usable;
+      }
+      const focusTarget =
+        (retryBtn && !retryBtn.hidden ? retryBtn : null) ??
+        (hevcBtn && !hevcBtn.hidden ? hevcBtn : null) ??
+        (extBtn && !extBtn.hidden ? extBtn : null) ??
+        (prevBtn && !prevBtn.hidden ? prevBtn : null);
+      focusTarget?.focus?.({ preventScroll: true });
     };
 
     const hideError = () => {
@@ -610,7 +716,7 @@ import TvLogo from "./TvLogo.astro";
     // Options + error buttons. (The browser's own Close button is
     // wired through its onClose -> closeBrowser; Quick Surf handles
     // its own buttons.)
-    shell.addEventListener("click", (ev) => {
+    shell.addEventListener("click", async (ev) => {
       const target = ev.target as HTMLElement | null;
       const keyBtn = target?.closest?.("[data-play-key]") as HTMLElement | null;
       if (keyBtn) {
@@ -625,6 +731,32 @@ import TvLogo from "./TvLogo.astro";
         if (action === "guide") requestLivetvMode("guide");
         else if (action === "browser") window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
         else if (action === "home") requestLivetvMode("landing");
+        else if (action === "previous") {
+          // 0.11.0 W5 — through the shell's own previous-channel
+          // path (release-then-tune), NOT a synthetic "\" keydown:
+          // the 0.9.0 OSD Previous button dispatched
+          // data-osd-key="\\" whose dataset value is TWO backslashes
+          // and never matched the engine's single-backslash check.
+          const prev = previousChannelTarget(tunedId, previousId);
+          if (prev !== null) {
+            switchChannel(windowPlaybackEngine, tunedId, prev);
+            closeOptions();
+          }
+        }
+        else if (action === "restart") {
+          // Restart the current programme from its start, through
+          // the engine's `livetv:programme` path (catch-up resolved
+          // honestly there). Only offered when paintOsd found a
+          // current programme with catch-up.
+          if (tunedId !== null && currentStartMs !== null) {
+            window.dispatchEvent(
+              new CustomEvent("livetv:programme", {
+                detail: { channelId: tunedId, startMs: currentStartMs },
+              }),
+            );
+            closeOptions();
+          }
+        }
         else if (action === "close") closeOptions();
         return;
       }
@@ -636,6 +768,25 @@ import TvLogo from "./TvLogo.astro";
           // Release-then-open: the failed mount is released before
           // the retry opens its replacement.
           if (targetId !== null) switchChannel(windowPlaybackEngine, tunedId, targetId);
+        } else if (action === "hevc") {
+          // Same public call the legacy failure panel made: install
+          // (or open the Store for) the HEVC Video Extensions, then
+          // retry the failed channel. A Store deep-link returns
+          // false (restart needed) — the overlay stays so the user
+          // is not stranded.
+          const targetId = retryTarget(failedId, lastWorkingId);
+          try {
+            if (await ensureHevcDecodable()) {
+              hideError();
+              if (targetId !== null) switchChannel(windowPlaybackEngine, tunedId, targetId);
+            }
+          } catch {}
+        } else if (action === "external") {
+          // Click the engine's own external-player button (wired
+          // with the real stream URL + headers by stream.ts). The
+          // engine handles release/restore around the handoff.
+          engineExternalButton()?.click();
+          hideError();
         } else if (action === "previous") {
           const prev = previousChannelTarget(tunedId, previousId);
           if (prev !== null) switchChannel(windowPlaybackEngine, tunedId, prev);

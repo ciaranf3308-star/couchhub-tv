@@ -306,6 +306,34 @@ export function nowNextRows(
   return rows;
 }
 
+// ── On Now featured programme (Live TV 0.11.0, W6) ──────────────
+//
+// The On Now composition is featured-left + Now/Next list-right
+// (mockup 3's Guide panel). The featured slot follows the user's
+// selection: the row whose current programme matches `selectedKey`
+// (the programme the user is focused on), else the first row.
+// Never invents a programme — null when there is nothing on now.
+
+/**
+ * Pick the On Now row whose current programme is the featured one:
+ * the selected programme when it is on now, else the first row.
+ * Returns null when there are no rows.
+ */
+export function pickNowFeatured(
+  rows: ReadonlyArray<GuideNowRow>,
+  selectedKey: string | null,
+): GuideNowRow | null {
+  if (rows.length === 0) return null;
+  if (selectedKey) {
+    const match = rows.find(
+      (row) =>
+        guideProgrammeKey(row.channelId, row.current.startMs) === selectedKey,
+    );
+    if (match) return match;
+  }
+  return rows[0]!;
+}
+
 // ── By Channel day navigation ────────────────────────────────────
 
 /** Day-offset bounds for By Channel LB/RB navigation (days from today). */

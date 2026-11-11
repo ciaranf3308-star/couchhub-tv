@@ -1,0 +1,175 @@
+---
+// TvProgrammeArt — programme artwork for Live TV (0.11.0 W2).
+//
+// Props: title, channelName?, channelLogoUrl?, variant ('hero' | 'feature'
+// | 'thumb' | 'card'), class?
+//
+// Renders an <img> when artwork exists (from the sync enrichment cache at
+// render time, otherwise upgraded in the browser by the component script
+// via upgradeProgrammeArtElements), else a premium branded placeholder:
+// a burgundy gradient wash with the channel name — never a giant empty
+// rectangle, never a giant initial letter.
+//
+// Consumers use this component, never their own <img> logic for programme
+// art. Client-rendered callers can emit the same markup by hand
+// (<div data-programme-art data-title="…" data-variant="…">) and call
+// upgradeProgrammeArtElements() after injecting it.
+//
+// Note: Astro renders this component at build time, where there is no
+// TMDb key and no enrichment cache, so the first paint is always the
+// placeholder and the client script upgrades it — the <img> path in the
+// frontmatter exists for SSR / pre-seeded-cache use.
+import { getProgrammeArtworkSync } from "@/scripts/lib/livetv-enrichment.ts";
+
+interface Props {
+  title: string;
+  channelName?: string;
+  channelLogoUrl?: string;
+  variant?: "hero" | "feature" | "thumb" | "card";
+  class?: string;
+}
+
+const { title, channelName, channelLogoUrl, variant = "card", class: className } = Astro.props;
+
+const cached = getProgrammeArtworkSync(title);
+const initialUrl =
+  variant === "card"
+    ? (cached?.posterUrl ?? cached?.backdropUrl ?? cached?.stillUrl ?? null)
+    : (cached?.backdropUrl ?? cached?.stillUrl ?? cached?.posterUrl ?? null);
+const initialSource = cached && initialUrl ? cached.source : "placeholder";
+---
+
+<div
+  class={`rs-livetv-programme-art rs-livetv-programme-art--${variant}${className ? ` ${className}` : ""}`}
+  data-programme-art
+  data-title={title}
+  data-channel={channelName ?? ""}
+  data-channel-logo={channelLogoUrl ?? ""}
+  data-variant={variant}
+  data-art-source={initialSource}
+>
+  {
+    initialUrl && (
+      <img
+        class="rs-livetv-programme-art__img is-loaded"
+        src={initialUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+    )
+  }
+  <div class="rs-livetv-programme-art__placeholder" aria-hidden="true">
+    <span class="rs-livetv-programme-art__glow"></span>
+    {
+      channelName && (
+        <span class="rs-livetv-programme-art__channel">{channelName}</span>
+      )
+    }
+    <span class="rs-livetv-programme-art__mark">NylahBox</span>
+  </div>
+</div>
+
+<script>
+  import { upgradeProgrammeArtElements } from "@/scripts/lib/livetv-enrichment.ts";
+  upgradeProgrammeArtElements(document);
+</script>
+
+<style>
+  /* 0.11.0 W2 programme art — burgundy 346-351deg, near-black, Manrope. */
+  .rs-livetv-programme-art {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 14px;
+    background: #0c0508;
+    isolation: isolate;
+  }
+  .rs-livetv-programme-art--hero {
+    aspect-ratio: 16 / 9;
+    border-radius: 18px;
+  }
+  .rs-livetv-programme-art--feature {
+    aspect-ratio: 16 / 9;
+  }
+  .rs-livetv-programme-art--thumb {
+    aspect-ratio: 16 / 9;
+    border-radius: 10px;
+  }
+  .rs-livetv-programme-art--card {
+    aspect-ratio: 2 / 3;
+    border-radius: 12px;
+  }
+  .rs-livetv-programme-art__placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 16px;
+    text-align: center;
+    background:
+      radial-gradient(120% 90% at 18% 0%, rgba(214, 51, 108, 0.38) 0%, rgba(214, 51, 108, 0) 55%),
+      radial-gradient(110% 100% at 88% 100%, rgba(122, 22, 48, 0.55) 0%, rgba(122, 22, 48, 0) 60%),
+      linear-gradient(148deg, #1d0710 0%, #12040a 58%, #0a0306 100%);
+  }
+  .rs-livetv-programme-art__glow {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(58% 46% at 50% 42%, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 70%);
+  }
+  .rs-livetv-programme-art__channel {
+    position: relative;
+    font-family: Manrope, system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(13px, 1.1vw, 19px);
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(255, 235, 240, 0.92);
+    text-shadow: 0 1px 18px rgba(0, 0, 0, 0.55);
+  }
+  .rs-livetv-programme-art__mark {
+    position: relative;
+    font-family: Manrope, system-ui, sans-serif;
+    font-weight: 600;
+    font-size: clamp(9px, 0.7vw, 12px);
+    letter-spacing: 0.34em;
+    text-transform: uppercase;
+    color: rgba(255, 235, 240, 0.42);
+  }
+  .rs-livetv-programme-art--thumb .rs-livetv-programme-art__mark,
+  .rs-livetv-programme-art--thumb .rs-livetv-programme-art__channel {
+    font-size: 11px;
+  }
+  .rs-livetv-programme-art--thumb .rs-livetv-programme-art__mark {
+    display: none;
+  }
+  .rs-livetv-programme-art__img {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 28%;
+    opacity: 0;
+    transition: opacity 450ms ease;
+    background: #0c0508;
+  }
+  .rs-livetv-programme-art__img.is-loaded {
+    opacity: 1;
+  }
+  /* Channel logos are art, not photography: contain them, never crop. */
+  .rs-livetv-programme-art[data-art-source="channel"] .rs-livetv-programme-art__img {
+    object-fit: contain;
+    box-sizing: border-box;
+    padding: 14%;
+  }
+  /* Soft fade so art never meets the page edge hard. */
+  .rs-livetv-programme-art--hero .rs-livetv-programme-art__img,
+  .rs-livetv-programme-art--feature .rs-livetv-programme-art__img {
+    mask-image: linear-gradient(to bottom, #000 82%, rgba(0, 0, 0, 0.55) 100%);
+  }
+</style>

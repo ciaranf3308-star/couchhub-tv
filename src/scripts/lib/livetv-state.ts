@@ -319,12 +319,18 @@ export function closeOverlay(state: LivetvState): LivetvState {
  * (e.g. the Guide button / playing channel card); when omitted the
  * previously recorded key is kept. `guideMode` switches the
  * sub-mode; when omitted the current sub-mode is kept (defaulting
- * to "now" when the state somehow has none).
+ * to "now" when the state somehow has none). `guideReturnTo`
+ * records the mode exitGuide returns to when it is called without
+ * an explicit mode (0.11.0: previously the field existed but no
+ * transition ever wrote it — TvGuideView set it with an object
+ * spread after enterGuide, and leaveGuide read a local instead,
+ * so the field was write-only decoration).
  */
 export function enterGuide(
   state: LivetvState,
   returnFocusKey?: string | null,
   guideMode?: GuideMode,
+  guideReturnTo?: LivetvModeInput | null,
 ): LivetvState {
   return {
     ...state,
@@ -338,22 +344,33 @@ export function enterGuide(
       : startOfLocalDayMs(Date.now()),
     guideMode:
       guideMode ?? (isValidGuideMode(state.guideMode) ? state.guideMode : "now"),
+    guideReturnTo:
+      guideReturnTo != null
+        ? normaliseLivetvMode(guideReturnTo)
+        : state.guideReturnTo,
   };
 }
 
 /**
  * Leave the Guide. `returnTo` is the mode the Guide was entered
  * from — "landing" by default; callers that opened the Guide from
- * fullscreen playback pass "playback". Guide position
- * (`guideChannelId` / `guideProgrammeKey` / `guideDateMs` /
- * `guideMode`) is kept so re-entering restores it, and
- * `returnFocusKey` is kept for the caller to focus on exit.
+ * fullscreen playback pass "playback". When `returnTo` is omitted
+ * the mode recorded by enterGuide (`guideReturnTo`) is used, so the
+ * Guide's entry mode is the single source of truth instead of a
+ * caller-local copy. Guide position (`guideChannelId` /
+ * `guideProgrammeKey` / `guideDateMs` / `guideMode`) is kept so
+ * re-entering restores it, and `returnFocusKey` is kept for the
+ * caller to focus on exit.
  */
 export function exitGuide(
   state: LivetvState,
-  returnTo: LivetvModeInput = "landing",
+  returnTo?: LivetvModeInput,
 ): LivetvState {
-  return { ...state, mode: normaliseLivetvMode(returnTo), overlay: "none" };
+  return {
+    ...state,
+    mode: normaliseLivetvMode(returnTo ?? state.guideReturnTo ?? "landing"),
+    overlay: "none",
+  };
 }
 
 /** Persisted shape: mode + tuned + previous + guide date ONLY. */
@@ -457,6 +474,28 @@ export function persistLivetvState(
   } catch {
     // Storage full / unavailable: persistence is a nicety, never fatal.
   }
+}
+
+/**
+ * Persist a mode change WITHOUT knowing the rest of the state.
+ * The shell (livetv.astro) is the single writer of the current
+ * mode, but it holds no LivetvState — it only knows the mode. So
+ * this reads back whatever is stored, replaces just the mode, and
+ * re-persists: tuned / previous / guide date survive untouched.
+ * (0.11.0: before this, only TvGuideView ever persisted, so a
+ * mode change made anywhere else was lost on reload and the
+ * stored mode could disagree with the mode on screen.)
+ */
+export function persistLivetvMode(
+  mode: LivetvModeInput,
+  storage: StorageLike | null = sessionStore(),
+): void {
+  if (!storage) return;
+  const restored = restoreLivetvState(storage);
+  persistLivetvState(
+    { ...restored, mode: normaliseLivetvMode(mode) },
+    storage,
+  );
 }
 
 /**

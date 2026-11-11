@@ -1,33 +1,52 @@
 ---
-// TvCategoryTile — Browse by Category tile (0.9.0 Landing).
+// TvCategoryTile — Browse by Category tile (0.11.0, W3).
 //
 // The presentational twin of buildCategoryTileElement() in
 // src/scripts/lib/livetv-landing.ts (same classes, same structure):
 // a fixed-size button (18.75rem × 10.625rem at 1920×1080, rem-scaled
-// — see couch.css `.rs-livetv-landing-category-tile`), a
-// deterministic burgundy gradient variant + one large initial motif
-// as its artwork, label + real channel count, and a "Now on …" line
-// from real EPG only (omitted when the guide covers nothing in the
-// group). Contains NO <img> and NO channel logos — category artwork
-// is deliberately NEVER a stack of channel logos.
+// — see couch.css `.rs-livetv-landing-category-tile`), label + real
+// channel count, and a "Now on …" line from real EPG only (omitted
+// when the guide covers nothing in the group).
+//
+// The 0.9.0 giant initial-letter motif is DELETED: no giant
+// letters, no stacked channel logos. Artwork is either contextual
+// programme artwork for the group's now-playing programme
+// (artworkUrl, supplied by the mount from the enrichment layer —
+// the same title the "Now on …" line names, never unrelated art)
+// or a premium graphic treatment: a deterministic burgundy
+// gradient variant + one small, deliberate category glyph
+// (categoryGlyphFor, ≤1.75rem, top corner — a texture accent, not
+// a motif). Artwork is bounded inside the tile and can never drive
+// the parent's height.
 //
 // Props: groupId (provider group identity, verbatim), label
 // (normalised display label), count, nowPlaying? ({channelName,
 // programmeTitle} from collectionNowPlaying), variant (0..5,
-// categoryTileVariant(groupId)).
+// categoryTileVariant(groupId)), artworkUrl? (enrichment backdrop
+// for the now-playing programme, or null).
 // Click behaviour lives in the landing mount (openLandingCategory →
 // `livetv:mode` {mode:"browser", browserFilter:{kind:"category",
 // value: groupId}}); this component only renders the button.
+import { categoryGlyphFor } from "@/scripts/lib/livetv-landing";
+
 interface Props {
   groupId: string;
   label: string;
   count: number;
   nowPlaying?: { channelName: string; programmeTitle: string } | null;
   variant?: number;
+  artworkUrl?: string | null;
 }
-const { groupId, label, count, nowPlaying = null, variant = 0 } = Astro.props;
+const {
+  groupId,
+  label,
+  count,
+  nowPlaying = null,
+  variant = 0,
+  artworkUrl = null,
+} = Astro.props;
 const focusKey = `landing-category-${groupId}`;
-const motif = (label.trim()[0] ?? "•").toUpperCase();
+const glyph = categoryGlyphFor(label);
 ---
 
 <button
@@ -38,7 +57,20 @@ const motif = (label.trim()[0] ?? "•").toUpperCase();
 	data-couch-key={focusKey}
 	data-focus-key={focusKey}
 	aria-label={`${label}, ${count} channel${count === 1 ? "" : "s"}`}>
-	<span class="rs-livetv-landing-category-tile__motif" aria-hidden="true">{motif}</span>
+	<span class="rs-livetv-landing-category-tile__art" aria-hidden="true">
+		{
+			artworkUrl && (
+				<img
+					class="rs-livetv-landing-category-tile__art-img"
+					src={artworkUrl}
+					alt=""
+					loading="lazy"
+					decoding="async"
+				/>
+			)
+		}
+		{!artworkUrl && <span class="rs-livetv-landing-category-tile__glyph">{glyph}</span>}
+	</span>
 	<span class="rs-livetv-landing-category-tile__label">{label}</span>
 	<span class="rs-livetv-landing-category-tile__count">{count} channel{count === 1 ? "" : "s"}</span>
 	{

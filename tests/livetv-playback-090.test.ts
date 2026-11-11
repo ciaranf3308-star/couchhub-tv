@@ -433,11 +433,15 @@ describe("playback chrome — mockup 2/3 (integration)", () => {
     expect(osd).toContain('else if (overlay === "quicksurf") el.setAttribute("data-hidden", "true");');
   });
 
-  it("renders a slim top bar with brand mark, Live TV label and live clock", () => {
+  it("renders a slim top bar with brand lockup, Live TV label and live clock", () => {
+    // 0.11.0 W5 — the mockup's full lockup ("NylahBox Studios" +
+    // "Live TV") replaces the 0.9.0 mark-only bar, and the clock is
+    // two lines, 24-hour ("18:24" / "Tue 10 Nov").
     expect(shell).toContain("rs-livetv-play-topbar");
-    expect(shell).toContain('variant="mark"');
+    expect(shell).toContain('variant="lockup"');
     expect(shell).toContain("Live TV</span>");
-    expect(shell).toContain("[data-play-clock]");
+    expect(shell).toContain("[data-play-clock-time]");
+    expect(shell).toContain("[data-play-clock-date]");
     expect(shell).toContain("setInterval(paintClock, 15000)");
   });
 
