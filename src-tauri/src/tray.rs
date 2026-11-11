@@ -144,6 +144,10 @@ fn toggle_main_window(app: &AppHandle) {
     } else {
         let _ = window.unminimize();
         let _ = window.show();
+        // 0.11.1 W1 (white bar): a hide/show cycle must never leave
+        // the window windowed — re-assert fullscreen on every show,
+        // same as the launch path in lib.rs.
+        let _ = window.set_fullscreen(true);
         let _ = window.set_focus();
     }
 }
@@ -152,6 +156,8 @@ fn navigate(app: &AppHandle, route: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
+        // 0.11.1 W1 (white bar): see toggle_main_window above.
+        let _ = window.set_fullscreen(true);
         let _ = window.set_focus();
     }
     let _ = app.emit("xt:tray:navigate", route.to_string());
