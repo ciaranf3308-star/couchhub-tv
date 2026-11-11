@@ -133,11 +133,19 @@ describe("rankCandidates", () => {
     expect(a.map((r) => r.candidate.id)).toEqual(b.map((r) => r.candidate.id))
   })
 
-  it("cold start still ranks (rating + recency + novelty), honestly", () => {
+  it("cold start still ranks, honestly (B10: a bare rating with no votes earns nothing)", () => {
     const ranked = rankCandidates(CATALOG, emptyTasteModel("shared", "pl1"))
     expect(ranked.length).toBeGreaterThan(0)
-    // Best-rated recent title wins with no taste: 9.8, 2025, unwatched.
-    expect(ranked[0].candidate.id).toBe("12")
+    // No title in CATALOG carries votes, so no rating term is awarded
+    // at all: the order is recency + novelty, and the bare 9.8 with
+    // nobody behind it must NOT win on rating.
+    expect(ranked[0].candidate.id).not.toBe("12")
+    // A vote-backed 8.0 beats the no-vote 9.8 outright.
+    const withVotes = [
+      candidate({ id: "30", title: "Proven Eight", genres: ["Drama"], cast: [], rating: 8.0, voteCount: 1200, tmdbId: 999, year: 2022 }),
+      candidate({ id: "12", title: "Superhero Smash", genres: ["Action"], cast: [], rating: 9.8, year: 2025 }),
+    ]
+    expect(rankCandidates(withVotes, emptyTasteModel("shared", "pl1"))[0].candidate.id).toBe("30")
   })
 })
 
