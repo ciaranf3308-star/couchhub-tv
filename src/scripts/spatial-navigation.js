@@ -45,6 +45,20 @@
     40: "down",
   }
 
+  // Synthetic KeyboardEvents (e.g. from the gamepad bridge) carry
+  // keyCode 0 in Chromium — the constructor has no keyCode slot —
+  // so derive the code from `key` when keyCode is missing. Physical
+  // keyboards keep their real keyCode; this only fills the gap, and
+  // without it every synthetic arrow / Enter is invisible here.
+  var KEYCODE_BY_KEY = {
+    ArrowLeft: 37,
+    ArrowUp: 38,
+    ArrowRight: 39,
+    ArrowDown: 40,
+    Enter: 13,
+    Escape: 27,
+  }
+
   var REVERSE = {
     left: "right",
     up: "down",
@@ -900,8 +914,12 @@
       return
     }
 
+    // Synthetic events (gamepad bridge) arrive with keyCode 0; read
+    // the code from `key` instead so they move focus like a keyboard.
+    var keyCode = evt.keyCode || KEYCODE_BY_KEY[evt.key] || 0
+
     if (
-      (evt.keyCode === 37 || evt.keyCode === 39) &&
+      (keyCode === 37 || keyCode === 39) &&
       isEditableTextTarget(evt.target) &&
       evt.target.getAttribute("inputmode") !== "none"
     ) {
@@ -915,9 +933,9 @@
       return false
     }
 
-    var direction = KEYMAPPING[evt.keyCode]
+    var direction = KEYMAPPING[keyCode]
     if (!direction) {
-      if (evt.keyCode == 13) {
+      if (keyCode == 13) {
         currentFocusedElement = getCurrentFocusedElement()
         if (currentFocusedElement && getSectionId(currentFocusedElement)) {
           if (!fireEvent(currentFocusedElement, "enter-down")) {
@@ -962,7 +980,9 @@
     if (evt.altKey || evt.ctrlKey || evt.metaKey || evt.shiftKey) {
       return
     }
-    if (!_pause && _sectionCount && evt.keyCode == 13) {
+    // Enter may arrive as a synthetic event with keyCode 0 (gamepad
+    // bridge); `key` names it just as well.
+    if (!_pause && _sectionCount && (evt.keyCode == 13 || evt.key === "Enter")) {
       var currentFocusedElement = getCurrentFocusedElement()
       if (currentFocusedElement && getSectionId(currentFocusedElement)) {
         if (!fireEvent(currentFocusedElement, "enter-up")) {

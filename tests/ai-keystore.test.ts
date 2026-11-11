@@ -107,4 +107,56 @@ describe("AI keystore", () => {
     invokeMock.mockRejectedValueOnce("INVALID:empty key")
     await expect(saveAiKey("sk-test-key")).rejects.toMatchObject({ kind: "invalid" })
   })
+
+  it("verifies a save by reading presence back (set then has)", async () => {
+    const { saveAiKey } = await loadKeystore()
+    await saveAiKey("sk-test-key")
+    expect(invokeMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "ai_key_set",
+      "ai_key_has",
+    ])
+  })
+
+  it("throws store_error when the write reports success but nothing can be read back", async () => {
+    const { saveAiKey } = await loadKeystore()
+    // ai_key_set resolves true, ai_key_has reports no key stored.
+    invokeMock
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+    await expect(saveAiKey("sk-test-key")).rejects.toMatchObject({
+      kind: "store_error",
+      detail: "saved but could not be read back",
+    })
+  })
+
+  it("preserves the Rust STORE detail on a save failure, without the key", async () => {
+    const { saveAiKey } = await loadKeystore()
+    invokeMock.mockRejectedValueOnce(new Error("STORE:Access is denied"))
+    const thrown = await saveAiKey("sk-test-key").catch((error: unknown) => error)
+    expect(thrown).toMatchObject({ kind: "store_error", detail: "Access is denied" })
+    expect(String((thrown as { detail?: unknown }).detail ?? "")).not.toContain("sk-test-key")
+    expect(String((thrown as { message?: unknown }).message ?? "")).not.toContain("sk-test-key")
+  })
+
+  it("serialises concurrent saves so the same credential is never written twice at once", async () => {
+    const { saveAiKey } = await loadKeystore()
+    const first = saveAiKey("sk-test-key-one")
+    const second = saveAiKey("sk-test-key-two")
+    await expect(first).resolves.toBeUndefined()
+    await expect(second).resolves.toBeUndefined()
+    // Without serialisation both ai_key_set calls would land before either
+    // ai_key_has; serialised, each save fully completes before the next.
+    expect(invokeMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      "ai_key_set",
+      "ai_key_has",
+      "ai_key_set",
+      "ai_key_has",
+    ])
+  })
+
+  it("reports unavailable — not store_error — outside the desktop app", async () => {
+    const { saveAiKey } = await loadKeystore(false)
+    await expect(saveAiKey("sk-test-key")).rejects.toMatchObject({ kind: "unavailable" })
+    expect(invokeMock).not.toHaveBeenCalled()
+  })
 })

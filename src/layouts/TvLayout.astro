@@ -110,33 +110,19 @@ const navItems = [
           }
         } catch (e) {}
 
+        // Single fixed theme (0.11.1 settings cull): dark + burgundy. The
+        // theme/accent pickers are gone, so stored xt_theme / xt_accent
+        // values are ignored — this is what stops the app rendering in a
+        // light/purple wash on a system set to light mode.
         try {
-          var storedThemeRaw = localStorage.getItem("xt_theme")
-          if (storedThemeRaw === null) document.documentElement.style.colorScheme = "dark"
-          else if (storedThemeRaw === "light") document.documentElement.style.colorScheme = "light"
-          else if (storedThemeRaw === "dark") document.documentElement.style.colorScheme = "dark"
+          document.documentElement.style.colorScheme = "dark"
+          document.documentElement.setAttribute("data-accent", "burgundy")
         } catch (e) {}
 
         try {
           var KNOWN_ACCENTS = ["fuchsia", "rose", "ember", "emerald", "cyan", "blue", "violet", "gold", "burgundy", "lime", "teal", "silver", "white"]
-          var storedAccent = localStorage.getItem("xt_accent") || ""
-          if (storedAccent === "random") {
-            // Same sessionStorage key as app-settings.js's resolveAccentForDisplay, so both agree.
-            var resolvedRandomAccent = ""
-            try { resolvedRandomAccent = sessionStorage.getItem("xt_accent_roll") || "" } catch (e) {}
-            if (!resolvedRandomAccent || KNOWN_ACCENTS.indexOf(resolvedRandomAccent) === -1) {
-              resolvedRandomAccent = KNOWN_ACCENTS[Math.floor(Math.random() * KNOWN_ACCENTS.length)]
-              try { sessionStorage.setItem("xt_accent_roll", resolvedRandomAccent) } catch (e) {}
-            }
-            if (resolvedRandomAccent !== "fuchsia") document.documentElement.setAttribute("data-accent", resolvedRandomAccent)
-          } else if (storedAccent && storedAccent !== "fuchsia" && KNOWN_ACCENTS.indexOf(storedAccent) !== -1) {
-            document.documentElement.setAttribute("data-accent", storedAccent)
-          } else if (!storedAccent) {
-            // Nylah Studios default: burgundy accent (bedroom theme) — deep
-            // wine in dark mode, warm beige in light mode.
-            document.documentElement.setAttribute("data-accent", "burgundy")
-          }
-          // Per-playlist override cache (playlist-accent.ts) wins over xt_accent.
+          // Per-playlist override cache (playlist-accent.ts) wins over the
+          // fixed accent. That is playlist data, not a theme setting.
           var activeAccentOverride = localStorage.getItem("xt_accent_active") || ""
           if (activeAccentOverride && KNOWN_ACCENTS.indexOf(activeAccentOverride) !== -1) {
             if (activeAccentOverride === "fuchsia") document.documentElement.removeAttribute("data-accent")

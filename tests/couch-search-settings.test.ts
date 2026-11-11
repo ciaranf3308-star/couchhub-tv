@@ -152,11 +152,11 @@ const BASELINE_SETTINGS_IDS: string[] = [
   "audio-transcode-helper", "audio-transcode-section", "auto-update-hint", "auto-update-row", "auto-update-select", "card-ai-discovery",
   "card-backup", "card-behavior", "card-captions-auto", "card-casting", "card-categories", "card-channel-overrides",
   "card-content-language", "card-display", "card-docs", "card-favorites", "card-feedback", "card-followed",
-  "card-haptics", "card-hevc", "card-hub-strips", "card-lang-grouping", "card-language", "card-livetv",
+  "card-hevc", "card-hub-strips", "card-lang-grouping", "card-language", "card-livetv",
   "card-livetv-layout", "card-mono-audio", "card-net-log", "card-network", "card-perf-mode", "card-play-on-tv",
   "card-progress-retention", "card-rendering", "card-storage", "card-tmdb", "card-tv-overscan", "card-tv-receiver",
   "card-ui-sounds", "card-write-nfo", "changelog-body", "changelog-section", "changelog-status", "content-lang-select",
-  "discord-client-id", "discord-controls", "discord-playlists", "discord-rpc-section", "discord-sandbox-note", "download-dir-clear",
+  "download-dir-clear",
   "download-dir-input", "download-dir-pick", "downloads-availability", "downloads-folder-section", "downloads-scan", "downloads-scan-msg",
   "epg-tz-section", "epg-tz-select", "epg-tz-status", "ffmpeg-browse-btn", "ffmpeg-path-helper", "ffmpeg-path-input",
   "ffmpeg-status", "ffmpeg-test-btn", "lang-grouping-select", "licenses-section", "linux-appimage-notice", "net-log-clear",
@@ -167,21 +167,21 @@ const BASELINE_SETTINGS_IDS: string[] = [
   "receiver-firewall-warning-body", "receiver-firewall-warning-title", "receiver-live-badge", "receiver-mode-toggle", "receiver-no-devices", "receiver-open-screen",
   "receiver-pair-code-display", "receiver-paired-list", "receiver-regenerate-btn", "receiver-status-block", "receiver-status-line", "receiver-status-line-text",
   "receiver-summary-helper", "receiver-summary-status", "rendering-env-override-note", "rendering-hint", "rendering-restart", "rendering-restart-note",
-  "rendering-select", "rendering-status", "settings-about", "settings-accent", "settings-accent-override-hint", "settings-add-from-website",
+  "rendering-select", "rendering-status", "settings-about", "settings-add-from-website",
   "settings-ai-clear", "settings-ai-enabled", "settings-ai-endpoint", "settings-ai-key", "settings-ai-key-status", "settings-ai-model",
   "settings-ai-msg", "settings-ai-reveal", "settings-ai-test", "settings-appearance", "settings-audio-transcode-auto", "settings-backup-msg",
   "settings-cache-msg", "settings-cache-newest", "settings-cache-size", "settings-captions-auto", "settings-channel-width", "settings-clear-cache",
   "settings-clear-history", "settings-danger", "settings-data", "settings-density", "settings-dev-mode", "settings-dev-mode-helper",
-  "settings-download-concurrency", "settings-download-concurrency-cap", "settings-epg-default", "settings-export", "settings-export-diagnostics", "settings-export-diagnostics-msg",
+  "settings-download-concurrency", "settings-download-concurrency-cap", "settings-export", "settings-export-diagnostics", "settings-export-diagnostics-msg",
   "settings-followed", "settings-followed-check-now", "settings-followed-interval", "settings-followed-scheduled", "settings-followed-status", "settings-font-scale",
-  "settings-haptics", "settings-help", "settings-hevc-install", "settings-hevc-status", "settings-import", "settings-import-cancel",
+  "settings-help", "settings-hevc-install", "settings-hevc-status", "settings-import", "settings-import-cancel",
   "settings-import-confirm", "settings-import-desc", "settings-import-dialog", "settings-import-input", "settings-import-title", "settings-library",
   "settings-mono-audio", "settings-network", "settings-network-timeout", "settings-network-timeout-helper", "settings-new-custom-playlist", "settings-new-custom-playlist-dialog",
   "settings-new-custom-playlist-name", "settings-new-custom-playlist-title", "settings-open-appdata", "settings-open-downloads", "settings-open-logs", "settings-perf-mode",
   "settings-playlists", "settings-playlists-list", "settings-profile", "settings-progress-retention", "settings-receiver-screensaver-hint", "settings-receiver-screensaver-open",
   "settings-refresh-active", "settings-reset-all", "settings-reset-cancel", "settings-reset-confirm", "settings-reset-desc", "settings-reset-dialog",
   "settings-reset-msg", "settings-reset-title", "settings-restore-last", "settings-restore-last-helper", "settings-search-clear", "settings-search-empty",
-  "settings-search-input", "settings-share-logs", "settings-support", "settings-theme", "settings-tmdb-enabled", "settings-tmdb-key",
+  "settings-search-input", "settings-share-logs", "settings-tmdb-enabled", "settings-tmdb-key",
   "settings-tmdb-msg", "settings-tmdb-reveal", "settings-tmdb-test", "settings-tvdb-enabled", "settings-ui-sounds", "settings-watching",
   "settings-write-nfo", "ua-custom", "ua-msg", "ua-preset", "ua-save", "update-channel-hint",
   "update-channel-row", "update-channel-select", "update-check", "update-current", "update-degraded", "update-get",
@@ -205,6 +205,32 @@ describe("couch-settings: preservation", () => {
     const src = pageSource("src/pages/settings.astro");
     const missing = BASELINE_SETTINGS_IDS.filter((id) => !src.includes(`id="${id}"`));
     expect(missing).toEqual([]);
+  });
+
+  it("0.11.1 settings cull: removed controls stay removed", () => {
+    const src = pageSource("src/pages/settings.astro");
+    // Themes (picker + accent), the dead "Show EPG by default" toggle (its
+    // xt_epg_open_default key was never read), the TV-irrelevant haptics
+    // row, the Discord Rich Presence section, and the action-less support
+    // card. None of these may come back as a control on the Settings page.
+    const removedIds = [
+      "settings-theme",
+      "settings-accent",
+      "settings-accent-override-hint",
+      "settings-epg-default",
+      "card-haptics",
+      "settings-haptics",
+      "discord-rpc-section",
+      "discord-client-id",
+      "discord-playlists",
+      "settings-support",
+    ];
+    for (const id of removedIds) {
+      expect(src, `culled control ${id} is back`).not.toContain(`id="${id}"`);
+    }
+    expect(src).not.toContain("xt_epg_open_default");
+    expect(src).not.toContain("setAccent(");
+    expect(src).not.toContain("commitTheme(");
   });
 
   it("settings.astro is a Couch page with Quick + Advanced groups", () => {
