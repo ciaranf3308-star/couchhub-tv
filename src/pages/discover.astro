@@ -1,34 +1,11 @@
 ---
-// RedSilk Discover — restored as a real destination in 0.10.0
-// (reverses the 0.8.0 Browse consolidation — user's explicit call).
-// The page shell is W3's (Discover + AI, issues B04/B05/AI01–AI07);
-// this file is the pre-0.8.0 shell restored verbatim so /discover
-// renders instead of redirecting into /browse (which is itself now
-// a redirect — leaving the stub here would loop).
-// Mood search + personalised rows over the household's own library.
-// Local engine only — the AI ranker seam lives in
-// src/scripts/lib/discover.ts and is wired by DiscoverView at mount
-// (registerAIRanker + initAI).
+// RedSilk Discover — a real destination again (0.10.0): the dedicated
+// Discover experience (prominent natural-language search, quick picks,
+// personalised rails) lives here, mounted from DiscoverView.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import DiscoverView from "@/components/DiscoverView.svelte";
 ---
 
 <CouchLayout pageTitle="Discover" activeNav="discover" view="discover">
-  <header class="rs-discover-head">
-    <h1 class="rs-page-title">Discover</h1>
-    <p class="rs-meta">
-      Personal picks from your own library — no account, no cloud, nothing invented.
-    </p>
-  </header>
-
-  <DiscoverView client:load />
+  <DiscoverView client:visible />
 </CouchLayout>
-
-<style>
-  .rs-discover-head {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-</style>

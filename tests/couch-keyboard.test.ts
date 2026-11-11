@@ -224,7 +224,7 @@ describe("TvKeyboard visibility contract", () => {
   });
 });
 
-describe("DiscoverView keyboard wiring (Browse landing mood field)", () => {
+describe("DiscoverView keyboard wiring (Discover search field)", () => {
   it("gates the keyboard on lifecycle state — no unconditional render", () => {
     const src = pageSource("src/components/DiscoverView.svelte");
     expect(src).toContain('import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"');
@@ -237,11 +237,11 @@ describe("DiscoverView keyboard wiring (Browse landing mood field)", () => {
 
   it("opens on input focus, dismisses on Escape, opens on ArrowDown, hides on scope blur", () => {
     const src = pageSource("src/components/DiscoverView.svelte");
-    expect(src).toContain("onfocus={onMoodInputFocus}");
+    expect(src).toContain("onfocus={onSearchInputFocus}");
     // A pointer click on an already-focused input fires no focus
     // event — the click handler reopens after a Hide-button dismiss.
-    expect(src).toContain("onclick={onMoodInputFocus}");
-    expect(src).toContain("onkeydown={onMoodInputKeyDown}");
+    expect(src).toContain("onclick={onSearchInputFocus}");
+    expect(src).toContain("onkeydown={onSearchInputKeyDown}");
     expect(src).toContain("onfocusout={onKeyboardScopeFocusOut}");
     expect(src).toContain("keyboard.onInputFocus()");
     expect(src).toContain("keyboard.dismiss()");
