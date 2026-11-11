@@ -1,18 +1,33 @@
 ---
-// TvLogo — NylahBox Studios brand lockup (W6 branding).
+// TvLogo — NylahBox Studios brand lockup.
 //
-// The wordmark is LIVE TEXT ("NylahBox Studios"), never baked into an
-// image, so the spelling is guaranteed at every size. The pixel-art mark
-// is the transparent PNG at /brand/nylahbox-mark.png (burgundy retro TV,
-// glowing rose play triangle).
+// The mark is Nylah (the transparent PNG at /brand/nylahbox-mark.png —
+// the fluffy puppy, full-pup at every size; it reads at 32px nav size,
+// eyes/nose/mouth distinct — see docs/screenshots evidence, no face
+// crop needed). The wordmark is LIVE TEXT ("NylahBox Studios") in the
+// vendored script face, never baked into an image, so the spelling is
+// guaranteed at every size and it stays crisp.
+//
+// Script face: Great Vibes (400), vendored locally at
+// /fonts/great-vibes/great-vibes-latin-400-normal.woff2 (OFL — see
+// OFL.txt in the same dir). Fallback is Dancing Script Bold (700),
+// vendored at /fonts/dancing-script/dancing-script-latin-700-normal.woff2
+// (OFL). Both @font-face rules live HERE, in this component, so the
+// script renders on every page that shows the lockup — CouchLayout,
+// ReceiverLayout, login, settings — with zero Google Fonts and zero
+// network requests at runtime. Do NOT move the faces to couch.css:
+// receiver pages do not load couch.css.
 //
 // Props:
-//   variant: "lockup" (default — mark + live-text wordmark)
+//   variant: "lockup" (default — mark + live-text script wordmark)
 //            | "mark" (mark image only)
 //            | "wordmark" (live text only)
-//            | "lockup-image" (baked PNG lockup, /brand/nylahbox-lockup.png
-//            — dark-background splash/login use only; the wordmark in it
-//            was visually verified as "NylahBox Studios").
+//            | "lockup-image" (baked PNG lockup,
+//            /brand/nylahbox-lockup.png — the W1 Nylah + Great Vibes
+//            lockup, same all-rose treatment as the live wordmark.
+//            Kept only so existing references resolve, NOT used
+//            anywhere in the UI since the 0.11.3 icon swap — the live
+//            lockup is the brand. Do not use for new screens.)
 //   size: "nav" (default — top nav, matches .rs-brand 28px)
 //         | "splash" (splash / login, large)
 //         | "about" (Settings About) | "loader" (loading screens).
@@ -65,42 +80,72 @@ const lockupSrc = "/brand/nylahbox-lockup.png";
 }
 
 <style>
+  /* Script wordmark faces — vendored locally, see header comment.
+     Great Vibes 400 is the wordmark; Dancing Script Bold 700 is the
+     fallback if Great Vibes ever fails to load. */
+  @font-face {
+    font-family: "Great Vibes";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 400;
+    src: url("/fonts/great-vibes/great-vibes-latin-400-normal.woff2")
+      format("woff2");
+  }
+  @font-face {
+    font-family: "Dancing Script";
+    font-style: normal;
+    font-display: swap;
+    font-weight: 700;
+    src: url("/fonts/dancing-script/dancing-script-latin-700-normal.woff2")
+      format("woff2");
+  }
   .tv-logo {
     display: inline-flex;
     align-items: center;
-    gap: 0.6em;
-    font-family: var(--rs-font-display, Georgia, "Times New Roman", serif);
-    line-height: 1;
+    gap: 0.5em;
+    font-family: "Great Vibes", "Dancing Script", Georgia, "Times New Roman",
+      serif;
+    font-weight: 400;
+    line-height: 1.1;
     color: inherit;
     white-space: nowrap;
   }
   .tv-logo__mark {
     width: auto;
-    image-rendering: pixelated;
+    /* The pup is photographic, NOT pixel art — never pixelated. */
+    image-rendering: auto;
     flex: none;
   }
   .tv-logo__word {
-    font-family: var(--rs-font-display, Georgia, "Times New Roman", serif);
-    line-height: 1;
+    font-family: "Great Vibes", "Dancing Script", Georgia, "Times New Roman",
+      serif;
+    font-weight: 400;
+    line-height: 1.15;
     white-space: nowrap;
-    color: inherit;
+    /* All-rose #F5B3BC — one treatment with the baked PNG lockup
+       (/brand/nylahbox-lockup.png). The old two-tone (white "NylahBox"
+       + rose "Studios") is gone; 0.11.3 integration. */
+    color: #f5b3bc;
   }
   .tv-logo__word em {
     font-style: normal;
-    color: var(--rs-focus, #eaa9b8);
+    color: #f5b3bc;
   }
   .tv-logo__lockup-img {
     width: auto;
     max-width: 100%;
   }
-  /* nav — matches .rs-brand (28px display type) */
+  /* nav — matches .rs-brand (28px display type). Script faces run
+     small (low x-height, tall ascenders), so the wordmark is set a
+     touch larger than the old 1.75rem Manrope to hold the same
+     presence next to the 2rem mark. */
   [data-tv-logo-size="nav"] .tv-logo__mark,
   .tv-logo__mark[data-tv-logo-size="nav"] {
     height: 2rem;
   }
   [data-tv-logo-size="nav"].tv-logo__word,
   [data-tv-logo-size="nav"] .tv-logo__word {
-    font-size: 1.75rem;
+    font-size: 2rem;
   }
   .tv-logo__lockup-img[data-tv-logo-size="nav"] {
     height: 2rem;
@@ -112,7 +157,7 @@ const lockupSrc = "/brand/nylahbox-lockup.png";
   }
   [data-tv-logo-size="splash"].tv-logo__word,
   [data-tv-logo-size="splash"] .tv-logo__word {
-    font-size: 3.75rem;
+    font-size: 4.25rem;
   }
   .tv-logo__lockup-img[data-tv-logo-size="splash"] {
     height: 7rem;
@@ -124,7 +169,7 @@ const lockupSrc = "/brand/nylahbox-lockup.png";
   }
   [data-tv-logo-size="about"].tv-logo__word,
   [data-tv-logo-size="about"] .tv-logo__word {
-    font-size: 2.25rem;
+    font-size: 2.5rem;
   }
   .tv-logo__lockup-img[data-tv-logo-size="about"] {
     height: 3.5rem;
@@ -136,7 +181,7 @@ const lockupSrc = "/brand/nylahbox-lockup.png";
   }
   [data-tv-logo-size="loader"].tv-logo__word,
   [data-tv-logo-size="loader"] .tv-logo__word {
-    font-size: 2.5rem;
+    font-size: 3rem;
   }
   .tv-logo__lockup-img[data-tv-logo-size="loader"] {
     height: 4.5rem;
