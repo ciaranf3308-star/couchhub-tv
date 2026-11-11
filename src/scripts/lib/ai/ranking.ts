@@ -18,6 +18,7 @@
 
 import { AiError, chatCompletions } from "./client.js"
 import { getAiEnabled } from "@/scripts/lib/app-settings.js"
+import { getAiShareTaste } from "./status.js"
 
 export interface DiscoverCandidate {
   id: string
@@ -253,6 +254,136 @@ export function fallbackRank(
 
 const rankCache = new Map<string, RankedCandidate[]>()
 
+// --- Session cache + usage guard (AI07) ----------------------------------
+// Paid requests only ever leave on an explicit user action (the caller
+// decides when to call rank()). Within a session, an identical query is
+// answered from the session cache, and re-asking the same query within
+// 60s never sends a second request: the caller falls back to local
+// ranking instead. All storage access is guarded — vitest runs in node,
+// where sessionStorage doesn't exist.
+const SESSION_CACHE_KEY = "rs-ai-rank-cache-v1"
+const SESSION_LAST_SENT_KEY = "rs-ai-last-sent-v1"
+export const AI_MIN_REPEAT_SECONDS = 60
+
+export interface AiActivityEvent {
+  type: "start" | "done" | "error"
+  at: number
+  query: string
+}
+
+type AiActivityListener = (event: AiActivityEvent) => void
+const activityListeners = new Set<AiActivityListener>()
+
+/** Discover subscribes to show when a request leaves the device (AI07). */
+export function subscribeAiActivity(listener: AiActivityListener): () => void {
+  activityListeners.add(listener)
+  return () => {
+    activityListeners.delete(listener)
+  }
+}
+
+function emitAiActivity(event: AiActivityEvent): void {
+  for (const listener of [...activityListeners]) {
+    try {
+      listener(event)
+    } catch {
+      // A UI listener must never break ranking.
+    }
+  }
+}
+
+function readSession(key: string): string | null {
+  try {
+    if (typeof sessionStorage === "undefined") return null
+    return sessionStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeSession(key: string, value: string): void {
+  try {
+    if (typeof sessionStorage === "undefined") return
+    sessionStorage.setItem(key, value)
+  } catch {
+    // ignore — the in-memory cache still applies
+  }
+}
+
+function normalizeQuery(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ")
+}
+
+function readSessionCache(
+  query: string,
+  candidates: DiscoverCandidate[]
+): RankedCandidate[] | null {
+  try {
+    const raw = readSession(SESSION_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as {
+      q?: string
+      rankings?: Array<{ id: string; score: number; reason: string }>
+    }
+    if (parsed?.q !== normalizeQuery(query) || !Array.isArray(parsed.rankings)) return null
+    const byId = new Map(candidates.map((c) => [c.id, c]))
+    const out: RankedCandidate[] = []
+    for (const entry of parsed.rankings) {
+      const candidate = byId.get(entry.id)
+      if (!candidate) continue
+      out.push({ candidate, score: entry.score, reason: entry.reason })
+    }
+    return out.length ? out : null
+  } catch {
+    return null
+  }
+}
+
+function writeSessionCache(query: string, rankings: RankedCandidate[]): void {
+  writeSession(
+    SESSION_CACHE_KEY,
+    JSON.stringify({
+      q: normalizeQuery(query),
+      rankings: rankings.map((r) => ({
+        id: r.candidate.id,
+        score: r.score,
+        reason: r.reason,
+      })),
+    })
+  )
+}
+
+/** True when this exact query was sent to the provider very recently. */
+export function wasRecentlySent(query: string, nowMs: number = Date.now()): boolean {
+  try {
+    const raw = readSession(SESSION_LAST_SENT_KEY)
+    if (!raw) return false
+    const parsed = JSON.parse(raw) as { q?: string; at?: number }
+    if (parsed?.q !== normalizeQuery(query) || typeof parsed?.at !== "number") return false
+    return nowMs - parsed.at < AI_MIN_REPEAT_SECONDS * 1000
+  } catch {
+    return false
+  }
+}
+
+function markSent(query: string, nowMs: number = Date.now()): void {
+  writeSession(
+    SESSION_LAST_SENT_KEY,
+    JSON.stringify({ q: normalizeQuery(query), at: nowMs })
+  )
+}
+
+export function clearAiUsageState(): void {
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(SESSION_CACHE_KEY)
+      sessionStorage.removeItem(SESSION_LAST_SENT_KEY)
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function cacheKey(
   query: string,
   candidates: DiscoverCandidate[],
@@ -288,15 +419,35 @@ export const aiRanker = {
     const shortlist = candidates.slice(0, AI_MAX_CANDIDATES)
     if (!shortlist.length) return []
 
-    const key = cacheKey(query, shortlist, tasteSummary)
+    // Privacy (AI05): without an explicit opt-in, the taste summary
+    // never leaves the device — the model sees query + candidates only.
+    const effectiveTaste: TasteSummary = getAiShareTaste()
+      ? tasteSummary
+      : { favouriteGenres: [], likedTitles: [], dislikedTitles: [] }
+
+    const key = cacheKey(query, shortlist, effectiveTaste)
     const cached = rankCache.get(key)
     if (cached) return [...cached]
+    const sessionCached = readSessionCache(query, shortlist)
+    if (sessionCached) {
+      rankCache.set(key, sessionCached)
+      return [...sessionCached]
+    }
+    // Same question within 60s: never send a second paid request.
+    if (wasRecentlySent(query)) {
+      throw new AiError(
+        "rate_limited",
+        "That question was just asked — showing local recommendations."
+      )
+    }
 
     currentRankController?.abort()
     const controller = new AbortController()
     currentRankController = controller
     try {
-      const { system, user } = buildAiPrompt(query, shortlist, tasteSummary)
+      const { system, user } = buildAiPrompt(query, shortlist, effectiveTaste)
+      emitAiActivity({ type: "start", at: Date.now(), query })
+      markSent(query)
       const result = await chatCompletions({
         messages: [
           { role: "system", content: system },
@@ -306,7 +457,12 @@ export const aiRanker = {
       })
       const parsed = parseAiRankResponse(result.text, shortlist)
       rankCache.set(key, parsed.rankings)
+      writeSessionCache(query, parsed.rankings)
+      emitAiActivity({ type: "done", at: Date.now(), query })
       return parsed.rankings
+    } catch (error) {
+      emitAiActivity({ type: "error", at: Date.now(), query })
+      throw error
     } finally {
       if (currentRankController === controller) currentRankController = null
     }

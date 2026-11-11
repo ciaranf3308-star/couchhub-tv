@@ -20,6 +20,7 @@ import {
   ensureLoaded as ensurePrefsLoaded,
 } from "@/scripts/lib/preferences.js";
 import { type CouchBrowseAdapter } from "@/scripts/movies/couch-browse.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import {
   getCachedSeasonCount,
   observeSeasonCount,
@@ -35,6 +36,7 @@ import {
   catalogueSeriesGenres,
   seriesMetaLine,
   pickFeaturedSeries,
+  seriesGenreCollections,
   type SeriesRow,
 } from "@/scripts/series/couch-series.ts";
 import { SERIES_SORT_MODES } from "@/scripts/series/couch-series.ts";
@@ -90,8 +92,9 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       return progress.completedIds.length > 0 && progress.hasIncompleteEpisode;
     });
     const recentRows = sortSeries(rows, "added").slice(0, 12);
+    // C2 — same evidence preference as the movies Recommended rail.
     const recommendedRows = sortSeries(
-      rows.filter((row) => (Number(row.rating) || 0) >= 8),
+      preferEvidence(rows.filter((row) => (Number(row.rating) || 0) >= 8)),
       "rating",
     ).slice(0, 12);
     // See the note on the getFavorites call in applyFilter: the
@@ -108,7 +111,7 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
     const watchLaterRows = rows.filter((row) => watchIds.has(row.id));
     const followedRows = rows.filter((row) => followedIds.has(row.id));
     const featured = pickFeaturedSeries(rows);
-    return [
+    const rails = [
       { id: "series-continue", title: "Continue Watching", rows: continueRows },
       { id: "series-featured", title: "Featured", rows: featured ? [featured] : [] },
       { id: "series-recent", title: "Recently Added", rows: recentRows },
@@ -117,6 +120,17 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       { id: "series-favorites", title: "Favourites", rows: favoriteRows },
       { id: "series-watchlater", title: "Watch Later", rows: watchLaterRows },
     ];
+    // B08 genre collections (Crime Drama, Comedy, Science Fiction,
+    // Documentary Series, Reality) built from real catalogue metadata
+    // by seriesGenreCollections — only non-empty ones come back.
+    // Rails already present above (Continue Watching, Recently Added)
+    // are not duplicated: the builder is the single source of truth
+    // for which genre collections exist.
+    const seen = new Set(rails.map((rail) => rail.id));
+    for (const collection of seriesGenreCollections(rows)) {
+      if (!seen.has(collection.id)) rails.push(collection);
+    }
+    return rails;
   },
   genres: (rows) =>
     catalogueSeriesGenres(rows).map(({ id, count }) => ({
@@ -152,6 +166,7 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       genre: filter.genre,
       year: filter.year,
       minRating: filter.minRating,
+      maxRuntime: filter.maxRuntime,
       favoriteIds,
       watchlistIds,
       inProgressIds,

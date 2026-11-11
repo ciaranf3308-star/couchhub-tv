@@ -675,10 +675,10 @@ function allEpisodesSeasonOf(episodeId: number): number | null {
 (async () => {
   await initI18n().catch(() => {});
   creds = await loadCreds();
-  // Back to Browse: history.back() when we arrived from the Browse
+  // Back to Series: history.back() when we arrived from the Series
   // grid, so couch-focus memory restores the exact card; otherwise
   // the link follows its href. (detailBackDecision is the tested half.)
-  wireDetailBackLink($("series-detail-back"), "/browse");
+  wireDetailBackLink($("series-detail-back"), "/series");
   if (!seriesId) {
     hideSkeleton();
     if (statusEl) statusEl.textContent = "No series selected.";

@@ -38,6 +38,7 @@
     mergeHomePayload,
   } from "@/scripts/lib/home-rails.ts"
   import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
+  import { kindLabel } from "@/scripts/lib/taxonomy.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
@@ -251,7 +252,9 @@
   /**
    * Presentation for one rail item. Badges are labels, not competing
    * accents (one badge style): "New" for new episodes, "Live" for
-   * live programmes. Landscape cards for episode-led rails, posters
+   * live programmes, otherwise the C1 type badge from the item's
+   * contentKind (kindLabel — Movie / Series / Documentary Film /
+   * Documentary Series). Landscape cards for episode-led rails, posters
    * elsewhere, fitted logos for channels.
    */
   function cardDisplay(rail, item) {
@@ -272,7 +275,13 @@
           ? `Next: ${item.nextTitle}`
           : undefined
         : itemMeta(item),
-      badge: isNewEpisode ? "New" : isLive ? "Live" : undefined,
+      badge: isNewEpisode
+        ? "New"
+        : isLive
+          ? "Live"
+          : item.contentKind
+            ? kindLabel(item.contentKind)
+            : undefined,
     }
   }
 </script>
@@ -363,7 +372,13 @@
     {#if rails.length}
       <div data-nylah-rails>
         {#each rails as rail (rail.id)}
-          <section class="rs-rail" data-nylah-rail={rail.id} aria-label={rail.title}>
+          <section
+            class="rs-rail{rail.variant ? ` rs-rail--variant-${rail.variant}` : ''}{rail.sparse ? ' rs-rail--sparse' : ''}"
+            data-nylah-rail={rail.id}
+            data-rail-variant={rail.variant}
+            data-rail-count={rail.items.length}
+            aria-label={rail.title}
+          >
             <div class="rs-rail__head">
               <h2 class="rs-section-title">{rail.title}</h2>
               {#if rail.seeAllHref}
@@ -393,7 +408,7 @@
         </div>
         <h2 class="rs-empty__title">Your library is empty</h2>
         <p class="rs-empty__message">Once films and series are in your playlist, your picks, trending titles and new episodes will appear here.</p>
-        <a class="rs-empty__action" data-nylah-item href="/browse">Browse Discover</a>
+        <a class="rs-empty__action" data-nylah-item href="/discover">Browse Discover</a>
       </div>
     {/if}
   {/if}
@@ -405,6 +420,7 @@
     class="rs-card rs-card--{display.cardKind}"
     data-nylah-item
     data-couch-key={item.key}
+    data-content-kind={item.contentKind}
     href={item.detailHref}
     aria-label={item.title}
   >

@@ -12,7 +12,15 @@
 //     as one joined segmented control,
 //   - the genre filter, as one labelled select in the filter row,
 //     year + rating selects, sort select, search input +
-//     on-screen keyboard dialog,
+//     on-screen keyboard dialog, and — when the catalogue carries
+//     runtime metadata (C5 availability gate) — a runtime select,
+//     as one labelled select in the same row,
+//   - filter persistence (B09): genre / decade / rating / runtime /
+//     sort survive a full reload via the shared C5 sessionStorage
+//     API (loadBrowseFilterState / saveBrowseFilterState), so a
+//     return from a detail page — or a fresh load — keeps the
+//     viewer's filters. The list tab and search query are not
+//     persisted (a reload starts on All with an empty search).
 //   - the full catalogue grid, windowed with computeVisibleWindow +
 //     gridColumnsForWidth so a 10,000-title catalogue never builds
 //     10,000 card nodes. The focused card is pinned into the window
@@ -24,13 +32,22 @@
 // "browse-series-" prefix; the standalone /movies and /series pages
 // use the bare ids):
 //   couch-browse-status, couch-browse-hero-count, couch-browse-tabs,
-//   couch-browse-genres, couch-browse-year, couch-browse-rating,
-//   couch-browse-sort, couch-browse-search, couch-search-open,
-//   couch-browse-rails, couch-browse-grid, couch-browse-skeleton,
-//   couch-browse-empty, couch-browse-error.
+//   couch-browse-genres, couch-browse-runtime, couch-browse-year,
+//   couch-browse-rating, couch-browse-sort, couch-browse-search,
+//   couch-search-open, couch-browse-rails, couch-browse-grid,
+//   couch-browse-skeleton, couch-browse-empty, couch-browse-error.
 
 import { computeVisibleWindow, gridColumnsForWidth } from "@/scripts/lib/couch-grid.ts";
 import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
+import {
+  computeFilterAvailability,
+  loadBrowseFilterState,
+  saveBrowseFilterState,
+  RUNTIME_OPTIONS,
+  RUNTIME_OPTION_LABELS,
+  type BrowseFilterEntry,
+  type BrowseSortId,
+} from "@/scripts/lib/browse-filters.ts";
 import { buildCouchCard, type CouchCardView } from "@/scripts/movies/couch-cards.ts";
 import { loadCouchCatalog, type CouchCatalogSpec } from "@/scripts/movies/couch-catalog.ts";
 import { debounce } from "@/scripts/lib/debounce.ts";
@@ -50,6 +67,8 @@ export interface CouchBrowseFilter {
   genre: GenreId | "";
   year: string;
   minRating: number;
+  /** Maximum runtime in minutes (0 = any length). B09. */
+  maxRuntime: number;
   sort: string;
   list: CouchBrowseList;
 }
@@ -118,6 +137,7 @@ export function mountCouchBrowse<T>(
   const heroCountEl = $(`${prefix}couch-browse-hero-count`);
   const tabsEl = $(`${prefix}couch-browse-tabs`);
   const genresEl = $(`${prefix}couch-browse-genres`);
+  const runtimeEl = $(`${prefix}couch-browse-runtime`);
   const yearEl = $(`${prefix}couch-browse-year`) as HTMLSelectElement | null;
   const ratingEl = $(`${prefix}couch-browse-rating`) as HTMLSelectElement | null;
   const sortEl = $(`${prefix}couch-browse-sort`) as HTMLSelectElement | null;
@@ -137,14 +157,36 @@ export function mountCouchBrowse<T>(
   let columns = 6;
   let renderRaf = 0;
 
+  // B09 — restore the shared filter state saved in sessionStorage
+  // (genre / decade / rating / runtime / sort), so a full reload or
+  // a return from a detail page keeps the viewer's filters. Values
+  // are already validated by parseBrowseFilterState (unknown values
+  // fall back to defaults); the genre is re-validated against this
+  // catalogue in renderGenres, and the sort against the page's own
+  // sort options when the static selects are synced below.
+  const filterScope = adapter.kind === "vod" ? "movies" : "series";
+  const restoredFilters = loadBrowseFilterState(filterScope);
+
   const filter: CouchBrowseFilter = {
     query: "",
-    genre: "",
-    year: "",
-    minRating: 0,
-    sort: "default",
+    genre: (restoredFilters?.genre || "") as GenreId | "",
+    year: restoredFilters?.year || "",
+    minRating: restoredFilters?.minRating || 0,
+    maxRuntime: restoredFilters?.maxRuntime || 0,
+    sort: restoredFilters?.sort || "default",
     list: "all",
   };
+
+  // Sync the static selects with any restored state (the genre
+  // select is built by renderGenres, which reads filter.genre
+  // itself; the runtime select is built by renderRuntime).
+  if (yearEl) yearEl.value = filter.year;
+  if (ratingEl) ratingEl.value = String(filter.minRating);
+  if (sortEl) {
+    const sortKnown = [...sortEl.options].some((o) => o.value === filter.sort);
+    if (sortKnown) sortEl.value = filter.sort;
+    else filter.sort = "default";
+  }
 
   const setVisible = (el: HTMLElement | null, visible: boolean) => {
     if (el) el.hidden = !visible;
@@ -165,7 +207,7 @@ export function mountCouchBrowse<T>(
   const renderRails = () => {
     if (!railsEl) return;
     railsEl.replaceChildren();
-    if (!loaded || filter.query || filter.genre || filter.year || filter.minRating > 0 || filter.list !== "all") {
+    if (!loaded || filter.query || filter.genre || filter.year || filter.minRating > 0 || filter.maxRuntime > 0 || filter.list !== "all") {
       return;
     }
     for (const rail of adapter.rails(all, playlistId)) {
@@ -353,9 +395,61 @@ export function mountCouchBrowse<T>(
     select.value = filter.genre;
   };
 
+  // Runtime filter (B09): ONE labelled <select> in the filter row,
+  // built by the controller like the genre select — and ONLY when
+  // the catalogue actually carries runtime metadata (C5 availability
+  // rule: computeFilterAvailability). Movie rows carry a provider
+  // duration; series rows carry none, so the control simply never
+  // appears on /series. A stored runtime limit with no metadata
+  // behind it resets to Any rather than filtering everything out.
+  const renderRuntime = () => {
+    if (!runtimeEl) return;
+    if (!computeFilterAvailability(all as BrowseFilterEntry[]).runtime) {
+      runtimeEl.replaceChildren();
+      if (filter.maxRuntime) filter.maxRuntime = 0;
+      return;
+    }
+    let select = runtimeEl.querySelector("select") as HTMLSelectElement | null;
+    if (!select) {
+      runtimeEl.replaceChildren();
+      const label = document.createElement("label");
+      label.className = "rs-browse-label";
+      label.htmlFor = `${prefix}couch-browse-runtime-select`;
+      label.textContent = "Length";
+      const built = document.createElement("select");
+      built.id = `${prefix}couch-browse-runtime-select`;
+      built.setAttribute("aria-label", "Filter by maximum length");
+      built.addEventListener("change", () => {
+        filter.maxRuntime = Number(built.value) || 0;
+        applyFilterAndRender();
+      });
+      runtimeEl.append(label, built);
+      select = built;
+    }
+    select.replaceChildren();
+    for (const max of RUNTIME_OPTIONS) {
+      const opt = document.createElement("option");
+      opt.value = String(max);
+      opt.textContent = RUNTIME_OPTION_LABELS[max] ?? `Under ${max} minutes`;
+      select.appendChild(opt);
+    }
+    select.value = String(filter.maxRuntime);
+  };
+
   const applyFilterAndRender = () => {
     const base = adapter.applyFilter(all, filter, playlistId);
     filtered = adapter.applySort(base, filter);
+    // B09 — persist the filter state for the next load / return
+    // trip (sessionStorage, per scope). One call, one funnel: every
+    // filter change runs through here.
+    saveBrowseFilterState(filterScope, {
+      genre: filter.genre,
+      contentType: "",
+      year: filter.year,
+      minRating: filter.minRating,
+      maxRuntime: filter.maxRuntime,
+      sort: filter.sort as BrowseSortId,
+    });
     if (heroCountEl) heroCountEl.textContent = adapter.countLabel(filtered.length);
     if (statusEl) {
       statusEl.textContent =
@@ -472,6 +566,7 @@ export function mountCouchBrowse<T>(
       return;
     }
     renderGenres();
+    renderRuntime();
     applyFilterAndRender();
     // Focus memory: after the first paint, restore where the viewer was.
     restoreCouchFocus();

@@ -9,22 +9,25 @@
 // no art still gets the intentional initials fallback, never a broken
 // image. Playback mounts the shared engine (mountPlayer) with the
 // TvOsd Couch controls; B / Escape while playing returns to this
-// detail page, never to Home. The back link returns to Browse and
-// history.back()s when you arrived from there, so focus restores to
-// the exact Browse card (couch-focus memory).
+// The back link returns to /movies and history.back()s when you arrived
+// from there, so focus restores to the exact Movies card (couch-focus
+// memory). Feedback lives HERE on the detail screen (one "More" menu):
+// More Like This / Not Interested / Watched / Why This? — never under
+// posters (B06). Play/Resume, Favourite and Watch Later stay as direct
+// hero actions.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
 import TvOsd from "@/components/couch/TvOsd.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 ---
 
-<CouchLayout pageTitle="Movie" activeNav="browse" view="movies-detail">
+<CouchLayout pageTitle="Movie" activeNav="movies" view="movies-detail">
   <a
     id="movie-detail-back"
     class="rs-detail-back rs-hero__action rs-hero__action--secondary"
-    href="/browse?type=movies"
+    href="/movies"
     data-nylah-item
-    aria-label="Back to Browse"
+    aria-label="Back to Movies"
   >
     ‹ Movies
   </a>
@@ -81,10 +84,19 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
           >
             ▶ Trailer
           </button>
+          <button
+            id="movie-detail-more"
+            type="button"
+            class="rs-hero__action rs-hero__action--secondary"
+            data-nylah-item
+            data-couch-dialog-open="movie-feedback-dialog"
+          >
+            ⋯ More
+          </button>
         </div>
         <p class="rs-detail-hints" aria-hidden="true">
           <span class="rs-detail-hint-key">A</span> Select
-          <span class="rs-detail-hint-key">B</span> Back to Browse
+          <span class="rs-detail-hint-key">B</span> Back to Movies
         </p>
       </div>
     </div>
@@ -145,8 +157,154 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       allowfullscreen></iframe>
   </TvDialog>
 
+  {/*
+    FEEDBACK (B06): the ONE contextual menu for this title. No feedback
+    buttons live under posters anywhere — these actions live here on
+    the detail screen only. Wired by the page script below into the
+    local taste model (taste.ts): More Like This records a selection
+    signal, Not Interested is a hard exclusion, Watched records the
+    title as already watched (and marks it completed), Why This?
+    explains from real signals only — never an invented reason.
+  */}
+  <TvDialog id="movie-feedback-dialog" title="More options">
+    <div class="rs-detail-feedback" data-nylah-rail="detail-feedback">
+      <button id="movie-feedback-more" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        More Like This
+      </button>
+      <button id="movie-feedback-not-interested" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Not Interested
+      </button>
+      <button id="movie-feedback-watched" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Watched
+      </button>
+      <button id="movie-feedback-why" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Why This?
+      </button>
+    </div>
+    <p id="movie-feedback-status" class="rs-meta" role="status"></p>
+    <p id="movie-feedback-why-text" class="rs-meta" hidden></p>
+  </TvDialog>
+
   <script>
     import "@/scripts/movies/couch-detail.ts";
+    import { getActiveEntry } from "@/scripts/lib/creds.js";
+    import {
+      getActiveProfileId,
+      SHARED_PROFILE_ID,
+    } from "@/scripts/lib/profiles.ts";
+    import {
+      loadTaste,
+      saveTaste,
+      recordFeedback,
+      summarizeTaste,
+      type TasteFeedbackAction,
+    } from "@/scripts/lib/taste.ts";
+    import {
+      ensureLoaded as ensurePrefsLoaded,
+      isFavorite,
+      isOnWatchlist,
+      isCompleted,
+      markCompleted,
+    } from "@/scripts/lib/preferences.js";
+
+    // Feedback menu (B06): one contextual menu on the detail screen.
+    const feedbackStatus = document.getElementById("movie-feedback-status");
+    const feedbackWhy = document.getElementById("movie-feedback-why-text");
+    const titleEl = document.getElementById("movie-detail-title");
+    const metaEl = document.getElementById("movie-detail-meta");
+    const movieId = Number(new URLSearchParams(location.search).get("id")) || 0;
+
+    function setFeedbackStatus(text: string): void {
+      if (feedbackStatus) feedbackStatus.textContent = text;
+      if (feedbackWhy) feedbackWhy.hidden = true;
+    }
+
+    async function applyFeedback(action: TasteFeedbackAction): Promise<void> {
+      if (!movieId) {
+        setFeedbackStatus("No movie selected.");
+        return;
+      }
+      const title = titleEl?.textContent?.trim() || "";
+      const entry = await getActiveEntry().catch(() => null);
+      const playlistId = (entry?._id as string | undefined) || "";
+      if (!playlistId) {
+        setFeedbackStatus("Couldn't save — no playlist selected.");
+        return;
+      }
+      const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
+      await ensurePrefsLoaded().catch(() => {});
+      const model = loadTaste(profileId, playlistId);
+      saveTaste(recordFeedback(model, { kind: "movie", id: movieId, title, action }));
+      if (action === "already-watched") {
+        markCompleted(playlistId, "vod", movieId, { name: title });
+      }
+      if (action === "more-like-this") {
+        setFeedbackStatus("Noted — we'll show more like this.");
+        document
+          .getElementById("movie-detail-similar")
+          ?.scrollIntoView({ block: "nearest" });
+      } else if (action === "not-interested") {
+        setFeedbackStatus("Noted — this title won't be recommended.");
+      } else if (action === "already-watched") {
+        setFeedbackStatus("Marked as already watched.");
+      }
+    }
+
+    function showWhyThis(): void {
+      if (!movieId || !feedbackWhy) return;
+      const title = titleEl?.textContent?.trim() || "";
+      // Meta chips are separate spans — join them with separators
+      // (raw textContent would run "2024" and "2h 5m" together).
+      const meta =
+        Array.from(metaEl?.querySelectorAll(".rs-detail-chip") ?? [])
+          .map((chip) => chip.textContent?.trim() || "")
+          .filter(Boolean)
+          .join(" · ") || metaEl?.textContent?.trim() || "";
+      void getActiveEntry()
+        .catch(() => null)
+        .then(async (entry) => {
+          const playlistId = (entry?._id as string | undefined) || "";
+          const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
+          await ensurePrefsLoaded().catch(() => {});
+          const signals: string[] = [];
+          if (playlistId) {
+            if (isFavorite(playlistId, "vod", movieId)) {
+              signals.push("it's in your Favourites");
+            }
+            if (isOnWatchlist(playlistId, "vod", movieId)) {
+              signals.push("it's on your Watch Later list");
+            }
+            if (isCompleted(playlistId, "vod", movieId)) {
+              signals.push("you've already watched it");
+            }
+            const taste = loadTaste(profileId, playlistId);
+            const topGenres = summarizeTaste(taste).favouriteGenres.slice(0, 3);
+            if (topGenres.length) {
+              signals.push(`your picks lean ${topGenres.join(", ")}`);
+            }
+          }
+          const detail = meta ? `${title} — ${meta}. ` : title ? `${title}. ` : "";
+          feedbackWhy.textContent =
+            signals.length > 0
+              ? `${detail}Why this? Because ${signals.join("; ")}.`
+              : `${detail}No personal signal yet — favourite it or mark it watched and picks will sharpen.`;
+          feedbackWhy.hidden = false;
+          if (feedbackStatus) feedbackStatus.textContent = "";
+        });
+    }
+
+    document
+      .getElementById("movie-feedback-more")
+      ?.addEventListener("click", () => void applyFeedback("more-like-this"));
+    document
+      .getElementById("movie-feedback-not-interested")
+      ?.addEventListener("click", () => void applyFeedback("not-interested"));
+    document
+      .getElementById("movie-feedback-watched")
+      ?.addEventListener("click", () => void applyFeedback("already-watched"));
+    document
+      .getElementById("movie-feedback-why")
+      ?.addEventListener("click", showWhyThis);
   </script>
 
   <style>
@@ -251,6 +409,15 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       margin: 0.25rem 0 0;
       font-size: 1rem;
       color: var(--rs-text-2);
+    }
+    /* Feedback menu (B06): one column of whole buttons in the dialog —
+       never a stack under a poster. */
+    .rs-detail-feedback {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
     }
     .rs-detail-hint-key {
       display: inline-grid;

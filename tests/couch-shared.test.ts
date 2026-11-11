@@ -101,32 +101,33 @@ describe("couch-nav destination table", () => {
     expect(couchNavIdFor("/")).toBe("home");
     expect(couchNavIdFor("/livetv")).toBe("livetv");
     expect(couchNavIdFor("/epg")).toBe("livetv");
-    expect(couchNavIdFor("/browse")).toBe("browse");
+    // /browse is a thin redirect (default target /discover).
+    expect(couchNavIdFor("/browse")).toBe("discover");
     expect(couchNavIdFor("/favorites")).toBe("favorites");
     expect(couchNavIdFor("/watchlist")).toBe("watchlist");
     expect(couchNavIdFor("/settings")).toBe("settings");
   });
 
-  it("maps the pre-consolidation routes to browse", () => {
-    // Browse consolidation (0.8.0): the old Movies / Series / Discover
-    // / Search destinations redirect into the Browse flow, and their
-    // detail pages resolve to the Browse section.
-    expect(couchNavIdFor("/movies")).toBe("browse");
-    expect(couchNavIdFor("/movies/detail?id=1")).toBe("browse");
-    expect(couchNavIdFor("/series")).toBe("browse");
-    expect(couchNavIdFor("/series/detail")).toBe("browse");
-    expect(couchNavIdFor("/discover")).toBe("browse");
+  it("maps Movies / Series / Discover to their own nav ids (0.10.0 split)", () => {
+    // 0.10.0 reverses the 0.8.0 Browse consolidation: Movies, Series
+    // and Discover are distinct destinations again, and their detail
+    // pages resolve to their own section.
+    expect(couchNavIdFor("/movies")).toBe("movies");
+    expect(couchNavIdFor("/movies/detail?id=1")).toBe("movies");
+    expect(couchNavIdFor("/series")).toBe("series");
+    expect(couchNavIdFor("/series/detail")).toBe("series");
+    expect(couchNavIdFor("/discover")).toBe("discover");
     expect(couchNavIdFor("/search")).toBe("browse");
   });
 
-  it("has exactly one Browse tab and no Movies / Series / Discover / Search tabs", () => {
+  it("has Home | Movies | Series | Discover | Live TV | Followed and NO Browse tab", () => {
     const ids = COUCH_NAV_PRIMARY.map((item) => item.id);
-    expect(ids).toEqual(["home", "livetv", "browse", "followed"]);
-    expect(ids.filter((id) => id === "browse")).toHaveLength(1);
-    expect(COUCH_DESTINATIONS.browse).toBe("/browse");
-    expect(COUCH_DESTINATIONS.movies).toBeUndefined();
-    expect(COUCH_DESTINATIONS.series).toBeUndefined();
-    expect(COUCH_DESTINATIONS.discover).toBeUndefined();
+    expect(ids).toEqual(["home", "movies", "series", "discover", "livetv", "followed"]);
+    expect(ids.filter((id) => id === "browse")).toHaveLength(0);
+    expect(COUCH_DESTINATIONS.browse).toBeUndefined();
+    expect(COUCH_DESTINATIONS.movies).toBe("/movies");
+    expect(COUCH_DESTINATIONS.series).toBe("/series");
+    expect(COUCH_DESTINATIONS.discover).toBe("/discover");
     expect(COUCH_DESTINATIONS.search).toBeUndefined();
   });
 

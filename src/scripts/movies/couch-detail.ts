@@ -363,10 +363,10 @@ document.getElementById("movie-trailer-dialog")?.addEventListener("close", () =>
 (async () => {
   await initI18n().catch(() => {});
   creds = await loadCreds();
-  // Back to Browse: history.back() when we arrived from the Browse
+  // Back to Movies: history.back() when we arrived from the Movies
   // grid, so couch-focus memory restores the exact card; otherwise
   // the link follows its href. (detailBackDecision is the tested half.)
-  wireDetailBackLink($("movie-detail-back"), "/browse");
+  wireDetailBackLink($("movie-detail-back"), "/movies");
   if (!movieId) {
     hideSkeleton();
     if (statusEl) statusEl.textContent = "No movie selected.";

@@ -71,6 +71,19 @@ export function pickNextSeed(pool: BecauseSeed[], lastShownKey: string | null): 
   return pool[(lastIndex + 1) % pool.length]
 }
 
+/**
+ * Signal-backed reason for a Because You Watched row (0.10.0, H05):
+ * the seed is a title the household actually watched (see
+ * pickBecauseSeedPool — only real watch signals enter the pool), so
+ * "Because you watched <seed>" is a real claim, never an invented
+ * one. Returns null when there is no seed to cite; the caller MUST
+ * then use a neutral label instead of inventing a reason.
+ */
+export function explainBecause(seed: BecauseSeed | null | undefined): string | null {
+  const name = seed?.name?.trim()
+  return name ? `Because you watched ${name}` : null
+}
+
 export interface BecauseRowOptions {
   limit?: number
   infoLookup?: (id: number | string) => LocalSimilarInfo | null

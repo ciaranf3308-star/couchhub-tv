@@ -13,20 +13,25 @@
 // Episode playback mounts the shared engine (mountPlayer) with the
 // TvOsd Couch controls incl. Next Episode + Autoplay-next; B / Escape
 // while playing returns to the episode listing, never to Home. The
-// back link returns to Browse and history.back()s when you arrived
-// from there, so focus restores to the exact Browse card.
+// back link returns to /series and history.back()s when you arrived
+// from there, so focus restores to the exact Series card.
+// Feedback lives HERE on the detail screen (one "More" menu):
+// More Like This / Not Interested / Watched / Why This? — never under
+// posters (B06). Resume / Next Episode, Follow, Favourite and Watch
+// Later stay as direct hero actions.
 import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvDialog from "@/components/couch/TvDialog.astro";
 import TvOsd from "@/components/couch/TvOsd.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 ---
 
-<CouchLayout pageTitle="Series" activeNav="browse" view="series-detail">
+<CouchLayout pageTitle="Series" activeNav="series" view="series-detail">
   <a
     id="series-detail-back"
     class="rs-detail-back rs-hero__action rs-hero__action--secondary"
-    href="/browse?type=series"
+    href="/series"
     data-nylah-item
-    aria-label="Back to Browse"
+    aria-label="Back to Series"
   >
     ‹ Series
   </a>
@@ -84,10 +89,19 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
             >
               + Watch Later
             </button>
+            <button
+              id="series-detail-more"
+              type="button"
+              class="rs-hero__action rs-hero__action--secondary"
+              data-nylah-item
+              data-couch-dialog-open="series-feedback-dialog"
+            >
+              ⋯ More
+            </button>
           </div>
           <p class="rs-detail-hints" aria-hidden="true">
             <span class="rs-detail-hint-key">A</span> Select
-            <span class="rs-detail-hint-key">B</span> Back to Browse
+            <span class="rs-detail-hint-key">B</span> Back to Series
           </p>
         </div>
       </div>
@@ -152,8 +166,147 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
     </TvOsd>
   </div>
 
+  {/*
+    FEEDBACK (B06): the ONE contextual menu for this title. No feedback
+    buttons live under posters anywhere — these actions live here on
+    the detail screen only. Wired by the page script below into the
+    local taste model (taste.ts): More Like This records a selection
+    signal, Not Interested is a hard exclusion, Watched records the
+    series as already watched (episode progress is untouched — watched
+    state stays per-episode), Why This? explains from real signals
+    only — never an invented reason.
+  */}
+  <TvDialog id="series-feedback-dialog" title="More options">
+    <div class="rs-detail-feedback" data-nylah-rail="detail-feedback">
+      <button id="series-feedback-more" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        More Like This
+      </button>
+      <button id="series-feedback-not-interested" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Not Interested
+      </button>
+      <button id="series-feedback-watched" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Watched
+      </button>
+      <button id="series-feedback-why" type="button" class="rs-hero__action rs-hero__action--secondary" data-nylah-item>
+        Why This?
+      </button>
+    </div>
+    <p id="series-feedback-status" class="rs-meta" role="status"></p>
+    <p id="series-feedback-why-text" class="rs-meta" hidden></p>
+  </TvDialog>
+
   <script>
     import "@/scripts/series/couch-detail.ts";
+    import { getActiveEntry } from "@/scripts/lib/creds.js";
+    import {
+      getActiveProfileId,
+      SHARED_PROFILE_ID,
+    } from "@/scripts/lib/profiles.ts";
+    import {
+      loadTaste,
+      saveTaste,
+      recordFeedback,
+      summarizeTaste,
+      type TasteFeedbackAction,
+    } from "@/scripts/lib/taste.ts";
+    import {
+      ensureLoaded as ensurePrefsLoaded,
+      isFavorite,
+      isOnWatchlist,
+    } from "@/scripts/lib/preferences.js";
+
+    // Feedback menu (B06): one contextual menu on the detail screen.
+    const feedbackStatus = document.getElementById("series-feedback-status");
+    const feedbackWhy = document.getElementById("series-feedback-why-text");
+    const titleEl = document.getElementById("series-detail-title");
+    const metaEl = document.getElementById("series-detail-meta");
+    const seriesId = Number(new URLSearchParams(location.search).get("id")) || 0;
+
+    function setFeedbackStatus(text: string): void {
+      if (feedbackStatus) feedbackStatus.textContent = text;
+      if (feedbackWhy) feedbackWhy.hidden = true;
+    }
+
+    async function applyFeedback(action: TasteFeedbackAction): Promise<void> {
+      if (!seriesId) {
+        setFeedbackStatus("No series selected.");
+        return;
+      }
+      const title = titleEl?.textContent?.trim() || "";
+      const entry = await getActiveEntry().catch(() => null);
+      const playlistId = (entry?._id as string | undefined) || "";
+      if (!playlistId) {
+        setFeedbackStatus("Couldn't save — no playlist selected.");
+        return;
+      }
+      const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
+      await ensurePrefsLoaded().catch(() => {});
+      const model = loadTaste(profileId, playlistId);
+      saveTaste(recordFeedback(model, { kind: "series", id: seriesId, title, action }));
+      if (action === "more-like-this") {
+        setFeedbackStatus("Noted — we'll show more like this.");
+        document
+          .getElementById("series-detail-similar")
+          ?.scrollIntoView({ block: "nearest" });
+      } else if (action === "not-interested") {
+        setFeedbackStatus("Noted — this title won't be recommended.");
+      } else if (action === "already-watched") {
+        setFeedbackStatus("Marked as already watched.");
+      }
+    }
+
+    function showWhyThis(): void {
+      if (!seriesId || !feedbackWhy) return;
+      const title = titleEl?.textContent?.trim() || "";
+      // Meta chips are separate spans — join them with separators
+      // (raw textContent would run "2024" and "1 season" together).
+      const meta =
+        Array.from(metaEl?.querySelectorAll(".rs-detail-chip") ?? [])
+          .map((chip) => chip.textContent?.trim() || "")
+          .filter(Boolean)
+          .join(" · ") || metaEl?.textContent?.trim() || "";
+      void getActiveEntry()
+        .catch(() => null)
+        .then(async (entry) => {
+          const playlistId = (entry?._id as string | undefined) || "";
+          const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
+          await ensurePrefsLoaded().catch(() => {});
+          const signals: string[] = [];
+          if (playlistId) {
+            if (isFavorite(playlistId, "series", seriesId)) {
+              signals.push("it's in your Favourites");
+            }
+            if (isOnWatchlist(playlistId, "series", seriesId)) {
+              signals.push("it's on your Watch Later list");
+            }
+            const taste = loadTaste(profileId, playlistId);
+            const topGenres = summarizeTaste(taste).favouriteGenres.slice(0, 3);
+            if (topGenres.length) {
+              signals.push(`your picks lean ${topGenres.join(", ")}`);
+            }
+          }
+          const detail = meta ? `${title} — ${meta}. ` : title ? `${title}. ` : "";
+          feedbackWhy.textContent =
+            signals.length > 0
+              ? `${detail}Why this? Because ${signals.join("; ")}.`
+              : `${detail}No personal signal yet — favourite it or mark it watched and picks will sharpen.`;
+          feedbackWhy.hidden = false;
+          if (feedbackStatus) feedbackStatus.textContent = "";
+        });
+    }
+
+    document
+      .getElementById("series-feedback-more")
+      ?.addEventListener("click", () => void applyFeedback("more-like-this"));
+    document
+      .getElementById("series-feedback-not-interested")
+      ?.addEventListener("click", () => void applyFeedback("not-interested"));
+    document
+      .getElementById("series-feedback-watched")
+      ?.addEventListener("click", () => void applyFeedback("already-watched"));
+    document
+      .getElementById("series-feedback-why")
+      ?.addEventListener("click", showWhyThis);
   </script>
 
   <style>
@@ -258,6 +411,15 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       margin: 0.25rem 0 0;
       font-size: 1rem;
       color: var(--rs-text-2);
+    }
+    /* Feedback menu (B06): one column of whole buttons in the dialog —
+       never a stack under a poster. */
+    .rs-detail-feedback {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      align-items: flex-start;
+      margin-bottom: 1rem;
     }
     .rs-detail-hint-key {
       display: inline-grid;

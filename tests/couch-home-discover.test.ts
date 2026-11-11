@@ -166,7 +166,7 @@ describe("buildHomeRails — order and conditional rendering", () => {
     const rails = buildHomeRails(fullRailsInput())
     const byId = new Map(rails.map((r) => [r.id, r]))
     expect(byId.get("new-episodes")?.href).toBe("/followed")
-    expect(byId.get("picked-for-you")?.href).toBe("/browse")
+    expect(byId.get("picked-for-you")?.href).toBe("/discover")
     expect(byId.get("recently-added")?.href).toBe("/recently-added")
     expect(byId.get("favourite-channels")?.href).toBe("/livetv")
     expect(byId.get("continue-watching")?.href).toBeUndefined()

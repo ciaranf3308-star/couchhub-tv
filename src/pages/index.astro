@@ -1,13 +1,21 @@
 ---
-// Nylah Studios home (W2, RedSilk Couch): cinematic hero from a real
-// catalogue title + rails in the fixed order — Continue Watching
-// (Movies & Series only), New Episodes, Picked for You, Trending,
-// Recently Added Movies, Continue Your Series, Favourite Live
-// Channels, Hidden Gems. All data loads client-side in HomeView from
-// the existing services; a rail renders only when it has meaningful
-// data, so an empty library is an honest empty state, never invented
-// titles. Top navigation, focus memory, gamepad and return-home all
-// come from CouchLayout.
+// Nylah Studios home (W2, RedSilk Couch; 0.10.0 W1 Home pass H01–H07):
+// cinematic hero from a real catalogue title + rails in the fixed
+// order — Continue Watching (Movies & Series only), New Episodes,
+// Picked for You, Trending, Recently Added Movies, Continue Your
+// Series, Favourite Live Channels, Hidden Gems. All data loads
+// client-side in HomeView from the home-rails data layer
+// (src/scripts/lib/home-rails.ts): every rail title names the content
+// type it holds (C1 taxonomy — a crime documentary is a documentary,
+// never a crime drama), personalised reasons come only from the
+// shared C2 engine's explain() (else a neutral "Featured …" label),
+// selection is confidence-gated (a 10.0 with no votes never
+// headlines), sparse recommendation rails hide rather than showing
+// 2–3 posters in an ocean of space, and Tonight's Picks shows real
+// EPG programmes with real start times. A rail renders only when it
+// has meaningful data, so an empty library is an honest empty state,
+// never invented titles. Top navigation, focus memory, gamepad and
+// return-home all come from CouchLayout.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import HomeView from "@/components/HomeView.svelte";
 ---

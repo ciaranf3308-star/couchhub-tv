@@ -148,6 +148,8 @@ export function titleGroupKey(candidate: DiscoverCandidate): string {
 export interface MoodPreset {
   id: string
   label: string
+  /** Single glyph shown on the quick-pick card (no image asset). */
+  icon: string
   /** Genres that count as a mood match (lower-cased). */
   genres?: string[]
   kind?: "movie" | "series"
@@ -158,20 +160,34 @@ export interface MoodPreset {
 }
 
 export const MOOD_PRESETS: MoodPreset[] = [
-  { id: "surprise-me", label: "Surprise Me" },
-  { id: "hidden-gems", label: "Hidden Gems", minRating: 7.5, hiddenGem: true },
+  { id: "surprise-me", label: "Surprise Me", icon: "✦" },
+  { id: "hidden-gems", label: "Hidden Gems", icon: "◆", minRating: 7.5, hiddenGem: true },
   {
     id: "intense",
     label: "Something Intense",
+    icon: "▲",
     genres: ["action", "thriller", "horror", "crime", "war", "mystery"],
   },
   {
     id: "easy",
     label: "Easy Watching",
+    icon: "☀",
     genres: ["comedy", "family", "animation", "romance", "musical"],
   },
-  { id: "short", label: "Short Films", kind: "movie", maxRuntimeMinutes: 60 },
-  { id: "binge", label: "Binge-worthy Series", kind: "series", minRating: 7.0 },
+  { id: "short", label: "Short Films", icon: "◷", kind: "movie", maxRuntimeMinutes: 60 },
+  { id: "binge", label: "Binge-worthy Series", icon: "▸▸", kind: "series", minRating: 7.0 },
+]
+
+/** Example natural-language prompts shown on the Discover page (B05).
+ * They are plain suggestions — tapping one fills the search box and
+ * submits it, exactly as if the user had typed it. */
+export const EXAMPLE_PROMPTS: string[] = [
+  "Something funny for tonight",
+  "A gripping crime series",
+  "A short film under an hour",
+  "Hidden gems I haven't seen",
+  "Something relaxing after a long day",
+  "A feel-good film for the family",
 ]
 
 export function moodPreset(id: string): MoodPreset | null {
@@ -701,13 +717,37 @@ export function validateRankedCandidates(
  * Rank a shortlist, preferring the registered AI ranker when the user
  * asked a natural-language question. Any failure, empty result, or
  * unknown id falls back to the local engine — Discover never goes blank
- * because the AI path did.
+ * because the AI path did. The returned `source` tells the page which
+ * engine actually produced the results, so it can label them honestly
+ * ("AI picks" vs "Local recommendations") and say when a fallback
+ * happened (AI04 / AI06).
  */
-export async function rankWithAI(
+export interface DiscoverSearchResult {
+  results: RankedCandidate[]
+  source: "ai" | "local"
+  /** Set when AI was attempted but the local engine answered instead. */
+  fallbackReason?: string
+}
+
+function aiFallbackReason(error: unknown): string {
+  const kind = (error as { kind?: string })?.kind
+  switch (kind) {
+    case "invalid_key":
+      return "The AI provider rejected the saved key, so these are local picks. Check the key in Settings."
+    case "rate_limited":
+      return "The AI provider is rate-limiting requests, so these are local picks for now."
+    case "not_configured":
+      return "AI isn't set up, so these are local picks."
+    default:
+      return "AI couldn't answer just now, so these are local picks."
+  }
+}
+
+export async function rankDiscover(
   query: string,
   candidates: DiscoverCandidate[],
   taste: TasteModel
-): Promise<RankedCandidate[]> {
+): Promise<DiscoverSearchResult> {
   const ranker = getAIRanker()
   if (ranker && isNaturalLanguageQuery(query)) {
     try {
@@ -717,12 +757,29 @@ export async function rankWithAI(
         Array.isArray(ranked) ? ranked : [],
         candidates
       )
-      if (valid.length) return valid
-    } catch {
-      // Fall through to local ranking below.
+      if (valid.length) return { results: valid, source: "ai" }
+      return {
+        results: searchDiscover(query, candidates, taste),
+        source: "local",
+        fallbackReason: "AI didn't rank any titles in your library, so these are local picks.",
+      }
+    } catch (error) {
+      return {
+        results: searchDiscover(query, candidates, taste),
+        source: "local",
+        fallbackReason: aiFallbackReason(error),
+      }
     }
   }
-  return searchDiscover(query, candidates, taste)
+  return { results: searchDiscover(query, candidates, taste), source: "local" }
+}
+
+export async function rankWithAI(
+  query: string,
+  candidates: DiscoverCandidate[],
+  taste: TasteModel
+): Promise<RankedCandidate[]> {
+  return (await rankDiscover(query, candidates, taste)).results
 }
 
 // ---------------------------------------------------------------------------
@@ -771,7 +828,9 @@ export interface DiscoverRowsInput {
   continueWatching: DiscoverCandidate[]
   /** Catalogue rows with a real `added` timestamp, newest first. */
   recentlyAdded: DiscoverCandidate[]
-  /** Live channels with a REAL current programme (EPG); never invented. */
+  /** Live channels with a REAL current programme (EPG); never invented.
+   * Accepted for compatibility — Discover (0.10.0) does not render a
+   * Live TV row, so loaders leave this empty. */
   nowPlaying: DiscoverCandidate[]
   /** Because-you-watched items (seed-based), when history exists. */
   becauseItems?: RankedCandidate[]
@@ -855,20 +914,10 @@ export function getDiscoverRows(input: DiscoverRowsInput): DiscoverRow[] {
     })
   }
 
-  // On TV Right Now — ONLY from real EPG data. An empty programme map
-  // means no row, never an invented listing.
-  if (input.nowPlaying.length) {
-    rows.push({
-      id: "on-tv-now",
-      title: "On TV Right Now",
-      subtitle: "Live now, from the programme guide",
-      items: input.nowPlaying.slice(0, limit).map((candidate) => ({
-        candidate,
-        score: 100,
-        reason: candidate.overview || "On now",
-      })),
-    })
-  }
+  // Discover is separate from Live TV (0.10.0): there is no "On TV
+  // Right Now" row here. Live listings live on the Live TV destination
+  // only; `input.nowPlaying` is accepted for call-site compatibility
+  // and deliberately ignored.
 
   // New Episodes of Followed Shows — renders only when a provider is
   // registered AND it reports episodes; otherwise the row hides.
@@ -1196,11 +1245,11 @@ export async function loadCatalogCandidates(
 /**
  * Load everything the Discover page needs in one pass: candidates, the
  * taste model (built from existing watched state + favourites), continue
- * watching, recently added, real-EPG now-playing, and the Because row
- * (via the existing similarity engine — reused, not duplicated).
+ * watching, recently added, and the Because row (via the existing
+ * similarity engine — reused, not duplicated).
  *
  * No network happens here beyond what the app's own cache warmup already
- * does; EPG reads come from the already-loaded programme map.
+ * does. Discover loads no EPG and no Live TV state (0.10.0).
  */
 export async function loadDiscoverData(
   playlistId: string,
@@ -1334,39 +1383,9 @@ export async function loadDiscoverData(
     })
     .filter((c): c is DiscoverCandidate => !!c)
 
-  // --- On TV Right Now: ONLY from the loaded EPG programme map.
-  const nowPlaying: DiscoverCandidate[] = []
-  try {
-    const epg = await import("@/scripts/lib/epg-data.js")
-    const liveCatalog = await import("@/scripts/lib/live-catalog.ts")
-    const nowNext = await import("@/scripts/lib/now-next.ts")
-    const credsMod = await import("@/scripts/lib/creds.js")
-    let epgState = epg.getProgrammesSync(playlistId)
-    if (!epgState?.programmes?.size) {
-      // Warm the guide the same way /search does, then re-read the sync map.
-      try {
-        const creds = await credsMod.loadCreds()
-        if (creds?.host) await epg.loadProgrammes(playlistId, creds).catch(() => null)
-      } catch {
-        // No creds / no guide: the row simply hides.
-      }
-      epgState = epg.getProgrammesSync(playlistId)
-    }
-    const programmes = epgState?.programmes ?? null
-    if (programmes?.size) {
-      const channels = liveCatalog.readCachedLiveChannels(playlistId)
-      for (const channel of channels.slice(0, 60)) {
-        const slot = nowNext.computeNowNext(programmes, channel, playlistId)
-        if (!slot.current) continue
-        nowPlaying.push(
-          liveChannelToCandidate(channel, slot.current.title, slot.next?.title ?? null)
-        )
-        if (nowPlaying.length >= 12) break
-      }
-    }
-  } catch {
-    // No EPG data: the row simply hides. Never invent programme info.
-  }
+  // --- On TV Right Now is NOT loaded here (0.10.0): Discover is
+  // --- separate from Live TV. nowPlaying stays empty; Live listings
+  // --- live on the Live TV destination only.
 
   // --- Because You Watched: the existing similarity engine, seeded from
   // --- the profile's most recent watched titles.
@@ -1427,7 +1446,7 @@ export async function loadDiscoverData(
     watchedKeys,
     continueWatching,
     recentlyAdded,
-    nowPlaying,
+    nowPlaying: [],
     becauseItems: becauseItems.slice(0, 12),
   }
 }

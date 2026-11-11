@@ -12,12 +12,15 @@ import {
   parseYear,
   yearMatches,
   ratingMatches,
+  runtimeMatches,
 } from "@/scripts/lib/browse-filters.ts";
 import {
   genreForCategoryName,
   parseGenreString,
   type GenreId,
 } from "@/scripts/lib/genres.ts";
+import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 
 export interface MovieRow {
@@ -181,6 +184,10 @@ export interface MovieFilter {
   year?: string;
   /** Minimum rating (0 = any). */
   minRating?: number;
+  /** Maximum runtime in minutes (0 = any length). B09 — reads the
+   * provider duration via runtimeMatches; a title with no parseable
+   * runtime cannot be shown to fit a limit. */
+  maxRuntime?: number;
   /** Favourite / watchlist id sets, when filtering to a personal list. */
   favoriteIds?: Set<number> | null;
   watchlistIds?: Set<number> | null;
@@ -209,6 +216,7 @@ export function filterMovies(rows: MovieRow[], filter: MovieFilter): MovieRow[] 
   const category = filter.category || "";
   const year = filter.year || "";
   const minRating = filter.minRating || 0;
+  const maxRuntime = filter.maxRuntime || 0;
   return rows.filter((row) => {
     if (tokens.length) {
       const hay = row.norm || normalize(`${row.name} ${row.category} ${row.year}`);
@@ -218,6 +226,7 @@ export function filterMovies(rows: MovieRow[], filter: MovieFilter): MovieRow[] 
     if (genre && !movieGenres(row).includes(genre)) return false;
     if (!yearMatches(row.year, year)) return false;
     if (!ratingMatches(row.rating, minRating)) return false;
+    if (!runtimeMatches(row, maxRuntime)) return false;
     if (filter.favoriteIds && !filter.favoriteIds.has(row.id)) return false;
     if (filter.watchlistIds && !filter.watchlistIds.has(row.id)) return false;
     if (filter.inProgressIds && !filter.inProgressIds.has(row.id)) return false;
@@ -293,6 +302,82 @@ export function catalogueCategories(rows: MovieRow[]): Array<{ name: string; cou
 export function genreDisplayLabel(id: GenreId): string {
   if (id === "sci-fi") return "Sci-Fi";
   return id.charAt(0).toUpperCase() + id.slice(1);
+}
+
+// ---------------------------------------------------------------------------
+// Genre collections (B08, 0.10.0) — meaningful rails built from real
+// catalogue metadata. Only non-empty collections are returned, so the
+// page never exposes an empty or unsupported category. Documentaries
+// are a kind of their own: a documentary film appears ONLY in
+// "Documentary Films", never in a fictional genre collection, even
+// when its provider category also names that genre (C1 rule —
+// genres are attributes, the documentary kind is not).
+// ---------------------------------------------------------------------------
+
+export interface GenreCollection<T> {
+  /** Stable rail id, e.g. "movies-genre-action". */
+  id: string;
+  /** Rail title, e.g. "Action". */
+  title: string;
+  rows: T[];
+}
+
+/** True when the row is a documentary (C1 classifyTitle — the kind
+ * decision; genres stay attributes, so a crime documentary is a
+ * documentary, not a crime drama). The adapter knows this is a
+ * movie row, so the base type is passed explicitly — a bare row
+ * carries no type field for the film/series split. */
+export function isDocumentaryMovie(row: MovieRow): boolean {
+  return isDocumentaryKind(classifyTitle({ type: "movie", category: row.category }));
+}
+
+const MOVIE_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: GenreId }> = [
+  { id: "movies-genre-action", title: "Action", genre: "action" },
+  { id: "movies-genre-thriller", title: "Thriller", genre: "thriller" },
+  { id: "movies-genre-comedy", title: "Comedy", genre: "comedy" },
+  { id: "movies-genre-horror", title: "Horror", genre: "horror" },
+  { id: "movies-genre-sci-fi", title: "Science Fiction", genre: "sci-fi" },
+  { id: "movies-genre-drama", title: "Drama", genre: "drama" },
+];
+
+/**
+ * B08 movie collections, in display order: Action, Thriller, Comedy,
+ * Horror, Science Fiction, Drama, Documentary Films, Recently Added.
+ * Genre collections are evidence-preferred then highest-rated first
+ * (C2 preferEvidence — a no-vote 10.0 with no TMDb link can never
+ * top a collection while any linked title qualifies; when nothing is
+ * linked the full pool is used, so a small library never empties);
+ * Recently Added is newest-first. Empty collections are omitted.
+ * Pure — no provider, DOM or storage access.
+ */
+export function movieGenreCollections(rows: MovieRow[]): GenreCollection<MovieRow>[] {
+  const out: GenreCollection<MovieRow>[] = [];
+  for (const def of MOVIE_GENRE_COLLECTION_DEFS) {
+    const members = preferEvidence(
+      rows.filter(
+        (row) => !isDocumentaryMovie(row) && movieGenres(row).includes(def.genre),
+      ),
+    );
+    if (members.length) {
+      out.push({ id: def.id, title: def.title, rows: sortMovies(members, "rating") });
+    }
+  }
+  const documentaries = preferEvidence(rows.filter((row) => isDocumentaryMovie(row)));
+  if (documentaries.length) {
+    out.push({
+      id: "movies-genre-documentary",
+      title: "Documentary Films",
+      rows: sortMovies(documentaries, "rating"),
+    });
+  }
+  if (rows.length) {
+    out.push({
+      id: "movies-recent",
+      title: "Recently Added",
+      rows: sortMovies(rows, "added"),
+    });
+  }
+  return out;
 }
 
 /** Watched fraction in [0, 1]; 0 when there is no usable progress. */
@@ -428,7 +513,10 @@ export function pickFeaturedMovie(rows: MovieRow[]): MovieRow | null {
   if (!withArt.length) return rows[0] ?? null;
   const byAdded = [...withArt].sort((a, b) => (b.added || 0) - (a.added || 0));
   const recentHalf = byAdded.slice(0, Math.max(1, Math.ceil(byAdded.length / 2)));
-  const byRating = [...recentHalf].sort(
+  // C2 — a no-vote 10.0 with no TMDb link never headlines while any
+  // recent linked title qualifies (preferEvidence falls back to the
+  // full half when nothing is linked).
+  const byRating = [...preferEvidence(recentHalf)].sort(
     (a, b) => ratingSortValue(b.rating) - ratingSortValue(a.rating),
   );
   return byRating[0] ?? byAdded[0] ?? null;

@@ -12,8 +12,11 @@ import {
   parseYear,
   yearMatches,
   ratingMatches,
+  runtimeMatches,
 } from "@/scripts/lib/browse-filters.ts";
 import { genreForCategoryName, parseGenreString, type GenreId } from "@/scripts/lib/genres.ts";
+import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 import { isGenericEpisodeTitle } from "@/scripts/lib/episode-title.ts";
 import {
@@ -154,6 +157,11 @@ export interface SeriesFilter {
   category?: string;
   year?: string;
   minRating?: number;
+  /** Maximum runtime in minutes (0 = any length). B09 — series rows
+   * carry no runtime metadata, so the runtime control is never
+   * offered on /series (C5 availability gate); the check stays here
+   * so the filter is honoured if rows ever gain a duration. */
+  maxRuntime?: number;
   favoriteIds?: Set<number> | null;
   watchlistIds?: Set<number> | null;
   followedIds?: Set<number> | null;
@@ -169,6 +177,7 @@ export function filterSeries(rows: SeriesRow[], filter: SeriesFilter): SeriesRow
   const category = filter.category || "";
   const year = filter.year || "";
   const minRating = filter.minRating || 0;
+  const maxRuntime = filter.maxRuntime || 0;
   return rows.filter((row) => {
     if (tokens.length) {
       const hay = row.norm || normalize(`${row.name} ${row.category} ${row.year}`);
@@ -178,6 +187,7 @@ export function filterSeries(rows: SeriesRow[], filter: SeriesFilter): SeriesRow
     if (genre && !seriesGenres(row).includes(genre)) return false;
     if (!yearMatches(row.year, year)) return false;
     if (!ratingMatches(row.rating, minRating)) return false;
+    if (!runtimeMatches(row, maxRuntime)) return false;
     if (filter.favoriteIds && !filter.favoriteIds.has(row.id)) return false;
     if (filter.watchlistIds && !filter.watchlistIds.has(row.id)) return false;
     if (filter.followedIds && !filter.followedIds.has(row.id)) return false;
@@ -234,6 +244,112 @@ export function catalogueSeriesGenres(rows: SeriesRow[]): Array<{ id: GenreId; c
   return [...counts.entries()]
     .map(([id, count]) => ({ id, count }))
     .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+}
+
+// ---------------------------------------------------------------------------
+// Genre collections (B08, 0.10.0) — meaningful rails built from real
+// catalogue metadata. Only non-empty collections are returned, so the
+// page never exposes an empty or unsupported category. Documentaries
+// are a kind of their own: a documentary series appears ONLY in
+// "Documentary Series", never in a fictional genre collection, even
+// when its provider category also names that genre (C1 rule).
+// "Reality" has no canonical genre id (TMDb 10764 is deliberately
+// unmapped in genres.ts), so it is matched on the provider category
+// text ("Reality", "Reality TV") — never on the title alone.
+// ---------------------------------------------------------------------------
+
+export interface GenreCollection<T> {
+  /** Stable rail id, e.g. "series-genre-crime-drama". */
+  id: string;
+  /** Rail title, e.g. "Crime Drama". */
+  title: string;
+  rows: T[];
+}
+
+/** True when the row is a documentary (C1 classifyTitle — the kind
+ * decision; genres stay attributes). The adapter knows this is a
+ * series row, so the base type is passed explicitly — without it a
+ * documentary series whose category carries no series token would
+ * misclassify as a documentary film. */
+export function isDocumentarySeries(row: SeriesRow): boolean {
+  return isDocumentaryKind(classifyTitle({ type: "series", category: row.category }));
+}
+
+/** True when the provider category names reality TV. */
+export function isRealitySeries(row: SeriesRow): boolean {
+  return /reality/i.test(row.category || "");
+}
+
+const SERIES_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: GenreId }> = [
+  { id: "series-genre-crime-drama", title: "Crime Drama", genre: "crime" },
+  { id: "series-genre-comedy", title: "Comedy", genre: "comedy" },
+  { id: "series-genre-sci-fi", title: "Science Fiction", genre: "sci-fi" },
+];
+
+export interface SeriesCollectionOptions {
+  /** Ids with saved in-progress episode state (Continue Watching). */
+  inProgressIds?: Set<number> | null;
+}
+
+/**
+ * B08 series collections, in display order: Crime Drama, Comedy,
+ * Science Fiction, Documentary Series, Reality, Recently Added,
+ * Continue Watching. Genre collections are evidence-preferred then
+ * highest-rated first (C2 preferEvidence — see movieGenreCollections);
+ * Recently Added is newest-first; Continue Watching keeps catalogue
+ * order. Empty collections are omitted. Pure — no provider, DOM or
+ * storage access.
+ */
+export function seriesGenreCollections(
+  rows: SeriesRow[],
+  opts: SeriesCollectionOptions = {},
+): GenreCollection<SeriesRow>[] {
+  const out: GenreCollection<SeriesRow>[] = [];
+  const fictional = (row: SeriesRow) => !isDocumentarySeries(row);
+  for (const def of SERIES_GENRE_COLLECTION_DEFS) {
+    const members = preferEvidence(
+      rows.filter(
+        (row) => fictional(row) && seriesGenres(row).includes(def.genre),
+      ),
+    );
+    if (members.length) {
+      out.push({ id: def.id, title: def.title, rows: sortSeries(members, "rating") });
+    }
+  }
+  const documentaries = preferEvidence(rows.filter((row) => isDocumentarySeries(row)));
+  if (documentaries.length) {
+    out.push({
+      id: "series-genre-documentary",
+      title: "Documentary Series",
+      rows: sortSeries(documentaries, "rating"),
+    });
+  }
+  const reality = preferEvidence(rows.filter((row) => fictional(row) && isRealitySeries(row)));
+  if (reality.length) {
+    out.push({
+      id: "series-genre-reality",
+      title: "Reality",
+      rows: sortSeries(reality, "rating"),
+    });
+  }
+  if (rows.length) {
+    out.push({
+      id: "series-recent",
+      title: "Recently Added",
+      rows: sortSeries(rows, "added"),
+    });
+  }
+  if (opts.inProgressIds?.size) {
+    const continuing = rows.filter((row) => opts.inProgressIds!.has(row.id));
+    if (continuing.length) {
+      out.push({
+        id: "series-continue",
+        title: "Continue Watching",
+        rows: continuing,
+      });
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +673,9 @@ export function pickFeaturedSeries(rows: SeriesRow[]): SeriesRow | null {
   if (!withArt.length) return rows[0] ?? null;
   const byAdded = [...withArt].sort((a, b) => (b.added || 0) - (a.added || 0));
   const recentHalf = byAdded.slice(0, Math.max(1, Math.ceil(byAdded.length / 2)));
-  const byRating = [...recentHalf].sort(
+  // C2 — a no-vote 10.0 with no TMDb link never headlines while any
+  // recent linked title qualifies (see pickFeaturedMovie).
+  const byRating = [...preferEvidence(recentHalf)].sort(
     (a, b) => ratingSortValue(b.rating) - ratingSortValue(a.rating),
   );
   return byRating[0] ?? byAdded[0] ?? null;

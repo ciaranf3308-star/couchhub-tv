@@ -11,13 +11,16 @@ export interface CouchNavItem {
 }
 
 /** Primary top-nav destinations, in display order.
- * Browse consolidation (0.8.0): Movies + Series + Discover collapse
- * into a single Browse destination — content type is a filter inside
- * Browse, not a tab. Search is one tap away at the top of Browse. */
+ * 0.10.0 reverses the 0.8.0 Browse consolidation (user's explicit
+ * call): Movies, Series and Discover are distinct destinations again.
+ * NO Browse entry. Search stays one tap away at the top of each
+ * catalogue page (in-page search + /search), as now. */
 export const COUCH_NAV_PRIMARY: readonly CouchNavItem[] = [
   { id: "home", label: "Home", href: "/" },
+  { id: "movies", label: "Movies", href: "/movies" },
+  { id: "series", label: "Series", href: "/series" },
+  { id: "discover", label: "Discover", href: "/discover" },
   { id: "livetv", label: "Live TV", href: "/livetv" },
-  { id: "browse", label: "Browse", href: "/browse" },
   { id: "followed", label: "Followed", href: "/followed" },
 ];
 
@@ -57,20 +60,21 @@ export function normalizeCouchPath(pathname: string): string {
 
 /**
  * Active nav id for a pathname. Detail / sub-routes resolve to their
- * parent section (e.g. /movies/detail -> "browse", /epg -> "livetv").
- * The pre-consolidation routes /movies, /series, /discover and /search
- * all resolve to "browse": they redirect into the Browse flow, and
- * search is part of Browse now. Returns null for paths outside the
- * Couch UI.
+ * parent section (e.g. /movies/detail -> "movies", /epg -> "livetv").
+ * /browse is a thin redirect (to /movies, /series or /discover) and
+ * never renders, so it resolves to "discover", its default target.
+ * /search has no top-nav entry of its own; it keeps the legacy
+ * "browse" id so isCouchRoute stays true and no nav item highlights.
+ * Returns null for paths outside the Couch UI.
  */
 export function couchNavIdFor(pathname: string): string | null {
   const path = normalizeCouchPath(pathname);
   if (path === "/") return "home";
   if (path === "/livetv" || path === "/epg") return "livetv";
-  if (path === "/browse") return "browse";
-  if (path === "/movies" || path.startsWith("/movies/")) return "browse";
-  if (path === "/series" || path.startsWith("/series/")) return "browse";
-  if (path === "/discover") return "browse";
+  if (path === "/browse") return "discover";
+  if (path === "/movies" || path.startsWith("/movies/")) return "movies";
+  if (path === "/series" || path.startsWith("/series/")) return "series";
+  if (path === "/discover") return "discover";
   if (path === "/search") return "browse";
   if (path === "/followed") return "followed";
   if (path === "/favorites") return "favorites";

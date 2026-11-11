@@ -405,6 +405,30 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
       RETURN_HOME_HINT,
     ],
   },
+  // 0.10.0 (W5): Library lists (Favourites / Watch Later) had no
+  // config and fell back to the generic legend (no Search row). They
+  // are plain card lists like Followed — same audited mapping: Y is
+  // the global gamepad.ts goSearch binding, Menu opens Settings.
+  favorites: {
+    id: "favorites",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Select" },
+      { glyph: "y", label: "Search" },
+      { glyph: "menu", label: "Settings" },
+      RETURN_HOME_HINT,
+    ],
+  },
+  watchlist: {
+    id: "watchlist",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Select" },
+      { glyph: "y", label: "Search" },
+      { glyph: "menu", label: "Settings" },
+      RETURN_HOME_HINT,
+    ],
+  },
   settings: {
     id: "settings",
     items: [

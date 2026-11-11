@@ -1,5 +1,14 @@
 // RedSilk Couch — Home rail assembly (W2).
 //
+// NOTE (0.10.0, W1): this is the 0.5.0 assembly layer — no src file
+// imports it any more; the live Home renders through home-rails.ts
+// (HomeView). It is kept (and tested) as the shared card-building
+// vocabulary, so it gets the same treatment: C1 kind labels on every
+// card (candidateTypeLine, H01), C2 confidence ordering for Hidden
+// Gems and the hero (H02), and no invented vote counts or ratings.
+// Rail titles here are left exactly as the tests pin them; the live
+// type-suffixed titles live in home-rails.ts.
+//
 // Pure functions over data the existing services already load
 // (loadDiscoverData / loadTrending / followed provider / preferences).
 // No browser globals, no network, no invented content: every card maps
@@ -30,6 +39,8 @@ import {
   type TrendingSource,
 } from "@/scripts/lib/trending.ts";
 import { railCardHref } from "@/scripts/lib/rail-card.ts";
+import { classifyTitle, kindLabel } from "@/scripts/lib/taxonomy.ts";
+import { confidenceScore } from "@/scripts/lib/recommendations.ts";
 
 export type HomeCardKind = "poster" | "landscape" | "channel";
 
@@ -96,6 +107,34 @@ export function candidateMeta(candidate: DiscoverCandidate): string | undefined 
   return parts.length ? parts.join(" · ") : undefined;
 }
 
+/**
+ * H01 — focused-card type line from the C1 taxonomy: the kind label
+ * ("Movie", "Series", "Documentary Film", "Documentary Series",
+ * "Live TV") plus the runtime for films when it is actually known
+ * ("Movie · 1h 58m"). Genres are attributes, never the kind — a
+ * crime documentary reads as a documentary here.
+ */
+export function candidateTypeLine(candidate: DiscoverCandidate): string {
+  const kind = classifyTitle({
+    type: candidate.kind,
+    kind: candidate.kind,
+    genres: candidate.genres,
+    title: candidate.title,
+  });
+  const label = kindLabel(kind);
+  if (
+    (kind === "movie" || kind === "documentary-film") &&
+    typeof candidate.runtimeMinutes === "number" &&
+    Number.isFinite(candidate.runtimeMinutes) &&
+    candidate.runtimeMinutes > 0
+  ) {
+    const h = Math.floor(candidate.runtimeMinutes / 60);
+    const m = candidate.runtimeMinutes % 60;
+    return `${label} · ${h > 0 ? `${h}h ${m}m` : `${m} min`}`;
+  }
+  return label;
+}
+
 function progressFraction(row: HomeProgressRow): number {
   if (!row.duration || row.duration <= 0) return 0;
   return Math.max(0, Math.min(1, (row.position || 0) / row.duration));
@@ -136,7 +175,7 @@ export function vodProgressCards(
       cards.push({
         key: candidateKey(candidate),
         title: candidate.title,
-        subtitle: "Film",
+        subtitle: candidateTypeLine(candidate),
         meta: candidateMeta(candidate),
         image: candidate.posterUrl,
         kind: "poster",
@@ -212,7 +251,7 @@ export function candidateCards(candidates: DiscoverCandidate[]): HomeCard[] {
   return candidates.slice(0, HOME_RAIL_LIMIT).map((candidate) => ({
     key: candidateKey(candidate),
     title: candidate.title,
-    subtitle: candidate.kind === "series" ? "Series" : candidate.kind === "live" ? "Live TV" : "Film",
+    subtitle: candidateTypeLine(candidate),
     meta: candidateMeta(candidate),
     image: candidate.posterUrl,
     kind: "poster" as const,
@@ -257,7 +296,7 @@ export function trendingCards(items: TrendingRailItem[]): HomeCard[] {
   return items.slice(0, HOME_RAIL_LIMIT).map((item) => ({
     key: `${item.kind}:${item.id}`,
     title: item.name,
-    subtitle: item.kind === "series" ? "Series" : "Film",
+    subtitle: kindLabel(item.kind === "series" ? "series" : "movie"),
     meta: [item.year, item.rating ? `★ ${item.rating}` : ""].filter(Boolean).join(" · ") || undefined,
     image: item.logo ?? undefined,
     kind: "poster" as const,
@@ -305,7 +344,15 @@ export function hiddenGemCards(
     .filter((c) => typeof c.rating === "number" && c.rating >= HIDDEN_GEM_MIN_RATING)
     .filter((c) => !watchedKeys.has(candidateKey(c)))
     .filter((c) => !excludedKeys.has(candidateKey(c)))
+    // H02 — order by the shared C2 confidence score, not the raw
+    // rating: a no-vote 10.0 scores the prior mean (6.5) and can no
+    // longer outrank a vote-backed title. The rating floor above is
+    // unchanged, so the existing "highly rated" bar still applies.
     .sort((a, b) => {
+      const confidenceDiff =
+        confidenceScore(b.rating ?? null, b.voteCount ?? null) -
+        confidenceScore(a.rating ?? null, a.voteCount ?? null);
+      if (confidenceDiff !== 0) return confidenceDiff;
       if ((b.rating ?? 0) !== (a.rating ?? 0)) return (b.rating ?? 0) - (a.rating ?? 0);
       return a.title.localeCompare(b.title);
     })
@@ -313,7 +360,7 @@ export function hiddenGemCards(
     .map((candidate) => ({
       key: candidateKey(candidate),
       title: candidate.title,
-      subtitle: candidate.kind === "series" ? "Series" : "Film",
+      subtitle: candidateTypeLine(candidate),
       meta: candidateMeta(candidate),
       image: candidate.posterUrl,
       kind: "poster" as const,
@@ -341,11 +388,25 @@ export function pickHero(input: {
 }): HeroPick | null {
   const withArt = (c: DiscoverCandidate | undefined): c is DiscoverCandidate =>
     !!c && !!c.posterUrl;
-  const fromContinue = input.continueWatching.find(withArt);
+  // H02 — within each source, best confidence first (C2 score, so a
+  // no-vote 10.0 scores the prior mean and cannot outrank a
+  // vote-backed title); the source preference order itself —
+  // in-progress, then picked, then recently added — is unchanged.
+  const byConfidence = (c: DiscoverCandidate[]): DiscoverCandidate[] =>
+    [...c]
+      .map((candidate, index) => ({ candidate, index }))
+      .sort(
+        (a, b) =>
+          confidenceScore(b.candidate.rating ?? null, b.candidate.voteCount ?? null) -
+            confidenceScore(a.candidate.rating ?? null, a.candidate.voteCount ?? null) ||
+          a.index - b.index,
+      )
+      .map(({ candidate }) => candidate);
+  const fromContinue = byConfidence(input.continueWatching).find(withArt);
   if (fromContinue) return { candidate: fromContinue, eyebrow: "Continue Watching" };
-  const fromPicked = input.picked.map((r) => r.candidate).find(withArt);
+  const fromPicked = byConfidence(input.picked.map((r) => r.candidate)).find(withArt);
   if (fromPicked) return { candidate: fromPicked, eyebrow: "Picked for You" };
-  const fromRecent = input.recentlyAdded.find(withArt);
+  const fromRecent = byConfidence(input.recentlyAdded).find(withArt);
   if (fromRecent) return { candidate: fromRecent, eyebrow: "Recently Added" };
   return null;
 }
@@ -390,7 +451,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
       id: "picked-for-you",
       title: "Picked for You",
       subtitle: "Based on what you've watched and loved",
-      href: "/browse",
+      href: "/discover",
       cards: input.picked,
     });
   }
@@ -414,7 +475,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
     rails.push({
       id: "continue-series",
       title: "Continue Your Series",
-      href: "/browse?type=series",
+      href: "/series",
       cards: input.continueSeries,
     });
   }
@@ -431,7 +492,7 @@ export function buildHomeRails(input: HomeRailsInput): HomeRail[] {
       id: "hidden-gems",
       title: "Hidden Gems",
       subtitle: "Highly rated, not watched yet",
-      href: "/browse",
+      href: "/discover",
       cards: input.hiddenGems,
     });
   }

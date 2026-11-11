@@ -447,13 +447,25 @@ describe("detail page contract (Browse 0.8.0)", () => {
     expect(series).toContain("series-detail-hero");
   });
 
-  it("back-links return to Browse with the right filter and highlight Browse", () => {
-    expect(movie).toContain('href="/browse?type=movies"');
-    expect(series).toContain('href="/browse?type=series"');
-    expect(movie).not.toContain('href="/movies"');
-    expect(series).not.toContain('href="/series"');
-    expect(movie).toContain('activeNav="browse"');
-    expect(series).toContain('activeNav="browse"');
+  it("back-links return to their own catalogue page and highlight it", () => {
+    expect(movie).toContain('href="/movies"');
+    expect(series).toContain('href="/series"');
+    expect(movie).not.toContain('href="/browse?type=movies"');
+    expect(series).not.toContain('href="/browse?type=series"');
+    expect(movie).toContain('activeNav="movies"');
+    expect(series).toContain('activeNav="series"');
+  });
+
+  it("detail screens carry the one feedback menu (B06)", () => {
+    for (const page of [movie, series]) {
+      expect(page).toContain("feedback-dialog");
+      expect(page).toContain("More Like This");
+      expect(page).toContain("Not Interested");
+      expect(page).toContain("Why This?");
+      expect(page).toContain("feedback-watched");
+    }
+    expect(movie).toContain('id="movie-feedback-dialog"');
+    expect(series).toContain('id="series-feedback-dialog"');
   });
 
   it("hero is a cinematic splash: poster inside the hero, chips, progress, actions rail", () => {
