@@ -120,11 +120,11 @@ import TvChannelRow from "./TvChannelRow.astro";
       channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
 
     // ── Highlighted-row programme artwork (0.11.0 W5) ──────────
-    // W2's enrichment module (`livetv-enrichment.ts`) does not exist
-    // at the 0.10.1 base — it lands with W2. `import.meta.glob`
-    // resolves to nothing until then, so this whole block is a
-    // no-op here and live after integration, with no build-time
-    // dependency on W2's file. Only the HIGHLIGHTED row is ever
+    // W2's enrichment module (`livetv-enrichment.ts`) is loaded
+    // through import.meta.glob with an ABSOLUTE-from-root pattern:
+    // a relative glob silently resolves empty inside an Astro
+    // component script (see W6's guide loader), so the relative
+    // form must not be used here. Only the HIGHLIGHTED row is ever
     // enriched (never the whole surf list): a cache peek paints
     // instantly, the async enrich fires only after the highlight
     // settles 250 ms, and a highlight move / close cancels the
@@ -140,7 +140,7 @@ import TvChannelRow from "./TvChannelRow.astro";
       getProgrammeArtworkSync?: (title: string) => SurfProgrammeArtwork | null;
     };
     const enrichmentLoaders = import.meta.glob(
-      "../../scripts/lib/livetv-enrichment.ts",
+      "/src/scripts/lib/livetv-enrichment.ts",
     ) as Record<string, () => Promise<unknown>>;
     let enrichmentModule: EnrichmentModule | null | undefined;
     const loadEnrichment = async (): Promise<EnrichmentModule | null> => {

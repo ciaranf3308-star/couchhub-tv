@@ -2069,9 +2069,10 @@ const nowMs = Date.now();
       persistLivetvState(liveState);
       active = false;
       root.hidden = true;
-      if (document.documentElement.dataset.livetvMode === "guide") {
-        delete document.documentElement.dataset.livetvMode;
-      }
+      // 0.11.0 integration (R9): the shell (livetv.astro setMode)
+      // is the single writer of html[data-livetv-mode]; the Guide
+      // used to delete it here, but requestLivetvMode below makes
+      // the shell write the return mode synchronously.
       requestLivetvMode(returnTo);
       const key = liveState.returnFocusKey;
       if (key) {
@@ -2172,24 +2173,28 @@ const nowMs = Date.now();
           : null;
       // Seed shared guideMode from the request (or the persisted
       // tab) and record where to return to — both live in shared
-      // state from here on; the local copy follows liveState.
+      // state from here on; the local copy follows liveState. The
+      // return mode goes through enterGuide's guideReturnTo param
+      // (0.11.0 integration: the post-enterGuide spread that used
+      // to set it here is gone — enterGuide is the single writer).
       liveState = enterGuide(
         persisted,
         invokerKey,
         requestedMode !== undefined
           ? parseGuideMode(requestedMode, persisted.guideMode)
           : undefined,
+        enteredFrom === "playback" ? "playback" : "landing",
       );
-      liveState = {
-        ...liveState,
-        guideReturnTo: enteredFrom === "playback" ? "playback" : "landing",
-      };
       guideMode = liveState.guideMode;
       persistLivetvState(liveState);
       active = true;
       activationFinished = false;
       root.hidden = false;
-      document.documentElement.dataset.livetvMode = "guide";
+      // 0.11.0 integration (R9): html[data-livetv-mode] is written
+      // only by the shell (livetv.astro setMode) — on the same
+      // livetv:mode event that triggers this activation, and on
+      // load by the shell init for ?mode=guide deep links. The
+      // Guide no longer writes it behind the shell's back.
       // The tab follows the request NOW, not after data loads: the
       // old code switched tabs only at the end of activate, so a
       // ?guideMode=tonight deep link stayed on On Now whenever the
@@ -2231,9 +2236,10 @@ const nowMs = Date.now();
         catalogRetryTimer = null;
       }
       root.hidden = true;
-      if (document.documentElement.dataset.livetvMode === "guide") {
-        delete document.documentElement.dataset.livetvMode;
-      }
+      // 0.11.0 integration (R9): the shell owns
+      // html[data-livetv-mode] — this used to delete it, but the
+      // shell's setMode on the same livetv:mode event writes the
+      // new mode, so there is nothing for the Guide to clean up.
     }
 
     // ── Events ────────────────────────────────────────────────

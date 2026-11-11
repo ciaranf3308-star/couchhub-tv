@@ -70,8 +70,10 @@ import { EPG_LOADED_EVENT } from "./epg-data.js";
 
 // ── Events / mode contract ──────────────────────────────────────
 
-/** W5 contract: gamepad resolves B/Escape to "back"; the shell dispatches this. */
-export const LIVETV_BACK_EVENT = "livetv:back";
+/** W5 contract: gamepad resolves B/Escape to "back"; the shell dispatches this.
+ *  Single definition lives in livetv-keys.ts (0.11.0 integration R7) —
+ *  this module re-exports it so existing import sites keep working. */
+export { LIVETV_BACK_EVENT } from "./livetv-keys";
 
 /** Dedicated sessionStorage key: last landing card's data-focus-key. */
 export const LANDING_FOCUS_STORAGE_KEY = "redsilk:livetv:landing-card";

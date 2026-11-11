@@ -12,7 +12,14 @@ interface Props {
   actionHref?: string;
 }
 const { title, message, art, actionLabel, actionHref } = Astro.props;
-const artSrc = art ? `/art/empty-${art}.jpg` : undefined;
+// 0.11.0 integration: the player art file is named player-empty.jpg,
+// not empty-player.jpg — the generic `empty-${art}.jpg` pattern would
+// 404 for art="player" (used by the Live TV landing + shell empty states).
+const artSrc = art
+  ? art === "player"
+    ? "/art/player-empty.jpg"
+    : `/art/empty-${art}.jpg`
+  : undefined;
 ---
 
 <div class="rs-empty" role="status">
