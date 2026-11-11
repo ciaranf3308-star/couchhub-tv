@@ -310,3 +310,20 @@ describe("prefetchProgrammes", () => {
     expect(() => prefetchProgrammes(["", "   "])).not.toThrow()
   })
 })
+
+// 0.11.0 W4 (merged) — no-key placeholder must NOT be cached, so enabling
+// a TMDb key later takes effect at once. Genuine no-match placeholders
+// (key active, searched, nothing found) ARE negative-cached 24h — see
+// "negatively caches a failed match" above.
+describe("enrichProgramme — no-key placeholder is transient", () => {
+  it("does not cache the placeholder when TMDb is inactive", async () => {
+    mockIsTmdbActive.mockReturnValue(false)
+    mockGetTmdbApiKey.mockReturnValue("")
+    clearProgrammeArtworkCache()
+    expect(getProgrammeArtworkSync("F1: Brazilian Grand Prix — Qualifying")).toBeNull()
+    const art = await enrichProgramme({ title: "F1: Brazilian Grand Prix — Qualifying", channelName: "Sky Sports F1" })
+    expect(art.source).toBe("placeholder")
+    expect(art.confidence).toBe(0)
+    expect(getProgrammeArtworkSync("F1: Brazilian Grand Prix — Qualifying")).toBeNull()
+  })
+})

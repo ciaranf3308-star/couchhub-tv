@@ -1,13 +1,11 @@
-// RedSilk Couch — Channel Browser (W1 engine, 0.9.0 W2 rebuild).
+// RedSilk Couch — Channel Browser (0.11.0 W4 reassessment).
 //
 // The virtualised long list used from Live TV Home, from playback
-// (W2 mounts it inside the playback shell as Quick Surf's "all
-// channels" view via mountChannelBrowser /
-// mountCachedChannelBrowser — same module, same contract) and,
-// since 0.9.0, as the dedicated Channel Browser utility screen
-// (TvChannelBrowser with screenMode; the shell mounts it as the
-// "browser" mode and enters it via `livetv:mode`
-// {mode:"browser", browserFilter?, openSearch?}).
+// (Quick Surf's "all channels" view via mountChannelBrowser /
+// mountCachedChannelBrowser — same module, same contract) and as the
+// dedicated Channel Browser utility screen (TvChannelBrowser with
+// screenMode; the shell mounts it as the "browser" mode and enters it
+// via `livetv:mode` {mode:"browser", browserFilter?, openSearch?}).
 //
 // Rules:
 //   - Virtualised with computeVisibleWindow: a 15,000-channel list
@@ -18,14 +16,28 @@
 //     happens only through the explicit Watch action (Watch Live in
 //     the contextual panel, Enter, double-click) via onSelect.
 //   - Search is debounced (150ms) and matches the channels' cached
-//     normalised names — no re-normalising per keystroke.
-//   - Category switching is instant (pure filter, no fetch).
+//     normalised names — no re-normalising per keystroke. The query
+//     itself is normalised too (normalizeBrowserQuery): redundant
+//     provider prefixes (country/region tokens, quality tags, bare
+//     "tv"/"channel") are ignored, so "BBC One HD" and "UK BBC"
+//     still find BBC One; tokens that survive are matched exactly,
+//     never invented.
+//   - Category switching is instant (pure filter, no fetch). Pills
+//     follow the mockup order: Favourites, provider groups (Irish &
+//     UK first), Recents, All Channels last.
 //   - Focus returns to the last highlighted channel: pass
 //     initialFocusId, or keep the handle and call highlightChannel.
-//   - The row is a 4-column utility row (Ch. / Channel / Now /
-//     Next, mockup 1000017108_1_hcjs.png) with a compact contextual
-//     panel on the right (≤ ~32% width) for the highlighted channel.
-//     No rectangles-in-rectangles: hierarchy comes from spacing,
+//     Selection + scroll survive data refreshes; in screen mode the
+//     highlight follows the visible list when a category/search
+//     change drops the highlighted channel out of view.
+//   - The row is a 4-column table row (Ch. / Channel / Now / Next,
+//     mockup 1000017108_0_mo5o.png) with a compact contextual panel
+//     on the right (≤30% width) for the highlighted channel. The
+//     panel earns its space with programme art for the selected
+//     channel's current programme only (livetv-enrichment, selected
+//     channel only — never the whole list); with no programme data
+//     it stays compact instead of leaving a giant empty panel.
+//   - No rectangles-in-rectangles: hierarchy comes from spacing,
 //     typography and hairline separators, never nested boxes.
 //   - B / Escape ("back") is owned here through two paths that
 //     converge on handleBack(): the `livetv:back` window event
@@ -45,8 +57,15 @@ import { computeVisibleWindow } from "./couch-grid";
 import { programmeProgress } from "./couch-livetv-epg";
 import { formatTimeRange } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
+import { normalize } from "./text";
 import { CACHE_REVALIDATED_EVENT } from "./cache.js";
 import { EPG_LOADED_EVENT, getProgrammesSync } from "./epg-data.js";
+import {
+  enrichProgramme as defaultEnrichProgramme,
+  getProgrammeArtworkSync,
+  type EnrichProgrammeRequest,
+  type ProgrammeArtwork,
+} from "./livetv-enrichment";
 import {
   dispatchLivetvTune,
   groupChannels,
@@ -54,7 +73,6 @@ import {
   nowNextForChannel,
   readActivePlaylistId,
   requestLivetvMode,
-  searchChannels,
   type LivetvChannel,
   type LivetvNowNext,
 } from "./livetv-data";
@@ -111,6 +129,123 @@ export function browserFilterFromEntry(
   }
 }
 
+// ── Search normalisation + cached searchable labels ───────────────
+
+/**
+ * Query tokens that carry no information about which channel the
+ * user wants — provider/country prefixes, quality tags and bare
+ * generic words. Stripping them can only widen a query to what the
+ * surviving tokens already name; it never invents a match for a
+ * token the user did not type. Brand names are NOT stripped:
+ * "sky" stays, because Sky Sports and Sky News are different
+ * channels. "itv" stays too (normalize keeps it one token).
+ */
+export const BROWSER_QUERY_REDUNDANT_TOKENS: ReadonlySet<string> = new Set([
+  "uk",
+  "gb",
+  "ireland",
+  "irish",
+  "ie",
+  "eire",
+  "english",
+  "british",
+  "hd",
+  "fhd",
+  "uhd",
+  "4k",
+  "sd",
+  "hevc",
+  "h265",
+  "h264",
+  "1080p",
+  "720p",
+  "2160p",
+  "1080i",
+  "tv",
+  "channel",
+  "channels",
+  "live",
+]);
+
+/**
+ * Pure: normalise a search query the way the channel haystacks are
+ * normalised (shared `normalize`: case-insensitive, diacritics
+ * stripped, punctuation → spaces), then drop redundant provider
+ * prefixes. "BBC One HD" → "bbc one"; "UK BBC" → "bbc"; "F1" stays
+ * "f1". An all-redundant query ("HD", "UK") normalises to "" —
+ * i.e. no filter — rather than matching nothing.
+ */
+export function normalizeBrowserQuery(query: string | null | undefined): string {
+  const tokens = normalize(query ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => !BROWSER_QUERY_REDUNDANT_TOKENS.has(token));
+  return tokens.join(" ");
+}
+
+/**
+ * Searchable labels, cached per channel array: the channel's
+ * precomputed `norm` haystack (name + category + tvgId, built once
+ * at catalogue load), keyed by channel id. applyBrowserFilter is
+ * called on every render/scroll, so the per-keystroke work stays a
+ * Map lookup, never a re-normalise of 15,000 names.
+ */
+const searchIndexCache = new WeakMap<
+  readonly LivetvChannel[],
+  Map<string, string>
+>();
+
+export function buildBrowserSearchIndex(
+  channels: readonly LivetvChannel[],
+): Map<string, string> {
+  let index = searchIndexCache.get(channels);
+  if (!index) {
+    index = new Map();
+    for (const channel of channels) {
+      index.set(String(channel.id), channel.norm ?? "");
+    }
+    searchIndexCache.set(channels, index);
+  }
+  return index;
+}
+
+function browserNumericTokenMatches(channel: LivetvChannel, token: string): boolean {
+  const idText = String(channel.id);
+  if (idText === token || idText.startsWith(token)) return true;
+  if (channel.chno != null) {
+    const chnoText = String(channel.chno);
+    if (chnoText === token || chnoText.startsWith(token)) return true;
+  }
+  return false;
+}
+
+/**
+ * Pure: search by name over the cached index. Every surviving
+ * token must match the channel's haystack; a digits-only token
+ * also matches channel number / id exactly or by prefix.
+ * Identical in result to the shared searchChannels for surviving
+ * tokens; the difference is the query normalisation (redundant
+ * prefixes dropped) and the cached index.
+ */
+export function searchBrowserChannels(
+  channels: readonly LivetvChannel[],
+  query: string,
+): LivetvChannel[] {
+  const q = normalizeBrowserQuery(query);
+  if (!q) return [...channels];
+  const tokens = q.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return [...channels];
+  const index = buildBrowserSearchIndex(channels);
+  return channels.filter((channel) =>
+    tokens.every((token) =>
+      /^\d+$/.test(token)
+        ? browserNumericTokenMatches(channel, token) ||
+          (index.get(String(channel.id)) ?? "").includes(token)
+        : (index.get(String(channel.id)) ?? "").includes(token),
+    ),
+  );
+}
+
 /**
  * Pure: filter + sort one browser view. Category "favourites"
  * keeps favourite-flagged channels; "recents" keeps the given
@@ -143,7 +278,7 @@ export function applyBrowserFilter(
   } else {
     list = [...channels];
   }
-  if (filter.query) list = searchChannels(list, filter.query);
+  if (filter.query) list = searchBrowserChannels(list, filter.query);
   switch (filter.sort ?? "source") {
     case "az":
       return list.sort((a, b) => a.displayName.localeCompare(b.displayName));
@@ -165,12 +300,44 @@ export interface BrowserCategory {
   id: string;
   label: string;
   count: number;
+  /** Small text glyph for the pill (mockup 1: one icon per pill). */
+  icon: string;
+}
+
+/** Pill glyph per category id (text glyphs only — no emoji). */
+export function browserCategoryIcon(id: string): string {
+  switch (id) {
+    case BROWSER_CATEGORY_FAVOURITES:
+      return "★";
+    case BROWSER_CATEGORY_RECENTS:
+      return "↻";
+    case "irish-uk":
+      return "◎";
+    case "sports":
+      return "◉";
+    case "movies":
+      return "▣";
+    case "news":
+      return "▤";
+    case "kids":
+      return "✿";
+    case "entertainment":
+      return "✦";
+    case "documentaries":
+      return "▧";
+    case "music":
+      return "♪";
+    case BROWSER_CATEGORY_ALL:
+      return "▦";
+    default:
+      return "▦";
+  }
 }
 
 /**
- * Category buttons for a channel set, in the 0.9.0 selector order:
- * Favourites, Recents, then provider groups (Irish & UK first,
- * All Channels last — groupChannels' order). Favourites / Recents
+ * Category pills for a channel set, in the mockup order:
+ * Favourites, provider groups (Irish & UK first, groupChannels'
+ * order), Recents, All Channels last. Favourites / Recents / All
  * are ALWAYS present, even at count 0, so they stay immediately
  * reachable as entry points; selecting an empty one shows the
  * empty state instead of hiding the destination.
@@ -185,12 +352,47 @@ export function browserCategories(
     channels.some((c) => String(c.id) === String(id)),
   ).length;
   const cats: BrowserCategory[] = [
-    { id: BROWSER_CATEGORY_FAVOURITES, label: "Favourites", count: favCount },
-    { id: BROWSER_CATEGORY_RECENTS, label: "Recents", count: recentCount },
+    {
+      id: BROWSER_CATEGORY_FAVOURITES,
+      label: "Favourites",
+      count: favCount,
+      icon: browserCategoryIcon(BROWSER_CATEGORY_FAVOURITES),
+    },
   ];
-  for (const group of groups) {
-    cats.push({ id: group.id, label: group.label, count: group.channels.length });
+  // Mockup pill order for the headline groups (Favourites, Irish &
+  // UK, Sports, Movies, News, Kids); every other genuine provider
+  // group follows in groupChannels order, then Recents, All last.
+  const headlineOrder = ["irish-uk", "sports", "movies", "news", "kids"];
+  const orderedGroups = groups
+    .filter((group) => group.id !== "all")
+    .sort((a, b) => {
+      const ai = headlineOrder.indexOf(a.id);
+      const bi = headlineOrder.indexOf(b.id);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return 0;
+    });
+  for (const group of orderedGroups) {
+    cats.push({
+      id: group.id,
+      label: group.label,
+      count: group.channels.length,
+      icon: browserCategoryIcon(group.id),
+    });
   }
+  cats.push({
+    id: BROWSER_CATEGORY_RECENTS,
+    label: "Recents",
+    count: recentCount,
+    icon: browserCategoryIcon(BROWSER_CATEGORY_RECENTS),
+  });
+  cats.push({
+    id: BROWSER_CATEGORY_ALL,
+    label: "All Channels",
+    count: channels.length,
+    icon: browserCategoryIcon(BROWSER_CATEGORY_ALL),
+  });
   return cats;
 }
 
@@ -241,6 +443,13 @@ export interface ChannelBrowserOptions {
   ) => boolean | null | Promise<boolean | null>;
   /** View Guide action from the contextual panel. Defaults to `livetv:mode` {mode:"guide"}. */
   onViewGuide?: (channel: LivetvChannel) => void;
+  /**
+   * Programme artwork for the selected channel only (detail panel).
+   * Defaults to the shared livetv-enrichment API (TMDB, cached,
+   * never throws). Inject a stub in tests; never called for the
+   * whole list — only the highlighted channel's current programme.
+   */
+  enrichProgramme?: (req: EnrichProgrammeRequest) => Promise<ProgrammeArtwork>;
 }
 
 export interface ChannelBrowserHandle {
@@ -299,6 +508,14 @@ export function mountChannelBrowser(
   let destroyed = false;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   let lastBackAt = 0;
+  // Detail-panel enrichment: only the highlighted channel's current
+  // programme is ever enriched. detailArtSeq guards the async art
+  // against a highlight that moved on; lastDetailKey keeps the
+  // panel from rebuilding (and re-enriching) on every scroll render.
+  const enrichProgramme = opts.enrichProgramme ?? defaultEnrichProgramme;
+  let detailArtSeq = 0;
+  let lastDetailKey = "__unrendered__";
+  let lastEnrichedKey = "";
 
   root.replaceChildren();
   root.classList.add("rs-livetv-browser");
@@ -316,11 +533,14 @@ export function mountChannelBrowser(
   detail.setAttribute("aria-label", "Selected channel");
   layout.appendChild(detail);
 
-  // ── Screen title (screen mode only — mockup 1): the shell's
-  //    generic "Live TV" head is hidden in browser mode, so the
-  //    browser carries its own title + live channel count.
+  // ── Screen header (screen mode only — mockup 1): title + live
+  //    channel count on the left, search top-right on the same row.
+  //    The shell's generic "Live TV" head is hidden in browser mode,
+  //    so the browser carries its own title.
   let subtitleEl: HTMLElement | null = null;
+  let headerEl: HTMLElement | null = null;
   if (opts.acceptModeEntry) {
+    headerEl = el("div", "rs-livetv-browser__header");
     const titleBlock = el("div", "rs-livetv-browser__title");
     const titleText = el("h2", "rs-livetv-browser__title-text");
     titleText.textContent = "Channel Browser";
@@ -329,7 +549,8 @@ export function mountChannelBrowser(
     subtitleEl.setAttribute("data-browser-subtitle", "");
     subtitleEl.textContent = "Browse and watch live TV";
     titleBlock.appendChild(subtitleEl);
-    main.appendChild(titleBlock);
+    headerEl.appendChild(titleBlock);
+    main.appendChild(headerEl);
   }
 
   // ── Toolbar: search (top-right) + sort + close ──
@@ -364,7 +585,8 @@ export function mountChannelBrowser(
     close.addEventListener("click", () => opts.onClose?.());
     toolbar.appendChild(close);
   }
-  main.appendChild(toolbar);
+  if (headerEl) headerEl.appendChild(toolbar);
+  else main.appendChild(toolbar);
 
   // ── Categories: one clean selector row, horizontally scrollable ──
   const categoriesEl = el("div", "rs-livetv-browser__categories");
@@ -401,6 +623,16 @@ export function mountChannelBrowser(
   statusEl.setAttribute("data-browser-status", "");
   statusEl.setAttribute("aria-live", "polite");
   main.appendChild(statusEl);
+
+  // Empty state, rendered INSIDE the list viewport: the status line
+  // sits below the list (and below the fold on a 1080p screen), so
+  // a no-match search would otherwise show a bare empty list with
+  // no explanation. This is the visible feedback; statusEl stays
+  // as the polite live region.
+  const emptyEl = el("p", "rs-livetv-browser__empty");
+  emptyEl.setAttribute("data-browser-empty", "");
+  emptyEl.hidden = true;
+  listEl.appendChild(emptyEl);
 
   const visible = (): LivetvChannel[] =>
     applyBrowserFilter(channels, {
@@ -517,9 +749,106 @@ export function mountChannelBrowser(
     return row;
   }
 
+  /**
+   * Paint the detail art area in place (never a full panel rebuild):
+   * real artwork only when enrichment found some; otherwise the
+   * branded placeholder (channel logo on a burgundy gradient — never
+   * a giant initial, never an empty rectangle). Only ever called for
+   * the highlighted channel's current programme.
+   */
+  function updateDetailArt(
+    channel: LivetvChannel,
+    nn: LivetvNowNext | null,
+  ): void {
+    const artEl = detail.querySelector<HTMLElement>("[data-browser-detail-art]");
+    if (!artEl || !nn?.current) return;
+    const seq = ++detailArtSeq;
+    const paint = (art: ProgrammeArtwork | null): void => {
+      if (seq !== detailArtSeq || destroyed) return;
+      const url = art?.backdropUrl ?? art?.stillUrl ?? art?.posterUrl ?? null;
+      // Same artwork already painted: leave the <img> alone (a
+      // rebuild per scroll frame would re-fetch and flicker).
+      if (artEl.dataset.artUrl !== (url ?? "")) {
+        artEl.dataset.artUrl = url ?? "";
+        artEl.replaceChildren();
+        if (url) {
+          const img = el("img") as HTMLImageElement;
+          img.src = url;
+          img.alt = "";
+          img.loading = "lazy";
+          img.decoding = "async";
+          img.setAttribute("data-browser-detail-art-img", "");
+          img.addEventListener("error", () => {
+            // A dead artwork URL falls back to the branded placeholder.
+            if (seq === detailArtSeq) {
+              artEl.dataset.artUrl = "";
+              paint(null);
+            }
+          });
+          artEl.appendChild(img);
+          artEl.classList.add("has-art");
+        } else {
+          artEl.classList.remove("has-art");
+          const logo = el("span", "rs-livetv-browser__detail-art-logo");
+          logo.appendChild(logoContent(channel));
+          artEl.appendChild(logo);
+        }
+      }
+      // TMDB synopsis only fills the slot when the EPG itself
+      // carries no description — never two competing descriptions,
+      // and never invented text (only enrichment output is shown).
+      const syn = detail.querySelector<HTMLElement>("[data-browser-detail-synopsis]");
+      if (syn) {
+        const text = art?.synopsis && !nn.current?.desc ? art.synopsis : "";
+        syn.textContent = text;
+        syn.hidden = !text;
+      }
+    };
+    const cached = getProgrammeArtworkSync(nn.current.title);
+    if (cached) {
+      paint(cached);
+      return;
+    }
+    paint(null);
+    // One enrichment per (channel, programme) while it is in
+    // flight: scroll renders re-enter here constantly, and must
+    // never spawn a second request for the same programme.
+    const enrichKey = `${channel.id}|${nn.current.title}`;
+    if (enrichKey === lastEnrichedKey) return;
+    lastEnrichedKey = enrichKey;
+    void enrichProgramme({
+      title: nn.current.title,
+      channelName: channel.displayName || channel.name,
+      startMs: nn.current.start,
+      endMs: nn.current.stop,
+    })
+      .then(paint)
+      .catch(() => undefined);
+  }
+
   /** Compact contextual panel for the highlighted channel. */
   function renderDetail(): void {
     const channel = channelById(highlightedId);
+    const nn = channel ? (opts.nowNextFor?.(channel) ?? null) : null;
+    // Keyed re-render: scroll renders call render() on every frame,
+    // but the panel only rebuilds when its content actually changes
+    // (channel, programmes, favourite, catch-up). That also keeps a
+    // pending enrichment from being discarded mid-flight.
+    const detailKey = channel
+      ? [
+          String(channel.id),
+          nn?.current?.title ?? "",
+          nn?.next?.title ?? "",
+          channel.favourite ? "fav" : "",
+          channel.catchup ? "catchup" : "",
+        ].join("|")
+      : "";
+    if (detailKey === lastDetailKey) {
+      if (channel) updateDetailArt(channel, nn);
+      return;
+    }
+    lastDetailKey = detailKey;
+    detailArtSeq += 1;
     detail.replaceChildren();
     if (!channel) {
       const empty = el("p", "rs-livetv-browser__detail-empty");
@@ -543,7 +872,17 @@ export function mountChannelBrowser(
     brand.appendChild(titles);
     detail.appendChild(brand);
 
-    const nn = opts.nowNextFor?.(channel) ?? null;
+    // Programme art earns its space only when there is a current
+    // programme to illustrate. With no EPG the panel stays compact
+    // (brand + note + actions) instead of holding a giant empty
+    // panel for art that does not exist.
+    if (nn?.current) {
+      const art = el("div", "rs-livetv-browser__detail-art");
+      art.setAttribute("data-browser-detail-art", "");
+      art.setAttribute("aria-hidden", "true");
+      detail.appendChild(art);
+    }
+
     if (nn?.current) {
       const nowBlock = el("div", "rs-livetv-browser__detail-now");
       const label = el("span", "rs-livetv-browser__detail-label");
@@ -556,6 +895,13 @@ export function mountChannelBrowser(
         const desc = el("span", "rs-livetv-browser__detail-desc");
         desc.textContent = nn.current.desc;
         nowBlock.appendChild(desc);
+      } else {
+        // Filled in place by updateDetailArt when enrichment has a
+        // synopsis; hidden until then.
+        const syn = el("span", "rs-livetv-browser__detail-desc");
+        syn.setAttribute("data-browser-detail-synopsis", "");
+        syn.hidden = true;
+        nowBlock.appendChild(syn);
       }
       const bar = el("span", "rs-livetv-browser__progress");
       bar.setAttribute("aria-hidden", "true");
@@ -607,14 +953,26 @@ export function mountChannelBrowser(
     guide.textContent = "View Guide";
     actions.appendChild(guide);
     detail.appendChild(actions);
+
+    updateDetailArt(channel, nn);
   }
 
   function render(): void {
     if (destroyed) return;
     const list = visible();
-    if (opts.autoHighlightFirst && highlightedId == null && list.length > 0) {
-      highlightedId = list[0]!.id;
-      opts.onHighlight?.(list[0]!);
+    if (opts.autoHighlightFirst && list.length > 0) {
+      // Screen mode: the highlight always names a visible channel.
+      // A category/search change that drops the highlighted channel
+      // out of view moves the highlight to the first visible row
+      // (and its detail panel) instead of showing a channel that is
+      // no longer in the list.
+      const stillVisible =
+        highlightedId != null &&
+        list.some((c) => String(c.id) === String(highlightedId));
+      if (!stillVisible) {
+        highlightedId = list[0]!.id;
+        opts.onHighlight?.(list[0]!);
+      }
     }
     const rowHeight = BROWSER_ROW_HEIGHT;
     spacer.style.height = `${list.length * rowHeight}px`;
@@ -632,7 +990,7 @@ export function mountChannelBrowser(
       const channel = list[i];
       if (channel) viewport.appendChild(rowElement(channel));
     }
-    statusEl.textContent =
+    const statusText =
       list.length === 0
         ? query
           ? `No channels match “${query}”.`
@@ -642,6 +1000,9 @@ export function mountChannelBrowser(
               ? "Nothing watched yet — channels you watch will appear here."
               : "No channels in this category."
         : `${list.length.toLocaleString()} channel${list.length === 1 ? "" : "s"}`;
+    statusEl.textContent = statusText;
+    emptyEl.hidden = list.length !== 0;
+    emptyEl.textContent = statusText;
     if (subtitleEl) {
       const total = channels.length;
       subtitleEl.textContent =
@@ -666,7 +1027,13 @@ export function mountChannelBrowser(
       btn.setAttribute("aria-label", `${cat.label}, ${cat.count} channel${cat.count === 1 ? "" : "s"}`);
       btn.title = `${cat.label} (${cat.count})`;
       if (cat.id === categoryId) btn.classList.add("is-active");
-      btn.textContent = cat.label;
+      const icon = el("span", "rs-livetv-browser__category-icon");
+      icon.setAttribute("aria-hidden", "true");
+      icon.textContent = cat.icon;
+      btn.appendChild(icon);
+      const label = el("span", "rs-livetv-browser__category-label");
+      label.textContent = cat.label;
+      btn.appendChild(label);
       btn.addEventListener("click", () => {
         categoryId = cat.id;
         renderCategories();
@@ -824,13 +1191,18 @@ export function mountChannelBrowser(
   }
 
   // ── Events ──
+  function applyQueryNow(): void {
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+    query = search.value.trim();
+    listEl.scrollTop = 0;
+    render();
+  }
   search.addEventListener("input", () => {
     if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      query = search.value.trim();
-      listEl.scrollTop = 0;
-      render();
-    }, BROWSER_SEARCH_DEBOUNCE_MS);
+    searchTimer = setTimeout(applyQueryNow, BROWSER_SEARCH_DEBOUNCE_MS);
   });
   search.addEventListener("focus", () => root.classList.add("is-search-open"));
   search.addEventListener("blur", () => {
@@ -842,6 +1214,20 @@ export function mountChannelBrowser(
       event.preventDefault();
       event.stopPropagation();
       closeSearch();
+      return;
+    }
+    if (event.key === "Enter") {
+      // Apply the query immediately and move to the first match:
+      // the list, not the keyboard, is where the user goes next.
+      event.preventDefault();
+      event.stopPropagation();
+      applyQueryNow();
+      const first = visible()[0];
+      if (first) {
+        highlight(first.id);
+        scrollToId(first.id);
+        listEl.focus({ preventScroll: true });
+      }
     }
   });
   sortSelect.addEventListener("change", () => {

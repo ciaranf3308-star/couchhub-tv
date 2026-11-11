@@ -2382,6 +2382,113 @@ html[data-couch] .rs-livetv-browser__detail-title {
   font-weight: 700;
   line-height: 1.25;
 }
+
+/* ── Channel Browser 0.11.0 (W4) ───────────────────────────────────
+   Mockup 1 (1000017108_0_mo5o.png): title + search share one header
+   row; category pills carry one icon each and the active pill has a
+   full glowing red border; the contextual panel (≤30%) earns its
+   space with 16:9 programme art for the selected channel only, and
+   stays compact with no art area at all when there is no EPG; the
+   Xbox hints legend closes the screen. Tokens only — no colour
+   literals here, so the hue regression (achromatic or wine
+   340–355°) cannot trip. */
+html[data-couch] .rs-livetv-browser__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 2rem;
+}
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__toolbar {
+  flex: 0 0 auto;
+  padding-bottom: 0.25rem;
+}
+/* The header must not squeeze the search: the input keeps its
+   full 26rem basis (the mockup's search reads in full), the sort
+   and Close take what is left. */
+html[data-couch] .rs-livetv-browser__header .rs-livetv-browser__search {
+  flex: 0 0 26rem;
+}
+html[data-couch] .rs-livetv-browser__search:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__category {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-livetv-browser__category-icon {
+  font-size: 1.125rem;
+  line-height: 1;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser__category.is-active {
+  border-color: var(--rs-accent);
+  background: color-mix(in srgb, var(--rs-accent) 16%, transparent);
+  box-shadow:
+    inset 0 0 0 1px var(--rs-accent),
+    0 0 1.25rem 0.125rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-livetv-browser__category.is-active .rs-livetv-browser__category-icon {
+  color: var(--rs-focus);
+}
+/* Detail programme art: 16:9, art only when enrichment found some;
+   otherwise the branded placeholder (channel logo on a burgundy
+   gradient, never a giant initial, never an empty rectangle). */
+html[data-couch] .rs-livetv-browser__detail-art {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
+}
+html[data-couch] .rs-livetv-browser__detail-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo {
+  width: 7rem;
+  height: 4rem;
+  display: grid;
+  place-items: center;
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 0.5rem;
+  filter: drop-shadow(0 0.5rem 1rem rgb(0 0 0 / 0.5));
+}
+html[data-couch] .rs-livetv-browser__detail-art-logo .rs-livetv-browser__initial {
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--rs-focus);
+}
+/* In-list empty state: the visible no-match / empty-category
+   feedback (the status line sits below the list). */
+html[data-couch] .rs-livetv-browser__empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-livetv-browser__empty[hidden] {
+  display: none;
+}
 html[data-couch] .rs-livetv-landing-hero__time {
   margin: 0;
   font-size: var(--rs-meta-size);
