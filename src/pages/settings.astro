@@ -2091,6 +2091,10 @@ const navStructure: NavSection[] = [
                   </div>
                 </dl>
 
+                <p
+                  id="update-display-diag"
+                  class="text-xs text-fg-3 tabular-nums break-words">Display: checking…</p>
+
                 <div
                   id="update-progress-wrap"
                   class="hidden flex-col gap-1.5">
@@ -4653,6 +4657,44 @@ const navStructure: NavSection[] = [
           updateCurrentEl.textContent = tag || "-"
         })
     }
+
+    // 0.11.2 W2 — display diagnostics. The 0.11.1 purple-wash report
+    // could not be reproduced from the bundle: the built Settings page
+    // renders burgundy headless under every combination tried (default,
+    // OS light scheme, couch.css blocked, forced light + violet accent),
+    // so the packaged build's LIVE values are surfaced here for a
+    // one-photo check on the PC — no devtools needed. Read it as:
+    // computed colour scheme, the html background actually painted, the
+    // --color-bg token as specified (its hue decides burgundy vs
+    // purple), the OS scheme, how many of the 3 linked stylesheets
+    // loaded, and the WebView Chrome version.
+    function fillDisplayDiagnostics() {
+      const el = document.getElementById("update-display-diag")
+      if (!el) return
+      try {
+        const root = document.documentElement
+        const cs = getComputedStyle(root)
+        const linkSheets = Array.from(document.styleSheets).filter((s) => !!s.href)
+        let loaded = 0
+        for (const s of linkSheets) {
+          try {
+            if (s.cssRules) loaded++
+          } catch {
+            // Blocked/cross-origin sheet: not loaded.
+          }
+        }
+        const ua = navigator.userAgent || ""
+        const chrome = (ua.match(/Chrome\/([\d.]+)/) || [])[1] || "?"
+        const osScheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light"
+        el.textContent =
+          `Display: scheme ${cs.colorScheme} · html ${cs.backgroundColor} · bg ${cs.getPropertyValue("--color-bg").trim() || "?"} · OS ${osScheme} · css ${loaded}/${linkSheets.length} · Chrome ${chrome}`
+      } catch {
+        el.textContent = "Display: unavailable"
+      }
+    }
+    fillDisplayDiagnostics()
 
     // Off the top-level await chain: a stuck isStoreBuild() IPC must not block this script.
     const updaterConfigReady = (async () => {
