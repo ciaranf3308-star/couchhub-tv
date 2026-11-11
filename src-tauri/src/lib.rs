@@ -239,20 +239,34 @@ pub fn run() {
         }))
         .plugin(external_player::sandbox_bootstrap_plugin())
         .plugin(
-            // Nylah Studios v0.2.2: FULLSCREEN and DECORATIONS are NOT
-            // saved or restored. The saved state predates the fullscreen
-            // launch (0.2.0) — restoring it put every launch back into
-            // the old 1300x850 windowed state and overrode the
-            // fullscreen:true config, which is why the app launched
-            // windowed on the TV. Fullscreen is owned by the config
-            // plus the explicit set_fullscreen(true) in setup() below;
-            // decorations are forced off there too.
+            // 0.11.1 W1 (white bar): the window-state plugin must NOT
+            // save or restore ANY window geometry. v0.2.2 excluded only
+            // FULLSCREEN and DECORATIONS — but SIZE, POSITION and
+            // MAXIMIZED were still restored from the saved state, which
+            // predates the fullscreen launch (0.2.0) and can still land
+            // the window in a windowed rect on the projector: the WebView
+            // then ends above the bottom of the screen and the desktop
+            // shows through below it as a full-width white strip (user
+            // photos 2026-11-11, Home + Settings — same strip on both,
+            // below the fixed hints pill, content sliced at its top
+            // edge). A fullscreen TV launcher has no windowed geometry
+            // worth remembering, so the flag set is empty: the plugin
+            // neither restores a stale rect nor saves a new one.
+            // Fullscreen is owned by the config plus the explicit
+            // set_fullscreen(true) calls in setup() below (re-asserted
+            // after show(), and again on RunEvent::Ready); decorations
+            // are forced off there too. Do NOT re-add SIZE, POSITION
+            // or MAXIMIZED here without a hardware check that the app
+            // still launches fullscreen on the user's PC.
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(
                     tauri_plugin_window_state::StateFlags::all()
                         - tauri_plugin_window_state::StateFlags::VISIBLE
                         - tauri_plugin_window_state::StateFlags::FULLSCREEN
-                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS
+                        - tauri_plugin_window_state::StateFlags::SIZE
+                        - tauri_plugin_window_state::StateFlags::POSITION
+                        - tauri_plugin_window_state::StateFlags::MAXIMIZED,
                 )
                 .build(),
         )
@@ -391,6 +405,27 @@ pub fn run() {
                     if let Err(error) = main_window.show() {
                         log::warn!("[window] show() failed: {error}");
                     }
+                    // 0.11.1 W1 (white bar): re-assert fullscreen AFTER
+                    // show(). The pre-show set_fullscreen(true) above was
+                    // the only fullscreen call the 0.11.0 launch path made,
+                    // and a fullscreen request made while the window is
+                    // still hidden can be dropped by the window manager —
+                    // the window then launches in a windowed rect and the
+                    // desktop shows through below the WebView as a white
+                    // strip. Re-asserting on the visible window is the
+                    // call that sticks, and it also forces the resize
+                    // event that re-lays the WebView out to the full
+                    // window. The log line below proves the outcome on
+                    // the user's PC — check the log, not the code.
+                    if let Err(error) = main_window.set_fullscreen(true) {
+                        log::warn!("[window] set_fullscreen(true) after show failed: {error}");
+                    }
+                    let fullscreen = main_window.is_fullscreen().unwrap_or(false);
+                    let size = main_window
+                        .inner_size()
+                        .map(|s| format!("{}x{}", s.width, s.height))
+                        .unwrap_or_else(|_| "unknown".to_string());
+                    log::info!("[window] launch fullscreen={fullscreen} inner_size={size}");
                     let _ = main_window.set_focus();
                 }
             }
@@ -411,17 +446,31 @@ pub fn run() {
         });
     }
 
-    app.run(|_app_handle, _event| {
+    app.run(|app_handle, event| {
+        // 0.11.1 W1 (white bar): re-assert fullscreen once the event
+        // loop is running. Anything that restores window geometry after
+        // setup() would otherwise leave the window windowed for the
+        // whole session; this is the last launch-time chance to force
+        // it fullscreen.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        if let tauri::RunEvent::Ready = event {
+            use tauri::Manager;
+            if let Some(main_window) = app_handle.get_webview_window("main") {
+                if let Err(error) = main_window.set_fullscreen(true) {
+                    log::warn!("[window] set_fullscreen(true) on Ready failed: {error}");
+                }
+            }
+        }
         // Tauri exit paths (e.g. tray Quit) may not run Drop for state behind Arcs, so kill any active ffmpeg session here.
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if let tauri::RunEvent::Exit = _event {
+        if let tauri::RunEvent::Exit = event {
             use tauri::Manager;
-            audio_proxy::shutdown(&_app_handle.state::<audio_proxy::AudioProxyState>());
-            vod_audio_proxy::shutdown(&_app_handle.state::<vod_audio_proxy::VodAudioProxyState>());
+            audio_proxy::shutdown(&app_handle.state::<audio_proxy::AudioProxyState>());
+            vod_audio_proxy::shutdown(&app_handle.state::<vod_audio_proxy::VodAudioProxyState>());
         }
-        if let tauri::RunEvent::Exit = _event {
+        if let tauri::RunEvent::Exit = event {
             use tauri::Manager;
-            receiver::shutdown(&_app_handle.state::<receiver::ReceiverState>());
+            receiver::shutdown(&app_handle.state::<receiver::ReceiverState>());
         }
     });
 }
