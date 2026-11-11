@@ -294,13 +294,26 @@ export function initI18n(): Promise<void> {
       seededMessages = cached.messages
     }
     const code = detectLocale()
-    _initPromise = setLocale(code === "en" ? "en" : code).then(() => {
+    // Assign the promise BEFORE invoking setLocale: when the locale bundle
+    // is already cached, setLocale runs synchronously through to its
+    // LOCALE_CHANGED_EVENT dispatch, and a listener that calls initI18n()
+    // (Settings' content-language select did) would otherwise re-enter
+    // here while _initPromise is still null, recurse setLocale -> dispatch
+    // -> listener -> initI18n, and overflow the stack (RangeError on
+    // /settings). With the promise assigned first, re-entrant calls just
+    // await the in-flight init.
+    let resolveInit!: () => void
+    _initPromise = new Promise<void>((resolve) => {
+      resolveInit = resolve
+    })
+    setLocale(code === "en" ? "en" : code).then(() => {
       // Fire-and-forget: refresh the persisted snapshot from the bundled JSON
       // so keys added by an app update reach users who already have a cached
       // translation blob (setLocale skips the loader once cache.has(code)).
       // Not awaited here so initI18n() keeps resolving right after the
       // initial setLocale - the cached strings are already on screen.
       void refreshSeededLocale()
+      resolveInit()
     })
   }
   return _initPromise

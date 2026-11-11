@@ -128,4 +128,27 @@ describe("initI18n background refresh", () => {
     expect(t(DENSITY_KEY)).toBe(en[DENSITY_KEY])
     expect(localStorage.getItem("xt_locale_messages_v3")).toBe(null)
   })
+
+  it("does not stack-overflow when a LOCALE_EVENT listener calls initI18n() re-entrantly", async () => {
+    // Regression: /settings threw RangeError (Maximum call stack size
+    // exceeded) ~11 times on load. Settings' content-language select
+    // listens for LOCALE_EVENT and calls initI18n(); the old initI18n only
+    // assigned _initPromise after setLocale() returned, but setLocale
+    // dispatches LOCALE_EVENT synchronously when the bundle is already
+    // cached, so the listener re-entered initI18n -> setLocale -> dispatch
+    // -> listener ... until the stack overflowed. The seeded Spanish cache
+    // below is what makes setLocale's dispatch synchronous.
+    seedStaleSpanishCache()
+
+    const { initI18n, LOCALE_EVENT } = await import("@/scripts/lib/i18n")
+    const reentrantListener = (): void => {
+      void initI18n()
+    }
+    document.addEventListener(LOCALE_EVENT, reentrantListener)
+    try {
+      await expect(initI18n()).resolves.toBeUndefined()
+    } finally {
+      document.removeEventListener(LOCALE_EVENT, reentrantListener)
+    }
+  })
 })

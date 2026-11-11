@@ -27,11 +27,6 @@ import {
   setLivetvResumeLastChannel,
   TV_OVERSCAN_EVENT,
   TV_OVERSCAN_VALUES,
-  getAccent,
-  setAccent,
-  ACCENT_PRESETS,
-  ACCENT_RANDOM_ID,
-  ACCENT_RANDOM_SWATCH,
   getLanguageGroupingEnabled,
   setLanguageGroupingEnabled,
   getContentLanguage,
@@ -64,16 +59,13 @@ import {
   ICON_TRASH,
   ICON_ALERT_TRIANGLE,
   ICON_PLAYLIST_ADD,
-  ICON_PALETTE,
   ICON_TEXT_SIZE,
   ICON_LANGUAGE,
-  ICON_ARROWS_SHUFFLE,
 } from "@/scripts/lib/icons"
 
 const SETTINGS_SECTION_ID = "tv-settings"
 const KEEP_IN_VIEW_REM = 7.5
 
-const THEME_KEY = "xt_theme"
 const FONT_SCALE_KEY = "xt_font_scale"
 const FONT_SCALE_PRESETS: Array<{ value: number; labelKey: string }> = [
   { value: 0.875, labelKey: "tv.settings.interfaceSize.smaller" },
@@ -82,35 +74,6 @@ const FONT_SCALE_PRESETS: Array<{ value: number; labelKey: string }> = [
   { value: 1.25, labelKey: "tv.settings.interfaceSize.large" },
   { value: 1.5, labelKey: "tv.settings.interfaceSize.largest" },
 ]
-
-function readTheme(): string {
-  try {
-    return localStorage.getItem(THEME_KEY) || "system"
-  } catch {
-    return "system"
-  }
-}
-
-function themeLabelKey(theme: string): string {
-  if (theme === "light") return "settings.theme.light"
-  if (theme === "dark") return "settings.theme.dark"
-  return "settings.theme.system"
-}
-
-function accentLabelKey(accent: string): string {
-  return `settings.accent.${accent}`
-}
-
-// Mirrors settings.astro's commitTheme(), minus the view-transition sweep.
-function applyTheme(theme: string): void {
-  const root = document.documentElement
-  if (theme === "light") root.style.colorScheme = "light"
-  else if (theme === "dark") root.style.colorScheme = "dark"
-  else root.style.colorScheme = ""
-  try {
-    localStorage.setItem(THEME_KEY, theme)
-  } catch {}
-}
 
 function readFontScale(): number {
   try {
@@ -179,28 +142,6 @@ const view: TvView = {
         value: activeEntry?.title || t("list.noPlaylistSelected"),
         kind: "action",
         onActivate: () => void openPlaylistsDialog(),
-      })
-
-      rows.push({
-        id: "theme",
-        icon: ICON_PALETTE,
-        label: t("settings.theme.label"),
-        value: t(themeLabelKey(readTheme())),
-        kind: "choice",
-        onActivate: () => void pickTheme(),
-      })
-
-      const effectiveAccentId =
-        typeof activeEntry?.accent === "string" && ACCENT_PRESETS.includes(activeEntry.accent)
-          ? activeEntry.accent
-          : getAccent()
-      rows.push({
-        id: "accent",
-        icon: ICON_PALETTE,
-        label: t("tv.settings.accent"),
-        value: t(accentLabelKey(effectiveAccentId)),
-        kind: "choice",
-        onActivate: () => void pickAccent(),
       })
 
       rows.push({
@@ -368,43 +309,6 @@ const view: TvView = {
       const active = getActiveLocale()
       const meta = getAvailableLocales().find((locale) => locale.code === active)
       return meta ? `${meta.nativeName} (${meta.code})` : active
-    }
-
-    async function pickTheme(): Promise<void> {
-      const picked = await openChoiceDialog({
-        title: t("settings.theme.label"),
-        selectedId: readTheme(),
-        options: [
-          { id: "system", label: t("settings.theme.system") },
-          { id: "light", label: t("settings.theme.light") },
-          { id: "dark", label: t("settings.theme.dark") },
-        ],
-      })
-      if (!picked) return
-      applyTheme(picked)
-      void renderRows()
-    }
-
-    async function pickAccent(): Promise<void> {
-      const options: ChoiceOption[] = ACCENT_PRESETS.map((id: string) => ({
-        id,
-        label: t(accentLabelKey(id)),
-        swatch: `var(--accent-swatch-${id})`,
-      }))
-      options.push({
-        id: ACCENT_RANDOM_ID,
-        label: t(accentLabelKey(ACCENT_RANDOM_ID)),
-        swatch: ACCENT_RANDOM_SWATCH,
-        icon: ICON_ARROWS_SHUFFLE,
-      })
-      const picked = await openChoiceDialog({
-        title: t("tv.settings.accent"),
-        selectedId: getAccent(),
-        options,
-      })
-      if (!picked) return
-      setAccent(picked)
-      void renderRows()
     }
 
     async function pickInterfaceSize(): Promise<void> {
