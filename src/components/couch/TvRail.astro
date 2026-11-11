@@ -7,22 +7,48 @@
 // cards per visible rail at 1080p via .rs-rail--large in couch.css;
 // default is the current sizing, unchanged. Home rails use "large";
 // every other screen keeps the default. Behaviour — slots, focus
-// memory, gamepad section registration — is identical either way).
+// memory, gamepad section registration — is identical either way),
+// variant? (H04 rail visual variation — ONE of "film" | "series" |
+// "documentary" | "followed" | "live"; renders
+// .rs-rail--variant-<name> in couch.css. Subtle differences only:
+// card treatment, spacing, typography — no heavy panels, no nested
+// containers. Omit for the neutral default rail), sparse? (H06 —
+// set when W1's minimum-population rule marks this rail sparse:
+// renders .rs-rail--sparse, which restyles a thin collection
+// instead of stretching it — default-density cards, quieter title,
+// no giant-card treatment even on a "large" rail. Hiding or
+// consolidating the rail entirely is W1's render decision; this is
+// the presentation for a sparse rail that still renders), count?
+// (item population, rendered as data-rail-count for CSS/JS hooks).
 // Children are the rail's cards (TvCard, each data-nylah-item).
 export type TvRailDensity = "default" | "large";
+export type TvRailVariant = "film" | "series" | "documentary" | "followed" | "live";
 
 interface Props {
   id: string;
   title: string;
   href?: string;
   density?: TvRailDensity;
+  variant?: TvRailVariant;
+  sparse?: boolean;
+  count?: number;
 }
-const { id, title, href, density = "default" } = Astro.props;
+const { id, title, href, density = "default", variant, sparse = false, count } = Astro.props;
+const classes = [
+  "rs-rail",
+  density === "large" ? "rs-rail--large" : "",
+  variant ? `rs-rail--variant-${variant}` : "",
+  sparse ? "rs-rail--sparse" : "",
+]
+  .filter(Boolean)
+  .join(" ");
 ---
 
 <section
-  class={`rs-rail${density === "large" ? " rs-rail--large" : ""}`}
+  class={classes}
   data-nylah-rail={id}
+  data-rail-variant={variant}
+  data-rail-count={count}
   aria-label={title}
 >
   <div class="rs-rail__head">
