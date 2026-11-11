@@ -414,10 +414,10 @@ export function mountCouchBrowse<T>(
       runtimeEl.replaceChildren();
       const label = document.createElement("label");
       label.className = "rs-browse-label";
-      label.htmlFor = `${prefix}couch-browse-runtime`;
+      label.htmlFor = `${prefix}couch-browse-runtime-select`;
       label.textContent = "Length";
       const built = document.createElement("select");
-      built.id = `${prefix}couch-browse-runtime`;
+      built.id = `${prefix}couch-browse-runtime-select`;
       built.setAttribute("aria-label", "Filter by maximum length");
       built.addEventListener("change", () => {
         filter.maxRuntime = Number(built.value) || 0;

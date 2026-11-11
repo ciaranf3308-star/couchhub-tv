@@ -111,6 +111,25 @@ export function sortByConfidence<T extends RatedItem>(items: T[]): T[] {
     .map(({ item }) => item)
 }
 
+/**
+ * Evidence preference for the ROW layer (Movies / Series rails, C2).
+ *
+ * MovieRow / SeriesRow carry no vote counts — the only evidence
+ * signal they have is the provider's TMDb link (`tmdb`): a linked
+ * title's rating is TMDb's vote_average surfaced through the
+ * provider, an unlinked title's rating is unproven. Prefer linked
+ * titles whenever any qualify; fall back to the full pool only when
+ * NONE is linked, so a library with no TMDb links never empties —
+ * a no-vote 10.0 with no link can never outrank a proven title, but
+ * it is not deleted from the catalogue (the grid and the factual
+ * rails still list it). Same Tier 1-else-Tier 2 shape as
+ * qualityPool in home-rails.ts, at the evidence the row layer has.
+ */
+export function preferEvidence<T extends { tmdb?: number | null }>(rows: T[]): T[] {
+  const backed = rows.filter((row) => typeof row.tmdb === "number" && row.tmdb > 0)
+  return backed.length ? backed : rows
+}
+
 // ---------------------------------------------------------------------------
 // Explanations (H05) — real signals only, else null
 // ---------------------------------------------------------------------------

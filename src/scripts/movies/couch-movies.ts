@@ -20,6 +20,7 @@ import {
   type GenreId,
 } from "@/scripts/lib/genres.ts";
 import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 
 export interface MovieRow {
@@ -342,21 +343,26 @@ const MOVIE_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: Gen
 /**
  * B08 movie collections, in display order: Action, Thriller, Comedy,
  * Horror, Science Fiction, Drama, Documentary Films, Recently Added.
- * Genre collections are highest-rated first; Recently Added is
- * newest-first. Empty collections are omitted. Pure — no provider,
- * DOM or storage access.
+ * Genre collections are evidence-preferred then highest-rated first
+ * (C2 preferEvidence — a no-vote 10.0 with no TMDb link can never
+ * top a collection while any linked title qualifies; when nothing is
+ * linked the full pool is used, so a small library never empties);
+ * Recently Added is newest-first. Empty collections are omitted.
+ * Pure — no provider, DOM or storage access.
  */
 export function movieGenreCollections(rows: MovieRow[]): GenreCollection<MovieRow>[] {
   const out: GenreCollection<MovieRow>[] = [];
   for (const def of MOVIE_GENRE_COLLECTION_DEFS) {
-    const members = rows.filter(
-      (row) => !isDocumentaryMovie(row) && movieGenres(row).includes(def.genre),
+    const members = preferEvidence(
+      rows.filter(
+        (row) => !isDocumentaryMovie(row) && movieGenres(row).includes(def.genre),
+      ),
     );
     if (members.length) {
       out.push({ id: def.id, title: def.title, rows: sortMovies(members, "rating") });
     }
   }
-  const documentaries = rows.filter((row) => isDocumentaryMovie(row));
+  const documentaries = preferEvidence(rows.filter((row) => isDocumentaryMovie(row)));
   if (documentaries.length) {
     out.push({
       id: "movies-genre-documentary",
@@ -507,7 +513,10 @@ export function pickFeaturedMovie(rows: MovieRow[]): MovieRow | null {
   if (!withArt.length) return rows[0] ?? null;
   const byAdded = [...withArt].sort((a, b) => (b.added || 0) - (a.added || 0));
   const recentHalf = byAdded.slice(0, Math.max(1, Math.ceil(byAdded.length / 2)));
-  const byRating = [...recentHalf].sort(
+  // C2 — a no-vote 10.0 with no TMDb link never headlines while any
+  // recent linked title qualifies (preferEvidence falls back to the
+  // full half when nothing is linked).
+  const byRating = [...preferEvidence(recentHalf)].sort(
     (a, b) => ratingSortValue(b.rating) - ratingSortValue(a.rating),
   );
   return byRating[0] ?? byAdded[0] ?? null;

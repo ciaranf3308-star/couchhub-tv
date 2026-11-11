@@ -1026,7 +1026,10 @@
   }
   .rs-discover-rating {
     position: absolute;
-    bottom: 0.625rem;
+    /* Top-left, like TvCard's badge: bottom-left collides with the
+       fallback art's own title line (0.10.0 integration — the rating
+       pill sat on top of "Bulk Comedy 14"'s first letter). */
+    top: 0.625rem;
     left: 0.625rem;
     z-index: 1;
     display: inline-flex;

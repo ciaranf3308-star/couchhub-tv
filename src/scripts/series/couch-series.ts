@@ -16,6 +16,7 @@ import {
 } from "@/scripts/lib/browse-filters.ts";
 import { genreForCategoryName, parseGenreString, type GenreId } from "@/scripts/lib/genres.ts";
 import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 import { isGenericEpisodeTitle } from "@/scripts/lib/episode-title.ts";
 import {
@@ -293,7 +294,8 @@ export interface SeriesCollectionOptions {
 /**
  * B08 series collections, in display order: Crime Drama, Comedy,
  * Science Fiction, Documentary Series, Reality, Recently Added,
- * Continue Watching. Genre collections are highest-rated first;
+ * Continue Watching. Genre collections are evidence-preferred then
+ * highest-rated first (C2 preferEvidence — see movieGenreCollections);
  * Recently Added is newest-first; Continue Watching keeps catalogue
  * order. Empty collections are omitted. Pure — no provider, DOM or
  * storage access.
@@ -305,14 +307,16 @@ export function seriesGenreCollections(
   const out: GenreCollection<SeriesRow>[] = [];
   const fictional = (row: SeriesRow) => !isDocumentarySeries(row);
   for (const def of SERIES_GENRE_COLLECTION_DEFS) {
-    const members = rows.filter(
-      (row) => fictional(row) && seriesGenres(row).includes(def.genre),
+    const members = preferEvidence(
+      rows.filter(
+        (row) => fictional(row) && seriesGenres(row).includes(def.genre),
+      ),
     );
     if (members.length) {
       out.push({ id: def.id, title: def.title, rows: sortSeries(members, "rating") });
     }
   }
-  const documentaries = rows.filter((row) => isDocumentarySeries(row));
+  const documentaries = preferEvidence(rows.filter((row) => isDocumentarySeries(row)));
   if (documentaries.length) {
     out.push({
       id: "series-genre-documentary",
@@ -320,7 +324,7 @@ export function seriesGenreCollections(
       rows: sortSeries(documentaries, "rating"),
     });
   }
-  const reality = rows.filter((row) => fictional(row) && isRealitySeries(row));
+  const reality = preferEvidence(rows.filter((row) => fictional(row) && isRealitySeries(row)));
   if (reality.length) {
     out.push({
       id: "series-genre-reality",
@@ -669,7 +673,9 @@ export function pickFeaturedSeries(rows: SeriesRow[]): SeriesRow | null {
   if (!withArt.length) return rows[0] ?? null;
   const byAdded = [...withArt].sort((a, b) => (b.added || 0) - (a.added || 0));
   const recentHalf = byAdded.slice(0, Math.max(1, Math.ceil(byAdded.length / 2)));
-  const byRating = [...recentHalf].sort(
+  // C2 — a no-vote 10.0 with no TMDb link never headlines while any
+  // recent linked title qualifies (see pickFeaturedMovie).
+  const byRating = [...preferEvidence(recentHalf)].sort(
     (a, b) => ratingSortValue(b.rating) - ratingSortValue(a.rating),
   );
   return byRating[0] ?? byAdded[0] ?? null;

@@ -19,6 +19,7 @@ import {
   ensureLoaded as ensurePrefsLoaded,
 } from "@/scripts/lib/preferences.js";
 import type { CouchBrowseAdapter } from "@/scripts/movies/couch-browse.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import {
   mapMovieRow,
   filterMovies,
@@ -63,8 +64,12 @@ export const moviesAdapter: CouchBrowseAdapter<MovieRow> = {
       if (fraction > 0 && fraction < 1) continueRows.push(row);
     }
     const recentRows = sortMovies(rows, "added").slice(0, 12);
+    // C2 — "Recommended" is a rating-ranked selection, so the same
+    // evidence preference applies as in the genre collections: a
+    // no-vote 10.0 with no TMDb link never tops it while any linked
+    // 8+ title qualifies.
     const recommendedRows = sortMovies(
-      rows.filter((row) => (Number(row.rating) || 0) >= 8),
+      preferEvidence(rows.filter((row) => (Number(row.rating) || 0) >= 8)),
       "rating",
     ).slice(0, 12);
     const favIds = getFavorites(playlistId, "vod");

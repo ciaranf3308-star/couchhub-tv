@@ -199,9 +199,12 @@ describe("B09 — controller + page wiring (source level)", () => {
     expect(src).toContain("loadBrowseFilterState(filterScope)");
     expect(src).toContain("saveBrowseFilterState(filterScope,");
     expect(src).toContain("renderRuntime()");
-    expect(src).toContain("computeFilterAvailability(all).runtime");
+    expect(src).toContain("computeFilterAvailability(all as BrowseFilterEntry[]).runtime");
     expect(src).toContain("maxRuntime: filter.maxRuntime");
     expect(src).toContain('adapter.kind === "vod" ? "movies" : "series"');
+    // The built select must NOT share the mount div's id
+    // (duplicate ids made getElementById return the div).
+    expect(src).toContain("couch-browse-runtime-select");
   });
 
   it("both catalogue pages carry the runtime mount point", () => {

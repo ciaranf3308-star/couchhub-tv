@@ -20,6 +20,7 @@ import {
   ensureLoaded as ensurePrefsLoaded,
 } from "@/scripts/lib/preferences.js";
 import { type CouchBrowseAdapter } from "@/scripts/movies/couch-browse.ts";
+import { preferEvidence } from "@/scripts/lib/recommendations.ts";
 import {
   getCachedSeasonCount,
   observeSeasonCount,
@@ -91,8 +92,9 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       return progress.completedIds.length > 0 && progress.hasIncompleteEpisode;
     });
     const recentRows = sortSeries(rows, "added").slice(0, 12);
+    // C2 — same evidence preference as the movies Recommended rail.
     const recommendedRows = sortSeries(
-      rows.filter((row) => (Number(row.rating) || 0) >= 8),
+      preferEvidence(rows.filter((row) => (Number(row.rating) || 0) >= 8)),
       "rating",
     ).slice(0, 12);
     // See the note on the getFavorites call in applyFilter: the
