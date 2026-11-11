@@ -1,5 +1,5 @@
 ---
-// TvLiveHero — Now Watching / Continue Live hero (0.9.0 Landing).
+// TvLiveHero — Now Watching / Continue Live hero (0.11.0, W3).
 //
 // The full-width cinematic hero band. Renders the skeleton with
 // [data-hero-*] mounts; src/scripts/lib/livetv-landing.ts fills it
@@ -7,17 +7,33 @@
 // channel + programme come from loadLivetvHomeData at runtime, so a
 // server-rendered hero would be stale by construction.
 //
-// Artwork honesty: the EPG Programme shape carries NO artwork
-// field, so there is no genuine programme artwork to show. The hero
-// art is a branded burgundy gradient (couch.css) + the channel logo
-// in [data-hero-logo] (real <img> when the provider supplies one,
-// the 0.8.0 fallback mark otherwise) — never a fabricated image.
+// Programme-led, not gradient-led (0.9.0's "EPG carries no
+// artwork" reasoning is superseded by the 0.11.0 enrichment
+// layer): the art layer ([data-hero-art]) starts as the branded
+// TvProgrammeArt placeholder and is upgraded in place to real
+// programme artwork by fillLandingHero via enrichProgramme — the
+// artwork forms the right-hand composition of the band, with
+// gradient fades preserving readability of the text on the left.
+// When no artwork is available the branded fallback stands — a
+// composed burgundy treatment with the channel logo, never a giant
+// empty rectangle, never unrelated artwork. Do NOT display artwork
+// matched to a different programme.
 //
-// No rectangles inside rectangles: the hero is a full-bleed band,
-// not a panel — no border, no card, hierarchy via typography,
-// spacing and the gradient. Watch Live tunes explicitly
+// Artwork honesty: programme title / times / progress / synopsis
+// are real EPG only (synopsis falls back to the enrichment
+// synopsis for the same title, never invented). No stream is
+// started to populate the hero: Watch Live tunes explicitly
 // (dispatchLivetvTune); opening the landing never auto-starts a
 // stream.
+//
+// Mount contract (unchanged from 0.9.0 so livetv.astro wiring
+// survives): [data-hero-eyebrow], [data-hero-logo],
+// [data-hero-title] (channel name), [data-hero-programme-title],
+// [data-hero-programme-time], [data-hero-progress-wrap] /
+// [data-hero-progress-fill], [data-hero-next], [data-hero-watch],
+// [data-hero-guide]. Added in 0.11.0: [data-hero-art] (artwork
+// layer) and [data-hero-description] (programme synopsis).
+import TvProgrammeArt from "@/components/couch/TvProgrammeArt.astro";
 ---
 
 <section
@@ -26,12 +42,15 @@
 	data-nylah-rail="livetv-landing-hero"
 	aria-label="Now watching"
 	hidden>
-	<div class="rs-livetv-landing-hero__art" aria-hidden="true">
-		<div class="rs-livetv-landing-hero__logo" data-hero-logo></div>
+	<div class="rs-livetv-landing-hero__art" data-hero-art aria-hidden="true">
+		<TvProgrammeArt title="" variant="hero" />
 	</div>
 	<div class="rs-livetv-landing-hero__body">
 		<p class="rs-livetv-landing-hero__eyebrow" data-hero-eyebrow>Now Watching</p>
-		<h2 class="rs-livetv-landing-hero__title" data-hero-title></h2>
+		<div class="rs-livetv-landing-hero__channel">
+			<div class="rs-livetv-landing-hero__logo" data-hero-logo></div>
+			<h2 class="rs-livetv-landing-hero__title" data-hero-title></h2>
+		</div>
 		<p class="rs-livetv-landing-hero__programme" data-hero-programme-title></p>
 		<p class="rs-livetv-landing-hero__time" data-hero-programme-time></p>
 		<div
@@ -42,6 +61,7 @@
 			hidden>
 			<div class="rs-livetv-landing-hero__progress-fill" data-hero-progress-fill style="width: 0%"></div>
 		</div>
+		<p class="rs-livetv-landing-hero__description" data-hero-description hidden></p>
 		<p class="rs-livetv-landing-hero__next" data-hero-next hidden></p>
 		<div class="rs-livetv-landing-hero__actions">
 			<button

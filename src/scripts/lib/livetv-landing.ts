@@ -1,11 +1,11 @@
-// RedSilk Couch — Live TV Landing (0.9.0, W1).
+// RedSilk Couch — Live TV Landing (0.11.0, W3).
 //
 // The cinematic Live TV landing: a full-width Now Watching hero, a
-// restrained quick-access row, and fixed-size Browse by Category
-// tiles. This module is the landing's whole behaviour — pure model
-// builders plus the DOM mount — so the Astro components
-// (TvLiveLanding / TvLiveHero / TvCategoryTile) stay thin shells
-// and the behaviour is unit-testable in jsdom.
+// quick-access row, and fixed-size Browse by Category tiles. This
+// module is the landing's whole behaviour — pure model builders
+// plus the DOM mount — so the Astro components (TvLiveLanding /
+// TvLiveHero / TvCategoryTile) stay thin shells and the behaviour
+// is unit-testable in jsdom.
 //
 // Contracts (shared with W5's shell — this module never imports
 // W5-owned code, it dispatches the same window events):
@@ -29,14 +29,24 @@
 //     `lastLandingCard`; this module does NOT depend on it — the
 //     seam is the focus-key string, so either side can read it.
 //
-// Artwork honesty: the EPG Programme shape carries NO artwork
-// field (start/stop/title/desc only — see now-next.ts), so there is
-// no genuine programme artwork to show. The hero is a branded
-// burgundy gradient + the channel logo through the 0.8.0 TvImage
-// fallback system (fallbackMarkFor), never a fabricated image.
-// Category tiles carry NO channel logos at all — no stacked-logo
-// artwork: a deterministic burgundy gradient variant + one large
-// initial motif per category, fixed dimensions, artwork bounded.
+// Artwork (0.11.0): the hero and the category tiles are
+// programme-led via the enrichment layer
+// (src/scripts/lib/livetv-enrichment.ts — W2's module, contract
+// in couchhub-tv-011-contracts.md). fillLandingHero fills text
+// synchronously from real EPG; upgradeLandingHeroArt then enriches
+// the current programme title and swaps the hero art layer to the
+// matched backdrop, and enrichCategoryTiles does the same for each
+// tile's now-playing programme. Artwork is matched to the programme
+// actually showing — never unrelated art, never fabricated. When
+// no artwork resolves, the branded fallback stands (channel logo /
+// gradient + small glyph). Enrichment runs only for visible
+// titles, never on focus/scroll, and never starts a stream.
+import {
+  enrichProgramme,
+  getProgrammeArtworkSync,
+  prefetchProgrammes,
+  type ProgrammeArtwork,
+} from "./livetv-enrichment";
 import {
   collectionNowPlaying,
   dispatchLivetvTune,
@@ -75,6 +85,7 @@ export type LandingMode = "home" | "playback" | "guide" | "browser";
 
 export type LandingBrowserFilter =
   | { kind: "favourites" }
+  | { kind: "recents" }
   | { kind: "all" }
   | { kind: "category"; value: string };
 
@@ -121,6 +132,7 @@ export function dispatchLandingMode(
 export type LandingQuickAction =
   | "continue"
   | "favourites"
+  | "recent"
   | "all"
   | "guide"
   | "search";
@@ -149,6 +161,9 @@ export function performLandingQuickAction(
     }
     case "favourites":
       dispatchLandingMode("browser", { browserFilter: { kind: "favourites" } });
+      return true;
+    case "recent":
+      dispatchLandingMode("browser", { browserFilter: { kind: "recents" } });
       return true;
     case "all":
       dispatchLandingMode("browser", { browserFilter: { kind: "all" } });
@@ -183,6 +198,8 @@ export interface LandingHeroProgramme {
   /** Elapsed fraction 0..1. */
   progress: number;
   timeRange: string;
+  /** Real EPG synopsis (Programme.desc), or null when the guide carries none. */
+  description?: string | null;
 }
 
 export interface LandingHeroModel {
@@ -224,6 +241,7 @@ export function buildLandingHeroModel(
           stop: nn.current.stop,
           progress: nn.current.progress ?? 0,
           timeRange: formatTimeRange(nn.current.start, nn.current.stop),
+          description: nn.current.desc?.trim() ? nn.current.desc.trim() : null,
         }
       : null,
     next: nn.next
@@ -248,6 +266,39 @@ export interface LandingCategory {
   nowPlaying: { channelName: string; programmeTitle: string } | null;
   /** Deterministic gradient variant 0..5 (hash of the group id). */
   variant: number;
+  /**
+   * Enrichment backdrop for the now-playing programme, or null.
+   * The pure builder always leaves this null; the mount fills it
+   * in via enrichCategoryTiles (same title the nowPlaying line
+   * names — never unrelated art).
+   */
+  artworkUrl?: string | null;
+}
+
+/**
+ * Small, deliberate category glyph — a texture accent in the tile
+ * corner, never a giant motif. Keyed on the normalised label so
+ * provider naming variations ("UK Sports", "Sports (HD)") still
+ * land on the same glyph. Unknown labels get a neutral spark.
+ */
+const CATEGORY_GLYPHS: Array<[RegExp, string]> = [
+  [/sport/i, "⚽"],
+  [/movie|film|cinema/i, "🎬"],
+  [/series|drama|tv show/i, "📺"],
+  [/entertain/i, "★"],
+  [/documentar|nature|factual/i, "🏔"],
+  [/kid|cartoon|family/i, "🧸"],
+  [/news/i, "📰"],
+  [/music/i, "♪"],
+  [/comedy/i, "😄"],
+];
+
+export function categoryGlyphFor(label: string): string {
+  const text = (label ?? "").trim();
+  for (const [pattern, glyph] of CATEGORY_GLYPHS) {
+    if (pattern.test(text)) return glyph;
+  }
+  return "✦";
 }
 
 export const LANDING_CATEGORY_TILE_VARIANTS = 6;
@@ -284,6 +335,7 @@ export function landingCategories(
     count: group.channels.length,
     nowPlaying: collectionNowPlaying(group, data.programmes, data.playlistId, atMs),
     variant: categoryTileVariant(group.id),
+    artworkUrl: null,
   }));
 }
 
@@ -428,9 +480,12 @@ export function mountLandingBack(
  * Category tile element — the runtime twin of TvCategoryTile.astro
  * (same classes, same structure). Fixed dimensions come from CSS
  * (.rs-livetv-landing-category-tile: 18.75rem × 10.625rem, never
- * auto height). Contains NO <img> and NO channel logos: the
- * artwork is the gradient variant + one large initial motif.
- * The "now playing" line is real EPG only, omitted when uncovered.
+ * auto height). The art layer is either the contextual enrichment
+ * backdrop for the tile's now-playing programme
+ * (category.artworkUrl — same title the "now playing" line names,
+ * never unrelated art) or the gradient variant + one small glyph.
+ * Contains NO channel logos and NO giant initial. The "now
+ * playing" line is real EPG only, omitted when uncovered.
  */
 export function buildCategoryTileElement(
   category: LandingCategory,
@@ -448,11 +503,24 @@ export function buildCategoryTileElement(
     `${category.label}, ${category.count} channel${category.count === 1 ? "" : "s"}`,
   );
 
-  const motif = document.createElement("span");
-  motif.className = "rs-livetv-landing-category-tile__motif";
-  motif.setAttribute("aria-hidden", "true");
-  motif.textContent = (category.label.trim()[0] ?? "•").toUpperCase();
-  tile.appendChild(motif);
+  const art = document.createElement("span");
+  art.className = "rs-livetv-landing-category-tile__art";
+  art.setAttribute("aria-hidden", "true");
+  if (category.artworkUrl) {
+    const img = document.createElement("img");
+    img.className = "rs-livetv-landing-category-tile__art-img";
+    img.src = category.artworkUrl;
+    img.alt = "";
+    img.loading = "lazy";
+    img.decoding = "async";
+    art.appendChild(img);
+  } else {
+    const glyph = document.createElement("span");
+    glyph.className = "rs-livetv-landing-category-tile__glyph";
+    glyph.textContent = categoryGlyphFor(category.label);
+    art.appendChild(glyph);
+  }
+  tile.appendChild(art);
 
   const label = document.createElement("span");
   label.className = "rs-livetv-landing-category-tile__label";
@@ -480,13 +548,49 @@ export function buildCategoryTileElement(
 }
 
 /**
+ * Swap a tile's art layer to an enrichment backdrop. The glyph
+ * layer is replaced by the image; a failed image load restores
+ * the glyph so a tile never shows a broken-image box. Only ever
+ * called with artwork matched to the tile's own now-playing
+ * programme. Returns false when the tile has no art layer.
+ */
+export function applyCategoryTileArtwork(
+  tile: HTMLElement,
+  artworkUrl: string | null,
+): boolean {
+  const art = tile.querySelector(".rs-livetv-landing-category-tile__art");
+  if (!art) return false;
+  if (!artworkUrl) return false;
+  art.replaceChildren();
+  const img = document.createElement("img");
+  img.className = "rs-livetv-landing-category-tile__art-img";
+  img.src = artworkUrl;
+  img.alt = "";
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.addEventListener("error", () => {
+    const glyph = document.createElement("span");
+    glyph.className = "rs-livetv-landing-category-tile__glyph";
+    const label =
+      tile.querySelector(".rs-livetv-landing-category-tile__label")?.textContent ?? "";
+    glyph.textContent = categoryGlyphFor(label);
+    art.replaceChildren(glyph);
+  });
+  art.appendChild(img);
+  return true;
+}
+
+/**
  * Fill a TvLiveHero skeleton (the [data-hero-*] mounts) from a
  * hero model. The logo mount gets the real channel logo <img> when
  * one exists, else the branded fallback mark (fallbackMarkFor —
  * the 0.8.0 TvImage fallback system). Programme artwork is never
  * fabricated: with no current programme the title line reads
- * "Live TV" and the progress bar stays hidden. Returns false when
- * there is no model (caller hides the hero).
+ * "Live TV" and the progress bar stays hidden. Artwork is NOT
+ * filled here — upgradeLandingHeroArt does that asynchronously
+ * after this synchronous text fill, so the hero is never blocked
+ * on a network call. Returns false when there is no model (caller
+ * hides the hero).
  */
 export function fillLandingHero(
   heroEl: HTMLElement,
@@ -521,11 +625,21 @@ export function fillLandingHero(
 
   const programmeTitle = heroEl.querySelector("[data-hero-programme-title]");
   const programmeTime = heroEl.querySelector("[data-hero-programme-time]");
+  const descriptionEl = heroEl.querySelector<HTMLElement>("[data-hero-description]");
   const progressWrap = heroEl.querySelector<HTMLElement>("[data-hero-progress-wrap]");
   const progressFill = heroEl.querySelector<HTMLElement>("[data-hero-progress-fill]");
   if (model.current) {
     if (programmeTitle) programmeTitle.textContent = model.current.title;
     if (programmeTime) programmeTime.textContent = model.current.timeRange;
+    if (descriptionEl) {
+      if (model.current.description) {
+        descriptionEl.textContent = model.current.description;
+        descriptionEl.removeAttribute("hidden");
+      } else {
+        descriptionEl.setAttribute("hidden", "");
+        descriptionEl.textContent = "";
+      }
+    }
     if (progressWrap) {
       progressWrap.removeAttribute("hidden");
       progressWrap.setAttribute(
@@ -541,6 +655,10 @@ export function fillLandingHero(
   } else {
     if (programmeTitle) programmeTitle.textContent = "Live TV";
     if (programmeTime) programmeTime.textContent = "";
+    if (descriptionEl) {
+      descriptionEl.setAttribute("hidden", "");
+      descriptionEl.textContent = "";
+    }
     if (progressWrap) progressWrap.setAttribute("hidden", "");
     if (progressFill) progressFill.style.width = "0%";
   }
@@ -559,8 +677,151 @@ export function fillLandingHero(
   if (watchBtn) {
     watchBtn.setAttribute("data-channel-id", String(model.channel.id));
   }
+  // Stamp the programme the art layer must match; a late
+  // enrichment for a superseded hero is dropped on arrival.
+  const artMount = heroEl.querySelector<HTMLElement>("[data-hero-art]");
+  if (artMount) {
+    artMount.setAttribute(
+      "data-art-title",
+      model.current ? model.current.title : "",
+    );
+    artMount.setAttribute(
+      "data-art-channel",
+      model.channel.displayName || model.channel.name,
+    );
+  }
   heroEl.removeAttribute("hidden");
   return true;
+}
+
+/**
+ * Swap a hero art layer ([data-hero-art], the TvProgrammeArt
+ * placeholder) to real programme artwork. Backdrop only — a
+ * poster aspect would stretch across the band. A failed image
+ * load restores the branded placeholder. The `expectedTitle`
+ * guard drops art for a programme the hero no longer shows.
+ * Returns false when there is no art layer or no backdrop.
+ */
+export function applyHeroArtwork(
+  heroEl: HTMLElement,
+  art: ProgrammeArtwork,
+  expectedTitle?: string,
+): boolean {
+  const artMount = heroEl.querySelector<HTMLElement>("[data-hero-art]");
+  if (!artMount) return false;
+  if (expectedTitle != null && artMount.getAttribute("data-art-title") !== expectedTitle) {
+    return false;
+  }
+  const url = art.backdropUrl;
+  if (!url) return false;
+  const placeholder = artMount.querySelector("[data-programme-art]");
+  const img = document.createElement("img");
+  img.className = "rs-livetv-programme-art__img";
+  img.src = url;
+  img.alt = "";
+  img.loading = "eager";
+  img.decoding = "async";
+  img.addEventListener("error", () => {
+    // Broken artwork URL: fall back to the branded placeholder.
+    img.remove();
+    if (placeholder && !artMount.contains(placeholder)) {
+      artMount.replaceChildren(placeholder);
+      placeholder.setAttribute("data-art-state", "placeholder");
+    }
+  });
+  artMount.replaceChildren(img);
+  if (placeholder) placeholder.setAttribute("data-art-state", "artwork");
+  return true;
+}
+
+/**
+ * Enrich the hero's current programme and upgrade the art layer
+ * in place. Only runs when there IS a current programme (no
+ * programme → no artwork, the branded fallback stands — never
+ * unrelated art). Applies the cached artwork synchronously when
+ * the enrichment cache already holds it, otherwise awaits the
+ * network result and applies it only if the hero still shows the
+ * same programme. When the EPG carries no synopsis, the
+ * enrichment synopsis for the same title fills the description
+ * line. Never throws, never tunes, never blocks the hero text.
+ */
+export async function upgradeLandingHeroArt(
+  heroEl: HTMLElement,
+  model: LandingHeroModel | null,
+): Promise<boolean> {
+  if (!model?.current) return false;
+  const title = model.current.title;
+  const channelName = model.channel.displayName || model.channel.name;
+  const cached = getProgrammeArtworkSync(title);
+  if (cached && cached.backdropUrl) {
+    return applyHeroArtwork(heroEl, cached, title);
+  }
+  let art: ProgrammeArtwork;
+  try {
+    art = await enrichProgramme({
+      title,
+      channelName,
+      startMs: model.current.start,
+      endMs: model.current.stop,
+    });
+  } catch {
+    return false;
+  }
+  // The hero may have re-rendered for another channel while the
+  // request was in flight — the guard inside applyHeroArtwork
+  // drops stale art, and the synopsis gets the same check.
+  const applied = applyHeroArtwork(heroEl, art, title);
+  if (art.synopsis && !model.current.description) {
+    const artMount = heroEl.querySelector<HTMLElement>("[data-hero-art]");
+    if (artMount?.getAttribute("data-art-title") === title) {
+      const descriptionEl = heroEl.querySelector<HTMLElement>("[data-hero-description]");
+      if (descriptionEl) {
+        descriptionEl.textContent = art.synopsis;
+        descriptionEl.removeAttribute("hidden");
+      }
+    }
+  }
+  return applied;
+}
+
+/**
+ * Enrich each rendered category tile's now-playing programme and
+ * swap its art layer to the matched backdrop. Prefetches the
+ * visible titles first (bounded by the enrichment layer), then
+ * applies cached art immediately and awaits the rest — a tile
+ * whose programme has no artwork keeps its gradient + glyph.
+ * Never throws; artwork is matched per tile, never shared across
+ * tiles with different programmes.
+ */
+export async function enrichCategoryTiles(
+  row: HTMLElement,
+  categories: readonly LandingCategory[],
+): Promise<void> {
+  const titles = categories
+    .map((c) => c.nowPlaying?.programmeTitle)
+    .filter((t): t is string => !!t);
+  if (!titles.length) return;
+  prefetchProgrammes(titles);
+  const tiles = [...row.querySelectorAll<HTMLElement>("[data-category-id]")];
+  const byId = new Map(tiles.map((t) => [t.getAttribute("data-category-id"), t]));
+  await Promise.all(
+    categories.map(async (category) => {
+      const title = category.nowPlaying?.programmeTitle;
+      const tile = byId.get(category.id);
+      if (!title || !tile) return;
+      const cached = getProgrammeArtworkSync(title);
+      if (cached?.backdropUrl) {
+        applyCategoryTileArtwork(tile, cached.backdropUrl);
+        return;
+      }
+      try {
+        const art = await enrichProgramme({ title });
+        if (art.backdropUrl) applyCategoryTileArtwork(tile, art.backdropUrl);
+      } catch {
+        // No artwork for this tile: gradient + glyph stand.
+      }
+    }),
+  );
 }
 
 function heroLogoFallback(channel: LivetvChannel): HTMLSpanElement {
@@ -634,6 +895,10 @@ export async function mountLivtvLanding(
     if (heroEl) {
       if (!fillLandingHero(heroEl, model)) {
         heroEl.setAttribute("hidden", "");
+      } else {
+        // Artwork upgrades in place once enrichment resolves;
+        // the text hero above never waits on the network.
+        void upgradeLandingHeroArt(heroEl, model);
       }
     }
 
@@ -658,6 +923,17 @@ export async function mountLivtvLanding(
         continueBtn.setAttribute("hidden", "");
       }
     }
+    const recentBtn = host.querySelector<HTMLElement>(
+      '[data-landing-action="recent"]',
+    );
+    if (recentBtn) {
+      if (recents.length > 0) {
+        recentBtn.removeAttribute("hidden");
+        setSublabel("recent", `${recents.length} channel${recents.length === 1 ? "" : "s"}`);
+      } else {
+        recentBtn.setAttribute("hidden", "");
+      }
+    }
     setSublabel("favourites", `${favourites.length} channel${favourites.length === 1 ? "" : "s"}`);
     setSublabel("all", `${data.channels.length} channel${data.channels.length === 1 ? "" : "s"}`);
     setSublabel("guide", "Now & Next");
@@ -667,7 +943,7 @@ export async function mountLivtvLanding(
     const section = host.querySelector<HTMLElement>(
       "[data-landing-categories-section]",
     );
-    const row = host.querySelector("[data-landing-categories]");
+    const row = host.querySelector<HTMLElement>("[data-landing-categories]");
     const categories = landingCategories(data);
     if (row) {
       row.replaceChildren();
@@ -678,6 +954,8 @@ export async function mountLivtvLanding(
         });
         row.appendChild(tile);
       }
+      // Contextual programme artwork per tile, upgraded in place.
+      void enrichCategoryTiles(row, categories);
     }
     if (section) {
       section.toggleAttribute("hidden", categories.length === 0);
@@ -760,6 +1038,5 @@ export async function mountLivtvLanding(
   };
 }
 
-// Re-exported for callers that only know the Programme shape: the
-// EPG carries no artwork, so the hero never asks for any.
+// Re-exported for callers that only know the Programme shape.
 export type { Programme };

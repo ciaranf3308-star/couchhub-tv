@@ -1,19 +1,29 @@
 ---
-// TvLiveLanding — Live TV Landing (0.9.0, W1).
+// TvLiveLanding — Live TV Landing (0.11.0, W3).
 //
-// The cinematic landing the 0.9.0 shell (W5, livetv.astro) mounts in
+// The cinematic landing the 0.9.0 shell (livetv.astro) mounts in
 // place of the 0.7.0/0.8.0 Home: (A) Now Watching hero (TvLiveHero),
-// (B) a restrained quick-access row, (C) Browse by Category tiles.
-// No props — everything loads client-side from the cached playlist
-// via mountLivtvLanding() (src/scripts/lib/livetv-landing.ts).
+// (B) quick access, (C) Browse by Category tiles. No props —
+// everything loads client-side from the cached playlist via
+// mountLivtvLanding() (src/scripts/lib/livetv-landing.ts).
+//
+// Quick access is a hierarchy, not a permanent toolbar of
+// equally-weighted buttons (mockup): Continue Watching is the one
+// primary pill — red outline, channel name as its sublabel — and
+// Favourites, Recently Watched, All Channels, TV Guide and Search
+// follow as quieter pills with real counts as sublabels. The
+// Continue Watching and Recently Watched pills stay hidden until
+// there is viewing history. Sublabels are filled from real counts
+// only. The Xbox hints legend is the shell's (data-livetv-legend);
+// the landing renders none of its own.
 //
 // No rectangles inside rectangles: the landing is one flowing
-// column — hero band, then a text-button row divided by hairlines,
-// then the category row — no outer panel containing smaller panels.
-// No content overflows the viewport at 1920×1080: the hero is a
-// fixed band, the quick row wraps, the category row scrolls
-// horizontally. All sizes are rem-based on the existing root
-// scaling (couch.css), so 4K stays proportional.
+// column — hero band, then a pill row, then the category row — no
+// outer panel containing smaller panels. No content overflows the
+// viewport at 1920×1080: the hero is a fixed band, the quick row
+// wraps, the category row is a fixed-height grid of six tiles. All
+// sizes are rem-based on the existing root scaling (couch.css), so
+// 4K stays proportional.
 //
 // Opening the landing starts NO stream: mountLivtvLanding only
 // renders; tuning happens on an explicit Watch / quick-access /
@@ -26,18 +36,16 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
 <div class="rs-livetv-landing" data-livetv-landing>
 	<TvLiveHero />
 
-	<!-- (B) Quick access — visually restrained: text buttons divided
-	     by hairlines, not a panel of panels. The Continue Watching
-	     button starts hidden; the mount shows it only when there is
-	     a last-watched channel, with that channel's name as its
-	     sublabel. Sublabels are filled from real counts only. -->
+	<!-- (B) Quick access — one primary pill (Continue Watching)
+	     then quieter pills, in the mockup's order. Sublabels are
+	     filled from real counts / the real channel name only. -->
 	<nav
 		class="rs-livetv-landing-quick"
 		data-nylah-rail="livetv-landing-quick"
 		aria-label="Quick access">
 		<button
 			type="button"
-			class="rs-livetv-landing-quick__action"
+			class="rs-livetv-landing-quick__action rs-livetv-landing-quick__action--primary"
 			data-landing-action="continue"
 			data-nylah-item
 			data-couch-key="landing-quick-continue"
@@ -60,6 +68,20 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
 			<span class="rs-livetv-landing-quick__text">
 				<span class="rs-livetv-landing-quick__label">Favourites</span>
 				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="favourites"></span>
+			</span>
+		</button>
+		<button
+			type="button"
+			class="rs-livetv-landing-quick__action"
+			data-landing-action="recent"
+			data-nylah-item
+			data-couch-key="landing-quick-recent"
+			data-focus-key="landing-quick-recent"
+			hidden>
+			<span class="rs-livetv-landing-quick__glyph" aria-hidden="true">↺</span>
+			<span class="rs-livetv-landing-quick__text">
+				<span class="rs-livetv-landing-quick__label">Recently Watched</span>
+				<span class="rs-livetv-landing-quick__sub" data-landing-sublabel-for="recent"></span>
 			</span>
 		</button>
 		<button
@@ -103,7 +125,7 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
 		</button>
 	</nav>
 
-	<!-- (C) Browse by Category — horizontal row of fixed-size tiles,
+	<!-- (C) Browse by Category — six fixed-size tiles in one row,
 	     filled by the mount from genuine provider groups. Hidden
 	     until the mount finds at least one group. -->
 	<section

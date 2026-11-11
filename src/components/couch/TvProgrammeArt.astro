@@ -1,0 +1,43 @@
+---
+// TvProgrammeArt — programme artwork (0.11.0, W2 contract — W3 stand-in).
+//
+// W2 owns this component; this file is a faithful implementation of
+// the contract in couchhub-tv-011-contracts.md so the landing (W3)
+// can build, test and screenshot-verify against it before W2's
+// branch lands. INTEGRATION: prefer W2's version when the two
+// differ — the exported surface (props + classes) must stay
+// identical.
+//
+// Server rendering has no artwork to show (the enrichment cache
+// lives in the browser), so this component renders the premium
+// branded placeholder: layered burgundy gradients + the channel
+// name as small branding text — never a giant empty rectangle,
+// never a giant initial letter, never a fabricated image. The
+// landing's client script upgrades the mount in place when
+// enrichProgramme resolves real artwork (same classes, an <img>
+// with .rs-livetv-programme-art__img replaces the placeholder
+// content; the mount's data-art-* attributes carry the title the
+// artwork was matched to).
+//
+// Props: title (programme title, used for the upgrade hook only —
+// never displayed as invented content), channelName?, variant
+// ('hero' | 'feature' | 'thumb' | 'card'), class?.
+interface Props {
+  title: string;
+  channelName?: string | null;
+  variant: "hero" | "feature" | "thumb" | "card";
+  class?: string;
+}
+const { title, channelName = null, variant, class: className = "" } = Astro.props;
+const brand = (channelName ?? "").trim();
+---
+
+<div
+  class={`rs-livetv-programme-art rs-livetv-programme-art--${variant}${className ? ` ${className}` : ""}`}
+  data-programme-art
+  data-art-state="placeholder"
+  data-art-title={title}
+  data-art-channel={brand}
+  aria-hidden="true">
+  <span class="rs-livetv-programme-art__brand">{brand ? brand : "Live TV"}</span>
+</div>
