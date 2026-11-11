@@ -278,6 +278,31 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 			min-height: 0;
 			flex: 1;
 		}
+		/* INTEGRATION 0.11.0 — viewport-fit the Browser + Guide
+		   screens. The flex chain below these mounts (browser
+		   host/layout/main/list, guide panel/list) already carries
+		   flex:1 + min-height:0, but the mode mounts are plain
+		   block flex items, so min-height:auto refused to shrink
+		   them below content height: the document grew to 1252px
+		   (browser) / 1475px (guide) at 1080p, the lists sized to
+		   content and never scrolled, and the 9th browser row /
+		   8th guide row sat half-cut under the fixed hints bar —
+		   list bottom padding alone could not fix it (it only grew
+		   the list taller). With the mounts as shrinking flex
+		   columns, body (min-height:100dvh) caps the page and the
+		   lists scroll internally; the 4.5rem bottom padding then
+		   clears the last row above the hints bar. Scoped to
+		   browser/guide only — landing/playback keep block layout.
+		   :not([hidden]) is load-bearing: setMode toggles modes
+		   via the hidden attribute, and a bare display:flex would
+		   override it and show every mount at once. */
+		#livetv-mode-browser:not([hidden]),
+		#livetv-mode-guide:not([hidden]) {
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+			flex: 1;
+		}
 		.rs-livetv-home__head {
 			display: flex;
 			flex-direction: column;
