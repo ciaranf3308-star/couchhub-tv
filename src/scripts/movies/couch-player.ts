@@ -1,16 +1,17 @@
-// Couch VOD player — playback controls on the W1 TvOsd shell (W4).
+// Couch VOD player — playback controls on the TvVodOsd shell (W4,
+// split from the Live TV TvOsd in 0.11.2 W3).
 //
 // The streaming engine is NOT rewritten here: playback mounts through
 // the shared `mountPlayer` (video.js / artplayer / shaka, per the user's
 // configured backend) and the source is fed to its `VjsLikeHandle`.
-// This module only owns the Couch control surface: the TvOsd buttons
+// This module only owns the Couch control surface: the TvVodOsd buttons
 // (play/pause, ±10s seek, timeline, subtitles, audio, fullscreen,
 // back, next episode), progress reporting, resume-seek, and the
 // ended -> next-episode handoff. The engine keeps its own control bar
-// (mountPlayer builds it per backend); the TvOsd is the
+// (mountPlayer builds it per backend); the TvVodOsd is the
 // controller-first surface — every button is a real focusable element
 // the D-pad can reach, and the OSD never hides while focus is inside
-// it (TvOsd shell behaviour).
+// it (TvVodOsd shell behaviour).
 //
 // Subtitle / audio controls only appear when the mounted media element
 // actually exposes tracks — nothing is invented for a stream that has
@@ -431,6 +432,16 @@ export async function createCouchVodPlayer(
       } catch {}
       try {
         handle.pause();
+      } catch {}
+      // 0.11.2 W3 — pause alone leaves the engine attached with its
+      // source loaded, so the provider connection stays held after
+      // exit and the next play (live or VOD) can be refused as
+      // connection-limit ("already open"). reset() destroys the
+      // hls / shaka / mpegts engines and unloads the source while
+      // keeping the <video> element for the next mount — dispose()
+      // would remove the element the detail page reuses.
+      try {
+        handle.reset?.();
       } catch {}
     },
     play: () => playWhenReady(handle),

@@ -8,7 +8,9 @@
 // the shared TvImage fallback system (couch-image.ts) — a title with
 // no art still gets the intentional initials fallback, never a broken
 // image. Playback mounts the shared engine (mountPlayer) with the
-// TvOsd Couch controls; B / Escape while playing returns to this
+// TvVodOsd VOD controls (0.11.2 W3 — the VOD overlay is NOT the Live
+// TV one: no LIVE badge, no Channels/Guide, just title + timeline +
+// transport); B / Escape while playing returns to this
 // The back link returns to /movies and history.back()s when you arrived
 // from there, so focus restores to the exact Movies card (couch-focus
 // memory). Feedback lives HERE on the detail screen (one "More" menu):
@@ -17,7 +19,7 @@
 // hero actions.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
-import TvOsd from "@/components/couch/TvOsd.astro";
+import TvVodOsd from "@/components/couch/TvVodOsd.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 ---
 
@@ -110,7 +112,7 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
     hidden
   >
     <video id="movie-player" playsinline></video>
-    <TvOsd autoHideMs={4500}>
+    <TvVodOsd autoHideMs={4500}>
       <h3 slot="info" class="rs-osd__title" id="movie-osd-title"></h3>
       <p slot="info" class="rs-osd__subtitle" id="movie-osd-subtitle"></p>
       <div class="rs-osd__timeline">
@@ -128,13 +130,13 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       <button slot="controls" id="movie-osd-back10" type="button" class="rs-osd__btn">−10s</button>
       <button slot="controls" id="movie-osd-play-pause" type="button" class="rs-osd__btn">▶ Play</button>
       <button slot="controls" id="movie-osd-fwd10" type="button" class="rs-osd__btn">+10s</button>
-      <button slot="controls" id="movie-osd-subtitles" type="button" class="rs-osd__btn" hidden>Subtitles</button>
+      <button slot="controls" id="movie-osd-subtitles" type="button" class="rs-osd__btn" data-vod-tracklist="movie-osd-subtitles-list" hidden>Subtitles</button>
       <span slot="controls" id="movie-osd-subtitles-list" class="rs-osd__tracklist"></span>
-      <button slot="controls" id="movie-osd-audio" type="button" class="rs-osd__btn" hidden>Audio</button>
+      <button slot="controls" id="movie-osd-audio" type="button" class="rs-osd__btn" data-vod-tracklist="movie-osd-audio-list" hidden>Audio</button>
       <span slot="controls" id="movie-osd-audio-list" class="rs-osd__tracklist"></span>
       <button slot="controls" id="movie-osd-fullscreen" type="button" class="rs-osd__btn">⛶ Fullscreen</button>
       <button slot="controls" id="movie-osd-back" type="button" class="rs-osd__btn">‹ Back</button>
-    </TvOsd>
+    </TvVodOsd>
   </div>
 
   <section id="movie-detail-cast" class="rs-detail-section" hidden>

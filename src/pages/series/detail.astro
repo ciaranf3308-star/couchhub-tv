@@ -11,7 +11,8 @@
 // through the shared TvImage fallback system (couch-image.ts) — a
 // title with no art still gets the intentional initials fallback.
 // Episode playback mounts the shared engine (mountPlayer) with the
-// TvOsd Couch controls incl. Next Episode + Autoplay-next; B / Escape
+// TvVodOsd VOD controls incl. Next Episode + Autoplay-next (0.11.2
+// W3 — the VOD overlay is NOT the Live TV one); B / Escape
 // while playing returns to the episode listing, never to Home. The
 // back link returns to /series and history.back()s when you arrived
 // from there, so focus restores to the exact Series card.
@@ -21,7 +22,7 @@
 // Later stay as direct hero actions.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
-import TvOsd from "@/components/couch/TvOsd.astro";
+import TvVodOsd from "@/components/couch/TvVodOsd.astro";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 ---
 
@@ -137,7 +138,7 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
     hidden
   >
     <video id="series-player" playsinline></video>
-    <TvOsd autoHideMs={4500}>
+    <TvVodOsd autoHideMs={4500}>
       <h3 slot="info" class="rs-osd__title" id="series-osd-title"></h3>
       <p slot="info" class="rs-osd__subtitle">Episode playback — B returns to the episode list</p>
       <div class="rs-osd__timeline">
@@ -156,14 +157,14 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       <button slot="controls" id="series-osd-play-pause" type="button" class="rs-osd__btn">▶ Play</button>
       <button slot="controls" id="series-osd-fwd10" type="button" class="rs-osd__btn">+10s</button>
       <button slot="controls" id="series-osd-next" type="button" class="rs-osd__btn" hidden>Next Episode ›</button>
-      <button slot="controls" id="series-osd-subtitles" type="button" class="rs-osd__btn" hidden>Subtitles</button>
+      <button slot="controls" id="series-osd-subtitles" type="button" class="rs-osd__btn" data-vod-tracklist="series-osd-subtitles-list" hidden>Subtitles</button>
       <span slot="controls" id="series-osd-subtitles-list" class="rs-osd__tracklist"></span>
-      <button slot="controls" id="series-osd-audio" type="button" class="rs-osd__btn" hidden>Audio</button>
+      <button slot="controls" id="series-osd-audio" type="button" class="rs-osd__btn" data-vod-tracklist="series-osd-audio-list" hidden>Audio</button>
       <span slot="controls" id="series-osd-audio-list" class="rs-osd__tracklist"></span>
       <button slot="controls" id="series-osd-autoplay" type="button" class="rs-osd__btn" aria-pressed="true">Autoplay next: On</button>
       <button slot="controls" id="series-osd-fullscreen" type="button" class="rs-osd__btn">⛶ Fullscreen</button>
       <button slot="controls" id="series-osd-back" type="button" class="rs-osd__btn">‹ Episodes</button>
-    </TvOsd>
+    </TvVodOsd>
   </div>
 
   {/*

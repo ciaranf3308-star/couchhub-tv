@@ -117,6 +117,27 @@ export function dispatchRelease(
   );
 }
 
+// ── Release on exit (0.11.2 W3) ───────────────────────────────────
+
+/**
+ * Does leaving playback for `mode` end the stream? Only the return
+ * to the landing screen does. Exiting used to only hide the shell,
+ * so the tuned channel kept playing hidden and held the provider's
+ * single connection — the next tune was refused as connection-limit
+ * ("already open" / "something else may still be playing") and went
+ * black a second after loading. Guide / browser keep the session by
+ * design: the tuned session survives mode switches (the Guide returns
+ * to playback, and the error overlay's "previous channel keeps
+ * playing underneath" is only true while it does), so they never
+ * release. "home" is the legacy landing name (requestLivetvMode maps
+ * it before dispatching, but the shell's setMode sees raw modes).
+ */
+export function shouldReleaseStreamOnModeLeave(
+  mode: string | null | undefined,
+): boolean {
+  return mode === "landing" || mode === "home";
+}
+
 /** The window-event engine: `livetv:tune` -> stream.ts `play()`. */
 export const windowPlaybackEngine: PlaybackEngine = {
   tune: (channelId) => dispatchTune(channelId),
