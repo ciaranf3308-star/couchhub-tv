@@ -400,6 +400,46 @@ describe("TMDb / TVDB enrichment toggles", () => {
     expect(isTmdbActive()).toBe(false)
   })
 
+  it("setTmdbApiKey returns true and the key round-trips (save then load)", async () => {
+    const { setTmdbApiKey, getTmdbApiKey } = await import("@/scripts/lib/app-settings.js")
+    expect(setTmdbApiKey("  abc123  ")).toBe(true)
+    expect(localStorage.getItem("xt_tmdb_key")).toBe("abc123")
+    expect(getTmdbApiKey()).toBe("abc123")
+  })
+
+  it("setTmdbApiKey returns false — instead of failing silently — when the storage write throws", async () => {
+    const { setTmdbApiKey, getTmdbApiKey } = await import("@/scripts/lib/app-settings.js")
+    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementationOnce(() => {
+      throw new Error("QuotaExceededError")
+    })
+    try {
+      expect(setTmdbApiKey("abc123")).toBe(false)
+    } finally {
+      setItemSpy.mockRestore()
+    }
+    expect(getTmdbApiKey()).toBe("")
+  })
+
+  it("setTmdbApiKey returns false when the write does not stick (read-back mismatch)", async () => {
+    const { setTmdbApiKey, getTmdbApiKey } = await import("@/scripts/lib/app-settings.js")
+    // Swallow the write: storage reports nothing, the key is not there.
+    const setItemSpy = vi.spyOn(localStorage, "setItem").mockImplementationOnce(() => {})
+    try {
+      expect(setTmdbApiKey("abc123")).toBe(false)
+    } finally {
+      setItemSpy.mockRestore()
+    }
+    expect(getTmdbApiKey()).toBe("")
+  })
+
+  it("clearing the TMDB key returns true and removes it", async () => {
+    const { setTmdbApiKey, getTmdbApiKey } = await import("@/scripts/lib/app-settings.js")
+    expect(setTmdbApiKey("abc123")).toBe(true)
+    expect(setTmdbApiKey("")).toBe(true)
+    expect(localStorage.getItem("xt_tmdb_key")).toBe(null)
+    expect(getTmdbApiKey()).toBe("")
+  })
+
   it("isEnrichmentActive is true when only TVDB is on", async () => {
     const { isEnrichmentActive } = await import("@/scripts/lib/app-settings.js")
     expect(isEnrichmentActive()).toBe(true)
