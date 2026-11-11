@@ -22,10 +22,12 @@
 //   variant: "lockup" (default — mark + live-text script wordmark)
 //            | "mark" (mark image only)
 //            | "wordmark" (live text only)
-//            | "lockup-image" (LEGACY baked PNG lockup,
-//            /brand/nylahbox-lockup.png — old pixel-TV mark; kept only
-//            so existing references resolve, NOT used anywhere in the
-//            UI since the 0.11.3 icon swap. Do not use for new screens.)
+//            | "lockup-image" (baked PNG lockup,
+//            /brand/nylahbox-lockup.png — the W1 Nylah + Great Vibes
+//            lockup, same all-rose treatment as the live wordmark.
+//            Kept only so existing references resolve, NOT used
+//            anywhere in the UI since the 0.11.3 icon swap — the live
+//            lockup is the brand. Do not use for new screens.)
 //   size: "nav" (default — top nav, matches .rs-brand 28px)
 //         | "splash" (splash / login, large)
 //         | "about" (Settings About) | "loader" (loading screens).
@@ -120,11 +122,14 @@ const lockupSrc = "/brand/nylahbox-lockup.png";
     font-weight: 400;
     line-height: 1.15;
     white-space: nowrap;
-    color: inherit;
+    /* All-rose #F5B3BC — one treatment with the baked PNG lockup
+       (/brand/nylahbox-lockup.png). The old two-tone (white "NylahBox"
+       + rose "Studios") is gone; 0.11.3 integration. */
+    color: #f5b3bc;
   }
   .tv-logo__word em {
     font-style: normal;
-    color: var(--rs-focus, #eaa9b8);
+    color: #f5b3bc;
   }
   .tv-logo__lockup-img {
     width: auto;
