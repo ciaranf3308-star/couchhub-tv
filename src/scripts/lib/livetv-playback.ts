@@ -28,6 +28,27 @@ import {
 export const OSD_AUTO_HIDE_MS = 5000;
 
 /**
+ * The OSD action row (0.11.0 W5 — mockup 2, bottom-left panel):
+ * exactly the mockup's seven icon actions, in the mockup's order.
+ * Transport (Pause / Mute / Previous) and Restart live in the
+ * Options overlay (Menu / Settings icon) — one press away, never a
+ * second text-action jungle under the programme. TvOsd.astro renders
+ * this set; the test asserts the contract so a future action can
+ * only join it deliberately.
+ */
+export const OSD_ACTION_IDS = [
+  "browser",
+  "guide",
+  "info",
+  "favourite",
+  "subtitles",
+  "audio",
+  "settings",
+] as const;
+
+export type OsdActionId = (typeof OSD_ACTION_IDS)[number];
+
+/**
  * Live TV "landing" is the Home mode. The 0.9.0 directive names the
  * return target "landing", but the mode vocabulary in livetv.astro /
  * livetv-state.ts is home | playback | guide and the mode guard drops
@@ -421,6 +442,95 @@ export async function toggleFavourite(
 }
 
 // ── Failure / retry ───────────────────────────────────────────────
+
+/**
+ * Raw failure kinds the engine reports on `livetv:playback-error`
+ * (stream.ts `failurePanelReasonKind`): the classified start-failure
+ * kind, "hevc-likely" when the name hints HEVC but no codec was
+ * observed, or "unknown".
+ */
+export type LivetvFailureKind =
+  | "hevc"
+  | "hevc-likely"
+  | "codec"
+  | "audio"
+  | "parse"
+  | "connection-limit"
+  | "unknown";
+
+export interface FailureRecoveryActions {
+  /**
+   * Offer "Enable HEVC playback": the channel needs the HEVC Video
+   * Extensions and the shell can install them through the public
+   * `ensureHevcDecodable()` lib (the same call the legacy panel
+   * made) — only for HEVC-classified failures.
+   */
+  hevc: boolean;
+  /**
+   * Offer "Open in external player": the embedded decoder cannot
+   * play this stream (HEVC / codec / audio) and an external player
+   * may. The shell clicks the engine's own `#external-launch-btn`
+   * (wired with the real stream URL + headers by stream.ts) — it
+   * never rebuilds the launch itself. Availability is checked at
+   * click time via `hasAvailableExternalPlayer()`.
+   */
+  external: boolean;
+}
+
+/**
+ * Which kind-aware recovery actions the shell error overlay offers
+ * for a failed tune. Pure: the caller still gates on runtime
+ * availability (Windows desktop for HEVC, a configured external
+ * player + the engine's launch button for external).
+ *
+ * Audio is deliberately absent: the engine auto-attempts its
+ * one-shot audio-proxy fix on an audio start failure BEFORE the
+ * failure panel (stream.ts `fixAudioNow`), and the fix flag +
+ * replay live inside the engine with no public seam — by the time
+ * the shell overlay shows, the fix has already run once and a
+ * second shell-side button could not re-arm it. Retry stays the
+ * audio path. Connection-limit / parse / unknown offer Retry /
+ * Previous / Home only.
+ */
+export function recoveryActionsForFailureKind(
+  kind: string | null | undefined,
+): FailureRecoveryActions {
+  const hevc = kind === "hevc" || kind === "hevc-likely";
+  const external =
+    kind === "hevc" || kind === "hevc-likely" || kind === "codec" || kind === "audio";
+  return { hevc, external };
+}
+
+// ── Highlighted-row programme artwork (Quick Surf) ───────────────
+
+/**
+ * Structural shape of W2's `ProgrammeArtwork` (contracts) as the
+ * surf row needs it. The surf script loads the W2 module
+ * (`src/scripts/lib/livetv-enrichment.ts`) only when it exists
+ * (import.meta.glob — absent at 0.10.1 base, present after W2
+ * lands); this type is the local contract so the row never depends
+ * on W2's module being importable at build time.
+ */
+export interface SurfProgrammeArtwork {
+  backdropUrl: string | null;
+  posterUrl: string | null;
+  stillUrl: string | null;
+  source: string;
+}
+
+/**
+ * Best single artwork URL for a Quick Surf highlighted row: the
+ * episode still first (most specific to what's on now), then the
+ * series/movie backdrop, then the poster. Null when the enrichment
+ * has nothing usable — the row then shows no thumb at all, never a
+ * placeholder rectangle.
+ */
+export function artworkUrlForSurf(
+  art: SurfProgrammeArtwork | null | undefined,
+): string | null {
+  if (!art) return null;
+  return art.stillUrl ?? art.backdropUrl ?? art.posterUrl ?? null;
+}
 
 /**
  * Map the engine's failure-panel kind (stream.ts

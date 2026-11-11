@@ -1,5 +1,5 @@
 ---
-// TvOsd — Live TV lower-third OSD (0.9.0 restyle).
+// TvOsd — Live TV lower-third OSD (0.11.0 W5 restyle).
 //
 // ONE restrained floating surface over fullscreen playback: a single
 // rounded translucent panel (soft gradient + blur), never nested
@@ -8,13 +8,16 @@
 // triggers a stream reconnect: opening or closing it touches no
 // player state.
 //
-// Layout (mockups): logo + channel (number, name, LIVE, favourite)
-// | current programme (title, time range, progress) | Up Next
-// (title + times), then one quiet row of ghost actions — transport
-// first (Pause / Mute / Previous), then Info, Favourite, Subtitles,
-// Audio, Restart (only where catch-up honestly offers it), Settings,
-// Guide, Channels, Back. Channel stepping lives in Quick Surf
-// (↑↓); the player still honours the [ ] keys.
+// Layout (mockups): logo + channel (number, name, LIVE) | current
+// programme (title, time range, progress) | Up Next (title + times),
+// then ONE quiet row of exactly seven icon actions — Channels,
+// Guide, Info, Favourite, Subtitles, Audio, Settings (the mockup's
+// set, in the mockup's order; see OSD_ACTION_IDS in
+// livetv-playback.ts). Transport (Pause / Mute / Previous), Restart
+// (catch-up) and Back live in the Options overlay (Menu key, or the
+// Settings icon) — one press away, never a text-action jungle under
+// the programme. The 0.9.0 row had eleven text actions; this is the
+// trim the 0.11.0 brief requires.
 //
 // Transport buttons do NOT reimplement the player: each dispatches
 // the synthetic keydown stream.ts already handles (see
@@ -25,9 +28,10 @@
 // audioTrackButton / subsCapsButton via findPlayerMenuButton) — the
 // OSD never reimplements track selection; where the mount has no
 // such button it reveals the player control bar instead. Favourite
-// goes to the shell (livetv:osd-action, which owns the playlist).
-// Back dispatches livetv:back with context playback — the shell
-// resolves the three-step B sequence.
+// goes to the shell (livetv:osd-action, which owns the playlist);
+// the Favourite icon itself shows the state (filled star +
+// aria-pressed). Back dispatches livetv:back with context playback
+// — the shell resolves the three-step B sequence.
 //
 // Props: channel?, nowTitle?, nowStartMs?, nowStopMs?, progress?,
 // nextTitle?, nextStartMs?, nextStopMs?, favourite?, autoHideMs?
@@ -72,6 +76,54 @@ const {
   autoHideMs = 5000,
 } = Astro.props;
 const label = channel ? channel.displayName || channel.name || "" : "";
+// 0.11.0 W5 — the seven mockup actions as icon + label buttons.
+// One shared SVG idiom (24px, currentColor stroke); the labels are
+// visible text, never title-only tooltips, so the row reads on a
+// 10-foot screen without hovering.
+const actions = [
+  {
+    id: "browser",
+    label: "Channels",
+    focusKey: "livetv-osd-channels",
+    icon: '<rect x="2.5" y="7" width="19" height="13" rx="2.5"/><path d="M8.5 3.5 12 7l3.5-3.5"/>',
+  },
+  {
+    id: "guide",
+    label: "Guide",
+    focusKey: "livetv-osd-guide",
+    icon: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+  },
+  {
+    id: "info",
+    label: "Info",
+    focusKey: "livetv-osd-info",
+    icon: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
+  },
+  {
+    id: "favourite",
+    label: "Favourite",
+    focusKey: "livetv-osd-favourite",
+    icon: '<path d="M12 3.6 14.6 9l5.9.7-4.4 4 1.2 5.8L12 16.7l-5.3 2.8 1.2-5.8-4.4-4 5.9-.7z"/>',
+  },
+  {
+    id: "subtitles",
+    label: "Subtitles",
+    focusKey: "livetv-osd-subtitles",
+    icon: '<rect x="2.5" y="5.5" width="19" height="13" rx="3"/><path d="M10.5 10.2c-.7-.6-1.7-.6-2.4 0-.7.7-.7 2.9 0 3.6.7.6 1.7.6 2.4 0M17.5 10.2c-.7-.6-1.7-.6-2.4 0-.7.7-.7 2.9 0 3.6.7.6 1.7.6 2.4 0"/>',
+  },
+  {
+    id: "audio",
+    label: "Audio",
+    focusKey: "livetv-osd-audio",
+    icon: '<path d="M4.5 14v-2.5a7.5 7.5 0 0 1 15 0V14"/><rect x="3" y="13.5" width="4" height="7" rx="1.8"/><rect x="17" y="13.5" width="4" height="7" rx="1.8"/>',
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    focusKey: "livetv-osd-settings",
+    icon: '<circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M2.8 12h2.6M18.6 12h2.6M5.2 5.2l1.8 1.8M17 17l1.8 1.8M18.8 5.2 17 7M7 17l-1.8 1.8"/>',
+  },
+] as const;
 ---
 
 <div
@@ -102,9 +154,6 @@ const label = channel ? channel.displayName || channel.name || "" : "";
         <span data-osd-chno>{channel?.chno != null ? channel.chno : ""}</span>
         <span data-osd-channel-name>{label}</span>
         <span class="rs-livetv-play-osd__live" data-osd-live>LIVE</span>
-        <span class="rs-livetv-play-osd__fav" data-osd-fav aria-label="Favourite" hidden={!(favourite)}>
-          ♥
-        </span>
       </span>
     </span>
     <TvProgrammeRow
@@ -120,28 +169,39 @@ const label = channel ? channel.displayName || channel.name || "" : "";
     />
   </div>
   <div class="rs-livetv-play-osd__controls" data-osd-controls>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key=" " data-focus-key="livetv-osd-pause">⏸ Pause</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="m" data-focus-key="livetv-osd-mute">Mute</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-key="\\" data-focus-key="livetv-osd-prev">Previous</button>
-    <span class="rs-livetv-play-osd__sep" aria-hidden="true"></span>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="info" data-focus-key="livetv-osd-info">Info</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="favourite" data-focus-key="livetv-osd-favourite">Favourite</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="subtitles" data-focus-key="livetv-osd-subtitles">Subtitles</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="audio" data-focus-key="livetv-osd-audio">Audio</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="restart" data-focus-key="livetv-osd-restart" data-osd-restart hidden>Restart</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="settings" data-focus-key="livetv-osd-settings">Settings</button>
-    <span class="rs-livetv-play-osd__sep" aria-hidden="true"></span>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="guide" data-focus-key="livetv-osd-guide">Guide</button>
-    <button type="button" class="rs-livetv-play-osd__btn" data-osd-action="browser" data-focus-key="livetv-osd-channels">Channels</button>
-    <button type="button" class="rs-livetv-play-osd__btn rs-livetv-play-osd__btn--back" data-osd-action="back" data-focus-key="livetv-osd-back"><span class="rs-livetv-play-osd__glyph-b" aria-hidden="true">B</span> Back</button>
+    {
+      actions.map((action) => (
+        <button
+          type="button"
+          class="rs-livetv-play-osd__btn rs-livetv-play-osd__btn--icon"
+          data-osd-action={action.id}
+          data-focus-key={action.focusKey}
+          {...(action.id === "favourite"
+            ? { "data-osd-fav-btn": "", "aria-pressed": favourite ? "true" : "false" }
+            : {})}
+        >
+          <svg
+            class="rs-livetv-play-osd__icon"
+            viewBox="0 0 24 24"
+            width="28"
+            height="28"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            set:html={action.icon}
+          />
+          <span class="rs-livetv-play-osd__btn-label">{action.label}</span>
+        </button>
+      ))
+    }
   </div>
-  <p class="rs-livetv-play-osd__shortcuts" aria-hidden="true">
-    A confirm · B back · ↑↓ surf · X guide · Y channels · Menu options
-  </p>
 </div>
 
 <script>
-  // TvOsd auto-hide + transport wiring (0.9.0). Timing lives in
+  // TvOsd auto-hide + action wiring (0.11.0 W5). Timing lives in
   // livetv-playback.ts `createOsdAutoHide` (vitest fake timers assert
   // it); this script owns only the DOM rules: never hide while focus
   // is inside the OSD, show on `couch-osd:show` / `livetv:overlay`
@@ -214,24 +274,15 @@ const label = channel ? channel.displayName || channel.name || "" : "";
       show();
     };
 
-    // Transport buttons dispatch the synthetic keydown stream.ts
-    // already handles — the OSD never reimplements tuning/transport.
     // OSD-owned actions dispatch window events the shell / engine
-    // consume (guide / channels / home / info / restart / settings /
-    // favourite / back).
+    // consume (guide / channels / home / info / settings /
+    // favourite). Transport (Pause / Mute / Previous) and Restart
+    // live in the Options overlay, not on this row.
     el.addEventListener("click", (ev) => {
       const btn = (ev.target as HTMLElement | null)?.closest?.(
-        "[data-osd-key],[data-osd-action]",
+        "[data-osd-action]",
       ) as HTMLElement | null;
       if (!btn || !el.contains(btn)) return;
-      const key = btn.getAttribute("data-osd-key");
-      if (key) {
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
-        );
-        show();
-        return;
-      }
       const action = btn.getAttribute("data-osd-action");
       if (action === "guide") {
         requestLivetvMode("guide");
@@ -241,9 +292,8 @@ const label = channel ? channel.displayName || channel.name || "" : "";
         );
       } else if (action === "home") {
         requestLivetvMode("landing");
-      } else if (action === "info" || action === "restart") {
-        // Info opens programme detail; Restart replays the current
-        // programme from its start. Both go through the engine's
+      } else if (action === "info") {
+        // Info opens programme detail through the engine's
         // `livetv:programme` path, which resolves catch-up honestly
         // (and toasts instead of playing where it is not supported).
         const detail = programmeDetail();
@@ -263,10 +313,6 @@ const label = channel ? channel.displayName || channel.name || "" : "";
       } else if (action === "settings") {
         window.dispatchEvent(
           new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
-        );
-      } else if (action === "back") {
-        window.dispatchEvent(
-          new CustomEvent("livetv:back", { detail: { context: "playback" } }),
         );
       }
       show();
