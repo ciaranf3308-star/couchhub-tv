@@ -158,11 +158,20 @@ function readLS(key, fallback = "") {
 }
 
 function writeLS(key, value) {
+  writeLSResult(key, value)
+}
+
+/** writeLS that reports success: a failed localStorage write (quota,
+ *  unavailable WebView profile, private mode) must surface to the caller
+ *  instead of vanishing silently — the TMDB key save depends on it. */
+function writeLSResult(key, value) {
   try {
     if (value) localStorage.setItem(key, value)
     else localStorage.removeItem(key)
+    return true
   } catch (writeError) {
     log.error("[xt:settings] localStorage write failed for", key, writeError)
+    return false
   }
 }
 
@@ -1135,11 +1144,24 @@ export function getTmdbApiKey() {
   return readLS(KEY_TMDB_KEY, "").trim()
 }
 
+/**
+ * Store the TMDB key. Returns true only when the write landed (verified
+ * by reading it back): a localStorage write that reports nothing while
+ * the key is gone on the next launch used to fail silently — the Settings
+ * field showed no error at all. Callers show a save failure when this
+ * returns false instead of assuming the key persisted.
+ */
 export function setTmdbApiKey(key) {
-  writeLS(KEY_TMDB_KEY, (key || "").trim())
+  const trimmed = (key || "").trim()
+  const written = writeLSResult(KEY_TMDB_KEY, trimmed)
+  const verified = written && readLS(KEY_TMDB_KEY, "") === trimmed
+  if (!verified) {
+    log.error("[xt:settings] TMDB key write did not persist")
+  }
   document.dispatchEvent(
     new CustomEvent(TMDB_SETTINGS_EVENT, { detail: { key: "apiKey" } })
   )
+  return verified
 }
 
 // Pre-1.9 stored "off" as "" (default-off semantics); the toggle flipped to

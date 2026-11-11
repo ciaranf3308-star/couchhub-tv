@@ -5517,11 +5517,21 @@ const navStructure: NavSection[] = [
     if (tmdbKeyInput) {
       tmdbKeyInput.value = getTmdbApiKey()
       let tmdbSaveTimer = null
+      // A failed write must say so here: setTmdbApiKey returns false when
+      // the localStorage write did not land (quota / unavailable profile),
+      // which used to fail silently and look like a key lost on restart.
+      function saveTmdbKey() {
+        if (!setTmdbApiKey(tmdbKeyInput.value)) {
+          flashMsg(tmdbMsgEl, t("settings.tmdb.saveFail"))
+          return false
+        }
+        return true
+      }
       tmdbKeyInput.addEventListener("input", () => {
         syncTmdbTestDisabled()
         if (tmdbSaveTimer) window.clearTimeout(tmdbSaveTimer)
         tmdbSaveTimer = window.setTimeout(() => {
-          setTmdbApiKey(tmdbKeyInput.value)
+          saveTmdbKey()
         }, 350)
       })
       tmdbKeyInput.addEventListener("blur", () => {
@@ -5529,7 +5539,7 @@ const navStructure: NavSection[] = [
           window.clearTimeout(tmdbSaveTimer)
           tmdbSaveTimer = null
         }
-        if (tmdbKeyInput.value !== getTmdbApiKey()) setTmdbApiKey(tmdbKeyInput.value)
+        if (tmdbKeyInput.value !== getTmdbApiKey()) saveTmdbKey()
       })
       syncTmdbTestDisabled()
     }
@@ -5544,6 +5554,15 @@ const navStructure: NavSection[] = [
     })
 
     tmdbTestBtn?.addEventListener("click", async () => {
+      // Save the typed key first (mirrors the AI Test button): a key typed
+      // moments ago may still be waiting on the 350ms debounce, and a
+      // test must never run against a key that failed to save.
+      if (tmdbKeyInput && tmdbKeyInput.value !== getTmdbApiKey()) {
+        if (!setTmdbApiKey(tmdbKeyInput.value)) {
+          flashMsg(tmdbMsgEl, t("settings.tmdb.saveFail"))
+          return
+        }
+      }
       const key = (tmdbKeyInput?.value || getTmdbApiKey() || "").trim()
       setLoading(tmdbTestBtn, true)
       try {
@@ -5780,6 +5799,21 @@ const navStructure: NavSection[] = [
       return true
     }
 
+    // Show a save failure WITH its cause: the keystore error carries a
+    // safe detail (Rust error code/message, never the key). The old code
+    // showed only the generic "Could not save the key." and dropped the
+    // error entirely, which made save-time failures undiagnosable from
+    // the UI or the log file.
+    function flashAiSaveFailed(error) {
+      log.error("[xt:ai] key save failed:", error)
+      const base = t(
+        error?.kind === "unsupported"
+          ? "settings.ai.storageUnavailable"
+          : "settings.ai.keySaveFailed"
+      )
+      flashMsg(aiMsgEl, error?.detail ? `${base} (${error.detail})` : base)
+    }
+
     aiKeyInput?.addEventListener("blur", async () => {
       try {
         if (await saveTypedAiKey()) {
@@ -5787,10 +5821,7 @@ const navStructure: NavSection[] = [
           void syncAiStatus()
         }
       } catch (error) {
-        flashMsg(
-          aiMsgEl,
-          t(error?.kind === "unsupported" ? "settings.ai.storageUnavailable" : "settings.ai.keySaveFailed")
-        )
+        flashAiSaveFailed(error)
       }
     })
 
@@ -5809,10 +5840,7 @@ const navStructure: NavSection[] = [
         try {
           await saveTypedAiKey()
         } catch (error) {
-          flashMsg(
-            aiMsgEl,
-            t(error?.kind === "unsupported" ? "settings.ai.storageUnavailable" : "settings.ai.keySaveFailed")
-          )
+          flashAiSaveFailed(error)
           return
         }
         // Real verification (C4): endpoint + key + model, via the

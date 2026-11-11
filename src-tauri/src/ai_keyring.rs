@@ -80,16 +80,42 @@ async fn read_key_from_store() -> Result<Option<String>, String> {
 /// Store (or replace) the AI provider API key in the OS credential store.
 /// Returns true on success. The key is trimmed; empty or over-long keys
 /// are rejected without touching the store.
+///
+/// The write is verified by reading the entry back inside the same
+/// blocking call: a `CredWriteW` that reports success while the entry
+/// still cannot be read is reported as a store error instead of letting
+/// the UI claim the key is saved. Store failures are logged (the error
+/// text is a platform message and never contains the key) so a save-time
+/// failure is diagnosable from the persistent log file.
 #[tauri::command]
 pub async fn ai_key_set(key: String) -> Result<bool, String> {
     let key = validate_key(&key)?;
     let owned = key.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = open_entry()?;
-        entry
+        let entry = open_entry().map_err(|error| {
+            log::warn!("[ai-keyring] key save failed to open store: {error}");
+            error
+        })?;
+        if let Err(error) = entry
             .set_password(&owned)
-            .map_err(|error| format!("STORE:{error}"))?;
-        Ok(true)
+            .map_err(|error| format!("STORE:{error}"))
+        {
+            log::warn!("[ai-keyring] key save failed to write: {error}");
+            return Err(error);
+        }
+        match entry.get_password() {
+            Ok(stored) if stored == owned => Ok(true),
+            Ok(_) => {
+                let error = "STORE:write did not persist (read-back mismatch)".to_string();
+                log::warn!("[ai-keyring] key save failed: {error}");
+                Err(error)
+            }
+            Err(error) => {
+                let error = format!("STORE:write could not be read back: {error}");
+                log::warn!("[ai-keyring] key save failed: {error}");
+                Err(error)
+            }
+        }
     })
     .await
     .map_err(|error| format!("STORE:key write worker failed: {error}"))?
@@ -100,7 +126,10 @@ pub async fn ai_key_set(key: String) -> Result<bool, String> {
 /// in memory only — never persist, log or display it.
 #[tauri::command]
 pub async fn ai_key_get() -> Result<Option<String>, String> {
-    read_key_from_store().await
+    read_key_from_store().await.map_err(|error| {
+        log::warn!("[ai-keyring] key read failed: {error}");
+        error
+    })
 }
 
 /// Whether a key is currently stored. Never reveals the key itself.
@@ -114,11 +143,18 @@ pub async fn ai_key_has() -> Result<bool, String> {
 #[tauri::command]
 pub async fn ai_key_delete() -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let entry = open_entry()?;
+        let entry = open_entry().map_err(|error| {
+            log::warn!("[ai-keyring] key delete failed to open store: {error}");
+            error
+        })?;
         match entry.delete_credential() {
             Ok(()) => Ok(true),
             Err(keyring::Error::NoEntry) => Ok(false),
-            Err(error) => Err(format!("STORE:{error}")),
+            Err(error) => {
+                let error = format!("STORE:{error}");
+                log::warn!("[ai-keyring] key delete failed: {error}");
+                Err(error)
+            }
         }
     })
     .await
@@ -319,5 +355,14 @@ mod tests {
         assert_eq!(classify_test_status(429), "rate_limited");
         assert_eq!(classify_test_status(500), "unavailable");
         assert_eq!(classify_test_status(404), "unavailable");
+    }
+
+    #[test]
+    fn credential_store_identity_is_pinned() {
+        // The user's stored key lives under this service name in Windows
+        // Credential Manager (target `ai-discovery-api-key.Nylah Studios`).
+        // Renaming it would orphan the stored key — never change these.
+        assert_eq!(SERVICE, "Nylah Studios");
+        assert_eq!(USERNAME, "ai-discovery-api-key");
     }
 }
