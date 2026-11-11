@@ -7,7 +7,7 @@
 // (favourites, Watch Later, episode progress), the followed store
 // (followSeries / unfollowSeries / isFollowing — never reimplemented),
 // the local "similar series" heuristic, and the shared Couch VOD
-// player (mountPlayer engine + TvOsd controls).
+// player (mountPlayer engine + TvVodOsd controls).
 //
 // Playback rules, preserved from the legacy page: resume at the exact
 // saved position (30s minimum), watched state from the same progress

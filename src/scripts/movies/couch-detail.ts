@@ -4,7 +4,7 @@
 // `get_vod_info` (cached 7d under `vod_info_<id>`, the same entry the
 // legacy detail page reads/writes), preferences (favourites, Watch
 // Later, recents, progress), the local "more like this" heuristic, and
-// the shared Couch VOD player (mountPlayer engine + TvOsd controls).
+// the shared Couch VOD player (mountPlayer engine + TvVodOsd controls).
 // Playback progress is recorded exactly as the legacy page records
 // it, so resume state is shared between the Couch and legacy screens.
 
