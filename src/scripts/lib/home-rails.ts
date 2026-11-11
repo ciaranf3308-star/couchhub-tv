@@ -1,12 +1,34 @@
-// RedSilk Home — Home rails data layer (W2, Home Production Pass).
+// RedSilk Home — Home rails data layer (W2, Home Production Pass;
+// 0.10.0 W1: H01–H07).
 //
-// The data API the Home view (W3) consumes. Pure composition over the
+// The data API the Home view (HomeView) consumes. Pure composition over the
 // data loadDiscoverData already loads (DiscoverData) plus the followed
 // episodes the Followed provider reports — no new data sources, no
 // network, no paid AI request anywhere on this path. Routine browsing
 // is ranked by the local engine (discover.ts rankCandidates) with a
-// confidence adjustment (rating-confidence.ts); the AI ranker seam is
-// never touched per homepage load.
+// confidence adjustment through the shared C2 engine
+// (recommendations.ts, which wraps rating-confidence.ts); the AI
+// ranker seam is never touched per homepage load.
+//
+// 0.10.0 contracts (see couchhub-tv-010-contracts.md):
+//   - C1 taxonomy: every item carries its classified ContentKind
+//     (classifyTitle) and kindLabel — a crime documentary is a
+//     documentary, never a crime drama (H03); rail titles name the
+//     content type they hold (H01).
+//   - C2 confidence: selection goes through confidenceScore /
+//     isHeadlineEligible — a 10.0 with no votes never headlines (H02).
+//     Reasons come from explain() only; explain() returning null means
+//     a neutral label, never an invented taste claim (H05).
+//   - H04: each rail declares a `variant` ("film" | "series" |
+//     "documentary" | "followed" | "live" | "mixed"); the view renders
+//     it as class `rs-rail--<variant>` (CSS owned by W5).
+//   - H06: recommendation rails hide below RECO_RAIL_MIN_ITEMS items
+//     rather than showing 2–3 posters in an ocean of space. Never
+//     padded with irrelevant content.
+//   - H07: Tonight's Picks reads real EPG programmes (slots resolved
+//     from the loaded guide via epg-data.js / now-next.ts, interpreted
+//     through couch-livetv-epg.ts helpers — programmeState,
+//     epgTimeRangeLabel). No guide, no live cards; no times invented.
 //
 // Honesty rules, enforced in code:
 //   - A rail is omitted entirely when it has nothing real to show —
@@ -20,7 +42,8 @@
 //   - Short & Sweet only ever shows films whose runtime is actually
 //     known (runtimeMinutes > 0). No runtime, no card.
 //   - Tonight's Picks only includes live programmes when real EPG
-//     data exists (DiscoverData.nowPlaying). No guide, no live cards.
+//     data exists (DiscoverData.nowPlaying, or resolved EPG slots
+//     with real start/stop times). No guide, no live cards.
 //   - Only titles with a valid playback target (a detail/play href
 //     resolving to real catalogue content) are returned. Trending
 //     extras that match nothing in the catalogue are dropped.
@@ -64,11 +87,26 @@ import {
   type FollowedEpisode,
   type RankedCandidate,
 } from "@/scripts/lib/discover.ts"
+import { BAYESIAN_PRIOR_MEAN } from "./rating-confidence.ts"
 import {
-  bayesianRating,
-  hasSufficientSupport,
-  BAYESIAN_PRIOR_MEAN,
-} from "./rating-confidence.ts"
+  classifyTitle,
+  kindLabel,
+  isDocumentaryKind,
+  type ContentKind,
+} from "./taxonomy.ts"
+import {
+  confidenceScore,
+  isHeadlineEligible,
+  explain,
+  neutralLabel,
+  trackExposure,
+  type TasteSignals,
+} from "./recommendations.ts"
+import { tasteSignalsFromModel } from "./taste.ts"
+import {
+  programmeState,
+  epgTimeRangeLabel,
+} from "./couch-livetv-epg.ts"
 import {
   ensureFollowedLoaded,
   followedProvider,
@@ -89,6 +127,43 @@ export type HomeRailKind =
   | "continue-series"
   | "short"
   | "genre"
+
+/**
+ * H04 — visual variant of a rail. The data layer only decides WHICH
+ * variant a rail is; the view passes it to W5's TvRail `variant`
+ * prop, which renders the class `.rs-rail--variant-<variant>`
+ * (CSS owned by W5 in couch.css — tasteful variation between film /
+ * series / documentary / followed / live rails, no heavy panels, no
+ * nested containers, burgundy identity kept). Variants:
+ *   film — films only (incl. Short & Sweet, Recently Added)
+ *   series — series only (Continue Your Series)
+ *   documentary — documentaries only (any mix of doc films/series)
+ *   followed — New Episodes, from Followed Series
+ *   live — Tonight's Picks when it carries live programmes
+ *   (no variant) — everything else: status rails and mixed
+ *   collections are the neutral default; the view omits the prop.
+ */
+export type HomeRailVariant =
+  | "film"
+  | "series"
+  | "documentary"
+  | "followed"
+  | "live"
+
+/** One real EPG now/next slot for Tonight's Picks (H07). Every field
+ * comes from the loaded programme guide — start/stop are ms epoch
+ * from the guide itself, never invented, never guessed. */
+export interface TonightEpgSlot {
+  channelId: string | number
+  channelName: string
+  channelLogo?: string | null
+  nowTitle: string
+  nowStartMs: number
+  nowStopMs: number
+  nextTitle?: string | null
+  nextStartMs?: number | null
+  nextStopMs?: number | null
+}
 
 export interface HomeRailItem {
   key: string
@@ -114,6 +189,27 @@ export interface HomeRailItem {
   nextTitle?: string
   /** Catalogue overview (the hero's description). */
   overview?: string
+  /** H01 — C1 content kind: Movie / Series / Documentary Film /
+   * Documentary Series / Live TV. Genres are attributes, never the
+   * kind: a crime documentary classifies as a documentary. */
+  contentKind?: ContentKind
+  /** H01 — focused-card type line: kind label + runtime when known,
+   * e.g. "Documentary Series", "Movie · 1h 58m". The view renders
+   * this (or the reason) as the card subtitle; the meta line already
+   * carries year + rating. Episode counts are not in the catalogue
+   * candidate shape, so series cards show the kind label, and
+   * episode-led cards name the episode (S2 E3 — Title) instead. */
+  typeLine?: string
+  /** H07 — real EPG timing for a live programme (ms epoch), present
+   * only when the guide supplied it. Absent means "no time known",
+   * never an invented time. */
+  nowStartMs?: number
+  nowStopMs?: number
+  nextStartMs?: number
+  nextStopMs?: number
+  /** H07 — programme state from couch-livetv-epg: "now" for the
+   * programme currently airing, "upcoming" for the next one. */
+  programmeStatus?: "now" | "upcoming"
 }
 
 export interface HomeRail {
@@ -123,6 +219,15 @@ export interface HomeRail {
   description?: string
   items: HomeRailItem[]
   seeAllHref?: string
+  /** H04 — visual variant; the view passes it to TvRail's `variant`
+   * prop (`.rs-rail--variant-<variant>`). Absent = neutral default. */
+  variant?: HomeRailVariant
+  /** H06 — true when the rail is deliberately shown below the
+   * recommendation floor (fewer than RECO_RAIL_MIN_ITEMS cards):
+   * factual rails (Continue Watching, Recently Added, …) show from
+   * 1 item rather than hiding. The view passes it to TvRail's
+   * `sparse` prop (`.rs-rail--sparse`, count via data-rail-count). */
+  sparse?: boolean
 }
 
 export interface HomeHero {
@@ -174,7 +279,17 @@ export const GENRE_RAIL_MIN_ITEMS = 4
 /** At most this many genre rails per launch — never all of them. */
 export const GENRE_RAILS_MAX = 3
 /** Tonight's Picks needs at least this many cards or it hides. */
-export const TONIGHT_MIN_ITEMS = 3
+export const TONIGHT_MIN_ITEMS = 4
+/** H06 — minimum items for a recommendation/collection rail
+ * (Next Obsession, Trending, Hidden Gems, Short & Sweet, Tonight's
+ * Picks, genre rails). Below this a rail hides rather than showing
+ * 2–3 posters in an ocean of space. Factual rails (Continue
+ * Watching, Continue Your Series, New Episodes, Recently Added)
+ * are status, not collections — they show from 1 item. Never pad
+ * with irrelevant content to reach the floor. */
+export const RECO_RAIL_MIN_ITEMS = 4
+/** H07 — max live programmes in Tonight's Picks. */
+export const TONIGHT_MAX_LIVE = 4
 /** Recently shown hero keys remembered to avoid repetition. */
 export const HERO_HISTORY_MAX = 10
 /** Small bonus so a title with a real backdrop wins the hero over an equal one. */
@@ -227,6 +342,15 @@ export interface LoadHomeRailsExtras {
    * it is already aborted, so a superseded load never paints. The
    * view also checks the signal after each of its own awaits. */
   signal?: AbortSignal
+  /** H07 — pre-resolved real EPG slots for Tonight's Picks (tests /
+   * future view wiring). When absent, loadHomeRails resolves them
+   * best-effort from the already-loaded guide (browser only, no
+   * extra fetch); when that fails too, Tonight's Picks falls back
+   * to DiscoverData.nowPlaying titles with no times attached. */
+  tonightEpg?: TonightEpgSlot[]
+  /** H07 — playlist id for the best-effort EPG resolve; otherwise
+   * read from the active playlist entry. */
+  playlistId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +385,7 @@ function candidateToItem(
   overrides: Partial<HomeRailItem> = {},
 ): HomeRailItem {
   const detailHref = candidateDetailHref(candidate)
+  const contentKind = contentKindOf(candidate)
   return {
     key: candidateKey(candidate),
     kind: candidate.kind,
@@ -281,7 +406,223 @@ function candidateToItem(
     detailHref,
     playHref:
       candidate.kind === "live" ? detailHref : withAutoplay(detailHref),
+    contentKind,
+    typeLine: typeLineFor(candidate, contentKind),
     ...overrides,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// H01 / H03 / H04 — content types (C1 taxonomy) and rail presentation
+// ---------------------------------------------------------------------------
+
+/** C1 kind of a catalogue candidate. Genres are attributes: only a
+ * documentary signal changes the kind (H03 — a crime documentary
+ * classifies as a documentary, never as a crime drama). */
+export function contentKindOf(candidate: DiscoverCandidate): ContentKind {
+  return classifyTitle({
+    type: candidate.kind,
+    kind: candidate.kind,
+    genres: candidate.genres,
+    title: candidate.title,
+  })
+}
+
+/** "1h 58m" / "88 min" from verified runtime minutes, else undefined. */
+export function formatRuntime(minutes?: number): string | undefined {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes <= 0) {
+    return undefined
+  }
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return h > 0 ? `${h}h ${m}m` : `${m} min`
+}
+
+/**
+ * H01 — focused-card type line: the C1 kind label, plus the runtime
+ * for films when it is actually known ("Movie · 1h 58m",
+ * "Documentary Series"). Year and rating already live in the card
+ * meta line; episode counts are not carried by catalogue
+ * candidates, so series cards show the kind label and episode-led
+ * cards name the episode instead (S2 E3 — Title).
+ */
+export function typeLineFor(
+  candidate: DiscoverCandidate,
+  kind: ContentKind = contentKindOf(candidate),
+): string {
+  const label = kindLabel(kind)
+  const runtime =
+    kind === "movie" || kind === "documentary-film"
+      ? formatRuntime(candidate.runtimeMinutes)
+      : undefined
+  return runtime ? `${label} · ${runtime}` : label
+}
+
+/** Display plural of a C1 kind label, anchored to kindLabel itself
+ * (C1: no invented kind strings): Movie → Films, Documentary Film →
+ * Documentary Films, Series / Documentary Series / Live TV unchanged. */
+export function kindPluralLabel(kind: ContentKind): string {
+  const label = kindLabel(kind)
+  if (label === "Movie") return "Films"
+  if (label.endsWith("Film")) return `${label}s`
+  return label
+}
+
+/** H01 — content-type suffix for a rail title, from the kinds its
+ * items actually hold: "Films", "Series", "Films & Series",
+ * "Documentary Series", "Live TV". Null when no item carries a kind.
+ * A rail mixing documentaries with fiction collapses to the broad
+ * types ("Films & Series") — spelling out every precise kind piles
+ * up ("Documentary Series & Films & Series"). Documentary-ness
+ * stays visible on the cards themselves (type line / neutral
+ * reason), and an all-documentary rail keeps the precise labels. */
+export function contentTypeSuffix(items: HomeRailItem[]): string | null {
+  const kinds = [
+    ...new Set(
+      items
+        .map((item) => item.contentKind)
+        .filter((kind): kind is ContentKind => !!kind),
+    ),
+  ]
+  if (!kinds.length) return null
+  if (kinds.length === 1) return kindPluralLabel(kinds[0] as ContentKind)
+  const docKinds = kinds.filter((kind) => isDocumentaryKind(kind))
+  const plainKinds = kinds.filter((kind) => !isDocumentaryKind(kind))
+  if (docKinds.length && plainKinds.length) {
+    const broad: string[] = []
+    if (kinds.some((kind) => kind === "movie" || kind === "documentary-film")) {
+      broad.push("Films")
+    }
+    if (kinds.some((kind) => kind === "series" || kind === "documentary-series")) {
+      broad.push("Series")
+    }
+    if (kinds.includes("live")) broad.push("Live TV")
+    return broad.join(" & ")
+  }
+  if (
+    kinds.length === 2 &&
+    kinds.includes("movie") &&
+    kinds.includes("series")
+  ) {
+    return "Films & Series"
+  }
+  return kinds.map((kind) => kindPluralLabel(kind)).join(" & ")
+}
+
+/** H04 — which visual variant a rail is, from its kind + content.
+ * The view passes the result to TvRail's `variant` prop
+ * (`.rs-rail--variant-<variant>`). Mixed / status rails return
+ * undefined: the neutral default, prop omitted. */
+export function variantForRail(
+  railKind: HomeRailKind,
+  items: HomeRailItem[],
+): HomeRailVariant | undefined {
+  if (railKind === "new-episodes") return "followed"
+  if (railKind === "tonight" && items.some((item) => item.isLive)) return "live"
+  const kinds = [
+    ...new Set(
+      items
+        .map((item) => item.contentKind)
+        .filter((kind): kind is ContentKind => !!kind),
+    ),
+  ]
+  if (kinds.length && kinds.every((kind) => isDocumentaryKind(kind))) {
+    return "documentary"
+  }
+  if (kinds.length === 1) {
+    const only = kinds[0] as ContentKind
+    if (only === "movie") return "film"
+    if (only === "series") return "series"
+    if (only === "live") return "live"
+  }
+  return undefined
+}
+
+/**
+ * H05 — the reason shown for a personalised pick: W4's explain()
+ * when it returns a real signal-backed string, else the neutral
+ * label ("Featured True Crime Series"). A "Matches your taste…"
+ * claim is never shown without a real signal behind it. The
+ * candidate's own kind (movie/series) is what explain() keys on —
+ * taste refs are keyed that way — while the neutral label uses the
+ * classified C1 kind, so a crime documentary is neutrally a
+ * "Documentary Series", never a "Crime Series".
+ */
+export function personalisedReason(
+  signals: TasteSignals,
+  candidate: DiscoverCandidate,
+): string {
+  const explained = explain(candidate, signals)
+  if (explained) return explained
+  return neutralLabel({ ...candidate, kind: contentKindOf(candidate) })
+}
+
+// ---------------------------------------------------------------------------
+// H07 — real EPG slots for Tonight's Picks
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve real now/next EPG slots for Tonight's Picks.
+ *
+ * Order: injected `extras.tonightEpg` first (tests / view wiring);
+ * otherwise best-effort from the guide loadDiscoverData already
+ * warmed — the in-memory programme map (epg-data.js) + the cached
+ * live channels (live-catalog.ts) + the now/next resolver
+ * (now-next.ts). couch-livetv-epg.ts itself holds no programme
+ * data; its helpers (programmeState, epgTimeRangeLabel) interpret
+ * the records once resolved.
+ *
+ * Never fetches here: if the guide map is empty the resolve returns
+ * null and Tonight's Picks falls back to DiscoverData.nowPlaying
+ * titles (no times attached, never invented). Never throws, never
+ * blocks on abort (the caller re-checks the signal). Node/SSR
+ * returns null immediately — there is no live guide there.
+ */
+export async function resolveTonightEpg(
+  extras: LoadHomeRailsExtras,
+  nowMs: number,
+): Promise<TonightEpgSlot[] | null> {
+  if (extras.tonightEpg) return extras.tonightEpg
+  if (typeof window === "undefined") return null
+  try {
+    const playlistId =
+      extras.playlistId ??
+      (await import("@/scripts/lib/creds.js")
+        .then((mod) => mod.getActiveEntry())
+        .then((entry) => entry?._id ?? null)
+        .catch(() => null))
+    if (!playlistId) return null
+    const epg = await import("@/scripts/lib/epg-data.js")
+    const programmes = epg.getProgrammesSync(playlistId)?.programmes ?? null
+    if (!programmes?.size) return null
+    const liveCatalog = await import("@/scripts/lib/live-catalog.ts")
+    const nowNext = await import("@/scripts/lib/now-next.ts")
+    const channels = liveCatalog.readCachedLiveChannels(playlistId) as Array<{
+      id: number | string
+      name?: string
+      logo?: string | null
+      stream_icon?: string | null
+    }>
+    const slots: TonightEpgSlot[] = []
+    for (const channel of channels.slice(0, 60)) {
+      const slot = nowNext.computeNowNext(programmes, channel, playlistId, nowMs)
+      if (!slot.current) continue
+      slots.push({
+        channelId: channel.id,
+        channelName: String(channel.name || ""),
+        channelLogo: channel.logo ?? channel.stream_icon ?? null,
+        nowTitle: slot.current.title,
+        nowStartMs: slot.current.start,
+        nowStopMs: slot.current.stop,
+        nextTitle: slot.next?.title ?? null,
+        nextStartMs: slot.next?.start ?? null,
+        nextStopMs: slot.next?.stop ?? null,
+      })
+      if (slots.length >= TONIGHT_MAX_LIVE) break
+    }
+    return slots
+  } catch {
+    return null
   }
 }
 
@@ -342,11 +683,15 @@ function rawRating(candidate: DiscoverCandidate): number | undefined {
 /**
  * Quality score for ranking: Bayesian when real votes exist, the raw
  * TMDb-backed rating when the title is TMDb-matched, the prior mean
- * otherwise ("average until proven otherwise").
+ * otherwise ("average until proven otherwise"). The vote-backed leg
+ * is C2's confidenceScore (recommendations.ts, wrapping
+ * rating-confidence.ts) — this module never forks its own Bayesian
+ * math. A null/unknown rating scores -Infinity through C2 and can
+ * never headline.
  */
 function tieredQuality(candidate: DiscoverCandidate): number {
   if (typeof candidate.voteCount === "number" && candidate.voteCount >= 1) {
-    return bayesianRating(candidate.rating, candidate.voteCount)
+    return confidenceScore(candidate.rating ?? null, candidate.voteCount)
   }
   if (isTmdbMatched(candidate)) {
     return rawRating(candidate) ?? BAYESIAN_PRIOR_MEAN
@@ -355,22 +700,23 @@ function tieredQuality(candidate: DiscoverCandidate): number {
 }
 
 /**
- * Quality support for a gate: real votes at the floor, OR a TMDb
- * match with a real rating (Tier 2 — see the decision note above).
+ * Quality support for a gate: real votes at the floor (C2
+ * isHeadlineEligible), OR a TMDb match with a real rating (Tier 2 —
+ * see the decision note above).
  */
 function hasTieredSupport(
   candidate: DiscoverCandidate,
   minVotes: number,
 ): boolean {
-  if (hasSufficientSupport(candidate.voteCount, minVotes)) return true
+  if (isHeadlineEligible(candidate, minVotes)) return true
   return isTmdbMatched(candidate) && rawRating(candidate) !== undefined
 }
 
 /**
  * The quality-gated pool for one selection: Tier 1 (vote-backed,
- * Bayesian) when any title qualifies, else Tier 2 (TMDb-matched,
- * raw rating). Never both mixed, never softened while real counts
- * exist — and never an unmatched no-vote title.
+ * Bayesian via C2) when any title qualifies, else Tier 2
+ * (TMDb-matched, raw rating). Never both mixed, never softened
+ * while real counts exist — and never an unmatched no-vote title.
  */
 function qualityPool(
   candidates: DiscoverCandidate[],
@@ -379,8 +725,8 @@ function qualityPool(
 ): DiscoverCandidate[] {
   const backed = candidates.filter(
     (c) =>
-      hasSufficientSupport(c.voteCount, minVotes) &&
-      bayesianRating(c.rating, c.voteCount) >= minBayesian,
+      isHeadlineEligible(c, minVotes) &&
+      confidenceScore(c.rating ?? null, c.voteCount ?? null) >= minBayesian,
   )
   if (backed.length) return backed
   return candidates.filter(
@@ -436,7 +782,29 @@ function confidenceAdjustedScore(item: RankedCandidate): number {
   return item.score - rawPoints + bayesianPoints
 }
 
+/**
+ * H02 — the ranking comparator for the taste-ranked rails (Next
+ * Obsession, genre rails, Tonight's Picks fillers). Titles WITH any
+ * quality evidence (real votes, or a TMDb match — the same Tier 1 /
+ * Tier 2 support the gates use) always sort before titles with none:
+ * a no-vote 10.0 can never outrank a proven title, however recent
+ * it is — the raw score's recency term used to let exactly that
+ * happen (a 2024 no-vote 10.0 outscoring a 2023 vote-backed 8.5).
+ * Within each group the confidence-adjusted score decides, so taste
+ * still orders proven titles. When NOTHING in the library has any
+ * evidence, the order falls back to the adjusted score alone — the
+ * hero and the quality-gated rails still exclude unproven titles
+ * entirely, so an unproven title can only lead a ranked rail when
+ * the library holds no proven title at all.
+ */
+function hasAnyEvidence(candidate: DiscoverCandidate): boolean {
+  return hasTieredSupport(candidate, 1)
+}
+
 function byAdjustedScore(a: RankedCandidate, b: RankedCandidate): number {
+  const supportDiff =
+    Number(hasAnyEvidence(b.candidate)) - Number(hasAnyEvidence(a.candidate))
+  if (supportDiff !== 0) return supportDiff
   const scoreDiff = confidenceAdjustedScore(b) - confidenceAdjustedScore(a)
   if (scoreDiff !== 0) return scoreDiff
   const bayesDiff =
@@ -601,12 +969,17 @@ interface BuildContext {
   continueWatchingKeys: Set<string>
   placements: PlacementTracker
   ranked: RankedCandidate[]
+  /** H05 — the C2 signals explain() may cite (from the taste model). */
+  signals: TasteSignals
+  /** H07 — resolved real EPG slots for Tonight's Picks, or null. */
+  tonightEpg: TonightEpgSlot[] | null
 }
 
 function buildContext(
   data: DiscoverData,
   followed: FollowedEpisode[],
   extras: LoadHomeRailsExtras,
+  tonightEpg: TonightEpgSlot[] | null = null,
 ): BuildContext {
   const nowMs = extras.nowMs ?? Date.now()
   const byKey = new Map(
@@ -684,6 +1057,17 @@ function buildContext(
     continueWatchingKeys,
     placements: new PlacementTracker(),
     ranked,
+    // H05 — C2 signals, projected from the taste model. The first
+    // More Like This seed is the because-watched seed explain() may
+    // cite ("Because you watched X") — it is a title the household
+    // explicitly picked, so the citation is real.
+    signals: tasteSignalsFromModel(
+      taste,
+      seedTitles.length
+        ? { title: seedTitles[0].title, genres: seedTitles[0].genres }
+        : null,
+    ),
+    tonightEpg,
   }
 }
 
@@ -715,7 +1099,11 @@ function buildContinueWatching(ctx: BuildContext, railIndex: number): HomeRail |
         items.push(
           candidateToItem(candidate, {
             progress,
-            reason: "Continue watching",
+            // H01 — the rail title already says "Continue Watching"
+            // and the progress bar shows the resume state; the
+            // subtitle names the content type + runtime instead of
+            // repeating the rail title ("Movie · 2h 30m").
+            reason: typeLineFor(candidate),
           }),
         )
         continue
@@ -752,15 +1140,18 @@ function buildContinueWatching(ctx: BuildContext, railIndex: number): HomeRail |
       seen.add(key)
       if (!ctx.placements.canPlace(key, railIndex, "continue-watching")) continue
       ctx.placements.place(key, railIndex, "continue-watching")
-      items.push(candidateToItem(candidate, { reason: "Continue watching" }))
+      items.push(candidateToItem(candidate, { reason: typeLineFor(candidate) }))
     }
   }
   if (!items.length) return null
+  const finalItems = items.slice(0, HOME_RAILS_LIMIT)
+  const suffix = contentTypeSuffix(finalItems)
   return {
     id: "continue-watching",
     kind: "continue-watching",
-    title: "Continue Watching",
-    items: items.slice(0, HOME_RAILS_LIMIT),
+    title: suffix ? `Continue Watching — ${suffix}` : "Continue Watching",
+    items: finalItems,
+    variant: variantForRail("continue-watching", finalItems),
   }
 }
 
@@ -795,16 +1186,20 @@ function buildNewEpisodes(ctx: BuildContext, railIndex: number): HomeRail | null
       detailHref: href,
       playHref: href,
       reason: `New: S${ep.season} E${ep.episode}${ep.episodeTitle ? ` — ${ep.episodeTitle}` : ""}`,
+      contentKind: "series",
+      typeLine: "Series",
     })
   }
   if (!items.length) return null
+  const finalItems = items.slice(0, HOME_RAILS_LIMIT)
   return {
     id: "new-episodes",
     kind: "new-episodes",
-    title: "New Episodes",
+    title: "New Episodes — Series",
     description: "From the series you follow",
-    items: items.slice(0, HOME_RAILS_LIMIT),
+    items: finalItems,
     seeAllHref: "/followed",
+    variant: "followed",
   }
 }
 
@@ -818,21 +1213,30 @@ function buildNextObsession(ctx: BuildContext, railIndex: number): HomeRail | nu
     if (!ctx.placements.canPlace(key, railIndex, "next-obsession")) continue
     ctx.placements.place(key, railIndex, "next-obsession")
     items.push(
-      candidateToItem(candidate, { reason: ranked.reason || undefined }),
+      candidateToItem(candidate, {
+        // H05 — explain() when it has a real signal, else the neutral
+        // label. The engine's own reason ("Matches your taste…") is
+        // never shown on a weaker claim than explain() allows.
+        reason: personalisedReason(ctx.signals, candidate),
+      }),
     )
     if (items.length >= HOME_RAILS_LIMIT) break
   }
-  if (!items.length) return null
+  // H06 — a 2–3 poster personalised rail is oceans of space; hide it
+  // rather than padding it with irrelevant titles.
+  if (items.length < RECO_RAIL_MIN_ITEMS) return null
   const hasHistory = ctx.data.hasHistory
+  const suffix = contentTypeSuffix(items)
   return {
     id: "next-obsession",
     kind: "next-obsession",
-    title: "Your Next Obsession",
+    title: suffix ? `Your Next Obsession — ${suffix}` : "Your Next Obsession",
     description: hasHistory
       ? "Based on what you've watched and loved"
       : "Highly rated in your library",
     items,
-    seeAllHref: "/browse",
+    seeAllHref: "/discover",
+    variant: variantForRail("next-obsession", items),
   }
 }
 
@@ -853,14 +1257,17 @@ function buildTrending(ctx: BuildContext, railIndex: number): HomeRail | null {
       )
       .filter((entry) => !ctx.recommendationExcluded.has(candidateKey(entry.candidate)))
       .filter((entry) => {
-        const rating =
-          typeof entry.item.rating === "number" ? entry.item.rating : entry.candidate.rating
-        return typeof rating === "number" && rating >= TRENDING_MIN_BAYESIAN
+        // H02 — "well-regarded" needs confidence-aware evidence,
+        // not the feed's raw rating: a no-vote 10.0 from the
+        // trending feed scores the prior mean and never leads.
+        return tieredQuality(entry.candidate) >= TRENDING_MIN_BAYESIAN
       })
       .sort((a, b) => {
-        const ra = a.item.rating ?? a.candidate.rating ?? 0
-        const rb = b.item.rating ?? b.candidate.rating ?? 0
-        if (rb !== ra) return rb - ra
+        const qualityDiff =
+          tieredQuality(b.candidate) - tieredQuality(a.candidate)
+        if (qualityDiff !== 0) return qualityDiff
+        const votesDiff = (b.candidate.voteCount ?? 0) - (a.candidate.voteCount ?? 0)
+        if (votesDiff !== 0) return votesDiff
         return a.candidate.title.localeCompare(b.candidate.title)
       })
     for (const pass of [0, 1]) {
@@ -913,15 +1320,21 @@ function buildTrending(ctx: BuildContext, railIndex: number): HomeRail | null {
       if (items.length >= HOME_RAILS_LIMIT) break
     }
   }
-  if (!items.length) return null
+  // H06 — hide a sparse trending rail rather than showing 2–3
+  // posters in an ocean of space.
+  if (items.length < RECO_RAIL_MIN_ITEMS) return null
+  const suffix = contentTypeSuffix(items)
   return {
     id: "trending",
     kind: "trending",
-    title: "Trending & Worth Watching",
+    title: suffix
+      ? `Trending & Worth Watching — ${suffix}`
+      : "Trending & Worth Watching",
     description: extras?.length
       ? "Trending now, matched to your library"
       : "Popular and well-regarded in your library",
     items,
+    variant: variantForRail("trending", items),
   }
 }
 
@@ -965,40 +1378,103 @@ function buildHiddenGems(ctx: BuildContext, railIndex: number): HomeRail | null 
     }
     if (items.length >= HOME_RAILS_LIMIT) break
   }
-  if (!items.length) return null
+  // H06 — hide a sparse gems rail rather than padding it.
+  if (items.length < RECO_RAIL_MIN_ITEMS) return null
+  const suffix = contentTypeSuffix(items)
   return {
     id: "hidden-gems",
     kind: "hidden-gems",
-    title: "Hidden Gems",
+    title: suffix ? `Hidden Gems — ${suffix}` : "Hidden Gems",
     description: "Highly rated, not watched yet",
     items,
-    seeAllHref: "/browse",
+    seeAllHref: "/discover",
+    variant: variantForRail("hidden-gems", items),
   }
 }
 
 function buildTonight(ctx: BuildContext, railIndex: number): HomeRail | null {
   const items: HomeRailItem[] = []
-  // Live programmes first — but ONLY from real EPG data. An empty
-  // programme map means no live cards, never an invented listing.
-  for (const candidate of ctx.data.nowPlaying.slice(0, 4)) {
-    if (candidate.kind !== "live" || !cleanTitle(candidate.title)) continue
-    const key = candidateKey(candidate)
-    if (!ctx.placements.canPlace(key, railIndex, "tonight")) continue
-    ctx.placements.place(key, railIndex, "tonight")
-    const { nowTitle, nextTitle } = parseNowNext(candidate.overview)
-    items.push(
-      candidateToItem(candidate, {
+  // Live programmes first — but ONLY from real EPG data. Resolved
+  // slots (with real start/stop times) win; without them the rail
+  // falls back to DiscoverData.nowPlaying titles, with no times
+  // attached — never invented. A channel with no current programme
+  // gets no card: never channel logos alone.
+  const slots = ctx.tonightEpg ?? []
+  let livePlaced = 0
+  if (slots.length) {
+    for (const slot of slots.slice(0, TONIGHT_MAX_LIVE)) {
+      if (!cleanTitle(slot.channelName) || !cleanTitle(slot.nowTitle)) continue
+      // Stale-guard: a slot whose programme already ended is dropped,
+      // never shown as "on now" (couch-livetv-epg programmeState).
+      if (programmeState(slot.nowStartMs, slot.nowStopMs, ctx.nowMs) !== "now") {
+        continue
+      }
+      const key = `live:${slot.channelId}`
+      if (!ctx.placements.canPlace(key, railIndex, "tonight")) continue
+      ctx.placements.place(key, railIndex, "tonight")
+      const nowRange = epgTimeRangeLabel(slot.nowStartMs, slot.nowStopMs)
+      const nextRange =
+        slot.nextTitle && slot.nextStartMs != null && slot.nextStopMs != null
+          ? epgTimeRangeLabel(slot.nextStartMs, slot.nextStopMs)
+          : null
+      // The view renders a live card as channel title / nowTitle /
+      // "Next: {nextTitle}", so the programme title, its on-now
+      // status and its real time range travel in those strings; the
+      // structured ms fields carry the same facts for the view.
+      items.push({
+        key,
+        kind: "live",
+        id: slot.channelId,
+        title: slot.channelName,
+        posterUrl: slot.channelLogo ?? undefined,
+        detailHref: `/livetv?channel=${encodeURIComponent(slot.channelId)}`,
+        playHref: `/livetv?channel=${encodeURIComponent(slot.channelId)}`,
         isLive: true,
-        nowTitle,
-        nextTitle,
-        reason: nowTitle ? `Now: ${nowTitle}` : "On now",
-      }),
-    )
+        nowTitle: nowRange
+          ? `${slot.nowTitle} · On now · ${nowRange}`
+          : `${slot.nowTitle} · On now`,
+        nextTitle:
+          slot.nextTitle && nextRange
+            ? `${slot.nextTitle} · ${nextRange}`
+            : (slot.nextTitle ?? undefined),
+        nowStartMs: slot.nowStartMs,
+        nowStopMs: slot.nowStopMs,
+        nextStartMs: slot.nextStartMs ?? undefined,
+        nextStopMs: slot.nextStopMs ?? undefined,
+        programmeStatus: "now",
+        reason: nowRange ? `On now · ${nowRange}` : "On now",
+        contentKind: "live",
+        typeLine: "Live TV",
+      })
+      livePlaced++
+    }
+  }
+  if (!livePlaced) {
+    for (const candidate of ctx.data.nowPlaying.slice(0, TONIGHT_MAX_LIVE)) {
+      if (candidate.kind !== "live" || !cleanTitle(candidate.title)) continue
+      const key = candidateKey(candidate)
+      if (!ctx.placements.canPlace(key, railIndex, "tonight")) continue
+      ctx.placements.place(key, railIndex, "tonight")
+      const { nowTitle, nextTitle } = parseNowNext(candidate.overview)
+      items.push(
+        candidateToItem(candidate, {
+          isLive: true,
+          nowTitle,
+          nextTitle,
+          reason: nowTitle ? `Now: ${nowTitle}` : "On now",
+        }),
+      )
+      livePlaced++
+    }
   }
   // Then the best taste-ranked unwatched picks not already placed.
   // Fresh titles first (a rail that just repeats Next Obsession is
   // not curation); already-placed-once titles fill any gaps, within
-  // the at-most-2-rails rule.
+  // the at-most-2-rails rule. H02 — fillers are recommendations, so
+  // they need quality evidence (real votes, or a TMDb match): an
+  // unproven title never fills Tonight's Picks, it only ever
+  // appears in the taste-ranked Next Obsession rail, below proven
+  // titles.
   for (const pass of [0, 1]) {
     for (const ranked of ctx.ranked) {
       if (items.length >= HOME_RAILS_LIMIT) break
@@ -1006,22 +1482,32 @@ function buildTonight(ctx: BuildContext, railIndex: number): HomeRail | null {
       if (!cleanTitle(candidate.title)) continue
       const key = candidateKey(candidate)
       if (ctx.recommendationExcluded.has(key)) continue
+      if (!hasTieredSupport(candidate, 1)) continue
       if (pass === 0 && ctx.placements.count(key) > 0) continue
       if (!ctx.placements.canPlace(key, railIndex, "tonight")) continue
       ctx.placements.place(key, railIndex, "tonight")
       items.push(
-        candidateToItem(candidate, { reason: ranked.reason || undefined }),
+        candidateToItem(candidate, {
+          // H05 — explain() or the neutral label, never the raw
+          // engine reason.
+          reason: personalisedReason(ctx.signals, candidate),
+        }),
       )
     }
     if (items.length >= HOME_RAILS_LIMIT) break
   }
   if (items.length < TONIGHT_MIN_ITEMS) return null
+  const hasLive = items.some((item) => item.isLive)
+  const suffix = hasLive ? "Live TV" : contentTypeSuffix(items)
   return {
     id: "tonight",
     kind: "tonight",
-    title: "Tonight's Picks",
-    description: "Films, series and live TV for tonight",
+    title: suffix ? `Tonight's Picks — ${suffix}` : "Tonight's Picks",
+    description: hasLive
+      ? "On now and up next, plus films and series for tonight"
+      : "For tonight, from your library",
     items,
+    variant: variantForRail("tonight", items),
   }
 }
 
@@ -1037,7 +1523,11 @@ function buildRecentlyAdded(ctx: BuildContext, railIndex: number): HomeRail | nu
     if (!ctx.placements.canPlace(key, railIndex, "recently-added")) continue
     ctx.placements.place(key, railIndex, "recently-added")
     items.push(
-      candidateToItem(candidate, { reason: "Recently added to your library" }),
+      candidateToItem(candidate, {
+        // H01 — the rail title already says "Recently Added"; the
+        // subtitle names the type + runtime ("Movie · 1h 45m").
+        reason: typeLineFor(candidate),
+      }),
     )
     if (items.length >= HOME_RAILS_LIMIT) break
   }
@@ -1049,6 +1539,7 @@ function buildRecentlyAdded(ctx: BuildContext, railIndex: number): HomeRail | nu
     description: "New to your library",
     items,
     seeAllHref: "/recently-added",
+    variant: variantForRail("recently-added", items),
   }
 }
 
@@ -1093,13 +1584,15 @@ function buildContinueSeries(ctx: BuildContext, railIndex: number): HomeRail | n
     }
   }
   if (!items.length) return null
+  const finalItems = items.slice(0, HOME_RAILS_LIMIT)
   return {
     id: "continue-series",
     kind: "continue-series",
     title: "Continue Your Series",
     description: "Pick up your series where you left off",
-    items: items.slice(0, HOME_RAILS_LIMIT),
-    seeAllHref: "/browse?type=series",
+    items: finalItems,
+    seeAllHref: "/series",
+    variant: variantForRail("continue-series", finalItems),
   }
 }
 
@@ -1145,13 +1638,16 @@ function buildShort(ctx: BuildContext, railIndex: number): HomeRail | null {
     }
     if (items.length >= HOME_RAILS_LIMIT) break
   }
-  if (!items.length) return null
+  // H06 — hide a sparse short-films rail rather than padding it.
+  if (items.length < RECO_RAIL_MIN_ITEMS) return null
+  const suffix = contentTypeSuffix(items)
   return {
     id: "short",
     kind: "short",
-    title: "Short & Sweet",
+    title: suffix ? `Short & Sweet — ${suffix}` : "Short & Sweet",
     description: "Highly rated films under two hours",
     items,
+    variant: variantForRail("short", items),
   }
 }
 
@@ -1195,8 +1691,19 @@ function buildGenreRails(ctx: BuildContext, startIndex: number): HomeRail[] {
       const candidate = ranked.candidate
       if (!cleanTitle(candidate.title)) return false
       if (ctx.recommendationExcluded.has(candidateKey(candidate))) return false
-      const genres = candidate.genres.map((g) => g.toLowerCase())
-      if (!genres.some((g) => def.match.some((m) => g.includes(m)))) return false
+      // H03 — taxonomy, not genre strings, decides the kind. A crime
+      // documentary is a documentary, never a crime drama: documentaries
+      // are excluded from every fiction genre rail, and the Documentary
+      // rail takes them on kind alone (its genre match would also catch
+      // fiction titles merely tagged "documentary").
+      const kind = contentKindOf(candidate)
+      if (def.id === "genre-documentary") {
+        if (!isDocumentaryKind(kind)) return false
+      } else {
+        if (isDocumentaryKind(kind)) return false
+        const genres = candidate.genres.map((g) => g.toLowerCase())
+        if (!genres.some((g) => def.match.some((m) => g.includes(m)))) return false
+      }
       if (tieredQuality(candidate) < minBayesian) return false
       if (minVotes > 0 && !hasTieredSupport(candidate, minVotes)) return false
       return true
@@ -1228,16 +1735,36 @@ function buildGenreRails(ctx: BuildContext, startIndex: number): HomeRail[] {
       if (!ctx.placements.canPlace(key, railIndex, def.id)) continue
       ctx.placements.place(key, railIndex, def.id)
       railItems.push(
-        candidateToItem(candidate, { reason: ranked.reason || undefined }),
+        candidateToItem(candidate, {
+          // H05 — explain() or the neutral label.
+          reason: personalisedReason(ctx.signals, candidate),
+        }),
       )
       if (railItems.length >= HOME_RAILS_LIMIT) break
     }
     if (railItems.length < GENRE_RAIL_MIN_ITEMS) continue
+    // H01 — the rail title names its content type ("Crime & Mystery
+    // — Films", "True Crime — Documentary Series"). The Documentary
+    // rail of a single kind is just that kind's plural — saying
+    // "Documentary — Documentary Series" twice helps nobody.
+    const suffix = contentTypeSuffix(railItems)
+    let title = suffix ? `${def.title} — ${suffix}` : def.title
+    if (def.id === "genre-documentary" && suffix) {
+      const kinds = [
+        ...new Set(
+          railItems
+            .map((item) => item.contentKind)
+            .filter((kind): kind is ContentKind => !!kind),
+        ),
+      ]
+      if (kinds.length === 1) title = suffix
+    }
     rails.push({
       id: def.id,
       kind: "genre",
-      title: def.title,
+      title,
       items: railItems,
+      variant: variantForRail("genre", railItems),
     })
     railIndex++
   }
@@ -1337,13 +1864,18 @@ function pickHomeHero(ctx: BuildContext): HomeHero | null {
   }
   if (!pick) return null
   recordHeroShown(candidateKey(pick))
-  const ranked = rankedByKey.get(candidateKey(pick))
   const item = candidateToItem(pick)
   return {
     item,
+    // H05 — a signal-backed reason when explain() has one, else the
+    // factual quality label. The hero is quality-gated (Tier 1
+    // vote-backed or Tier 2 TMDb-matched), so "Highly rated" is an
+    // honest quality claim, never a taste claim.
     reason:
-      ranked?.reason ||
-      `Highly rated (${pick.rating?.toFixed(1) ?? "—"}/10)`,
+      explain(pick, ctx.signals) ??
+      (typeof pick.rating === "number"
+        ? `Highly rated (${pick.rating.toFixed(1)}/10)`
+        : "Featured in your library"),
   }
 }
 
@@ -1381,7 +1913,13 @@ export async function loadHomeRails(
     if (!data || !Array.isArray(data.candidates) || !data.taste) {
       throw new Error("loadHomeRails: invalid DiscoverData")
     }
-    const ctx = buildContext(data, followed ?? [], extras)
+    // H07 — resolve real EPG slots before building (best-effort,
+    // never throws; a superseded load still aborts right after).
+    const tonightEpg = await resolveTonightEpg(extras, extras.nowMs ?? Date.now())
+    if (extras.signal?.aborted) {
+      throw new DOMException("Home load aborted", "AbortError")
+    }
+    const ctx = buildContext(data, followed ?? [], extras, tonightEpg)
     const rails: HomeRail[] = []
     // Rail indices count emitted rails only: an omitted rail does not
     // sit between two displayed rails, so adjacency is judged on the
@@ -1402,7 +1940,26 @@ export async function loadHomeRails(
       rails.push(genreRail)
     }
     const hero = pickHomeHero(ctx)
+    // H06 — mark the rails that are deliberately shown sparse (below
+    // the recommendation floor): only factual rails can be sparse,
+    // since recommendation rails hide instead. The view passes it
+    // to TvRail's `sparse` prop (`.rs-rail--sparse`).
+    for (const rail of rails) {
+      rail.sparse = rail.items.length < RECO_RAIL_MIN_ITEMS
+    }
     const payload: HomePayload = { hero, rails }
+    // C2 — record what the recommendation rails actually showed, so
+    // the same small group of titles stops dominating Home. Guarded
+    // inside trackExposure (no-ops with no storage, e.g. node tests).
+    trackExposure(
+      payload.rails
+        .filter((rail) =>
+          ["next-obsession", "trending", "hidden-gems", "genre", "tonight"].includes(
+            rail.kind,
+          ),
+        )
+        .flatMap((rail) => rail.items.map((item) => item.key)),
+    )
     moduleCache = payload
     writeStoredPayload(payload)
     return payload
