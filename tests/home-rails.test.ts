@@ -412,6 +412,14 @@ describe("loadHomeRails", () => {
         trending: [
           { kind: "movie", id: "crowd", title: "Crowd Favourite", rating: 8.0 },
           { kind: "movie", id: "9999", title: "Ghost Title", rating: 9.9 },
+          // H06: a recommendation rail needs at least 4 items to
+          // show, so the fixture carries three more real trending
+          // matches (horror bulk titles, low taste affinity — they
+          // do not crowd the Next Obsession rail). The drop claim
+          // under test (ghost + blank) is unchanged.
+          { kind: "movie", id: "bulk-5", title: "Bulk Horror 5", rating: 7.5 },
+          { kind: "movie", id: "bulk-11", title: "Bulk Horror 11", rating: 7.7 },
+          { kind: "movie", id: "bulk-17", title: "Bulk Horror 17", rating: 7.9 },
         ],
       },
     )
@@ -471,10 +479,29 @@ describe("loadHomeRails", () => {
       rating: 10.0,
       year: 2024,
     })
+    // H06: a recommendation rail needs at least 4 items to show, so
+    // the fixture carries two more mid-tier dramas (the ranking
+    // claim under test is unchanged).
+    const fillerA = candidate({
+      id: "filler-a",
+      title: "Filler A",
+      genres: ["Drama"],
+      rating: 7.5,
+      voteCount: 500,
+      year: 2024,
+    })
+    const fillerB = candidate({
+      id: "filler-b",
+      title: "Filler B",
+      genres: ["Drama"],
+      rating: 7.2,
+      voteCount: 300,
+      year: 2024,
+    })
     const taste = emptyTasteModel("profile-1", "playlist-1")
     taste.genreWeights = { drama: 5 }
     const payload = await loadHomeRails(
-      discoverData({ candidates: [perfect, supported], taste, hasHistory: true }),
+      discoverData({ candidates: [perfect, supported, fillerA, fillerB], taste, hasHistory: true }),
       [],
     )
     const picks = railById(payload, "next-obsession")
@@ -598,6 +625,25 @@ describe("loadHomeRails", () => {
       voteCount: 500,
       year: 2024,
     })
+    // H06: a recommendation rail needs at least 4 items to show, so
+    // the fixture carries two more hopefuls (the boost claim under
+    // test — crime first, comedy second — is unchanged).
+    const dramaHopeful = candidate({
+      id: "drama-hopeful",
+      title: "Drama Hopeful",
+      genres: ["Drama"],
+      rating: 7.5,
+      voteCount: 500,
+      year: 2024,
+    })
+    const horrorHopeful = candidate({
+      id: "horror-hopeful",
+      title: "Horror Hopeful",
+      genres: ["Horror"],
+      rating: 7.4,
+      voteCount: 500,
+      year: 2024,
+    })
     let taste = emptyTasteModel("profile-1", "playlist-1")
     taste = recordFeedback(taste, {
       kind: "movie",
@@ -609,7 +655,7 @@ describe("loadHomeRails", () => {
     })
     const payload = await loadHomeRails(
       discoverData({
-        candidates: [seed, crimeHopeful, comedyHopeful],
+        candidates: [seed, crimeHopeful, comedyHopeful, dramaHopeful, horrorHopeful],
         taste,
         hasHistory: true,
         watchedKeys: new Set(["movie:seed"]),
@@ -618,7 +664,7 @@ describe("loadHomeRails", () => {
     )
     const picks = railById(payload, "next-obsession")
     const keys = picks?.items.map((item) => item.key) ?? []
-    expect(keys).toEqual(["movie:crime-hopeful", "movie:comedy-hopeful"])
+    expect(keys.slice(0, 2)).toEqual(["movie:crime-hopeful", "movie:comedy-hopeful"])
   })
 
   it("sparse-profile hero is the best-supported title, not catalogue order", async () => {
