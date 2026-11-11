@@ -3,9 +3,11 @@
 // Deterministic, works with NO key and NO network: every score below is
 // computed from the active catalogue + the local taste model (taste.ts).
 // Results are deliberately NOT just "most popular": the rating term is
-// capped at 10 of ~100 points, and row selection caps how many titles one
-// genre or one title-group may contribute, so a single franchise cannot
-// fill a row.
+// capped at 10 of ~100 points — and it is confidence-based (B10, shared
+// C2 engine in recommendations.ts): a rating only earns points when
+// real votes back it, so a no-vote 10.0 can never top a rail. Row
+// selection caps how many titles one genre or one title-group may
+// contribute, so a single franchise cannot fill a row.
 //
 // Seams (defined here, wired by the coordinator):
 //   - AI ranker: worker W2's module registers via registerAIRanker. The
@@ -31,6 +33,7 @@ import {
   type TasteFeedbackAction,
   type TasteModel,
 } from "@/scripts/lib/taste.ts"
+import { confidenceScore, votesFor } from "./recommendations.ts"
 import { normalize } from "@/scripts/lib/text.ts"
 
 // ---------------------------------------------------------------------------
@@ -402,15 +405,28 @@ function scoreOne(
     }
   }
 
-  // Rating is deliberately a small term: popularity must not dominate.
-  if (candidate.rating && candidate.rating > 0) {
-    const points = Math.min(
-      RATING_MAX_POINTS,
-      (Math.min(candidate.rating, 10) / 10) * RATING_MAX_POINTS
-    )
+  // Rating is deliberately a small term: popularity must not dominate —
+  // and it is confidence-based (B10, shared C2 engine): a rating only
+  // earns points when real votes back it. confidenceScore() shrinks a
+  // no-vote 10.0 to the prior mean (6.5), never 10 — and with no votes
+  // behind the rating at all we award no rating points and print no
+  // rating-based reason, so an unproven title can never top a rail on
+  // a bare "10.0". A null/unknown rating scores -Infinity in the
+  // engine and earns nothing here, as before. (A TMDb match alone is
+  // not evidence for this term: recommendations.ts requires a real
+  // vote count before a rating counts as proven.)
+  const rating =
+    typeof candidate.rating === "number" &&
+    Number.isFinite(candidate.rating) &&
+    candidate.rating > 0
+      ? Math.min(candidate.rating, 10)
+      : undefined
+  const votes = votesFor(candidate)
+  if (rating !== undefined && votes >= 1) {
+    const confidence = confidenceScore(rating, votes)
     contributions.push({
-      label: `Highly rated${genres[0] ? ` ${genres[0]}` : ""} (${candidate.rating.toFixed(1)}/10)`,
-      points,
+      label: `Highly rated${genres[0] ? ` ${genres[0]}` : ""} (${rating.toFixed(1)}/10)`,
+      points: Math.min(RATING_MAX_POINTS, (confidence / 10) * RATING_MAX_POINTS),
     })
   }
 
@@ -890,21 +906,33 @@ export function getDiscoverRows(input: DiscoverRowsInput): DiscoverRow[] {
     })
   }
 
-  // New and Worth Watching: recently added, best-rated first — but never
-  // claim a rating the catalogue doesn't carry.
+  // New and Worth Watching: recently added, best first — ranked by the
+  // shared C2 confidence score (B10), never the raw rating. Titles
+  // with real votes behind their rating always sort before titles
+  // with none (the preferEvidence shape: evidence first, then
+  // confidence) — a no-vote 10.0 scores the prior mean (6.5) in the
+  // engine and can never lead while any proven title is in the row.
+  // Ties keep input order, and recentlyAdded arrives newest-first, so
+  // recency is the tiebreak; the raw rating never ranks. An unrated
+  // title scores -Infinity in the engine and sinks to the end.
   const recentRanked = input.recentlyAdded
     .filter((c) => !baseOpts.excludeKeys?.has(candidateKey(c)))
     .filter((c) => !(excludeWatched && input.watchedKeys?.has(candidateKey(c))))
-    .map((candidate) => ({
+    .map((candidate, index) => ({
       candidate,
-      score: (candidate.rating ?? 0) * 10,
+      score: confidenceScore(candidate.rating ?? null, votesFor(candidate)),
+      index,
       reason: "Recently added to your library",
     }))
     .sort((a, b) => {
+      const evidenceDiff =
+        Number(votesFor(b.candidate) >= 1) - Number(votesFor(a.candidate) >= 1)
+      if (evidenceDiff !== 0) return evidenceDiff
       if (b.score !== a.score) return b.score - a.score
-      return a.candidate.title.localeCompare(b.candidate.title)
+      return a.index - b.index
     })
     .slice(0, limit)
+    .map(({ candidate, score, reason }) => ({ candidate, score, reason }))
   if (recentRanked.length) {
     rows.push({
       id: "new-and-worth-watching",

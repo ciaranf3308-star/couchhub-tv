@@ -97,6 +97,7 @@ import {
 import {
   confidenceScore,
   isHeadlineEligible,
+  votesFor,
   explain,
   neutralLabel,
   trackExposure,
@@ -766,20 +767,22 @@ export function newEpisodeHref(episode: FollowedEpisode): string {
 
 /**
  * Confidence-adjusted rank score: rankCandidates' rating term is the
- * raw catalogue rating, so a no-vote 10.0 would outscore a
- * well-supported 8.0 on rating alone. Swap the raw term for the
- * Bayesian term — the rest of the score (taste, seeds, mood, recency)
- * is untouched, so personalisation still decides between titles of
- * equal proven quality.
+ * shared C2 confidence term (B10 — Bayesian points when real votes
+ * back the rating, zero otherwise), so a no-vote 10.0 contributes
+ * nothing on rating alone. Remove exactly that term and add the
+ * tiered quality, so the rating is counted once: the rest of the
+ * score (taste, seeds, mood, recency) is untouched, so
+ * personalisation still decides between titles of equal proven
+ * quality. (Subtracting the raw rating here instead would count the
+ * rating twice and demote TMDb-matched titles by their full rating.)
  */
 function confidenceAdjustedScore(item: RankedCandidate): number {
-  const raw = item.candidate.rating
-  const rawPoints =
-    typeof raw === "number" && Number.isFinite(raw) && raw > 0
-      ? Math.min(10, raw)
+  const candidate = item.candidate
+  const awarded =
+    votesFor(candidate) >= 1
+      ? confidenceScore(candidate.rating ?? null, votesFor(candidate))
       : 0
-  const bayesianPoints = tieredQuality(item.candidate)
-  return item.score - rawPoints + bayesianPoints
+  return item.score - awarded + tieredQuality(candidate)
 }
 
 /**
