@@ -17,6 +17,7 @@ import {
   openOverlay,
   parseLivetvModeParam,
   parseLivetvState,
+  persistLivetvMode,
   persistLivetvState,
   restoreLivetvState,
   serializeLivetvState,
@@ -432,5 +433,79 @@ describe("parseLivetvModeParam — shell ?mode= mapping", () => {
     expect(parseLivetvModeParam("")).toBeNull();
     expect(parseLivetvModeParam("nope")).toBeNull();
     expect(parseLivetvModeParam("HOME")).toBeNull();
+  });
+});
+
+describe("0.11.0 W1 — guideReturnTo is written by enterGuide and read by exitGuide", () => {
+  it("enterGuide records the entry mode; without one it keeps the current value", () => {
+    const playing = enterPlayback(createLivetvState(NOW), "ch-7");
+    expect(enterGuide(playing, "k", undefined, "playback").guideReturnTo).toBe(
+      "playback",
+    );
+    expect(enterGuide(playing, "k").guideReturnTo).toBe("landing");
+    const fromPlayback = enterGuide(playing, "k", undefined, "playback");
+    expect(enterGuide(fromPlayback).guideReturnTo).toBe("playback");
+  });
+
+  it("enterGuide normalises the legacy \"home\" return target to landing", () => {
+    const guide = enterGuide(createLivetvState(NOW), null, undefined, "home");
+    expect(guide.guideReturnTo).toBe("landing");
+  });
+
+  it("exitGuide with no argument returns to the recorded entry mode", () => {
+    const fromPlayback = enterGuide(
+      enterPlayback(createLivetvState(NOW), "ch-7"),
+      "k",
+      undefined,
+      "playback",
+    );
+    expect(exitGuide(fromPlayback).mode).toBe("playback");
+    const fromLanding = enterGuide(createLivetvState(NOW), "k");
+    expect(exitGuide(fromLanding).mode).toBe("landing");
+  });
+
+  it("exitGuide with an explicit mode still wins over the recorded one", () => {
+    const fromPlayback = enterGuide(
+      enterPlayback(createLivetvState(NOW), "ch-7"),
+      "k",
+      undefined,
+      "playback",
+    );
+    expect(exitGuide(fromPlayback, "landing").mode).toBe("landing");
+  });
+
+  it("enterGuide / exitGuide never mutate their input", () => {
+    const before = enterPlayback(createLivetvState(NOW), "ch-7");
+    const guide = enterGuide(before, "k", undefined, "playback");
+    expect(before.guideReturnTo).toBe("landing");
+    expect(before.mode).toBe("playback");
+    const back = exitGuide(guide);
+    expect(guide.mode).toBe("guide");
+    expect(back.mode).toBe("playback");
+  });
+});
+
+describe("0.11.0 W1 — persistLivetvMode updates only the mode", () => {
+  it("replaces the stored mode and preserves tuned / previous / guide date", () => {
+    const storage = fakeStorage();
+    const day = startOfLocalDayMs(NOW) + 24 * HOUR;
+    const state = {
+      ...tuneTo(enterPlayback(createLivetvState(NOW), "ch-1"), "ch-2"),
+      guideDateMs: day,
+    };
+    persistLivetvState(state, storage);
+    persistLivetvMode("guide", storage);
+    const restored = restoreLivetvState(storage);
+    expect(restored.mode).toBe("guide");
+    expect(restored.tunedChannelId).toBe("ch-2");
+    expect(restored.previousChannelId).toBe("ch-1");
+    expect(restored.guideDateMs).toBe(day);
+  });
+
+  it("normalises the legacy \"home\" mode to landing and never throws without storage", () => {
+    const storage = fakeStorage();
+    persistLivetvMode("home", storage);
+    expect(restoreLivetvState(storage).mode).toBe("landing");
+    expect(() => persistLivetvMode("browser", null)).not.toThrow();
   });
 });

@@ -55,11 +55,12 @@
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import WelcomeCard from "@/components/WelcomeCard.astro";
 import TvEmpty from "@/components/couch/TvEmpty.astro";
-import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 import TvLiveLanding from "@/components/couch/TvLiveLanding.astro";
 import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 import TvPlaybackShell from "@/components/couch/TvPlaybackShell.astro";
 import TvGuideView from "@/components/couch/TvGuideView.astro";
+import { livetvEmptyProps } from "@/scripts/lib/livetv-data";
+const providerEmpty = livetvEmptyProps("provider-lost");
 ---
 
 <CouchLayout pageTitle="Live TV" view="livetv">
@@ -85,10 +86,11 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		<header class="rs-livetv-home__head">
 			<h1 class="rs-page-title">Live TV</h1>
 			<p class="rs-meta">Live channels from your playlist — pick a channel to start watching.</p>
-			<!-- W6 button-hint legend mount (W7 leaves the place;
-			     integration / W6 fills [data-livetv-legend] — Home
-			     never renders its own hints). -->
-			<div class="rs-livetv-home__legend" data-livetv-legend></div>
+			<!-- The Xbox button-hint legend is the layout-level
+			     TvButtonHints (CouchLayout), NOT a mount here: the
+			     [data-livetv-legend] div that used to sit in this
+			     header was never filled by anything (0.11.0 W1
+			     removed it). -->
 		</header>
 
 		<section
@@ -100,8 +102,8 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 
 		<div id="livetv-provider-empty" class="rs-livetv-home__empty" hidden>
 			<TvEmpty
-				title="No live playlist connected"
-				message="Add a playlist to browse live channels."
+				title={providerEmpty.title}
+				message={providerEmpty.message}
 				art="player"
 				actionLabel="Add a playlist"
 				actionHref="/login"
@@ -286,92 +288,13 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 			gap: 0.75rem;
 			margin-bottom: 1rem;
 		}
-		/* Hero: logo left, programme + actions right; warm RedSilk
-		   gradient, never a white surface. */
-		.rs-livetv-home-hero {
-			display: flex;
-			gap: 2rem;
-			align-items: center;
-			min-height: 16rem;
-			padding: 2rem;
-			border-radius: 1.25rem;
-			border: 1px solid var(--rs-line);
-			background:
-				radial-gradient(120% 90% at 85% 0%, color-mix(in srgb, var(--rs-accent) 22%, transparent) 0%, transparent 55%),
-				linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
-			box-shadow: var(--rs-shadow);
-		}
-		.rs-livetv-home-hero__logo {
-			flex-shrink: 0;
-			width: 14rem;
-			height: 8rem;
-			display: grid;
-			place-items: center;
-			border-radius: 1rem;
-			background: color-mix(in srgb, var(--rs-bg) 55%, transparent);
-			border: 1px solid var(--rs-line);
-			overflow: hidden;
-		}
-		.rs-livetv-home-hero__body {
-			display: flex;
-			flex-direction: column;
-			gap: 0.75rem;
-			min-width: 0;
-			flex: 1;
-		}
-		.rs-livetv-home-hero__eyebrow {
-			margin: 0;
-			font-size: 0.875rem;
-			font-weight: 700;
-			letter-spacing: 0.22em;
-			text-transform: uppercase;
-			color: var(--rs-accent);
-		}
-		.rs-livetv-home-hero__title {
-			margin: 0;
-			font-size: clamp(2rem, 4vw, 3.25rem);
-			line-height: 1.05;
-			letter-spacing: -0.02em;
-			font-weight: 800;
-		}
-		.rs-livetv-home-hero__next {
-			margin: 0;
-			font-size: 1.25rem;
-			color: var(--rs-text-2);
-		}
-		.rs-livetv-home-hero__actions {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 0.75rem;
-			margin-top: 0.5rem;
-		}
-		/* Collections: LARGE category cards, never tiny pills.
-		   (The grid itself is static markup, so it stays scoped;
-		   the cards are built in JS — their rules live in the
-		   global block below, or Astro's scope attribute never
-		   matches them and they render as unstyled giant logos.) */
-		.rs-livetv-home-collections__grid {
-			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
-			gap: 1.25rem;
-		}
-		.rs-livetv-home-browser {
-			display: flex;
-			flex-direction: column;
-			gap: 1rem;
-			min-height: 0;
-		}
-		/* Browser head: title left, expander right. The legend
-		   mount takes no space until W6 fills it. */
-		.rs-livetv-home-browser__head {
-			justify-content: space-between;
-			align-items: center;
-			flex-wrap: wrap;
-			gap: 1rem;
-		}
-		.rs-livetv-home__legend:empty {
-			display: none;
-		}
+		/* 0.11.0 W1: the 0.7.0 Home interior rules that used to
+		   live here (.rs-livetv-home-hero*,
+		   .rs-livetv-home-collections__grid,
+		   .rs-livetv-home-browser*) are deleted — no markup has
+		   rendered them since TvLiveLanding replaced the Home
+		   interior in 0.9.0, and the landing owns its own
+		   classes in couch.css. */
 		/* 0.9.0: the [hidden] guard for the retired 0.7.0 Home
 		   rails / hero / collections was removed with them —
 		   TvLiveLanding owns the landing now. */
@@ -444,90 +367,12 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		}
 	</style>
 
-	<!-- W7: rules for elements Home builds in JS. Astro scopes the
-	     block above to the template's elements, so anything created
-	     with document.createElement never matches it — in 0.7.0
-	     the collection cards rendered as unstyled giant logos for
-	     exactly this reason. These selectors are rs-prefixed and
-	     unique, so global scope is safe. -->
-	<style is:global>
-		.rs-livetv-home-hero__logo img {
-			width: 100%;
-			height: 100%;
-			object-fit: contain;
-			padding: 1rem;
-		}
-		.rs-livetv-home-hero__logo-fallback {
-			font-size: 4rem;
-			font-weight: 800;
-			color: var(--rs-text-2);
-		}
-		.rs-livetv-home-collection-card {
-			display: flex;
-			flex-direction: column;
-			align-items: flex-start;
-			gap: 0.75rem;
-			min-height: 9rem;
-			padding: 1.5rem;
-			text-align: left;
-			border-radius: 1.25rem;
-			border: 1px solid var(--rs-line);
-			background: linear-gradient(180deg, var(--rs-surface) 0%, var(--rs-bg-2) 100%);
-			color: var(--rs-text);
-			cursor: pointer;
-			box-shadow: var(--rs-shadow);
-		}
-		.rs-livetv-home-collection-card:hover {
-			border-color: var(--rs-accent);
-		}
-		.rs-livetv-home-collection-card:focus-visible {
-			outline: none;
-			border-color: var(--rs-focus);
-			box-shadow:
-				0 0 0 2px var(--rs-focus),
-				0 0 2rem 0.25rem var(--rs-focus-glow);
-		}
-		.rs-livetv-home-collection-card__label {
-			font-size: 1.75rem;
-			font-weight: 800;
-			letter-spacing: -0.01em;
-			line-height: 1.1;
-		}
-		.rs-livetv-home-collection-card__count {
-			font-size: 1.125rem;
-			color: var(--rs-text-2);
-		}
-		.rs-livetv-home-collection-card__sample {
-			display: flex;
-			gap: 0.5rem;
-			margin-top: auto;
-		}
-		/* "Now on …" line: real EPG only, omitted when the guide
-		   covers nothing in the group. */
-		.rs-livetv-home-collection-card__now {
-			font-size: 1.125rem;
-			line-height: 1.35;
-			color: var(--rs-text-2);
-		}
-		.rs-livetv-home-collection-card__now strong {
-			color: var(--rs-text);
-			font-weight: 700;
-		}
-		.rs-livetv-home-collection-card__sample img,
-		.rs-livetv-home-collection-card__sample span {
-			width: 3.5rem;
-			height: 2.25rem;
-			object-fit: contain;
-			border-radius: 0.5rem;
-			background: color-mix(in srgb, var(--rs-bg) 60%, transparent);
-			border: 1px solid var(--rs-line);
-			display: grid;
-			place-items: center;
-			font-weight: 800;
-			font-size: 1.125rem;
-			color: var(--rs-text-2);
-		}
-	</style>
+	<!-- 0.11.0 W1: the global .rs-livetv-home-collection-card* /
+     .rs-livetv-home-hero__logo* rules that used to live here are
+     deleted — they styled the retired 0.7.0 Home interior, which no
+     markup renders any more (TvLiveLanding owns the landing now).
+     Nothing JS-built needs them: the landing builds its tiles with
+     its own classes (see livetv-landing.ts). -->
 
 	<script>
 		import "../scripts/stream/stream.ts";
@@ -540,6 +385,7 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		} from "../scripts/lib/livetv-data.ts";
 		import { getLivetvResumeLastChannel } from "../scripts/lib/app-settings.js";
 		import { restoreLivetvState, parseLivetvModeParam } from "../scripts/lib/livetv-state.ts";
+		import { persistLivetvMode } from "../scripts/lib/livetv-state.ts";
 
 		// ── Mode shell (0.9.0: four modes + "home" alias) ─────────
 		// Listens for livetv:mode {mode, browserFilter?, guideMode?,
@@ -578,6 +424,16 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 				mount.toggleAttribute("hidden", key !== mode);
 			}
 			document.documentElement.dataset.livetvMode = mode;
+			// 0.11.0 W1: the shell is the single writer of the
+			// current mode — persist it (mode only; tuned /
+			// previous / guide date survive via persistLivetvMode)
+			// so a reload restores the mode on screen instead of
+			// whatever TvGuideView last persisted. Leaving the
+			// Guide also clears its stale sub-mode mirror.
+			persistLivetvMode(mode);
+			if (mode !== "guide") {
+				delete document.documentElement.dataset.livetvGuideMode;
+			}
 			if (detail && typeof detail === "object") {
 				if (mode === "browser" && browserMount) {
 					const filter = detail.browserFilter;
@@ -612,11 +468,11 @@ import TvGuideView from "@/components/couch/TvGuideView.astro";
 		// so a Guide request just dispatches the mode — no /epg
 		// fallback navigation any more. /epg itself redirects to
 		// /livetv?mode=guide as a bookmark safety net.
-		document.querySelectorAll("[data-livetv-guide]").forEach((btn) => {
-			btn.addEventListener("click", () => {
-				requestLivetvMode("guide");
-			});
-		});
+		// 0.11.0 W1: the [data-livetv-guide] click binding that
+		// used to live here is deleted — no element in any Live TV
+		// screen carries that attribute (the hero Guide button is
+		// [data-hero-guide], handled in livetv-landing.ts), so it
+		// bound to nothing.
 
 		// ── Player visibility ───────────────────────────────────
 		// The engine unhides #player when a stream tunes (deep link
