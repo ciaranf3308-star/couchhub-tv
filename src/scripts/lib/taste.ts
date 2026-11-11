@@ -443,6 +443,58 @@ export function summarizeTaste(model: TasteModel): TasteSummaryShape {
 }
 
 // ---------------------------------------------------------------------------
+// Preference signals for the recommendation engine (0.10.0, C2 / H05)
+// ---------------------------------------------------------------------------
+
+/**
+ * The evidence `recommendations.explain()` may cite — and nothing else.
+ * Every field here is a real signal: a liked/favourited title, an
+ * affinity weight built only from liked titles, a hard exclusion, or a
+ * because-watched seed that came from actual watch history. There is
+ * no inferred "you might like" field: if none of these match a
+ * candidate, explain() returns null and the caller uses a neutral label.
+ */
+export interface TasteSignals {
+  likedTitles: TasteTitleRef[]
+  favouriteTitles: TasteTitleRef[]
+  dislikedTitles: TasteTitleRef[]
+  notInterestedKeys: string[]
+  /** Normalised genre -> weight, from liked titles only. */
+  genreWeights: Record<string, number>
+  /** Lower-cased person name -> weight, from liked titles only. */
+  castWeights: Record<string, number>
+  /** Lower-cased director name -> weight, from liked titles only. */
+  directorWeights: Record<string, number>
+  /**
+   * The because-watched seed this row was built from, when the caller
+   * has one (see because-watched.ts). The seed title must be a title
+   * the household actually watched; its genres are the link explain()
+   * is allowed to cite.
+   */
+  seedTitle?: { title: string; genres?: string[] } | null
+}
+
+/**
+ * Project a stored taste model into the signals the recommendation
+ * engine may cite. Pure projection — the model is not modified.
+ */
+export function tasteSignalsFromModel(
+  model: TasteModel,
+  seedTitle?: { title: string; genres?: string[] } | null,
+): TasteSignals {
+  return {
+    likedTitles: [...model.likedTitles],
+    favouriteTitles: [...model.favouriteTitles],
+    dislikedTitles: [...model.dislikedTitles],
+    notInterestedKeys: [...model.notInterestedKeys],
+    genreWeights: { ...model.genreWeights },
+    castWeights: { ...model.castWeights },
+    directorWeights: { ...model.directorWeights },
+    seedTitle: seedTitle ?? null,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Persistence (localStorage, same namespaced pattern as profiles.ts)
 // ---------------------------------------------------------------------------
 
