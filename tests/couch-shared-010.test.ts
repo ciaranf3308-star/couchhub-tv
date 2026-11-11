@@ -65,11 +65,12 @@ describe("C3 poster card (TvCard)", () => {
   });
 
   it("badges from the taxonomy kind label, with an explicit override", () => {
-    expect(tvCardAstro).toContain('contentKind?: TvContentKind');
-    expect(tvCardAstro).toContain('movie: "Movie"');
-    expect(tvCardAstro).toContain('"documentary-film": "Documentary Film"');
-    expect(tvCardAstro).toContain('"documentary-series": "Documentary Series"');
-    expect(tvCardAstro).toContain('live: "Live TV"');
+    // Integration: the label comes from W4's taxonomy.ts kindLabel —
+    // the single source of truth — never a local map in this file.
+    expect(tvCardAstro).toContain('import { kindLabel } from "@/scripts/lib/taxonomy.ts"');
+    expect(tvCardAstro).toContain("kindLabel(contentKind)");
+    expect(tvCardAstro).not.toContain("CONTENT_KIND_LABELS");
+    expect(tvCardAstro).toContain("contentKind?: TvContentKind");
     expect(tvCardAstro).toContain("badgeText");
   });
 

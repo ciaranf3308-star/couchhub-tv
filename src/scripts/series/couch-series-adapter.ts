@@ -164,6 +164,7 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
       genre: filter.genre,
       year: filter.year,
       minRating: filter.minRating,
+      maxRuntime: filter.maxRuntime,
       favoriteIds,
       watchlistIds,
       inProgressIds,

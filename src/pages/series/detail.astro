@@ -197,7 +197,6 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 
   <script>
     import "@/scripts/series/couch-detail.ts";
-    import { detailBackDecision } from "@/scripts/lib/couch-detail-presentation.ts";
     import { getActiveEntry } from "@/scripts/lib/creds.js";
     import {
       getActiveProfileId,
@@ -215,33 +214,6 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       isFavorite,
       isOnWatchlist,
     } from "@/scripts/lib/preferences.js";
-
-    // Back link: the detail controller wires history.back() for the
-    // retired /browse grid path; /series is the grid now, so this
-    // page wires the same decision for /series. Filters + focus
-    // survive the return trip because history.back() restores the
-    // page in place (B09); otherwise the href navigates to /series.
-    const backLink = document.getElementById("series-detail-back");
-    backLink?.addEventListener("click", (event) => {
-      if (
-        event.button !== 0 ||
-        event.ctrlKey ||
-        event.metaKey ||
-        event.shiftKey ||
-        event.altKey
-      ) {
-        return;
-      }
-      const decision = detailBackDecision({
-        referrer: document.referrer,
-        origin: location.origin,
-        gridPath: "/series",
-        historyLength: history.length,
-      });
-      if (decision !== "history-back") return;
-      event.preventDefault();
-      history.back();
-    });
 
     // Feedback menu (B06): one contextual menu on the detail screen.
     const feedbackStatus = document.getElementById("series-feedback-status");

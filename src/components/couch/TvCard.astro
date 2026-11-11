@@ -11,10 +11,10 @@
 // FITTED), contentKind? (taxonomy kind — 'movie' | 'series' |
 // 'documentary-film' | 'documentary-series' | 'live'; the badge
 // shows its C1 kindLabel — 'Movie' | 'Series' | 'Documentary Film'
-// | 'Documentary Series' | 'Live TV'. W4 owns taxonomy.ts; until a
-// caller passes kindLabel() through `badge`, this local label map
-// carries the same strings — keep them in sync with C1), badge?
-// (explicit badge text; wins over contentKind), subtitle?
+// | 'Documentary Series' | 'Live TV'. The label comes from W4's
+// taxonomy.ts (kindLabel) — the single source of truth, so a title
+// is never a "Movie" on one screen and a "Series" on another.
+// badge? (explicit badge text; wins over contentKind), subtitle?
 // (legacy alias: used as the metadata line ONLY when no meta /
 // year / runtime / episode count is given), progress? (0..1 watched
 // fraction), href?, itemKey? (stable key for per-route focus memory
@@ -42,6 +42,7 @@
 // rename them. data-content-kind is set when contentKind is given,
 // so rails can key off the kind without parsing the badge text.
 import TvImage from "./TvImage.astro";
+import { kindLabel } from "@/scripts/lib/taxonomy.ts";
 
 export type TvCardKind = "poster" | "landscape" | "channel";
 
@@ -53,14 +54,6 @@ export type TvContentKind =
   | "documentary-series"
   | "live";
 
-/** C1 kindLabel strings — keep in sync with taxonomy.ts. */
-const CONTENT_KIND_LABELS: Record<TvContentKind, string> = {
-  movie: "Movie",
-  series: "Series",
-  "documentary-film": "Documentary Film",
-  "documentary-series": "Documentary Series",
-  live: "Live TV",
-};
 
 interface Props {
   title: string;
@@ -103,8 +96,9 @@ const pct =
     : null;
 const hasDetailSlot = Astro.slots.has("detail");
 const Tag = href ? "a" : "div";
-// Badge: explicit text wins; otherwise the taxonomy kind label.
-const badgeText = badge ?? (contentKind ? CONTENT_KIND_LABELS[contentKind] : undefined);
+// Badge: explicit text wins; otherwise the C1 taxonomy kind label
+// (kindLabel from taxonomy.ts — the single source of truth).
+const badgeText = badge ?? (contentKind ? kindLabel(contentKind) : undefined);
 // ONE metadata line: explicit meta, else year · runtime · episodes
 // (only the parts supplied), else the legacy subtitle.
 const yearText = year == null || year === "" ? "" : String(year).trim();

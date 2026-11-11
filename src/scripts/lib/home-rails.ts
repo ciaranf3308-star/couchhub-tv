@@ -1706,6 +1706,12 @@ function buildGenreRails(ctx: BuildContext, startIndex: number): HomeRail[] {
       }
       if (tieredQuality(candidate) < minBayesian) return false
       if (minVotes > 0 && !hasTieredSupport(candidate, minVotes)) return false
+      // Genre pools require evidence too: a no-vote 10.0 with no
+      // TMDb match scores the prior mean (6.5) and would otherwise
+      // sit mid-list in a genre rail. Real votes (any count) or a
+      // TMDb match with a real rating count as evidence; without
+      // either the title stays out of every genre pool.
+      if (!hasAnyEvidence(candidate)) return false
       return true
     })
     if (pool.length < GENRE_RAIL_MIN_ITEMS) continue

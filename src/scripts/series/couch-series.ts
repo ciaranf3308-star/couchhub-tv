@@ -12,8 +12,10 @@ import {
   parseYear,
   yearMatches,
   ratingMatches,
+  runtimeMatches,
 } from "@/scripts/lib/browse-filters.ts";
 import { genreForCategoryName, parseGenreString, type GenreId } from "@/scripts/lib/genres.ts";
+import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 import { isGenericEpisodeTitle } from "@/scripts/lib/episode-title.ts";
 import {
@@ -154,6 +156,11 @@ export interface SeriesFilter {
   category?: string;
   year?: string;
   minRating?: number;
+  /** Maximum runtime in minutes (0 = any length). B09 — series rows
+   * carry no runtime metadata, so the runtime control is never
+   * offered on /series (C5 availability gate); the check stays here
+   * so the filter is honoured if rows ever gain a duration. */
+  maxRuntime?: number;
   favoriteIds?: Set<number> | null;
   watchlistIds?: Set<number> | null;
   followedIds?: Set<number> | null;
@@ -169,6 +176,7 @@ export function filterSeries(rows: SeriesRow[], filter: SeriesFilter): SeriesRow
   const category = filter.category || "";
   const year = filter.year || "";
   const minRating = filter.minRating || 0;
+  const maxRuntime = filter.maxRuntime || 0;
   return rows.filter((row) => {
     if (tokens.length) {
       const hay = row.norm || normalize(`${row.name} ${row.category} ${row.year}`);
@@ -178,6 +186,7 @@ export function filterSeries(rows: SeriesRow[], filter: SeriesFilter): SeriesRow
     if (genre && !seriesGenres(row).includes(genre)) return false;
     if (!yearMatches(row.year, year)) return false;
     if (!ratingMatches(row.rating, minRating)) return false;
+    if (!runtimeMatches(row, maxRuntime)) return false;
     if (filter.favoriteIds && !filter.favoriteIds.has(row.id)) return false;
     if (filter.watchlistIds && !filter.watchlistIds.has(row.id)) return false;
     if (filter.followedIds && !filter.followedIds.has(row.id)) return false;
@@ -256,9 +265,13 @@ export interface GenreCollection<T> {
   rows: T[];
 }
 
-/** True when the row's provider category marks it a documentary. */
+/** True when the row is a documentary (C1 classifyTitle — the kind
+ * decision; genres stay attributes). The adapter knows this is a
+ * series row, so the base type is passed explicitly — without it a
+ * documentary series whose category carries no series token would
+ * misclassify as a documentary film. */
 export function isDocumentarySeries(row: SeriesRow): boolean {
-  return seriesGenres(row).includes("documentary");
+  return isDocumentaryKind(classifyTitle({ type: "series", category: row.category }));
 }
 
 /** True when the provider category names reality TV. */

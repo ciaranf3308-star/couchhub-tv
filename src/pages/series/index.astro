@@ -87,6 +87,13 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
           It lives in the filter row with Sort / Decade / Rating.
         */}
         <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
+        {/*
+          RUNTIME FILTER (B09): the controller renders ONE labelled
+          Length select into this mount point — only when the
+          catalogue carries runtime metadata (movies do; series
+          rows carry none, so the mount stays empty on /series).
+        */}
+        <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
     </div>
   </section>
 
@@ -198,6 +205,24 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       gap: 0.75rem;
     }
     .rs-browse-genre-filter select {
+      min-height: 3rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-surface);
+      color: var(--rs-text);
+      font-size: 1.125rem;
+    }
+    /* Runtime filter (B09): same treatment as the genre filter —
+       the controller renders ONE labelled Length select into the
+       .rs-browse-runtime-filter mount point, only when the catalogue
+       carries runtime metadata. */
+    .rs-browse-runtime-filter {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .rs-browse-runtime-filter select {
       min-height: 3rem;
       padding: 0.5rem 0.75rem;
       border-radius: 0.75rem;

@@ -12,12 +12,14 @@ import {
   parseYear,
   yearMatches,
   ratingMatches,
+  runtimeMatches,
 } from "@/scripts/lib/browse-filters.ts";
 import {
   genreForCategoryName,
   parseGenreString,
   type GenreId,
 } from "@/scripts/lib/genres.ts";
+import { classifyTitle, isDocumentaryKind } from "@/scripts/lib/taxonomy.ts";
 import { ratingSortValue } from "@/scripts/lib/format.ts";
 
 export interface MovieRow {
@@ -181,6 +183,10 @@ export interface MovieFilter {
   year?: string;
   /** Minimum rating (0 = any). */
   minRating?: number;
+  /** Maximum runtime in minutes (0 = any length). B09 — reads the
+   * provider duration via runtimeMatches; a title with no parseable
+   * runtime cannot be shown to fit a limit. */
+  maxRuntime?: number;
   /** Favourite / watchlist id sets, when filtering to a personal list. */
   favoriteIds?: Set<number> | null;
   watchlistIds?: Set<number> | null;
@@ -209,6 +215,7 @@ export function filterMovies(rows: MovieRow[], filter: MovieFilter): MovieRow[] 
   const category = filter.category || "";
   const year = filter.year || "";
   const minRating = filter.minRating || 0;
+  const maxRuntime = filter.maxRuntime || 0;
   return rows.filter((row) => {
     if (tokens.length) {
       const hay = row.norm || normalize(`${row.name} ${row.category} ${row.year}`);
@@ -218,6 +225,7 @@ export function filterMovies(rows: MovieRow[], filter: MovieFilter): MovieRow[] 
     if (genre && !movieGenres(row).includes(genre)) return false;
     if (!yearMatches(row.year, year)) return false;
     if (!ratingMatches(row.rating, minRating)) return false;
+    if (!runtimeMatches(row, maxRuntime)) return false;
     if (filter.favoriteIds && !filter.favoriteIds.has(row.id)) return false;
     if (filter.watchlistIds && !filter.watchlistIds.has(row.id)) return false;
     if (filter.inProgressIds && !filter.inProgressIds.has(row.id)) return false;
@@ -313,9 +321,13 @@ export interface GenreCollection<T> {
   rows: T[];
 }
 
-/** True when the row's provider category marks it a documentary. */
+/** True when the row is a documentary (C1 classifyTitle — the kind
+ * decision; genres stay attributes, so a crime documentary is a
+ * documentary, not a crime drama). The adapter knows this is a
+ * movie row, so the base type is passed explicitly — a bare row
+ * carries no type field for the film/series split. */
 export function isDocumentaryMovie(row: MovieRow): boolean {
-  return movieGenres(row).includes("documentary");
+  return isDocumentaryKind(classifyTitle({ type: "movie", category: row.category }));
 }
 
 const MOVIE_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: GenreId }> = [
