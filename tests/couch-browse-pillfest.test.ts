@@ -378,35 +378,31 @@ describe("list tabs: one segmented control, all five lists work", () => {
   });
 });
 
-describe("no pill-cluster markup remains in the Browse views", () => {
-  it("the genre mount point lives inside the filter row in both Browse sections", () => {
-    // 0.8.0 integration (W3): the standalone /movies and /series
-    // pages are redirects into /browse — the genre mount lives in
-    // Browse's movies + series sections, not in three separate pages.
-    for (const prefix of ["browse-movies-", "browse-series-"] as const) {
-      // The Genre select mount sits after the Rating select and before
-      // the list tabs — i.e. inside the one filter row.
-      const ratingIdx = browseAstro.indexOf(`id="${prefix}couch-browse-rating"`);
-      const genreIdx = browseAstro.indexOf(`id="${prefix}couch-browse-genres"`);
-      const tabsIdx = browseAstro.indexOf(`id="${prefix}couch-browse-tabs"`);
-      expect(ratingIdx, `browse.astro ${prefix} rating`).toBeGreaterThan(-1);
-      expect(genreIdx, `browse.astro ${prefix} genre mount`).toBeGreaterThan(-1);
-      expect(tabsIdx, `browse.astro ${prefix} tabs`).toBeGreaterThan(-1);
-      expect(genreIdx, `browse.astro ${prefix} genre after rating`).toBeGreaterThan(ratingIdx);
-      expect(genreIdx, `browse.astro ${prefix} genre before tabs`).toBeLessThan(tabsIdx);
-    }
-    expect(browseAstro).toContain("rs-browse-segmented");
-    expect(browseAstro).toContain("rs-browse-genre-filter");
-    expect(browseAstro).not.toContain('class="rs-browse-genres"');
-    // The retired standalone pages are pure redirects — no filter
-    // markup of any kind lives there any more.
+describe("no pill-cluster markup remains in the catalogue views", () => {
+  it("the genre mount point lives inside the filter row on each standalone page", () => {
+    // 0.10.0 split: /movies and /series are real pages again — the
+    // genre mount lives in each page's own filter row, not in
+    // browse.astro (which is only a client-side redirect now).
+    expect(browseAstro).toContain("location.replace");
+    expect(browseAstro).not.toContain("couch-browse-genres");
     for (const [name, src] of [
       ["movies/index.astro", moviesAstro],
       ["series/index.astro", seriesAstro],
     ] as const) {
-      expect(src, name).toContain("Astro.redirect");
-      expect(src, name).not.toContain("couch-browse-genres");
-      expect(src, name).not.toContain("rs-browse-segmented");
+      // The Genre select mount sits after the Rating select and before
+      // the list tabs — i.e. inside the one filter row.
+      const ratingIdx = src.indexOf('id="couch-browse-rating"');
+      const genreIdx = src.indexOf('id="couch-browse-genres"');
+      const tabsIdx = src.indexOf('id="couch-browse-tabs"');
+      expect(ratingIdx, `${name} rating`).toBeGreaterThan(-1);
+      expect(genreIdx, `${name} genre mount`).toBeGreaterThan(-1);
+      expect(tabsIdx, `${name} tabs`).toBeGreaterThan(-1);
+      expect(genreIdx, `${name} genre after rating`).toBeGreaterThan(ratingIdx);
+      expect(genreIdx, `${name} genre before tabs`).toBeLessThan(tabsIdx);
+      expect(src, name).toContain("rs-browse-segmented");
+      expect(src, name).toContain("rs-browse-genre-filter");
+      expect(src, name).not.toContain('class="rs-browse-genres"');
+      expect(src, name).not.toContain("Astro.redirect");
     }
   });
 
@@ -424,9 +420,9 @@ describe("no pill-cluster markup remains in the Browse views", () => {
     expect(discoverView).toContain("discover-fb-btn");
   });
 
-  it("the type segmented control is untouched (three items, still the pattern)", () => {
-    expect(browseAstro).toContain('data-browse-type="all"');
-    expect(browseAstro).toContain('data-browse-type="movies"');
-    expect(browseAstro).toContain('data-browse-type="series"');
+  it("there is no Browse type switcher any more — Movies / Series / Discover are nav destinations", () => {
+    expect(browseAstro).not.toContain('data-browse-type="all"');
+    expect(browseAstro).not.toContain('data-browse-type="movies"');
+    expect(browseAstro).not.toContain('data-browse-type="series"');
   });
 });

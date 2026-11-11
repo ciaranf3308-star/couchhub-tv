@@ -28,6 +28,7 @@ import {
   movieProgressFraction,
   pickFeaturedMovie,
   genreDisplayLabel,
+  movieGenreCollections,
   type MovieRow,
 } from "@/scripts/movies/couch-movies.ts";
 import { MOVIE_SORT_MODES } from "@/scripts/movies/couch-movies.ts";
@@ -77,7 +78,7 @@ export const moviesAdapter: CouchBrowseAdapter<MovieRow> = {
     );
     const watchLaterRows = rows.filter((row) => watchIds.has(row.id));
     const featured = pickFeaturedMovie(rows);
-    return [
+    const rails = [
       { id: "movies-continue", title: "Continue Watching", rows: continueRows },
       { id: "movies-featured", title: "Featured", rows: featured ? [featured] : [] },
       { id: "movies-recent", title: "Recently Added", rows: recentRows },
@@ -85,6 +86,17 @@ export const moviesAdapter: CouchBrowseAdapter<MovieRow> = {
       { id: "movies-favorites", title: "Favourites", rows: favoriteRows },
       { id: "movies-watchlater", title: "Watch Later", rows: watchLaterRows },
     ];
+    // B08 genre collections (Action, Thriller, Comedy, Horror,
+    // Science Fiction, Drama, Documentary Films) built from real
+    // catalogue metadata by movieGenreCollections — only non-empty
+    // ones come back. Rails already present above (Recently Added)
+    // are not duplicated: the builder is the single source of truth
+    // for which genre collections exist.
+    const seen = new Set(rails.map((rail) => rail.id));
+    for (const collection of movieGenreCollections(rows)) {
+      if (!seen.has(collection.id)) rails.push(collection);
+    }
+    return rails;
   },
   genres: (rows) =>
     catalogueGenres(rows).map(({ id, count }) => ({

@@ -274,13 +274,31 @@ describe("focus restoration after a detail return", () => {
   });
 });
 
-describe("browse.astro markup contract", () => {
-  it("hosts DiscoverView and both catalogue sections, each with its own prefixed ids", () => {
-    expect(browseAstro).toContain("DiscoverView");
-    expect(browseAstro).toContain('id="browse-discover"');
-    expect(browseAstro).toContain('id="browse-movies"');
-    expect(browseAstro).toContain('id="browse-series"');
-    for (const prefix of ["browse-movies-", "browse-series-"]) {
+describe("browse.astro markup contract (0.10.0 split)", () => {
+  it("/browse is only a thin redirect — no sections, no DiscoverView, no search slot", () => {
+    // Client-side redirect (static build: a frontmatter redirect
+    // would bake in one target and never branch on the query).
+    expect(browseAstro).toContain("location.replace");
+    expect(browseAstro).toContain('"/movies"');
+    expect(browseAstro).toContain('"/series"');
+    expect(browseAstro).toContain('"/discover"');
+    expect(browseAstro).not.toContain("Astro.redirect");
+    expect(browseAstro).not.toContain("DiscoverView");
+    expect(browseAstro).not.toContain('id="browse-discover"');
+    expect(browseAstro).not.toContain('id="browse-movies"');
+    expect(browseAstro).not.toContain('id="browse-series"');
+    expect(browseAstro).not.toContain("browse-search-slot");
+    expect(browseAstro).not.toContain("TvSearchAction");
+  });
+
+  it("the standalone catalogue pages host the sections with bare ids", () => {
+    // 0.10.0: the markup that lived in browse.astro's prefixed
+    // sections moved back out to /movies and /series, which mount one
+    // controller each on the bare DOM ids.
+    for (const pageAstro of [
+      readFileSync(resolve(here, "../src/pages/movies/index.astro"), "utf8"),
+      readFileSync(resolve(here, "../src/pages/series/index.astro"), "utf8"),
+    ]) {
       for (const id of [
         "couch-browse-status",
         "couch-browse-hero-count",
@@ -296,39 +314,40 @@ describe("browse.astro markup contract", () => {
         "couch-browse-empty",
         "couch-browse-error",
       ]) {
-        expect(browseAstro).toContain(`id="${prefix}${id}"`);
+        expect(pageAstro).toContain(`id="${id}"`);
       }
       // One search dialog per kind, wired to its own open button.
-      expect(browseAstro).toContain(`id="${prefix}couch-search-dialog"`);
-      expect(browseAstro).toContain(
-        `data-couch-dialog-open="${prefix}couch-search-dialog"`,
+      expect(pageAstro).toContain('id="couch-search-dialog"');
+      expect(pageAstro).toContain(
+        'data-couch-dialog-open="couch-search-dialog"',
       );
+    }
+    // No prefixed ids leak into the standalone pages.
+    for (const pageAstro of [
+      readFileSync(resolve(here, "../src/pages/movies/index.astro"), "utf8"),
+      readFileSync(resolve(here, "../src/pages/series/index.astro"), "utf8"),
+    ]) {
+      expect(pageAstro).not.toContain("browse-movies-");
+      expect(pageAstro).not.toContain("browse-series-");
     }
   });
 
-  it("has no bare (unprefixed) couch-browse ids — the two controllers would collide", () => {
-    const bare = browseAstro.match(/id="couch-browse-[a-z-]+"/g) ?? [];
-    expect(bare).toEqual([]);
-    const bareDialog = browseAstro.match(/id="couch-search-dialog"/g) ?? [];
-    expect(bareDialog).toEqual([]);
+  it("keeps the empty states on the standalone pages", () => {
+    expect(
+      readFileSync(resolve(here, "../src/pages/movies/index.astro"), "utf8"),
+    ).toContain("No movies yet");
+    expect(
+      readFileSync(resolve(here, "../src/pages/series/index.astro"), "utf8"),
+    ).toContain("No series yet");
   });
 
-  it("keeps the empty states for both kinds on the page", () => {
-    expect(browseAstro).toContain('id="browse-movies-couch-browse-empty"');
-    expect(browseAstro).toContain('id="browse-series-couch-browse-empty"');
-    expect(browseAstro).toContain("No movies yet");
-    expect(browseAstro).toContain("No series yet");
-  });
-
-  it("mounts W2's TvSearchAction in the search slot (integration)", () => {
-    // Integration wired W2's component into W1's slot: the slot is
-    // no longer empty — it mounts the search action client:load so
-    // the return trip from /search restores focus to it.
-    expect(browseAstro).toContain("browse-search-slot");
-    expect(browseAstro).toContain(
-      'import TvSearchAction from "@/components/couch/TvSearchAction.svelte"',
+  it("/discover hosts DiscoverView (W3's page shell)", () => {
+    const discoverAstro = readFileSync(
+      resolve(here, "../src/pages/discover.astro"),
+      "utf8",
     );
-    expect(browseAstro).toMatch(/<TvSearchAction client:load \/>/);
+    expect(discoverAstro).toContain("DiscoverView");
+    expect(discoverAstro).not.toContain("Astro.redirect");
   });
 
   it("does not reintroduce serif or rebuild the Discover engines", () => {

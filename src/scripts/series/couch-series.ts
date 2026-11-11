@@ -237,6 +237,105 @@ export function catalogueSeriesGenres(rows: SeriesRow[]): Array<{ id: GenreId; c
 }
 
 // ---------------------------------------------------------------------------
+// Genre collections (B08, 0.10.0) — meaningful rails built from real
+// catalogue metadata. Only non-empty collections are returned, so the
+// page never exposes an empty or unsupported category. Documentaries
+// are a kind of their own: a documentary series appears ONLY in
+// "Documentary Series", never in a fictional genre collection, even
+// when its provider category also names that genre (C1 rule).
+// "Reality" has no canonical genre id (TMDb 10764 is deliberately
+// unmapped in genres.ts), so it is matched on the provider category
+// text ("Reality", "Reality TV") — never on the title alone.
+// ---------------------------------------------------------------------------
+
+export interface GenreCollection<T> {
+  /** Stable rail id, e.g. "series-genre-crime-drama". */
+  id: string;
+  /** Rail title, e.g. "Crime Drama". */
+  title: string;
+  rows: T[];
+}
+
+/** True when the row's provider category marks it a documentary. */
+export function isDocumentarySeries(row: SeriesRow): boolean {
+  return seriesGenres(row).includes("documentary");
+}
+
+/** True when the provider category names reality TV. */
+export function isRealitySeries(row: SeriesRow): boolean {
+  return /reality/i.test(row.category || "");
+}
+
+const SERIES_GENRE_COLLECTION_DEFS: Array<{ id: string; title: string; genre: GenreId }> = [
+  { id: "series-genre-crime-drama", title: "Crime Drama", genre: "crime" },
+  { id: "series-genre-comedy", title: "Comedy", genre: "comedy" },
+  { id: "series-genre-sci-fi", title: "Science Fiction", genre: "sci-fi" },
+];
+
+export interface SeriesCollectionOptions {
+  /** Ids with saved in-progress episode state (Continue Watching). */
+  inProgressIds?: Set<number> | null;
+}
+
+/**
+ * B08 series collections, in display order: Crime Drama, Comedy,
+ * Science Fiction, Documentary Series, Reality, Recently Added,
+ * Continue Watching. Genre collections are highest-rated first;
+ * Recently Added is newest-first; Continue Watching keeps catalogue
+ * order. Empty collections are omitted. Pure — no provider, DOM or
+ * storage access.
+ */
+export function seriesGenreCollections(
+  rows: SeriesRow[],
+  opts: SeriesCollectionOptions = {},
+): GenreCollection<SeriesRow>[] {
+  const out: GenreCollection<SeriesRow>[] = [];
+  const fictional = (row: SeriesRow) => !isDocumentarySeries(row);
+  for (const def of SERIES_GENRE_COLLECTION_DEFS) {
+    const members = rows.filter(
+      (row) => fictional(row) && seriesGenres(row).includes(def.genre),
+    );
+    if (members.length) {
+      out.push({ id: def.id, title: def.title, rows: sortSeries(members, "rating") });
+    }
+  }
+  const documentaries = rows.filter((row) => isDocumentarySeries(row));
+  if (documentaries.length) {
+    out.push({
+      id: "series-genre-documentary",
+      title: "Documentary Series",
+      rows: sortSeries(documentaries, "rating"),
+    });
+  }
+  const reality = rows.filter((row) => fictional(row) && isRealitySeries(row));
+  if (reality.length) {
+    out.push({
+      id: "series-genre-reality",
+      title: "Reality",
+      rows: sortSeries(reality, "rating"),
+    });
+  }
+  if (rows.length) {
+    out.push({
+      id: "series-recent",
+      title: "Recently Added",
+      rows: sortSeries(rows, "added"),
+    });
+  }
+  if (opts.inProgressIds?.size) {
+    const continuing = rows.filter((row) => opts.inProgressIds!.has(row.id));
+    if (continuing.length) {
+      out.push({
+        id: "series-continue",
+        title: "Continue Watching",
+        rows: continuing,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Episodes — get_series_info payload -> grouped, sorted episodes.
 // ---------------------------------------------------------------------------
 
