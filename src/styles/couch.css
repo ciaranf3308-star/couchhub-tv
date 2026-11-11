@@ -3629,6 +3629,245 @@ html[data-couch] .rs-guide-channel-dayhint {
   }
 }
 
+/* Live TV 0.11.0 — Guide composition (W6) ───────────────────────
+ * Mockup 3's Guide panel: On Now is featured-left + Now/Next
+ * list-right (never stacked full-width rows); Tonight's featured
+ * programme is art-led (photo, no enclosing rectangle); By
+ * Channel rows are time-led (no repeated logo/channel per row).
+ * Burgundy 346–351° tokens only; no new colours, no nested
+ * panels — the featured art image is the visual, not a box. */
+/* On Now: featured column + Now/Next list column. */
+html[data-couch] .rs-guide-now {
+  display: flex;
+  gap: 2rem;
+  flex: 1;
+  min-height: 0;
+}
+html[data-couch] .rs-guide-now-featured {
+  flex: 0 0 34%;
+  min-width: 24rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+html[data-couch] .rs-guide-now-featured[hidden] {
+  display: none;
+}
+html[data-couch] .rs-guide-now-listwrap {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+html[data-couch] .rs-guide-now-head {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  padding: 0.25rem 1.25rem 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-text-2);
+  flex-shrink: 0;
+}
+/* Featured programme — art-led, no enclosing rectangle. The
+   --now variant stacks art over text (narrow left column); the
+   --art variant (Tonight) puts art left of the text. */
+html[data-couch] .rs-guide-featured--now,
+html[data-couch] .rs-guide-featured--art {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+html[data-couch] .rs-guide-featured--now {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+}
+html[data-couch] .rs-guide-featured--art {
+  flex-direction: row;
+  gap: 1.5rem;
+}
+html[data-couch] .rs-guide-featured--art .rs-guide-featured__art {
+  flex: 0 0 30rem;
+}
+html[data-couch] .rs-guide-featured__art {
+  display: block;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 1rem;
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--rs-accent) 55%, #1a0508),
+    color-mix(in srgb, var(--rs-focus) 30%, #160408)
+  );
+  flex-shrink: 0;
+}
+html[data-couch] .rs-guide-featured__art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+html[data-couch] .rs-guide-featured__art-logo {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: 55%;
+  max-height: 55%;
+  object-fit: contain;
+}
+html[data-couch] .rs-guide-featured__art-name {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-guide-featured__progress {
+  display: block;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--rs-surface-2);
+  overflow: hidden;
+}
+html[data-couch] .rs-guide-featured__progress > span {
+  display: block;
+  height: 100%;
+  background: var(--rs-accent);
+  border-radius: 999px;
+}
+html[data-couch] .rs-guide-featured__next {
+  font-size: 1.15rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* On Now list rows: channel | now | next. */
+html[data-couch] .rs-guide-row--nownav {
+  display: grid;
+  grid-template-columns: 15rem minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+html[data-couch] .rs-guide-nownav__channel {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+html[data-couch] .rs-guide-nownav__logo {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-guide-nownav__logo--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-guide-nownav__name {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-guide-nownav__now,
+html[data-couch] .rs-guide-nownav__next {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+html[data-couch] .rs-guide-nownav__title {
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-guide-nownav__title--next {
+  font-family: var(--rs-font-body);
+  font-size: 1.25rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-guide-nownav__time {
+  font-size: 1.1rem;
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* By Channel: time-led schedule rows + "on now" picker lines. */
+html[data-couch] .rs-guide-row--channel {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+html[data-couch] .rs-guide-channelrow__time {
+  font-size: 1.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-guide-channelrow__end {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-guide-channel-pick__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+html[data-couch] .rs-guide-channel-pick__now {
+  font-size: 1.05rem;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 75rem) {
+  html[data-couch] .rs-guide-now {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  html[data-couch] .rs-guide-now-featured {
+    flex: none;
+    min-width: 0;
+    overflow: visible;
+  }
+  html[data-couch] .rs-guide-featured--art {
+    flex-direction: column;
+  }
+  html[data-couch] .rs-guide-featured--art .rs-guide-featured__art {
+    flex: none;
+  }
+}
+
 /* ── INTEGRATION 0.9.0 — browser screen title + shell head ───── */
 /* Mockup 1's browser carries its own "Channel Browser" title, and
    mockup 3's guide carries its tabs — neither shows the shell's
