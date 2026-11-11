@@ -1596,12 +1596,26 @@ const navStructure: NavSection[] = [
             <span class="icon-mark">
               <IconSparkles aria-hidden="true" stroke={2} />
             </span>
-            <h3 data-i18n="settings.ai.title" class="text-base font-semibold">AI Discovery (optional)</h3>
+            <h3 class="text-base font-semibold">AI &amp; Recommendations</h3>
           </div>
-          <p data-i18n="settings.ai.helper" class="settings-surface__helper text-xs text-fg-3">
-            Optional AI-powered ranking for Discover. Your search text, a short list of candidate titles and your taste summary go to your chosen AI provider. Your watch history, IPTV credentials and stream links are never sent.
+          <p class="settings-surface__helper text-xs text-fg-3">
+            Optional AI-powered ranking for Discover. Your search text and a short list of candidate titles go to your chosen AI provider only when you ask a question. Your watch history, IPTV credentials and stream links are never sent unless you switch sharing on below. AI use is billed separately by your provider.
           </p>
           <div class="settings-rows">
+
+            <!-- Connection status (AI03) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Connection status</h3>
+                <p class="text-xs text-fg-3">
+                  <span id="settings-ai-status-detail">Checking…</span>
+                  <span id="settings-ai-last-tested" class="block"></span>
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+                <span id="settings-ai-status" aria-live="polite" class="text-sm font-medium">Checking…</span>
+              </div>
+            </div>
 
             <!-- Enable AI Discovery -->
             <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
@@ -1638,6 +1652,26 @@ const navStructure: NavSection[] = [
               </script>
             </div>
 
+            <!-- Provider (AI02) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Provider</h3>
+                <p class="text-xs text-fg-3">
+                  OpenAI, or any OpenAI-compatible API. Picking OpenAI fills in its endpoint below.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-provider"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="AI provider">
+                  <button type="button" data-provider="openai" aria-pressed="false" class="ai-provider-btn btn">OpenAI</button>
+                  <button type="button" data-provider="other" aria-pressed="false" class="ai-provider-btn btn">Other provider</button>
+                </div>
+              </div>
+            </div>
+
             <!-- Provider endpoint -->
             <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
@@ -1658,22 +1692,33 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
-            <!-- Model -->
+            <!-- Model (AI02) -->
             <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
-                <h3 data-i18n="settings.ai.model" class="text-sm font-medium leading-snug">Model</h3>
-                <p data-i18n="settings.ai.modelHelper" class="text-xs text-fg-3">
-                  Model name on your provider, e.g. gpt-4o-mini.
+                <h3 class="text-sm font-medium leading-snug">Model</h3>
+                <p class="text-xs text-fg-3">
+                  Model on your provider. Smaller models cost less per question.
                 </p>
               </div>
               <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
-                <input
+                <select
                   id="settings-ai-model"
+                  class="field-input flex-1 min-w-0"
+                  aria-label="AI model">
+                  <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
+                  <option value="gpt-4o">gpt-4o — higher quality</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
+                  <option value="gpt-4.1">gpt-4.1 — higher quality</option>
+                  <option value="o4-mini">o4-mini — reasoning, low cost</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <input
+                  id="settings-ai-model-custom"
                   type="text"
                   autocomplete="off"
                   spellcheck="false"
-                  placeholder="e.g. gpt-4o-mini"
-                  class="field-input font-mono flex-1 min-w-0"
+                  placeholder="Custom model name"
+                  class="field-input font-mono flex-1 min-w-0 hidden"
                 />
               </div>
             </div>
@@ -1684,6 +1729,13 @@ const navStructure: NavSection[] = [
                 <h3 data-i18n="settings.ai.apiKey" class="text-sm font-medium leading-snug">API key</h3>
                 <p class="text-xs text-fg-3">
                   <span data-i18n="settings.ai.apiKeyHelper">Stored in your device's credential store (Windows Credential Manager on this PC), never in the app's files. It is never shown back in full.</span>
+                  <a
+                    id="settings-ai-keys-link"
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="underline underline-offset-2">Get a key at platform.openai.com</a>
+                  <span id="settings-ai-keys-note" class="hidden">Get a key from your provider's dashboard.</span>
                 </p>
               </div>
               <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
@@ -1715,7 +1767,65 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
-            <!-- Test connection -->
+            <!-- Cost + privacy (AI05) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Cost</h3>
+                <p class="text-xs text-fg-3">
+                  AI questions are billed separately by your provider, per question. A ChatGPT subscription does not include API usage — API calls are charged on top, even if you already pay for ChatGPT.
+                </p>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Share viewing history &amp; preferences</h3>
+                <p class="text-xs text-fg-3">
+                  Off by default. When on, Discover also sends a short taste summary (favourite genres, liked and disliked titles) so picks fit you better. Your full watch history, IPTV credentials and stream links are never sent.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-share-taste"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Share viewing history and preferences with the AI provider">
+                  <button type="button" data-share="on" aria-pressed="false" class="ai-share-btn btn">On</button>
+                  <button type="button" data-share="off" aria-pressed="false" class="ai-share-btn btn">Off</button>
+                </div>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">When AI is asked</h3>
+                <p class="text-xs text-fg-3">
+                  Manual (recommended): searching runs locally and you tap “Ask AI” for one question at a time. Automatic: submitting a question in Discover sends it to AI straight away. AI is never asked while browsing, scrolling or changing focus.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-auto"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="When AI is asked">
+                  <button type="button" data-auto="manual" aria-pressed="false" class="ai-auto-btn btn">Manual</button>
+                  <button type="button" data-auto="auto" aria-pressed="false" class="ai-auto-btn btn">Automatic</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Setup steps (AI02) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Set up in four steps</h3>
+                <p class="text-xs text-fg-3">
+                  1. Create an API key at your provider (link above) and make sure billing is enabled there. 2. Paste the key here — it is saved in the credential store, never in a file. 3. Pick a model. 4. Press Test connection below. Discover keeps working locally until then.
+                </p>
+              </div>
+            </div>
+
+            <!-- Test connection (AI03) -->
             <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
                 <h3 data-i18n="settings.ai.test" class="text-sm font-medium leading-snug">Test connection</h3>
@@ -1733,13 +1843,17 @@ const navStructure: NavSection[] = [
                   id="settings-ai-msg"
                   aria-live="polite"
                   class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+                <span
+                  id="settings-ai-test-detail"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 empty:hidden"></span>
               </div>
             </div>
 
           </div>
         </div>
 
-        <!-- Network log: developer-mode only, unhidden by the script below -->
+<!-- Network log: developer-mode only, unhidden by the script below -->
         <details id="card-net-log" data-settings-item class="changelog-outer settings-surface icon-mark-host group hidden scroll-mt-6 lg:scroll-mt-20">
           <summary class="settings-surface__header cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden pb-5 sm:pb-6">
             <span class="icon-mark">
@@ -2791,7 +2905,22 @@ const navStructure: NavSection[] = [
       setAiEnabled,
     } from "@/scripts/lib/app-settings.js"
     import { validateTmdbKey } from "@/scripts/lib/tmdb.ts"
-    import { saveAiKey, deleteAiKey, hasAiKey, testAiConnection } from "@/scripts/lib/ai/keystore.ts"
+    import { saveAiKey, deleteAiKey, hasAiKey } from "@/scripts/lib/ai/keystore.ts"
+    import {
+      getAiStatus,
+      testAiConnection,
+      aiStatusMessage,
+      clearAiTestRecord,
+      getAiShareTaste,
+      setAiShareTaste,
+      getAiAutoRequests,
+      setAiAutoRequests,
+      getAiProvider,
+      setAiProvider,
+      AI_MODE_LABELS,
+      OPENAI_ENDPOINT,
+      OPENAI_KEYS_URL,
+    } from "@/scripts/lib/ai/status.ts"
     import { initAI } from "@/scripts/lib/ai/init.ts"
     import { bindExternalLinks } from "@/scripts/lib/external-link.js"
     import { bindBackupRestore } from "@/scripts/lib/restore-backup.js"
@@ -5435,13 +5564,18 @@ const navStructure: NavSection[] = [
     // -------------------------------------------------------------------
     // AI Discovery (optional) — key lives in the OS credential store,
     // never in localStorage; the field is never filled back from it.
+    // Status + verification live in ai/status.ts (C4); this block only
+    // wires the card's controls to it.
     // -------------------------------------------------------------------
     const aiEnabledGroup = document.getElementById("settings-ai-enabled")
     const aiEndpointInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-ai-endpoint")
     )
-    const aiModelInput = /** @type {HTMLInputElement|null} */ (
+    const aiModelSelect = /** @type {HTMLSelectElement|null} */ (
       document.getElementById("settings-ai-model")
+    )
+    const aiModelCustomInput = /** @type {HTMLInputElement|null} */ (
+      document.getElementById("settings-ai-model-custom")
     )
     const aiKeyInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-ai-key")
@@ -5457,6 +5591,38 @@ const navStructure: NavSection[] = [
     )
     const aiKeyStatusEl = document.getElementById("settings-ai-key-status")
     const aiMsgEl = document.getElementById("settings-ai-msg")
+    const aiTestDetailEl = document.getElementById("settings-ai-test-detail")
+    const aiStatusEl = document.getElementById("settings-ai-status")
+    const aiStatusDetailEl = document.getElementById("settings-ai-status-detail")
+    const aiLastTestedEl = document.getElementById("settings-ai-last-tested")
+    const aiProviderGroup = document.getElementById("settings-ai-provider")
+    const aiShareGroup = document.getElementById("settings-ai-share-taste")
+    const aiAutoGroup = document.getElementById("settings-ai-auto")
+    const aiKeysLink = /** @type {HTMLAnchorElement|null} */ (
+      document.getElementById("settings-ai-keys-link")
+    )
+    const aiKeysNote = document.getElementById("settings-ai-keys-note")
+
+    /** Refresh the connection-status row from the C4 status model. */
+    async function syncAiStatus() {
+      if (!aiStatusEl) return
+      try {
+        const status = await getAiStatus()
+        aiStatusEl.textContent = AI_MODE_LABELS[status.mode] ?? status.mode
+        if (aiStatusDetailEl) aiStatusDetailEl.textContent = status.detail
+        if (aiLastTestedEl) {
+          aiLastTestedEl.textContent = status.lastTestedAt
+            ? `Last tested ${new Date(status.lastTestedAt).toLocaleString()}.`
+            : ""
+        }
+      } catch {
+        aiStatusEl.textContent = "Local recommendations"
+        if (aiStatusDetailEl) {
+          aiStatusDetailEl.textContent = "AI status couldn't be checked — using local recommendations."
+        }
+      }
+    }
+    syncAiStatus()
 
     function syncAiEnabled() {
       if (!aiEnabledGroup) return
@@ -5473,6 +5639,63 @@ const navStructure: NavSection[] = [
       if (!btn) return
       setAiEnabled(btn.getAttribute("data-ai") === "on")
       syncAiEnabled()
+      void syncAiStatus()
+    })
+
+    /** Generic segmented-control sync for the On/Off + Manual/Auto rows. */
+    function syncSeg(group, attr, current) {
+      if (!group) return
+      for (const btn of group.querySelectorAll("button")) {
+        btn.setAttribute("aria-pressed", btn.getAttribute(attr) === current ? "true" : "false")
+      }
+    }
+
+    function syncAiProvider() {
+      const provider = getAiProvider()
+      syncSeg(aiProviderGroup, "data-provider", provider)
+      if (aiKeysLink) {
+        aiKeysLink.classList.toggle("hidden", provider !== "openai")
+        if (provider === "openai") aiKeysLink.href = OPENAI_KEYS_URL
+      }
+      aiKeysNote?.classList.toggle("hidden", provider === "openai")
+    }
+    syncAiProvider()
+
+    aiProviderGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-provider-btn")
+      if (!btn) return
+      const provider = btn.getAttribute("data-provider") === "other" ? "other" : "openai"
+      setAiProvider(provider)
+      if (provider === "openai") {
+        setAiEndpoint(OPENAI_ENDPOINT)
+        if (aiEndpointInput) aiEndpointInput.value = getAiEndpoint()
+      }
+      syncAiProvider()
+      void syncAiStatus()
+    })
+
+    function syncAiShare() {
+      syncSeg(aiShareGroup, "data-share", getAiShareTaste() ? "on" : "off")
+    }
+    syncAiShare()
+
+    aiShareGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-share-btn")
+      if (!btn) return
+      setAiShareTaste(btn.getAttribute("data-share") === "on")
+      syncAiShare()
+    })
+
+    function syncAiAuto() {
+      syncSeg(aiAutoGroup, "data-auto", getAiAutoRequests() ? "auto" : "manual")
+    }
+    syncAiAuto()
+
+    aiAutoGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-auto-btn")
+      if (!btn) return
+      setAiAutoRequests(btn.getAttribute("data-auto") === "auto")
+      syncAiAuto()
     })
 
     async function syncAiKeyStatus() {
@@ -5500,7 +5723,41 @@ const navStructure: NavSection[] = [
       })
     }
     bindAiTextInput(aiEndpointInput, getAiEndpoint, setAiEndpoint)
-    bindAiTextInput(aiModelInput, getAiModel, setAiModel)
+
+    // Model: a select of supported models, with a free-text box for
+    // anything else (other providers, newer models).
+    function syncAiModel() {
+      if (!aiModelSelect) return
+      const current = getAiModel()
+      const known = [...aiModelSelect.options].some((opt) => opt.value === current)
+      if (known && current) {
+        aiModelSelect.value = current
+        aiModelCustomInput?.classList.add("hidden")
+      } else {
+        aiModelSelect.value = "custom"
+        if (aiModelCustomInput) {
+          aiModelCustomInput.classList.remove("hidden")
+          aiModelCustomInput.value = current
+        }
+      }
+    }
+    syncAiModel()
+
+    aiModelSelect?.addEventListener("change", () => {
+      const value = aiModelSelect.value
+      if (value === "custom") {
+        aiModelCustomInput?.classList.remove("hidden")
+        aiModelCustomInput?.focus()
+        return
+      }
+      aiModelCustomInput?.classList.add("hidden")
+      setAiModel(value)
+      void syncAiStatus()
+    })
+    bindAiTextInput(aiModelCustomInput, getAiModel, (value) => {
+      setAiModel(value)
+      void syncAiStatus()
+    })
 
     aiRevealBtn?.addEventListener("click", () => {
       if (!aiKeyInput) return
@@ -5525,7 +5782,10 @@ const navStructure: NavSection[] = [
 
     aiKeyInput?.addEventListener("blur", async () => {
       try {
-        if (await saveTypedAiKey()) flashMsg(aiMsgEl, t("settings.ai.keySaved"))
+        if (await saveTypedAiKey()) {
+          flashMsg(aiMsgEl, t("settings.ai.keySaved"))
+          void syncAiStatus()
+        }
       } catch (error) {
         flashMsg(
           aiMsgEl,
@@ -5536,8 +5796,10 @@ const navStructure: NavSection[] = [
 
     aiClearBtn?.addEventListener("click", async () => {
       await deleteAiKey()
+      clearAiTestRecord()
       await initAI()
       await syncAiKeyStatus()
+      await syncAiStatus()
       flashMsg(aiMsgEl, t("settings.ai.keyCleared"))
     })
 
@@ -5553,20 +5815,21 @@ const navStructure: NavSection[] = [
           )
           return
         }
-        const result = await testAiConnection(getAiEndpoint(), getAiModel())
+        // Real verification (C4): endpoint + key + model, via the
+        // status model. A stored key alone is not proof AI works.
+        const result = await testAiConnection()
+        await syncAiStatus()
         if (result.ok) {
           flashMsg(aiMsgEl, t("settings.ai.testOk"))
+          if (aiTestDetailEl) {
+            aiTestDetailEl.textContent = result.modelVerified
+              ? "Endpoint, key and model all verified."
+              : "Endpoint and key verified."
+          }
           flashSuccess(aiTestBtn)
-        } else if (result.error === "no_key") {
-          flashMsg(aiMsgEl, t("settings.ai.testNoKey"))
-        } else if (result.error === "invalid_key") {
-          flashMsg(aiMsgEl, t("settings.ai.testInvalidKey"))
-        } else if (result.error === "rate_limited") {
-          flashMsg(aiMsgEl, t("settings.ai.testRateLimited"))
-        } else if (result.error === "invalid_endpoint" || result.error === "invalid_model") {
-          flashMsg(aiMsgEl, t("settings.ai.testInvalidEndpoint"))
         } else {
-          flashMsg(aiMsgEl, t("settings.ai.testUnavailable"))
+          flashMsg(aiMsgEl, aiStatusMessage(result.error))
+          if (aiTestDetailEl) aiTestDetailEl.textContent = ""
         }
       } finally {
         setLoading(aiTestBtn, false)

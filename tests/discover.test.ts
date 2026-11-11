@@ -7,6 +7,7 @@ import {
   getDiscoverRows,
   validateRankedCandidates,
   rankWithAI,
+  rankDiscover,
   registerAIRanker,
   getAIRanker,
   moodPreset,
@@ -300,8 +301,9 @@ describe("getDiscoverRows", () => {
     expect(ids["picked-for-you"].items.map((i: RankedCandidate) => i.candidate.id)).not.toContain("10")
     expect(ids["continue-watching"].items).toHaveLength(1)
     expect(ids["new-and-worth-watching"].items.map((i: RankedCandidate) => i.candidate.id)).toEqual(["15"])
-    expect(ids["on-tv-now"].items[0].candidate.kind).toBe("live")
-    expect(ids["on-tv-now"].items[0].reason).toMatch(/Evening News/)
+    // Discover is separate from Live TV (0.10.0): even supplied
+    // now-playing data renders no Live TV row here.
+    expect(ids["on-tv-now"]).toBeUndefined()
   })
 
   it("labels cold start honestly instead of claiming personalisation", () => {
@@ -310,8 +312,8 @@ describe("getDiscoverRows", () => {
     expect(rows[0].subtitle).toMatch(/No watch history yet/)
   })
 
-  it("hides the On TV row when there is no real EPG data", () => {
-    const rows = getDiscoverRows({ ...base, nowPlaying: [] })
+  it("never renders a Live TV row in Discover", () => {
+    const rows = getDiscoverRows(base)
     expect(rows.map((r) => r.id)).not.toContain("on-tv-now")
   })
 
@@ -395,5 +397,81 @@ describe("catalogue mapping", () => {
     expect(candidateDetailHref(candidate({ id: "2", title: "S", kind: "series" }))).toBe("/series/detail?id=2")
     expect(candidateDetailHref(candidate({ id: "3", title: "L", kind: "live" }))).toBe("/livetv?channel=3")
     expect(candidateKey(candidate({ id: "1", title: "M" }))).toBe("movie:1")
+  })
+})
+
+describe("rankDiscover (AI04 / AI06)", () => {
+  it("reports source 'ai' and only catalogue titles when the ranker answers", async () => {
+    registerAIRanker({
+      rank: async (_q, candidates) => [
+        { candidate: candidates[0], score: 1, reason: "Cosy and funny." },
+        // Invented id: must be dropped, never surfaced.
+        {
+          candidate: {
+            id: "invented",
+            kind: "movie",
+            title: "Made Up Film",
+            genres: [],
+            cast: [],
+            source: "catalog",
+          } as DiscoverCandidate,
+          score: 0.9,
+          reason: "Hallucinated.",
+        },
+      ],
+    })
+    try {
+      const out = await rankDiscover("something cosy for tonight please", CATALOG, tasteWithLikes())
+      expect(out.source).toBe("ai")
+      expect(out.results.map((r) => r.candidate.id)).toEqual([CATALOG[0].id])
+      expect(out.fallbackReason).toBeUndefined()
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("falls back to local ranking and says so when the ranker fails", async () => {
+    registerAIRanker({
+      rank: async () => {
+        throw Object.assign(new Error("provider down"), { kind: "unavailable" })
+      },
+    })
+    try {
+      const out = await rankDiscover("something cosy for tonight please", CATALOG, tasteWithLikes())
+      expect(out.source).toBe("local")
+      expect(out.fallbackReason).toMatch(/couldn't answer/)
+      expect(out.results.length).toBeGreaterThan(0)
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("never sends a plain title search to the ranker", async () => {
+    let called = false
+    registerAIRanker({
+      rank: async (_q, candidates) => {
+        called = true
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const out = await rankDiscover("Space Heist", CATALOG, tasteWithLikes())
+      expect(called).toBe(false)
+      expect(out.source).toBe("local")
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("quick picks carry one icon each (B04)", async () => {
+    const { MOOD_PRESETS, EXAMPLE_PROMPTS } = await import("../src/scripts/lib/discover")
+    expect(MOOD_PRESETS).toHaveLength(6)
+    for (const preset of MOOD_PRESETS) {
+      expect(preset.icon).toBeTruthy()
+    }
+    expect(EXAMPLE_PROMPTS.length).toBeGreaterThanOrEqual(4)
+    for (const prompt of EXAMPLE_PROMPTS) {
+      expect(prompt.length).toBeGreaterThan(10)
+    }
   })
 })

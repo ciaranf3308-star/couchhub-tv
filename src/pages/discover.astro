@@ -1,6 +1,11 @@
 ---
-// Browse consolidation (0.8.0): /discover is retired as a destination —
-// its mood search + personalised picks are the Browse landing. The
-// file stays so old links / bookmarks keep working.
-return Astro.redirect("/browse");
+// RedSilk Discover — a real destination again (0.10.0): the dedicated
+// Discover experience (prominent natural-language search, quick picks,
+// personalised rails) lives here, mounted from DiscoverView.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import DiscoverView from "@/components/DiscoverView.svelte";
 ---
+
+<CouchLayout pageTitle="Discover" activeNav="discover" view="discover">
+  <DiscoverView client:visible />
+</CouchLayout>

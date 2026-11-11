@@ -420,8 +420,10 @@ describe("no pill-cluster markup remains in the Browse views", () => {
     expect(discoverView).toContain("MOOD_PRESETS");
     expect(discoverView).toContain('data-nylah-item');
     expect(discoverView).toMatch(/class="rs-discover-mood"/);
-    // Feedback actions are a clean rectangular row, not pills.
-    expect(discoverView).toContain("discover-fb-btn");
+    // Feedback lives on the detail screen now (0.10.0, B01): no
+    // permanent feedback button stacks under Discover posters.
+    expect(discoverView).not.toContain("discover-fb-btn");
+    expect(discoverView).not.toContain("rs-discover-fb");
   });
 
   it("the type segmented control is untouched (three items, still the pattern)", () => {

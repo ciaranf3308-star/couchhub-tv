@@ -1,6 +1,8 @@
 // Browse consolidation (0.8.0, W3) — nav + routing + redirects.
+// (0.10.0: /discover is a real destination again; /movies and
+// /series are still redirects until W2 restores them.)
 //
-// The retired /movies, /series and /discover destinations redirect
+// The retired /movies and /series destinations redirect
 // into the single Browse destination (with the content-type filter
 // where one applies); the detail routes keep working at their own
 // URLs and point back into Browse. The /browse page itself is W1's
@@ -29,11 +31,12 @@ describe("Browse consolidation redirects", () => {
     );
   });
 
-  it("/discover redirects to Browse (the Discover landing)", () => {
+  it("/discover is a real destination again (0.10.0) — no redirect", () => {
     expect(existsSync(join(root, "src/pages/discover.astro"))).toBe(true);
-    expect(read("src/pages/discover.astro")).toContain(
-      'Astro.redirect("/browse")',
-    );
+    const page = read("src/pages/discover.astro");
+    expect(page).not.toContain("Astro.redirect");
+    expect(page).toContain("DiscoverView");
+    expect(page).toContain('activeNav="discover"');
   });
 });
 
