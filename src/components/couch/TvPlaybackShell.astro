@@ -166,6 +166,8 @@ import TvLogo from "./TvLogo.astro";
     streamToKeepOnFailure,
     resolveBackStep,
     switchChannel,
+    dispatchRelease,
+    shouldReleaseStreamOnModeLeave,
     catchupActionForPlaybackChannel,
     toggleFavourite,
     recoveryActionsForFailureKind,
@@ -570,6 +572,35 @@ import TvLogo from "./TvLogo.astro";
           showOsd();
         });
       } else {
+        // Leaving playback for the landing screen ENDS the stream
+        // (0.11.2 W3): exiting used to only hide the shell, so the
+        // tuned channel kept playing hidden and held the provider's
+        // single connection — the next tune was refused as
+        // connection-limit ("already open") and went black a second
+        // after loading. Guide / browser keep the session by design
+        // (the tuned session survives mode switches; the Guide
+        // returns to playback), so only landing/home releases. The
+        // release is the engine's own `livetv:release` path
+        // (pause + reset + lastPlayContext=null); dispatching it
+        // with no listener / no mount is a harmless no-op. The
+        // shell's tuned state is cleared with the stream, so a later
+        // error overlay can never offer retry to a dead channel and
+        // Previous never points at a released session.
+        const wasPlayback =
+          document.documentElement.dataset.livetvMode === "playback";
+        if (
+          wasPlayback &&
+          tunedId !== null &&
+          shouldReleaseStreamOnModeLeave(mode)
+        ) {
+          dispatchRelease(tunedId);
+          tunedId = null;
+          previousId = null;
+          lastWorkingId = null;
+          failedId = null;
+          shell.dataset.tunedChannelId = "";
+          shell.dataset.previousChannelId = "";
+        }
         shell.hidden = true;
         shell.dataset.hidden = "true";
         if (document.documentElement.dataset.livetvMode === "playback") {

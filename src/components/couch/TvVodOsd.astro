@@ -1,0 +1,123 @@
+---
+// TvVodOsd — VOD (movies / series) playback overlay shell.
+//
+// This is a DIFFERENT overlay from the Live TV one (TvOsd) on
+// purpose: live is a channel + Now/Next programme row + the seven
+// Live actions (Channels / Guide / Info / Favourite / Subtitles /
+// Audio / Settings); VOD is a title + seek timeline + transport
+// (Play/Pause, −10s / +10s, Next Episode, Autoplay-next) + the
+// track menus the media actually exposes. The two overlays share
+// only chrome: the floating lower-third surface (.rs-osd), the
+// auto-hide timing (createOsdAutoHide — the single source of truth
+// TvOsd also uses), and the focus rule (never hide while focus is
+// inside). Nothing Live-TV dispatches here: no livetv:mode,
+// livetv:tune, livetv:programme or livetv:osd-action — on a VOD
+// page those events have no listener and the buttons would be dead.
+//
+// Named slots (restored from the W1 TvOsd, whose slots the 0.9.0
+// W3 Live restyle removed — since then the VOD pages' slotted
+// children were silently dropped from the DOM, so movies/series
+// rendered the Live TV overlay with a LIVE badge and dead
+// Channels/Guide buttons and no Play/Pause, seek, timeline, Back,
+// Next Episode or Autoplay controls at all):
+//   "info"     — title / subtitle (movie title, episode line)
+//   (default)  — anything else, e.g. the seek timeline
+//   "controls" — transport buttons (Play/Pause, ±10s, Next,
+//                Subtitles, Audio, Fullscreen, Back)
+// Props: autoHideMs? (default 4500).
+//
+// Behaviour: hides ~4–5s after the last activity (pointer, key,
+// focus, or a `couch-osd:show` window event — createCouchVodPlayer
+// dispatches it on mount). Focus inside the OSD cancels the hide.
+// Subtitles / Audio buttons carry data-vod-tracklist="<list id>":
+// clicking one toggles its track list open/closed (the lists are
+// populated by couch-player.ts; without the toggle the buttons did
+// nothing). Showing/hiding never touches the player — no reconnect,
+// no retune. Starts hidden: the caller reveals it on mount.
+interface Props {
+  autoHideMs?: number;
+}
+const { autoHideMs = 4500 } = Astro.props;
+---
+
+<div
+  class="rs-osd"
+  data-couch-osd
+  data-vod-osd
+  data-autohide-ms={autoHideMs}
+  data-hidden="true"
+  role="status"
+  aria-label="Playback controls"
+>
+  <div class="rs-osd__info">
+    <slot name="info" />
+  </div>
+  <slot />
+  <div class="rs-osd__controls">
+    <slot name="controls" />
+  </div>
+</div>
+
+<script>
+  // TvVodOsd auto-hide + tracklist wiring. Timing lives in
+  // livetv-playback.ts `createOsdAutoHide` (vitest fake timers
+  // assert it); this script owns only the DOM rules: never hide
+  // while focus is inside the OSD, show on `couch-osd:show`, and
+  // the Subtitles/Audio tracklist toggles.
+  import { createOsdAutoHide } from "@/scripts/lib/livetv-playback";
+
+  const osds = Array.from(document.querySelectorAll("[data-vod-osd]"));
+  for (const osd of osds) {
+    const el = osd;
+    if (el.dataset.osdArmed) continue;
+    el.dataset.osdArmed = "1";
+    const delay = Number(el.getAttribute("data-autohide-ms")) || 4500;
+    const autoHide = createOsdAutoHide(() => {
+      // Focus inside the OSD cancels the hide so keyboard/controller
+      // users are never locked out of controls they are tabbing
+      // through; hiding resumes once focus leaves.
+      if (el.contains(document.activeElement)) {
+        autoHide.show();
+        return;
+      }
+      el.setAttribute("data-hidden", "true");
+    }, delay);
+    const show = () => {
+      el.setAttribute("data-hidden", "false");
+      autoHide.show();
+    };
+    const onActivity = () => show();
+    for (const evt of ["pointermove", "pointerdown", "keydown", "focusin"]) {
+      el.addEventListener(evt, onActivity, { passive: true });
+    }
+    el.addEventListener("focusout", () => {
+      autoHide.show();
+    });
+    window.addEventListener("couch-osd:show", onActivity);
+    // Track lists start closed (couch-player.ts populates them on
+    // loadedmetadata; the toggle below opens them).
+    for (const toggle of Array.from(
+      el.querySelectorAll("[data-vod-tracklist]"),
+    )) {
+      const list = document.getElementById(
+        toggle.getAttribute("data-vod-tracklist") ?? "",
+      );
+      if (list) list.hidden = true;
+    }
+    // Subtitles / Audio open their track list (populated by
+    // couch-player.ts). The toggle is the only wiring the OSD owns:
+    // track selection itself stays in couch-player.ts.
+    el.addEventListener("click", (ev) => {
+      const btn = (ev.target as HTMLElement | null)?.closest?.(
+        "[data-vod-tracklist]",
+      ) as HTMLElement | null;
+      if (!btn || !el.contains(btn)) return;
+      const list = document.getElementById(
+        btn.getAttribute("data-vod-tracklist") ?? "",
+      );
+      if (list) list.hidden = !list.hidden;
+    });
+    // Start hidden: the player reveals the OSD on mount.
+    el.setAttribute("data-hidden", "true");
+  }
+</script>

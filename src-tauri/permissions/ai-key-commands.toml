@@ -1,0 +1,21 @@
+# Cross-platform ACL for the AI Discovery key store commands, granted from default.json.
+# The key lives in the OS credential store (Windows Credential Manager via
+# keyring `windows-native`, service "Nylah Studios") behind src-tauri/src/ai_keyring.rs.
+#
+# These commands were registered in lib.rs by the Discover feature (fe32bdf)
+# but never added to any permission set, so every call from the main window
+# was rejected with "Command ai_key_set not allowed by ACL" (0.11.1, user
+# photo 2026-11-11) — including ai_key_has, which made Settings always
+# report "No key saved". Every ai_key_* command the frontend invokes must
+# stay listed here; tests/tauri-acl-coverage.test.ts enforces it.
+
+[[permission]]
+identifier = "allow-ai-key-commands"
+description = "Local-origin access to the AI Discovery API key store commands."
+commands.allow = [
+    "ai_key_set",
+    "ai_key_get",
+    "ai_key_has",
+    "ai_key_delete",
+    "ai_test_connection",
+]

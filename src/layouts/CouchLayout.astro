@@ -55,6 +55,33 @@ const documentTitle = pageTitle
     <meta name="x-app-version" content={pkg.version} />
     <meta name="theme-color" content="#170A0C" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script is:inline>
+      // Single fixed theme (0.11.1 settings cull) — parity with
+      // Layout.astro / TvLayout.astro. Couch routes never ran a pre-paint
+      // theme script: they relied solely on couch.css's
+      // html[data-couch] { color-scheme: dark } rule. That rule holds in
+      // the normal case — verified headless: even a forced light scheme
+      // + violet accent cannot change the paint (the :root[data-couch]
+      // leak guard pins every --color-* token to burgundy) — but a
+      // pre-paint pin also covers the stylesheet-failure mode: if
+      // couch.css fails to load, light-dark() tokens still resolve to
+      // their dark branch instead of the light fuchsia wash.
+      // This is hardening, NOT a fix for the 0.11.1 purple-wash report:
+      // no in-bundle cause for that report was found (see the 0.11.2 W2
+      // notes), so nothing here claims to fix it.
+      try {
+        document.documentElement.style.colorScheme = "dark";
+        document.documentElement.setAttribute("data-accent", "burgundy");
+        // Per-playlist override cache (playlist-accent.ts) wins over the
+        // fixed accent. That is playlist data, not a theme setting.
+        var KNOWN_ACCENTS = ["fuchsia", "rose", "ember", "emerald", "cyan", "blue", "violet", "gold", "burgundy", "lime", "teal", "silver", "white"];
+        var activeAccentOverride = localStorage.getItem("xt_accent_active") || "";
+        if (activeAccentOverride && KNOWN_ACCENTS.indexOf(activeAccentOverride) !== -1) {
+          if (activeAccentOverride === "fuchsia") document.documentElement.removeAttribute("data-accent");
+          else document.documentElement.setAttribute("data-accent", activeAccentOverride);
+        }
+      } catch (e) {}
+    </script>
   </head>
 
   <body class="rs-body">

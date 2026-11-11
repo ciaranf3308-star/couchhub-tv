@@ -1,5 +1,9 @@
 ---
-// TvOsd — Live TV lower-third OSD (0.11.0 W5 restyle).
+// TvOsd — Live TV lower-third OSD (0.11.0 W5 restyle). LIVE TV ONLY:
+// VOD (movies / series) uses TvVodOsd instead — the two overlays
+// are different by design (0.11.2 W3), and sharing this one put a
+// LIVE badge + dead Channels/Guide buttons over films and episodes
+// while the VOD controls were silently dropped (no slots).
 //
 // ONE restrained floating surface over fullscreen playback: a single
 // rounded translucent panel (soft gradient + blur), never nested
