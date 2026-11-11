@@ -2235,6 +2235,11 @@ html[data-couch] .rs-livetv-browser[data-browser-screen] .rs-livetv-browser__lis
   min-height: 0;
   height: auto;
   max-height: none;
+  /* INTEGRATION 0.11.0 — the shell's fixed hints bar overlays the
+     bottom ~45px of the viewport; without this the last row (9th of
+     9 at 1080p) scrolls only to half-hidden under the bar. The
+     padding grows the scrollable area so every row can clear it. */
+  padding-bottom: 4.5rem;
 }
 
 
@@ -3300,6 +3305,17 @@ html[data-couch] .rs-guide-list {
   display: flex;
   flex-direction: column;
 }
+/* INTEGRATION 0.11.0 — guide scroll containers (On Now list, By
+   Channel schedule, Tonight sections, featured column) all end at
+   the viewport bottom under the shell's fixed hints bar; without
+   this the last row scrolls only to half-hidden under the bar —
+   the same defect as the browser's 9th row. The padding grows each
+   scrollable area so every row can clear the bar. */
+html[data-couch] .rs-guide-list,
+html[data-couch] .rs-guide-tonight-sections,
+html[data-couch] .rs-guide-now-featured {
+  padding-bottom: 4.5rem;
+}
 html[data-couch] .rs-guide-panel-empty {
   padding: 2rem;
   font-size: 1.25rem;
@@ -3700,11 +3716,13 @@ html[data-couch] .rs-guide-featured__art {
   aspect-ratio: 16 / 9;
   border-radius: 1rem;
   overflow: hidden;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--rs-accent) 55%, #1a0508),
-    color-mix(in srgb, var(--rs-focus) 30%, #160408)
-  );
+  /* INTEGRATION 0.11.0 — the flat two-stop wash read as a giant
+     empty mauve slab when no key is configured; mirror the browser
+     detail placeholder's richer treatment (radial accent glow over
+     a dark surface gradient) so every placeholder reads intentional. */
+  background:
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--rs-accent) 30%, transparent) 0%, transparent 55%),
+    linear-gradient(155deg, var(--rs-surface) 0%, var(--rs-bg-2) 62%, var(--rs-bg) 100%);
   flex-shrink: 0;
 }
 html[data-couch] .rs-guide-featured__art-img {
