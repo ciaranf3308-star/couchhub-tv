@@ -1,0 +1,23 @@
+# Cross-platform ACL for the Followed Series commands, granted from default.json.
+#
+# Same class of gap as the AI key commands (see ai-key-commands.toml):
+# registered in lib.rs on both the desktop and mobile handlers and invoked
+# from the main window (followed-startup.ts, followed-card.ts, followed.ts),
+# but never added to any permission set — so the scheduled-check repair,
+# headless completion and notification publish calls were all rejected by
+# the ACL. followed_schedule_status is not invoked from the frontend today;
+# it is listed as part of the family so the first caller does not hit the
+# same silent block. tests/tauri-acl-coverage.test.ts enforces coverage.
+
+[[permission]]
+identifier = "allow-followed-commands"
+description = "Local-origin access to the Followed Series commands."
+commands.allow = [
+    "followed_headless_mode",
+    "followed_take_pending_deep_link",
+    "followed_headless_done",
+    "followed_publish_notifications",
+    "followed_schedule_status",
+    "followed_schedule_set",
+    "followed_schedule_repair",
+]
