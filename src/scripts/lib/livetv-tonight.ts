@@ -214,6 +214,75 @@ export function isHighlight(item: TonightItem): boolean {
   return Boolean(item.channel.favourite || item.channel.watched) || isNewOrPremiere(item);
 }
 
+/**
+ * Rank within the highlight signal: a new series / premiere is the
+ * strongest pick, then a favourite channel, then a recently-watched
+ * channel. Lower is stronger; 3 means "not a highlight at all".
+ */
+export function highlightRank(item: TonightItem): number {
+  if (isNewOrPremiere(item)) return 0;
+  if (item.channel.favourite) return 1;
+  if (item.channel.watched) return 2;
+  return 3;
+}
+
+/**
+ * Max highlights from any single channel (Live TV 0.11.0, W6).
+ * Affinity is a real signal, but one watched channel must not turn
+ * its whole evening into "Tonight's Highlights" — the 0.10.1
+ * fixture showed exactly that (tune once, every programme on the
+ * channel qualifies). Two per channel keeps the section a pick,
+ * not a channel listing.
+ */
+export const TONIGHT_HIGHLIGHT_PER_CHANNEL_CAP = 2;
+
+/**
+ * The Tonight's Highlights pick: highlight-signal programmes from
+ * the evening, strongest signal first, at most
+ * TONIGHT_HIGHLIGHT_PER_CHANNEL_CAP per channel and
+ * TONIGHT_SECTION_ITEM_CAP overall, presented chronologically.
+ * Returns [] when nothing carries a highlight signal.
+ */
+export function rankHighlights(
+  items: ReadonlyArray<TonightItem>,
+  nowMs: number = Date.now(),
+): TonightItem[] {
+  const evening = programmesForTonight(items, nowMs);
+  const ranked = evening
+    .filter((item) => isHighlight(item))
+    .sort((a, b) => highlightRank(a) - highlightRank(b) || byStart(a, b));
+  const perChannel = new Map<string, number>();
+  const picked: TonightItem[] = [];
+  for (const item of ranked) {
+    const count = perChannel.get(item.channel.id) ?? 0;
+    if (count >= TONIGHT_HIGHLIGHT_PER_CHANNEL_CAP) continue;
+    perChannel.set(item.channel.id, count + 1);
+    picked.push(item);
+    if (picked.length >= TONIGHT_SECTION_ITEM_CAP) break;
+  }
+  return picked.sort(byStart);
+}
+
+/**
+ * The Tonight featured programme: the strongest highlight (a
+ * premiere first, then a favourite-channel pick), else the first
+ * programme starting soon, else the first programme of the
+ * evening. Null when the evening is empty.
+ */
+export function pickTonightFeatured(
+  built: TonightSections,
+  evening: ReadonlyArray<TonightItem>,
+): TonightItem | null {
+  if (evening.length === 0) return null;
+  const highlights = built.sections.find((s) => s.id === "highlights")?.items ?? [];
+  const premiere = highlights.find((item) => isNewOrPremiere(item));
+  if (premiere) return premiere;
+  if (highlights.length > 0) return highlights[0]!;
+  const startingSoon = built.sections.find((s) => s.id === "starting-soon")?.items ?? [];
+  if (startingSoon.length > 0) return startingSoon[0]!;
+  return evening[0]!;
+}
+
 /** Starts within the next 60 minutes (and has not started yet). */
 export function isStartingSoon(
   item: TonightItem,
@@ -264,12 +333,12 @@ export function buildTonightSections(
     });
   }
 
-  const highlights = evening.filter((item) => isHighlight(item));
+  const highlights = rankHighlights(items, nowMs);
   if (highlights.length > 0) {
     sections.push({
       id: "highlights",
       title: "Tonight's Highlights",
-      items: capped([...highlights].sort(byStart)),
+      items: highlights,
     });
   }
 
