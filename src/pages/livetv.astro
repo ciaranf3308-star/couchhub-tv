@@ -303,6 +303,15 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 			min-height: 0;
 			flex: 1;
 		}
+		/* Same treatment for the Guide's mount wrapper — a plain
+		   block flex item with min-height:auto would refuse to
+		   shrink and re-open the same overflow one level down. */
+		#livetv-mode-guide:not([hidden]) [data-livetv-guide-mount] {
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+			flex: 1;
+		}
 		.rs-livetv-home__head {
 			display: flex;
 			flex-direction: column;

@@ -2463,7 +2463,15 @@ const nowMs = Date.now();
       const mode = event.detail?.mode;
       if (mode === "guide") {
         void activate(event.detail?.guideMode);
-      } else if (mode === "home" || mode === "playback") {
+      } else if (mode === "home" || mode === "landing" || mode === "playback") {
+        // INTEGRATION 0.11.0 — "landing" is the 0.11.0 name for
+        // the 0.9.0 "home" mode (setMode maps home→landing before
+        // dispatching, so the "home" branch is dead): without it,
+        // leaving the Guide for the landing via the top nav left
+        // `active` true, and re-entering the Guide early-returned
+        // from activate() without capturing the invoker's focus
+        // key — B then restored focus to a stale key (or the
+        // nav fallback) instead of the invoker.
         deactivate();
       }
     });

@@ -203,6 +203,25 @@ html[data-couch] .rs-main {
   gap: 2.5rem;
 }
 
+/* INTEGRATION 0.11.0 — viewport-fit the Browser + Guide screens.
+   The flex chain below the mode mounts (flex:1 + min-height:0)
+   can only shrink into a DEFINITE height; body is min-height:
+   100dvh, so without this the document grew to 1252px (browser)
+   / 1475px (guide) at 1080p, the lists sized to content and never
+   scrolled, and the last row sat half-cut under the fixed hints
+   bar. Capping body at exactly 100dvh in these two modes (the
+   shell writes html[data-livetv-mode]) gives the chain its
+   definite height: main/home/mounts shrink, the lists scroll
+   internally, and the 4.5rem bottom padding clears the last row
+   above the hints bar. Landing/playback are not capped — the
+   landing has no internal scroller and fits, and playback is an
+   overlay. */
+html[data-couch][data-livetv-mode="browser"] body,
+html[data-couch][data-livetv-mode="guide"] body {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* ── Type scale (px values are at 1920x1080, root 16px) ────────── */
 
 html[data-couch] .rs-hero-title {
