@@ -13,7 +13,6 @@ import {
   IconDeviceFloppy,
   IconDownload,
   IconUpload,
-  IconHeart,
   IconBug,
   IconMail,
   IconChevronDown,
@@ -47,7 +46,6 @@ import {
   IconActivity,
   IconDeviceTv,
   IconCast,
-  IconArrowsShuffle,
 } from "@tabler/icons-svelte"
 import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
 import LocalePicker from "@/components/LocalePicker.svelte"
@@ -82,7 +80,6 @@ const navStructure: NavSection[] = [
   ]},
   { id: "settings-network", labelKey: "settings.group.network", label: "Network", cards: [
     { id: "card-network",          labelKey: "settings.network.title", label: "Network" },
-    { id: "discord-rpc-section",   labelKey: "settings.discord.title", label: "Discord Rich Presence", conditional: true },
     { id: "card-casting",          labelKey: "settings.casting.title", label: "Casting", conditional: true },
     { id: "card-tmdb",             labelKey: "settings.tmdb.title",    label: "Metadata enrichment" },
     { id: "card-ai-discovery",     labelKey: "settings.ai.title",     label: "AI Discovery" },
@@ -105,7 +102,6 @@ const navStructure: NavSection[] = [
   { id: "settings-help", labelKey: "settings.group.help", label: "Help & feedback", cards: [
     { id: "card-docs",        labelKey: "settings.help.docsTitle",  label: "Read the docs" },
     { id: "card-feedback",    labelKey: "settings.nav.feedback",    label: "Send feedback" },
-    { id: "settings-support", labelKey: "settings.group.support",   label: "Support" },
   ]},
   { id: "settings-danger",  labelKey: "settings.group.dangerZone", label: "Danger zone", cards: [], danger: true },
 ]
@@ -129,7 +125,7 @@ const navStructure: NavSection[] = [
     <TvSettingsGroup
       id="settings-quick"
       title="Quick settings"
-      description="The settings used most often on the TV. Everything else — every playlist, playback, metadata, AI, backup and diagnostics option — lives in Advanced below, unchanged.">
+      description="The settings used most often on the TV. Everything else — every playlist, playback, metadata, AI, backup and diagnostics option — lives in Advanced below.">
       <div class="couch-quick-grid">
         <a class="couch-quick-card" data-nylah-item href="#settings-playlists">
           <span class="couch-quick-card__title" data-i18n="settings.group.playlists">Playlists</span>
@@ -137,7 +133,7 @@ const navStructure: NavSection[] = [
         </a>
         <a class="couch-quick-card" data-nylah-item href="#card-display">
           <span class="couch-quick-card__title" data-i18n="settings.section.display">Display</span>
-          <span class="couch-quick-card__desc">Language, theme, accent and text size</span>
+          <span class="couch-quick-card__desc">Language and text size</span>
         </a>
         <a class="couch-quick-card" data-nylah-item href="#playback-section">
           <span class="couch-quick-card__title" data-i18n="settings.playback.title">Playback</span>
@@ -164,7 +160,7 @@ const navStructure: NavSection[] = [
       id="settings-advanced"
       title="Advanced"
       variant="advanced"
-      description="Every setting, as before. Nothing was removed — provider and playlist options, backup, playback, metadata, AI integrations, update controls and diagnostics are all here.">
+      description="The settings that work on this TV — playlists, playback, metadata, AI, backup, updates and diagnostics. Anything that didn't work, or that this TV doesn't need, was removed.">
     <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
 
     <div class="settings-nav-scroller -mx-4 sm:-mx-6 lg:m-0 lg:contents">
@@ -358,87 +354,8 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
-            <!-- Theme + accent + font scale -->
+            <!-- Font scale + density -->
             <div data-settings-item class="scroll-mt-6 lg:scroll-mt-20 settings-rows">
-              <div class="settings-row">
-                <span data-i18n="settings.theme.label" class="text-sm font-medium leading-snug">Theme</span>
-                <div class="settings-row__control">
-                  <div
-                    id="settings-theme"
-                    class="settings-seg"
-                    role="radiogroup"
-                    data-i18n-attr="aria-label:settings.theme.label"
-                    aria-label="Theme">
-                    <button type="button" role="radio" data-theme="system" aria-checked="false" data-i18n="settings.theme.system" class="theme-btn btn">System</button>
-                    <button type="button" role="radio" data-theme="light"  aria-checked="false" data-i18n="settings.theme.light" class="theme-btn btn">Light</button>
-                    <button type="button" role="radio" data-theme="dark"   aria-checked="false" data-i18n="settings.theme.dark" class="theme-btn btn">Dark</button>
-                  </div>
-                </div>
-              </div>
-
-              <div class="settings-row">
-                <div class="settings-row__text">
-                  <span data-i18n="settings.accent.label" class="text-sm font-medium leading-snug">Accent color</span>
-                </div>
-                <div class="settings-row__control">
-                <div class="flex flex-col items-end gap-2">
-                  <div
-                    id="settings-accent"
-                    class="flex flex-wrap justify-end gap-2"
-                    role="radiogroup"
-                    data-i18n-attr="aria-label:settings.accent.label"
-                    aria-label="Accent color">
-                    <button type="button" role="radio" data-accent-value="fuchsia" aria-checked="false" data-i18n-attr="title:settings.accent.fuchsia;aria-label:settings.accent.fuchsia" title="Fuchsia" aria-label="Fuchsia" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-fuchsia)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="rose" aria-checked="false" data-i18n-attr="title:settings.accent.rose;aria-label:settings.accent.rose" title="Rose" aria-label="Rose" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-rose)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="ember" aria-checked="false" data-i18n-attr="title:settings.accent.ember;aria-label:settings.accent.ember" title="Ember" aria-label="Ember" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-ember)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="emerald" aria-checked="false" data-i18n-attr="title:settings.accent.emerald;aria-label:settings.accent.emerald" title="Emerald" aria-label="Emerald" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-emerald)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="cyan" aria-checked="false" data-i18n-attr="title:settings.accent.cyan;aria-label:settings.accent.cyan" title="Cyan" aria-label="Cyan" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-cyan)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="blue" aria-checked="false" data-i18n-attr="title:settings.accent.blue;aria-label:settings.accent.blue" title="Blue" aria-label="Blue" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-blue)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="violet" aria-checked="false" data-i18n-attr="title:settings.accent.violet;aria-label:settings.accent.violet" title="Violet" aria-label="Violet" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-violet)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="gold" aria-checked="false" data-i18n-attr="title:settings.accent.gold;aria-label:settings.accent.gold" title="Gold" aria-label="Gold" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-gold)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="burgundy" aria-checked="false" data-i18n-attr="title:settings.accent.burgundy;aria-label:settings.accent.burgundy" title="Burgundy" aria-label="Burgundy" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-burgundy)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="lime" aria-checked="false" data-i18n-attr="title:settings.accent.lime;aria-label:settings.accent.lime" title="Lime" aria-label="Lime" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-lime)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="teal" aria-checked="false" data-i18n-attr="title:settings.accent.teal;aria-label:settings.accent.teal" title="Teal" aria-label="Teal" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-teal)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="silver" aria-checked="false" data-i18n-attr="title:settings.accent.silver;aria-label:settings.accent.silver" title="Silver" aria-label="Silver" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-silver)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="white" aria-checked="false" data-i18n-attr="title:settings.accent.white;aria-label:settings.accent.white" title="White" aria-label="White" class="accent-btn btn group size-11 p-0" style="--swatch: var(--accent-swatch-white)">
-                      <span class="size-5 rounded-full bg-(--swatch) group-aria-checked:ring-2 group-aria-checked:ring-(--swatch) group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                    </button>
-                    <button type="button" role="radio" data-accent-value="random" aria-checked="false" data-i18n-attr="title:settings.accent.random;aria-label:settings.accent.random" title="Random" aria-label="Random" class="accent-btn btn group relative size-11 p-0">
-                      <span class="size-5 rounded-full bg-[conic-gradient(red,orange,yellow,green,cyan,blue,magenta,red)] group-aria-checked:ring-2 group-aria-checked:ring-fg/50 group-aria-checked:ring-offset-2 group-aria-checked:ring-offset-surface" aria-hidden="true"></span>
-                      <IconArrowsShuffle aria-hidden="true" stroke={2.5} size={12} class="absolute inset-0 m-auto text-white mix-blend-difference pointer-events-none" />
-                    </button>
-                  </div>
-                  <p id="settings-accent-override-hint" data-i18n="settings.accent.overrideHint" class="hidden text-xs text-fg-3 text-right">
-                    The active playlist overrides this color.
-                  </p>
-                </div>
-                </div>
-              </div>
-
               <div class="settings-row">
                 <div class="settings-row__text">
                   <span data-i18n="settings.fontScale.label" class="text-sm font-medium leading-snug">Font scale</span>
@@ -501,22 +418,6 @@ const navStructure: NavSection[] = [
                     var densityBtns = densityGroup.querySelectorAll(".density-btn");
                     for (var densityIndex = 0; densityIndex < densityBtns.length; densityIndex++) {
                       densityBtns[densityIndex].setAttribute("aria-pressed", densityBtns[densityIndex].getAttribute("data-density") === savedDensity ? "true" : "false");
-                    }
-                  }
-                  var currentTheme = localStorage.getItem("xt_theme") || "system";
-                  var themeGroup = document.getElementById("settings-theme");
-                  if (themeGroup) {
-                    var themeBtns = themeGroup.querySelectorAll(".theme-btn");
-                    for (var j = 0; j < themeBtns.length; j++) {
-                      themeBtns[j].setAttribute("aria-checked", themeBtns[j].getAttribute("data-theme") === currentTheme ? "true" : "false");
-                    }
-                  }
-                  var currentAccent = localStorage.getItem("xt_accent") || "burgundy";
-                  var accentGroup = document.getElementById("settings-accent");
-                  if (accentGroup) {
-                    var accentBtns = accentGroup.querySelectorAll(".accent-btn");
-                    for (var k = 0; k < accentBtns.length; k++) {
-                      accentBtns[k].setAttribute("aria-checked", accentBtns[k].getAttribute("data-accent-value") === currentAccent ? "true" : "false");
                     }
                   }
                 } catch (e) {}
@@ -602,40 +503,6 @@ const navStructure: NavSection[] = [
                     for (var sIdx = 0; sIdx < uiSoundsBtns.length; sIdx++) {
                       var uiSoundsBtnOn = uiSoundsBtns[sIdx].getAttribute("data-sounds") === "on";
                       uiSoundsBtns[sIdx].setAttribute("aria-pressed", uiSoundsBtnOn === uiSoundsOn ? "true" : "false");
-                    }
-                  }
-                } catch (e) {}
-              </script>
-            </div>
-
-            <!-- Touch feedback: subtle vibration on favorite/watchlist touch actions -->
-            <div id="card-haptics" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20 hidden">
-              <div class="settings-row__text">
-                <h3 data-i18n="settings.haptics.title" class="text-sm font-medium leading-snug">Touch feedback</h3>
-                <p data-i18n="settings.haptics.helperLong" class="text-xs text-fg-3">
-                  A tiny vibration when you star a favorite or add to your watchlist by touch. Follows the system touch-feedback setting.
-                </p>
-              </div>
-              <div class="settings-row__control">
-                <div
-                  id="settings-haptics"
-                  class="settings-seg"
-                  role="radiogroup"
-                  aria-label="Touch feedback"
-                  data-i18n-attr="aria-label:settings.haptics.label">
-                  <button type="button" data-haptics="on"  aria-pressed="false" data-i18n="settings.haptics.on"  class="haptics-btn btn">On</button>
-                  <button type="button" data-haptics="off" aria-pressed="false" data-i18n="settings.haptics.off" class="haptics-btn btn">Off</button>
-                </div>
-              </div>
-              <script is:inline>
-                try {
-                  var hapticsOn = localStorage.getItem("xt_haptics") !== "0";
-                  var hapticsGroup = document.getElementById("settings-haptics");
-                  if (hapticsGroup) {
-                    var hapticsBtns = hapticsGroup.querySelectorAll(".haptics-btn");
-                    for (var hIdx = 0; hIdx < hapticsBtns.length; hIdx++) {
-                      var hapticsBtnOn = hapticsBtns[hIdx].getAttribute("data-haptics") === "on";
-                      hapticsBtns[hIdx].setAttribute("aria-pressed", hapticsBtnOn === hapticsOn ? "true" : "false");
                     }
                   }
                 } catch (e) {}
@@ -736,22 +603,8 @@ const navStructure: NavSection[] = [
           </div>
           <div class="settings-rows">
 
-            <!-- Live TV layout: EPG default + channel column width -->
+            <!-- Live TV layout: channel column width -->
             <div id="card-livetv-layout" data-settings-item class="scroll-mt-6 lg:scroll-mt-20 settings-rows">
-              <div class="settings-row">
-                <span data-i18n="settings.livetvLayout.epgDefault" class="text-sm font-medium leading-snug">Show EPG by default</span>
-                <div class="settings-row__control">
-                  <div
-                    id="settings-epg-default"
-                    class="settings-seg"
-                    role="radiogroup"
-                    aria-label="Show EPG by default" data-i18n-attr="aria-label:aria.showEpgDefault">
-                    <button type="button" data-epg="on"  aria-pressed="false" data-i18n="settings.livetvLayout.epg.on" class="epg-default-btn btn">On</button>
-                    <button type="button" data-epg="off" aria-pressed="false" data-i18n="settings.livetvLayout.epg.off" class="epg-default-btn btn">Off</button>
-                  </div>
-                </div>
-              </div>
-
               <div class="settings-row">
                 <span data-i18n="settings.livetvLayout.columnWidth" class="text-sm font-medium leading-snug">Channel column width</span>
                 <div class="settings-row__control">
@@ -1087,7 +940,7 @@ const navStructure: NavSection[] = [
       </div>
     </section>
 
-    <!-- Group: Network (User-Agent spoofing, Discord Rich Presence) -->
+    <!-- Group: Network (User-Agent spoofing, request timeout, developer mode) -->
     <section id="settings-network" class="settings-group scroll-mt-8 lg:scroll-mt-20">
       <h2 data-i18n="settings.group.network" class="settings-group__title">Network</h2>
       <div class="flex flex-col gap-4">
@@ -1192,39 +1045,6 @@ const navStructure: NavSection[] = [
                 </div>
               </div>
             </div>
-
-            <!-- Discord Rich Presence: desktop-only, unhidden by the script below -->
-            <details id="discord-rpc-section" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">
-              <summary class="settings-row cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
-                <span class="settings-row__text">
-                  <h3 class="text-sm font-medium leading-snug">
-                    <IconBrandDiscord aria-hidden="true" stroke={2} class="size-4 text-fg-3 inline-block align-[-2px] me-1.5" />
-                    <span data-i18n="settings.discord.title">Discord Rich Presence</span>
-                  </h3>
-                  <span data-i18n="settings.discord.helperLong" class="text-xs text-fg-3 line-clamp-1 block">
-                    Show "Watching X on NylahBox Studios" on your Discord profile while you use the app. On by default; uncheck a playlist below to mute presence for that account. Desktop only - requires Discord running on the same machine.
-                  </span>
-                </span>
-                <span class="settings-row__control">
-                  <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
-                </span>
-              </summary>
-              <div class="px-5 sm:px-6 pb-4 pt-1 flex flex-col gap-3">
-                <input id="discord-client-id" type="hidden" />
-
-                <div id="discord-controls" class="flex flex-col gap-2">
-                  <span data-i18n="settings.discord.perPlaylist" class="text-eyebrow font-medium uppercase text-fg-3">Per-playlist</span>
-                  <div
-                    id="discord-playlists"
-                    class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden">
-                    <div data-i18n="settings.playlists.empty" class="px-4 py-4 text-xs text-fg-3">No playlists yet.</div>
-                  </div>
-                </div>
-                <p id="discord-sandbox-note" data-i18n="settings.discord.sandboxNote" class="text-xs text-fg-3" hidden>
-                  Discord Rich Presence isn't available in Snap installs.
-                </p>
-              </div>
-            </details>
 
           </div>
         </div>
@@ -1555,7 +1375,7 @@ const navStructure: NavSection[] = [
                     class="text-accent underline ms-1">Get a key at themoviedb.org</a>
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <div class="flex gap-2">
                   <input
                     id="settings-tmdb-key"
@@ -1612,7 +1432,7 @@ const navStructure: NavSection[] = [
                   <span id="settings-ai-last-tested" class="block"></span>
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <span id="settings-ai-status" aria-live="polite" class="text-sm font-medium">Checking…</span>
               </div>
             </div>
@@ -1680,7 +1500,7 @@ const navStructure: NavSection[] = [
                   OpenAI-compatible API base URL.
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <input
                   id="settings-ai-endpoint"
                   type="text"
@@ -1700,7 +1520,7 @@ const navStructure: NavSection[] = [
                   Model on your provider. Smaller models cost less per question.
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <select
                   id="settings-ai-model"
                   class="field-input flex-1 min-w-0"
@@ -1738,7 +1558,7 @@ const navStructure: NavSection[] = [
                   <span id="settings-ai-keys-note" class="hidden">Get a key from your provider's dashboard.</span>
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <div class="flex gap-2">
                   <input
                     id="settings-ai-key"
@@ -1833,7 +1653,7 @@ const navStructure: NavSection[] = [
                   Checks the saved key against the endpoint above.
                 </p>
               </div>
-              <div class="settings-row__control w-full @2xl:w-96 flex-col items-stretch gap-1">
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
                 <div class="flex gap-2">
                   <button id="settings-ai-test" type="button" class="btn flex-none w-auto justify-center">
                     <span data-i18n="settings.ai.test">Test connection</span>
@@ -2647,19 +2467,6 @@ const navStructure: NavSection[] = [
           </div>
         </div>
 
-        <div id="settings-support" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
-          <div class="settings-surface__header">
-            <span class="icon-mark icon-mark--heart">
-              <IconHeart aria-hidden="true" stroke={2} />
-            </span>
-            <h3 data-i18n="settings.support.title" class="text-base font-semibold">Like the app?</h3>
-          </div>
-          <div class="px-5 sm:px-6 pb-5 pt-4 flex flex-col gap-4">
-            <p data-i18n="settings.support.intro" class="text-sm text-fg-2">
-              NylahBox Studios is free and open source.
-            </p>
-          </div>
-        </div>
       </div>
     </section>
 
@@ -2839,15 +2646,10 @@ const navStructure: NavSection[] = [
       setPerfMode,
       getUiSoundsEnabled,
       setUiSoundsEnabled,
-      getHapticsEnabled,
-      setHapticsEnabled,
       getMonoAudioEnabled,
       setMonoAudioEnabled,
       getCaptionsAutoEnabled,
       setCaptionsAutoEnabled,
-      getAccent,
-      setAccent,
-      ACCENT_PRESETS,
       getDensity,
       setDensity,
       getProgressRetentionDays,
@@ -2871,7 +2673,6 @@ const navStructure: NavSection[] = [
       DEV_MODE_EVENT,
     } from "@/scripts/lib/app-settings.js"
     import { playUiSound } from "@/scripts/lib/ui-sounds.ts"
-    import { hapticsAvailable, performHaptic } from "@/scripts/lib/haptics.ts"
     import { audioTranscodeStatus } from "@/scripts/lib/audio-proxy.ts"
     import { ensureHevcDecodable, isWindowsDesktop as isWindowsDesktopEnv } from "@/scripts/lib/hevc-extension.ts"
     import { deviceSupportsHevc } from "@/scripts/lib/codec-hints.ts"
@@ -2882,14 +2683,6 @@ const navStructure: NavSection[] = [
       USER_INFO_LOADED_EVENT,
     } from "@/scripts/lib/account-info.js"
     import { isDownloadable, scanDownloadsFolder } from "@/scripts/lib/downloads.js"
-    import {
-      getDiscordClientId,
-      setDiscordClientId,
-      isDiscordEnabledForPlaylist,
-      setDiscordEnabledForPlaylist,
-      DISCORD_RPC_EVENT,
-    } from "@/scripts/lib/app-settings.js"
-    import { discordRpcSupported } from "@/scripts/lib/discord-rpc.js"
     import {
       getTmdbApiKey,
       setTmdbApiKey,
@@ -3896,102 +3689,6 @@ const navStructure: NavSection[] = [
     syncDensityButtons()
 
     // ---------------------------------------------------------------------
-    // Theme: light / dark / system. Persisted to xt_theme; applied by the
-    // inline script in <head> on page load. CSS uses `light-dark()` so the
-    // single `colorScheme` property on :root drives the whole palette.
-    // ---------------------------------------------------------------------
-    const themeGroup = document.getElementById("settings-theme")
-    function readTheme() {
-      try {
-        return localStorage.getItem("xt_theme") || "system"
-      } catch {
-        return "system"
-      }
-    }
-    function commitTheme(t) {
-      if (t === "light") document.documentElement.style.colorScheme = "light"
-      else if (t === "dark") document.documentElement.style.colorScheme = "dark"
-      else document.documentElement.style.colorScheme = ""
-      try {
-        localStorage.setItem("xt_theme", t)
-      } catch {}
-      try {
-        window.__applyAndroidStatusBar?.(t)
-      } catch {}
-      syncThemeButtons()
-    }
-    function applyTheme(t, originX, originY) {
-      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      const supportsVT = typeof document.startViewTransition === "function"
-      if (!supportsVT || reduceMotion) {
-        commitTheme(t)
-        return
-      }
-      const root = document.documentElement
-      const x = Number.isFinite(originX) ? originX : window.innerWidth / 2
-      const y = Number.isFinite(originY) ? originY : window.innerHeight / 2
-      const farX = Math.max(x, window.innerWidth - x)
-      const farY = Math.max(y, window.innerHeight - y)
-      const radius = Math.hypot(farX, farY)
-      root.style.setProperty("--xt-theme-x", `${x}px`)
-      root.style.setProperty("--xt-theme-y", `${y}px`)
-      root.style.setProperty("--xt-theme-r", `${radius}px`)
-      root.classList.add("xt-theme-switching")
-      const transition = document.startViewTransition(() => commitTheme(t))
-      transition.finished.finally(() => {
-        root.classList.remove("xt-theme-switching")
-        root.style.removeProperty("--xt-theme-x")
-        root.style.removeProperty("--xt-theme-y")
-        root.style.removeProperty("--xt-theme-r")
-      })
-    }
-    function syncThemeButtons() {
-      const current = readTheme()
-      for (const btn of themeGroup?.querySelectorAll(".theme-btn") || []) {
-        btn.setAttribute("aria-checked", String(btn.dataset.theme === current))
-      }
-    }
-    themeGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".theme-btn")
-      if (!btn) return
-      applyTheme(btn.dataset.theme || "system", event.clientX, event.clientY)
-    })
-    syncThemeButtons()
-
-    // ---------------------------------------------------------------------
-    // Accent color: persisted to xt_accent, applied via `data-accent` on <html>.
-    // ---------------------------------------------------------------------
-    const accentGroup = document.getElementById("settings-accent")
-    function syncAccentButtons() {
-      const current = getAccent()
-      for (const btn of accentGroup?.querySelectorAll(".accent-btn") || []) {
-        btn.setAttribute("aria-checked", String(btn.dataset.accentValue === current))
-      }
-    }
-    accentGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".accent-btn")
-      if (!btn) return
-      setAccent(btn.dataset.accentValue || "fuchsia")
-      syncAccentButtons()
-    })
-    syncAccentButtons()
-
-    // Hint that the active playlist overrides this, so the picker doesn't look broken.
-    const accentOverrideHint = document.getElementById("settings-accent-override-hint")
-    async function syncAccentOverrideHint() {
-      if (!accentOverrideHint) return
-      const active = await getActiveEntry()
-      const hasOverride =
-        typeof active?.accent === "string" && ACCENT_PRESETS.includes(active.accent)
-      accentOverrideHint.classList.toggle("hidden", !hasOverride)
-    }
-    document.addEventListener("xt:active-changed", syncAccentOverrideHint)
-    document.addEventListener("xt:entries-updated", syncAccentOverrideHint)
-    syncAccentOverrideHint()
-
-    // ---------------------------------------------------------------------
     // Performance mode: persisted to xt_perf_mode; the inline script in
     // Layout.astro mirrors it to `data-perf-mode` on <html> before paint
     // so the brand-mark + entry animations don't flash on first frame.
@@ -4036,32 +3733,6 @@ const navStructure: NavSection[] = [
       if (next) void playUiSound("confirm")
     })
     syncUiSoundsButtons()
-
-    // ---------------------------------------------------------------------
-    // Touch feedback (Android / touch devices only)
-    // ---------------------------------------------------------------------
-    const hapticsCard = document.getElementById("card-haptics")
-    const hapticsGroup = document.getElementById("settings-haptics")
-    if (hapticsCard && hapticsAvailable()) {
-      hapticsCard.classList.remove("hidden")
-    }
-    function syncHapticsButtons() {
-      const current = getHapticsEnabled()
-      for (const btn of hapticsGroup?.querySelectorAll(".haptics-btn") || []) {
-        const isOn = btn.dataset.haptics === "on"
-        btn.setAttribute("aria-pressed", String(isOn === current))
-      }
-    }
-    hapticsGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".haptics-btn")
-      if (!btn) return
-      const next = btn.dataset.haptics === "on"
-      setHapticsEnabled(next)
-      syncHapticsButtons()
-      if (next) performHaptic("confirm")
-    })
-    syncHapticsButtons()
 
     // ---------------------------------------------------------------------
     // Rendering (Linux desktop only): WebKitGTK DMA-BUF safe mode
@@ -4189,10 +3860,21 @@ const navStructure: NavSection[] = [
       document.getElementById("content-lang-select")
     )
     // initI18n() may not have settled yet, so await it before reading locale-dependent labels.
+    // Guard against re-entrant runs: a LOCALE_EVENT fired while populating
+    // must not start a second populate (a locale change mid-run re-queues
+    // one pass instead).
+    let contentLangPopulating = false
+    let contentLangRepopulateQueued = false
     async function populateContentLangSelect() {
       if (!contentLangSelectEl) return
-      await initI18n()
-      contentLangSelectEl.replaceChildren()
+      if (contentLangPopulating) {
+        contentLangRepopulateQueued = true
+        return
+      }
+      contentLangPopulating = true
+      try {
+        await initI18n()
+        contentLangSelectEl.replaceChildren()
 
       const autoOption = document.createElement("option")
       autoOption.value = ""
@@ -4211,6 +3893,13 @@ const navStructure: NavSection[] = [
       }
 
       contentLangSelectEl.value = getContentLanguage()
+      } finally {
+        contentLangPopulating = false
+        if (contentLangRepopulateQueued) {
+          contentLangRepopulateQueued = false
+          void populateContentLangSelect()
+        }
+      }
     }
     contentLangSelectEl?.addEventListener("change", () => {
       setContentLanguage(contentLangSelectEl.value)
@@ -4379,42 +4068,8 @@ const navStructure: NavSection[] = [
     syncRetentionButtons()
 
     // ---------------------------------------------------------------------
-    // Live TV layout: default EPG visibility + channel column width.
+    // Live TV layout: channel column width.
     // ---------------------------------------------------------------------
-    const epgDefaultGroup = document.getElementById("settings-epg-default")
-    function readEpgDefault() {
-      try {
-        const v = localStorage.getItem("xt_epg_open_default")
-        return v === null ? true : v === "true"
-      } catch {
-        return true
-      }
-    }
-    function applyEpgDefault(on) {
-      try {
-        localStorage.setItem("xt_epg_open_default", String(on))
-        // Reset the per-session override so the new default applies on the
-        // next visit to /livetv.
-        localStorage.removeItem("xt_epg_visible")
-      } catch {}
-      syncEpgDefaultButtons()
-    }
-    function syncEpgDefaultButtons() {
-      const on = readEpgDefault()
-      for (const btn of epgDefaultGroup?.querySelectorAll(".epg-default-btn") ||
-        []) {
-        const isOn = btn.dataset.epg === "on"
-        btn.setAttribute("aria-pressed", String(isOn === on))
-      }
-    }
-    epgDefaultGroup?.addEventListener("click", (e) => {
-      const t = /** @type {HTMLElement} */ (e.target)
-      const btn = t.closest(".epg-default-btn")
-      if (!btn) return
-      applyEpgDefault(btn.dataset.epg === "on")
-    })
-    syncEpgDefaultButtons()
-
     const channelWidthGroup = document.getElementById("settings-channel-width")
     const CHANNEL_WIDTH_DEFAULT = 28
     function readChannelWidth() {
@@ -5365,98 +5020,6 @@ const navStructure: NavSection[] = [
 
     autoUpdateSelectEl?.addEventListener("change", () => {
       setAutoUpdateEnabled(autoUpdateSelectEl.value === "on")
-    })
-
-    // -------------------------------------------------------------------
-    // Discord Rich Presence
-    // -------------------------------------------------------------------
-    const discordSection = document.getElementById("discord-rpc-section")
-    const discordClientIdInput = /** @type {HTMLInputElement|null} */ (
-      document.getElementById("discord-client-id")
-    )
-    const discordPlaylistsEl = document.getElementById("discord-playlists")
-
-    if (discordSection && discordRpcSupported) {
-      discordSection.classList.remove("hidden")
-      // Flatpak grants the IPC socket (xdg-run/discord-ipc-0); snap doesn't.
-      if (sandboxed === "snap") {
-        document.getElementById("discord-controls")?.setAttribute("hidden", "")
-        document.getElementById("discord-sandbox-note")?.removeAttribute("hidden")
-      }
-    }
-
-    if (discordClientIdInput) {
-      discordClientIdInput.value = getDiscordClientId()
-      let saveTimer = null
-      discordClientIdInput.addEventListener("input", () => {
-        if (saveTimer) window.clearTimeout(saveTimer)
-        saveTimer = window.setTimeout(() => {
-          setDiscordClientId(discordClientIdInput.value)
-        }, 350)
-      })
-      discordClientIdInput.addEventListener("blur", () => {
-        if (saveTimer) {
-          window.clearTimeout(saveTimer)
-          saveTimer = null
-        }
-        setDiscordClientId(discordClientIdInput.value)
-      })
-    }
-
-    async function renderDiscordPlaylists() {
-      if (!discordPlaylistsEl) return
-      const entries = await getEntries()
-      if (!entries.length) {
-        discordPlaylistsEl.innerHTML =
-          '<div class="px-4 py-4 text-xs text-fg-3">No playlists yet.</div>'
-        return
-      }
-      const frag = document.createDocumentFragment()
-      for (const entry of entries) {
-        const row = document.createElement("label")
-        row.className =
-          "flex items-center justify-between gap-3 px-4 py-3 hover:bg-surface-2 transition-colors cursor-pointer"
-        const labelWrap = document.createElement("div")
-        labelWrap.className = "flex flex-col gap-0.5 min-w-0"
-        const title = document.createElement("span")
-        title.className = "truncate text-sm font-medium text-fg"
-        title.textContent = entry.title || "(untitled)"
-        const sub = document.createElement("span")
-        sub.className = "truncate text-2xs text-fg-3"
-        sub.textContent =
-          entry.type === "xtream"
-            ? "Xtream"
-            : entry.type === "local-m3u"
-            ? "Local file"
-            : "M3U source"
-        labelWrap.append(title, sub)
-        row.appendChild(labelWrap)
-
-        const toggle = document.createElement("input")
-        toggle.type = "checkbox"
-        toggle.className = "size-5 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        toggle.checked = isDiscordEnabledForPlaylist(entry._id)
-        toggle.setAttribute(
-          "aria-label",
-          `Show Discord presence for ${entry.title || "this playlist"}`
-        )
-        toggle.addEventListener("change", () => {
-          setDiscordEnabledForPlaylist(entry._id, toggle.checked)
-        })
-        row.appendChild(toggle)
-        frag.appendChild(row)
-      }
-      discordPlaylistsEl.replaceChildren(frag)
-    }
-
-    renderDiscordPlaylists()
-    document.addEventListener("xt:entries-updated", renderDiscordPlaylists)
-    document.addEventListener(DISCORD_RPC_EVENT, () => {
-      // Keep the input in sync if the value changed elsewhere.
-      if (discordClientIdInput) {
-        const next = getDiscordClientId()
-        if (discordClientIdInput.value !== next) discordClientIdInput.value = next
-      }
     })
 
     // -------------------------------------------------------------------
