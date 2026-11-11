@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   LIVETV_STATE_KEYS,
   LIVETV_STATE_COPY,
+  livetvEmptyProps,
   groupChannels,
   isLocalChannel,
   loadLivetvChannels,
@@ -373,6 +374,23 @@ describe("shared state keys", () => {
       expect(LIVETV_STATE_COPY[key].title.length).toBeGreaterThan(0);
       expect(LIVETV_STATE_COPY[key].message.length).toBeGreaterThan(0);
     }
+  });
+
+  it("livetvEmptyProps returns the shared copy for every key (0.11.0 W1)", () => {
+    for (const key of LIVETV_STATE_KEYS) {
+      expect(livetvEmptyProps(key)).toEqual(LIVETV_STATE_COPY[key]);
+    }
+    expect(livetvEmptyProps("provider-lost")).toEqual({
+      title: "No live playlist connected",
+      message: "Add a playlist to browse live channels.",
+    });
+  });
+
+  it("livetvEmptyProps returns a fresh object per call", () => {
+    const a = livetvEmptyProps("no-favourites");
+    const b = livetvEmptyProps("no-favourites");
+    expect(a).toEqual(b);
+    expect(a).not.toBe(b);
   });
 });
 

@@ -171,6 +171,27 @@ export const LIVETV_STATE_COPY: Record<
   },
 };
 
+/**
+ * Shared Live TV loading / error / empty presentation (0.11.0 W1).
+ *
+ * ONE pattern for every Live TV screen: pick a `LivetvStateKey` and
+ * render it with TvEmpty (title + message); a loading state renders
+ * TvSkeleton, never a bare text line. The copy lives in exactly one
+ * place (LIVETV_STATE_COPY above) — screens must not restate these
+ * strings inline, or the same empty state drifts into different
+ * wording per screen (the shell, the landing and the playback
+ * error overlay all carried their own copy of "provider-lost").
+ * Returns a fresh `{ title, message }` object so callers can spread
+ * it straight into TvEmpty props.
+ */
+export function livetvEmptyProps(key: LivetvStateKey): {
+  title: string;
+  message: string;
+} {
+  const copy = LIVETV_STATE_COPY[key];
+  return { title: copy.title, message: copy.message };
+}
+
 // ── Channel shape ───────────────────────────────────────────────
 
 export interface LivetvChannel {
