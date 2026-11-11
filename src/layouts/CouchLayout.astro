@@ -121,6 +121,54 @@ const documentTitle = pageTitle
       mountGamepad();
       mountReturnHome();
       initCouchFocus();
+      // Spatial navigation is the arrow-key focus engine every Couch
+      // screen moves through. It was never initialised on this
+      // layout — only the legacy Layout.astro and the TvLayout shell
+      // call init() + add() — so the window keydown listener was
+      // never attached and _sectionCount stayed 0: arrows (physical
+      // keyboard AND the gamepad bridge's synthetic keys) did nothing
+      // on Home / Live TV / Movies / Series / Discover / Search /
+      // Settings. Same "main" section shape as Layout.astro; the
+      // duplicate-add throw is swallowed so a script re-run is a
+      // no-op, and makeFocusable re-runs on load for content mounted
+      // after this script (Svelte views).
+      const sn = window.SpatialNavigation;
+      if (sn) {
+        sn.init();
+        try {
+          sn.add({
+            id: "main",
+            selector:
+              "a, button, summary, input, textarea, [contenteditable='true'], select, [tabindex]:not([tabindex='-1'])",
+            // Reject fullscreen-occluded, inert, offscreen-parked, invisible, or faded-out player-chrome targets
+            navigableFilter: (elem: Element) => {
+              const fullscreenEl = document.fullscreenElement;
+              if (fullscreenEl && !fullscreenEl.contains(elem)) return false;
+              if (elem.closest("[inert]")) return false;
+              const rect = elem.getBoundingClientRect();
+              if (rect.right <= 0 || rect.bottom <= 0) return false;
+              if (getComputedStyle(elem).visibility !== "visible") return false;
+              const playerChrome = elem.closest(
+                ".vjs-control-bar, .vjs-volume-vertical, .vjs-menu",
+              );
+              if (playerChrome && parseFloat(getComputedStyle(playerChrome).opacity) === 0) {
+                return false;
+              }
+              return true;
+            },
+          });
+        } catch {
+          // Section already registered (script re-run): keep it.
+        }
+        sn.makeFocusable();
+        window.addEventListener("load", () => {
+          try {
+            sn.makeFocusable();
+          } catch {
+            // Focus engine unavailable: mouse/touch keep working.
+          }
+        });
+      }
     </script>
   </body>
 </html>

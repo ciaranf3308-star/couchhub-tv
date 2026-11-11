@@ -267,6 +267,44 @@ export function closeCouchDialog(id: string): boolean {
 }
 
 /**
+ * Seed focus on a cold launch, when nothing is focused yet and there
+ * is no stored focus to restore. Focuses the active top-nav link
+ * (server-rendered, always present), else the first visible nav
+ * item, else the first visible rail item. Returns the focused
+ * element, or null when there was nothing to seed (something already
+ * focused, a modal open, or no focusable on the page). Without this,
+ * A on a cold launch dispatches Enter to <body> and does nothing,
+ * and component-scoped key handlers never see the gamepad's
+ * synthetic keys at all — the controller looks dead until the user
+ * clicks something first. Seeding is a mount-time act only: content
+ * loading later never moves focus (see initCouchFocus).
+ */
+export function seedInitialCouchFocus(
+  doc: Document = document,
+): HTMLElement | null {
+  if (findOpenModal(doc)) return null;
+  const active = doc.activeElement as HTMLElement | null;
+  if (active && active !== doc.body) return null;
+  const candidates: Array<HTMLElement | null> = [
+    doc.querySelector<HTMLElement>(
+      '[data-couch-nav] [aria-current="page"]',
+    ),
+    doc.querySelector<HTMLElement>("[data-couch-nav] [data-nylah-item]"),
+    ...Array.from(doc.querySelectorAll("[data-nylah-rail]")).flatMap(
+      (rail) => couchRailItems(rail),
+    ),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && candidate.isConnected && isVisible(candidate)) {
+      candidate.focus({ preventScroll: true });
+      scrollFocusedIntoView(candidate);
+      return candidate;
+    }
+  }
+  return null;
+}
+
+/**
  * Mount the Couch focus layer. Idempotent. Call once from CouchLayout.
  * Returns an unmount function (mainly for tests).
  *
@@ -328,7 +366,13 @@ export function initCouchFocus(): () => void {
 
   const restore = (): void => {
     // One frame after load so server-rendered rails are laid out.
-    requestAnimationFrame(() => restoreCouchFocus(document));
+    requestAnimationFrame(() => {
+      // Stored focus first; on a cold launch (no memory) seed the
+      // top nav so D-pad / A have a focused element from the first
+      // press. seedInitialCouchFocus no-ops when something is
+      // already focused or a modal is open.
+      if (!restoreCouchFocus(document)) seedInitialCouchFocus(document);
+    });
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", restore, { once: true });

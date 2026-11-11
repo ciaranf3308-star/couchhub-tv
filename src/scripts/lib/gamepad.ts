@@ -87,6 +87,45 @@ const ARROW_KEY: Record<Direction, string> = {
   right: "ArrowRight",
 };
 
+// Synthetic KeyboardEvent.keyCode values. Chromium's KeyboardEvent
+// constructor has no keyCode slot, so a synthetic event reads
+// keyCode 0 — and spatial-navigation.js reads keyCode only. Stamp
+// the real code onto each dispatched event (see dispatchKey); the
+// map also feeds the spatial-nav key fallback.
+const KEY_CODE: Record<string, number> = {
+  ArrowLeft: 37,
+  ArrowUp: 38,
+  ArrowRight: 39,
+  ArrowDown: 40,
+  Enter: 13,
+  Escape: 27,
+  " ": 32,
+  PageUp: 33,
+  PageDown: 34,
+  "[": 219,
+  "]": 221,
+  ContextMenu: 93,
+};
+
+function keyCodeForKey(key: string): number | undefined {
+  const direct = KEY_CODE[key];
+  if (direct !== undefined) return direct;
+  if (key.length === 1) return key.toUpperCase().charCodeAt(0);
+  return undefined;
+}
+
+/** First connected pad at ANY index — never just slot 0. */
+export function firstConnectedPad(
+  pads: ArrayLike<Gamepad | null> | null | undefined,
+): Gamepad | null {
+  if (!pads) return null;
+  for (let i = 0; i < pads.length; i++) {
+    const pad = pads[i];
+    if (pad && pad.connected) return pad;
+  }
+  return null;
+}
+
 function isEditingTarget(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
   if (!el || typeof el.tagName !== "string") return false;
@@ -98,8 +137,26 @@ function isEditingTarget(target: EventTarget | null): boolean {
 function dispatchKey(key: string): void {
   const target = document.activeElement ?? document.body;
   const init: KeyboardEventInit = { key, code: key, bubbles: true, cancelable: true };
-  target.dispatchEvent(new KeyboardEvent("keydown", init));
-  target.dispatchEvent(new KeyboardEvent("keyup", init));
+  // A synthetic KeyboardEvent reads keyCode 0 in Chromium (the
+  // constructor has no keyCode slot), and spatial-navigation.js reads
+  // keyCode only — without the stamp every gamepad arrow / Enter /
+  // Escape is invisible to the focus engine. Object.defineProperty
+  // shadows the prototype getter and survives dispatch (verified in
+  // Chromium); if an old webview refuses it, e.key readers still see
+  // the press.
+  const keyCode = keyCodeForKey(key);
+  for (const type of ["keydown", "keyup"] as const) {
+    const event = new KeyboardEvent(type, init);
+    if (keyCode !== undefined) {
+      try {
+        Object.defineProperty(event, "keyCode", { value: keyCode });
+        Object.defineProperty(event, "which", { value: keyCode });
+      } catch {
+        // Very old webviews: the key-only event still goes out.
+      }
+    }
+    target.dispatchEvent(event);
+  }
 }
 
 function currentVideo(): HTMLVideoElement | null {
@@ -450,6 +507,10 @@ export function mountGamepad(): void {
   let held: HeldDirection | null = null;
   let viewMenuHoldStart: number | null = null;
   let menuPressedWithView = false;
+  // Index of the pad the loop is currently reading. The pad can move
+  // (reconnect at a new index, a different pad taking over); edge
+  // state from the previous pad must never fire on the new one.
+  let activePadIndex: number | null = null;
 
   const markGamepadActive = () => {
     document.documentElement.classList.add("gamepad-active");
@@ -524,18 +585,35 @@ export function mountGamepad(): void {
     if (document.hidden) return;
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const gp = pads ? pads[0] ?? null : null;
-    if (!gp || !gp.connected) {
+    // First connected pad at ANY index: a virtual / second device can
+    // sit at 0 while the real controller is at 1+. Reading slot 0
+    // only made the controller invisible on exactly those machines.
+    const gp = firstConnectedPad(pads);
+    if (!gp) {
       prevSnapshot = [];
       held = null;
       viewMenuHoldStart = null;
+      activePadIndex = null;
       return;
+    }
+    if (activePadIndex !== gp.index) {
+      activePadIndex = gp.index;
+      prevSnapshot = [];
+      held = null;
+      viewMenuHoldStart = null;
     }
 
     const snapshot = gp.buttons.map((b) => b.pressed || b.value > 0.5);
-    const justPressed = (index: number): boolean =>
-      snapshot[index] === true && prevSnapshot[index] !== true;
+    // Capture the previous frame BEFORE reassigning: justPressed
+    // closes over this binding, so assigning prevSnapshot = snapshot
+    // first made every edge compare the snapshot against itself and
+    // always return false — A / B / X / Y / LB / RB / LT / RT / Menu
+    // could never fire, on any screen. (0.11.0 bug: the assign sat
+    // between the justPressed definition and its first call.)
+    const prev = prevSnapshot;
     prevSnapshot = snapshot;
+    const justPressed = (index: number): boolean =>
+      snapshot[index] === true && prev[index] !== true;
 
     const editing = isEditingTarget(document.activeElement);
 
@@ -704,17 +782,25 @@ export function mountGamepad(): void {
   });
   window.addEventListener("gamepadconnected", () => start());
   window.addEventListener("gamepaddisconnected", () => {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    const anyConnected = pads ? Array.from(pads).some((p) => p?.connected) : false;
-    if (!anyConnected) stop();
+    // The loop keeps polling: a reconnect (or a first press that
+    // opens Chromium's gesture gate) is picked up on the next frame
+    // without depending on the connect event arriving. Only the
+    // edge state is reset, so a held button cannot fire stale.
+    prevSnapshot = [];
+    held = null;
+    viewMenuHoldStart = null;
+    activePadIndex = null;
   });
 
-  // Start immediately if a controller is already connected (the
-  // gamepadconnected event only fires on plug-in after page load).
-  try {
-    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    if (pads && Array.from(pads).some((p) => p?.connected)) start();
-  } catch {
-    // No Gamepad API in this webview — keyboard/mouse keep working.
-  }
+  // Start the poll loop UNCONDITIONALLY at mount. The old code only
+  // started it when getGamepads() already showed a pad, or when a
+  // gamepadconnected event arrived — both miss the cold-launch case:
+  // Chromium hides an already-connected pad until its first button
+  // press (anti-fingerprinting gesture gate), and a gamepadconnected
+  // fired by a press during page load — before this listener exists
+  // — is lost forever, leaving the loop stopped and the controller
+  // dead for the whole session. Polling every frame costs nothing
+  // when no pad is present (early return above) and discovers the
+  // pad on the first frame its gate opens, event or no event.
+  start();
 }
