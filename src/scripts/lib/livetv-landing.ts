@@ -63,6 +63,7 @@ import {
   type LivetvHomeData,
 } from "./livetv-data";
 import type { GuideMode } from "./livetv-state";
+import { LIVETV_BACK_EVENT } from "./livetv-keys";
 import { formatTimeRange, type Programme } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
 import { readCouchFocusMemory } from "./couch-focus";
@@ -72,8 +73,9 @@ import { EPG_LOADED_EVENT } from "./epg-data.js";
 
 /** W5 contract: gamepad resolves B/Escape to "back"; the shell dispatches this.
  *  Single definition lives in livetv-keys.ts (0.11.0 integration R7) —
- *  this module re-exports it so existing import sites keep working. */
-export { LIVETV_BACK_EVENT } from "./livetv-keys";
+ *  imported above for local use and re-exported so existing import
+ *  sites keep working. */
+export { LIVETV_BACK_EVENT };
 
 /** Dedicated sessionStorage key: last landing card's data-focus-key. */
 export const LANDING_FOCUS_STORAGE_KEY = "redsilk:livetv:landing-card";

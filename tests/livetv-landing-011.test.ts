@@ -23,12 +23,13 @@ import {
   type LandingHeroModel,
 } from "@/scripts/lib/livetv-landing";
 import {
+  clearProgrammeArtworkCache,
   enrichProgramme,
   getProgrammeArtworkSync,
-  normaliseProgrammeTitle,
+  normalizeProgrammeTitle,
+  parseProgrammeTitleSignals,
   placeholderArtwork,
   prefetchProgrammes,
-  __clearEnrichmentMemoryCache,
 } from "@/scripts/lib/livetv-enrichment";
 import type { LivetvChannel } from "@/scripts/lib/livetv-data";
 
@@ -83,32 +84,39 @@ function heroEl(): HTMLElement {
 
 beforeEach(() => {
   window.localStorage.removeItem("xt_tmdb_key");
-  window.localStorage.removeItem("redsilk:livetv:enrichment:v1");
-  __clearEnrichmentMemoryCache();
+  window.localStorage.removeItem("xt_livetv_enrichment_v1");
+  clearProgrammeArtworkCache();
   sessionStorage.clear();
 });
 
 afterEach(() => {
   document.body.replaceChildren();
   window.localStorage.removeItem("xt_tmdb_key");
-  window.localStorage.removeItem("redsilk:livetv:enrichment:v1");
-  __clearEnrichmentMemoryCache();
+  window.localStorage.removeItem("xt_livetv_enrichment_v1");
+  clearProgrammeArtworkCache();
 });
 
 // ── Enrichment contract (no key → placeholder, never throws) ───
 
 describe("livetv-enrichment (W2 contract)", () => {
-  it("normaliseProgrammeTitle strips only safe provider noise", () => {
-    expect(normaliseProgrammeTitle("F1: Brazilian GP [HD]")).toBe("F1: Brazilian GP");
-    expect(normaliseProgrammeTitle("LIVE: Match of the Day")).toBe("Match of the Day");
-    expect(normaliseProgrammeTitle("The Chase S12E04")).toBe("The Chase");
-    expect(normaliseProgrammeTitle("Friends 1x02")).toBe("Friends");
-    expect(normaliseProgrammeTitle("News at Ten | Sky")).toBe("News at Ten");
+  it("normalizeProgrammeTitle strips only safe provider noise", () => {
+    expect(normalizeProgrammeTitle("The Chase S12E04")).toBe("The Chase");
+    expect(normalizeProgrammeTitle("Friends 1x02")).toBe("Friends");
     // The programme name itself is never rewritten.
-    expect(normaliseProgrammeTitle("F1: Brazilian Grand Prix — Qualifying")).toBe(
+    expect(normalizeProgrammeTitle("F1: Brazilian Grand Prix — Qualifying")).toBe(
       "F1: Brazilian Grand Prix — Qualifying",
     );
-    expect(normaliseProgrammeTitle("  ")).toBe("");
+    expect(normalizeProgrammeTitle("  ")).toBe("");
+  });
+
+  // 0.11.0 integration: W2's canonical normalizer is deliberately
+  // conservative — bracketed quality tags, LIVE: prefixes and
+  // trailing "| channel" suffixes stay in the cache key. The
+  // aggressive cleaning lives in the match variants instead, so a
+  // "[HD]" title still resolves to TMDb art at match time.
+  it("parseProgrammeTitleSignals offers the cleaned title as a match variant", () => {
+    const signals = parseProgrammeTitleSignals("F1: Brazilian GP [HD]");
+    expect(signals.variants).toContain("F1: Brazilian GP");
   });
 
   it("placeholderArtwork is the honest miss shape", () => {
@@ -302,10 +310,16 @@ describe("TvProgrammeArt.astro", () => {
   it("renders the branded placeholder shell, never a giant initial or an empty rectangle", () => {
     expect(artAstro).toContain("rs-livetv-programme-art");
     expect(artAstro).toContain("data-programme-art");
-    expect(artAstro).toContain("data-art-state");
-    expect(artAstro).toContain("__brand");
+    // 0.11.0 integration: W2's real component carries data-art-source
+    // in the template; data-art-state is set at runtime by
+    // upgradeProgrammeArtElements (imported by the component script).
+    expect(artAstro).toContain("data-art-source");
+    expect(artAstro).toContain("upgradeProgrammeArtElements");
+    expect(artAstro).toContain("__placeholder");
     const markup = artAstro.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^---[\s\S]*?---/m, "");
-    expect(markup).not.toContain("<img");
+    // The only <img> is the SSR path, gated on cached artwork —
+    // first paint is the placeholder; the client script upgrades it.
+    expect(markup).toContain("initialUrl &&");
     // No giant initial anywhere in the component.
     expect(artAstro).not.toContain("__motif");
     expect(artAstro).not.toContain("toUpperCase");

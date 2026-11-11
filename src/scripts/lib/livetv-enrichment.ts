@@ -78,7 +78,9 @@ export const PLACEHOLDER_ARTWORK: ProgrammeArtwork = {
   genres: [],
 }
 
-function placeholderArtwork(): ProgrammeArtwork {
+/** Fresh honest-miss shape (exported for callers/tests that need a
+ *  placeholder ProgrammeArtwork without sharing one object). */
+export function placeholderArtwork(): ProgrammeArtwork {
   return { ...PLACEHOLDER_ARTWORK, genres: [] }
 }
 
