@@ -1,20 +1,25 @@
 ---
- // Couch Series — binge-first browsing on the W1 shared UI system.
- // Restored as a real destination in 0.10.0 (reverses the 0.8.0 Browse
- // consolidation — user's explicit call). The catalogue loads
- // client-side (Xtream provider) via src/scripts/series/couch-index.ts:
- // genre collections (Crime Drama, Comedy, Science Fiction,
- // Documentary Series, Reality — only non-empty ones render),
- // Continue Watching, Featured, Recently Added, Followed, Favourites,
- // Watch Later, genre/year/rating/sort controls, search + on-screen
- // keyboard, and a windowed grid (computeVisibleWindow) for large
- // catalogues. Series cards carry a resume badge (S2 E4) and resolve
- // their season count as they scroll into view.
- // No Live TV here (B11): live recommendations live on Home and in the
- // dedicated Live TV experience, never in catalogue browsing.
- // The genre filter is ONE labelled select rendered by the controller
- // into #couch-browse-genres — no per-genre pill buttons. The list
- // tabs are ONE joined segmented control.
+ // Couch Series Home + Browse Everything (0.11.8, W4).
+ //
+ // TWO MODES, ONE NAV ITEM (brief §1.1, §2): Series Home (shelves)
+ // and Series → Browse Everything (the complete catalogue). The mode
+ // lives in the URL (?mode=browse); the mount controller
+ // (src/scripts/series/couch-series-home.ts) switches between the
+ // #series-home-root shelves and the #series-browse-root browser
+ // without a reload, and browser history restores mode + filters on
+ // a return from a detail page.
+ //
+ // Series Home NEVER mounts the full catalogue grid: the shelves
+ // (Continue Watching, New Episodes from followed series, Series
+ // Worth Starting, Recently Added, Explore Series Genres) render
+ // from the catalog index, and the Browse Everything entry opens the
+ // complete browser. No giant automatic series grid underneath.
+ //
+ // The browse root keeps the legacy couch-browse DOM contract (ids
+ // below) so the W2 browse engine mounts into it; on this branch the
+ // catalog shim delegates to the legacy shared controller. The old
+ // Header → Search/Filters → List tabs → rails → grid stack is gone
+ // from Home — it lives only inside browse mode.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
 import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
@@ -25,126 +30,147 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
 
 <CouchLayout pageTitle="Series" activeNav="series" view="series">
-  <header class="rs-browse-head">
-    <h1 class="rs-page-title">Series</h1>
-    <p class="rs-meta">
+  <header class="rs-series-home-head">
+    <div class="rs-series-home-head__titles">
+      <h1 class="rs-page-title">Series</h1>
+      <p class="rs-meta">
+        <span id="series-home-count">—</span>
+        <span aria-hidden="true"> · </span>
+        <span id="series-home-status">Loading…</span>
+      </p>
+    </div>
+    <div id="series-home-actions-home" class="rs-series-home-actions">
+      <button
+        id="series-home-search"
+        type="button"
+        class="rs-hero__action rs-hero__action--secondary"
+      >
+        Search Series
+      </button>
+      <a
+        id="series-home-browse"
+        class="rs-hero__action"
+        href="/series?mode=browse"
+        data-series-home-mode="browse"
+      >
+        Browse Everything
+      </a>
+    </div>
+    <div id="series-home-actions-browse" class="rs-series-home-actions" hidden>
+      <a
+        id="series-home-home-link"
+        class="rs-hero__action rs-hero__action--secondary"
+        href="/series"
+        data-series-home-mode="home"
+      >
+        ← Series Home
+      </a>
+    </div>
+  </header>
+
+  <div id="series-home-root"></div>
+
+  <div id="series-browse-root" hidden>
+    <p class="rs-meta rs-browse-status-line">
       <span id="couch-browse-hero-count">—</span>
       <span aria-hidden="true"> · </span>
       <span id="couch-browse-status">Loading…</span>
     </p>
-  </header>
 
-  <section class="rs-browse-toolbar" aria-label="Browse controls">
-    <div class="rs-browse-search">
-      <label class="rs-browse-label" for="couch-browse-search">Search series</label>
-      <input
-        id="couch-browse-search"
-        type="search"
-        placeholder="Search series…"
-        autocomplete="off"
-      />
-      <button
-        id="couch-search-open"
-        type="button"
-        class="rs-hero__action rs-hero__action--secondary"
-        data-couch-dialog-open="couch-search-dialog"
-      >
-        ⌨ On-screen keyboard
-      </button>
-    </div>
+    <section class="rs-browse-toolbar" aria-label="Browse controls">
+      <div class="rs-browse-search">
+        <label class="rs-browse-label" for="couch-browse-search">Search series</label>
+        <input
+          id="couch-browse-search"
+          type="search"
+          placeholder="Search series…"
+          autocomplete="off"
+        />
+        <button
+          id="couch-search-open"
+          type="button"
+          class="rs-hero__action rs-hero__action--secondary"
+          data-couch-dialog-open="couch-search-dialog"
+        >
+          ⌨ On-screen keyboard
+        </button>
+      </div>
 
-    <div class="rs-browse-selects">
-      <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
-      <select id="couch-browse-sort">
-        {
-          SERIES_SORT_MODES.map((mode) => (
-            <option value={mode.value}>{mode.label}</option>
-          ))
-        }
-      </select>
-      <label class="rs-browse-label" for="couch-browse-year">Decade</label>
-      <select id="couch-browse-year">
-        <option value="">Any decade</option>
-        {
-          YEAR_ORDER.map((year) => (
-            <option value={year}>{year}</option>
-          ))
-        }
-      </select>
-      <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
-      <select id="couch-browse-rating">
-        {
-          RATING_OPTIONS.map((min) => (
-            <option value={min}>
-              {min === 0 ? "Any rating" : `${min}+`}
-            </option>
-          ))
-        }
-      </select>
-        {/*
-          GENRE FILTER: the controller renders ONE labelled Genre
-          select into this mount point — no per-genre pill buttons.
-          It lives in the filter row with Sort / Decade / Rating.
-        */}
+      <div class="rs-browse-selects">
+        <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
+        <select id="couch-browse-sort">
+          {
+            SERIES_SORT_MODES.map((mode) => (
+              <option value={mode.value}>{mode.label}</option>
+            ))
+          }
+        </select>
+        <label class="rs-browse-label" for="couch-browse-year">Decade</label>
+        <select id="couch-browse-year">
+          <option value="">Any decade</option>
+          {
+            YEAR_ORDER.map((year) => (
+              <option value={year}>{year}</option>
+            ))
+          }
+        </select>
+        <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
+        <select id="couch-browse-rating">
+          {
+            RATING_OPTIONS.map((min) => (
+              <option value={min}>
+                {min === 0 ? "Any rating" : `${min}+`}
+              </option>
+            ))
+          }
+        </select>
         <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
-        {/*
-          RUNTIME FILTER (B09): the controller renders ONE labelled
-          Length select into this mount point — only when the
-          catalogue carries runtime metadata (movies do; series
-          rows carry none, so the mount stays empty on /series).
-        */}
         <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
-        {/*
-          RESET FILTERS (0.11.6, W4): the controller renders ONE
-          "Reset filters" button into this mount point — the last
-          control in the filter row. One press clears every filter
-          (genre, decade, rating, length, sort, search, list tab)
-          and the persisted filter state. No filter pills.
-        */}
         <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
+      </div>
+    </section>
+
+    <div
+      id="couch-browse-tabs"
+      class="rs-browse-tabs rs-browse-segmented"
+      role="group"
+      aria-label="Series lists"
+    >
     </div>
-  </section>
 
-  <div
-    id="couch-browse-tabs"
-    class="rs-browse-tabs rs-browse-segmented"
-    role="group"
-    aria-label="Series lists"
-  >
-  </div>
+    <div id="couch-browse-rails"></div>
 
-  <div id="couch-browse-rails"></div>
+    <div id="couch-browse-skeleton">
+      <TvSkeleton kind="poster" count={12} />
+    </div>
 
-  <div id="couch-browse-skeleton">
-    <TvSkeleton kind="poster" count={12} />
-  </div>
+    <div id="couch-browse-empty" hidden>
+      <TvEmpty
+        title="No series yet"
+        message="This playlist has no series."
+        art="library"
+        actionLabel="Open Settings"
+        actionHref="/settings"
+      />
+    </div>
 
-  <div id="couch-browse-empty" hidden>
-    <TvEmpty
-      title="No series yet"
-      message="This playlist has no series."
-      art="library"
-      actionLabel="Open Settings"
-      actionHref="/settings"
-    />
-  </div>
+    <div id="couch-browse-error" hidden role="alert">
+      <p class="rs-body-text" data-role="error-message"></p>
+      <p>
+        <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
+          Check Settings
+        </a>
+      </p>
+    </div>
 
-  <div id="couch-browse-error" hidden role="alert">
-    <p class="rs-body-text" data-role="error-message"></p>
-    <p>
-      <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
-        Check Settings
-      </a>
-    </p>
-  </div>
-
-  <div
-    id="couch-browse-grid"
-    class="rs-grid"
-    data-couch-grid
-    aria-label="All series"
-    hidden
-  >
+    <div
+      id="couch-browse-grid"
+      class="rs-grid"
+      data-couch-grid
+      aria-label="All series"
+      hidden
+    >
+    </div>
   </div>
 
   <TvDialog id="couch-search-dialog" title="Search series">
@@ -153,14 +179,14 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
   </TvDialog>
 
   <script>
-    import "@/scripts/series/couch-index.ts";
+    import "@/scripts/series/couch-series-home.ts";
   </script>
 
   <style>
-    .rs-browse-head {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+    /* Browse-mode chrome only. Series Home styles live in the
+       delimited 0.11.8 W4 section of src/styles/couch.css. */
+    .rs-browse-status-line {
+      margin-bottom: 1rem;
     }
     .rs-browse-toolbar {
       display: flex;
@@ -204,9 +230,6 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       font-size: 1.125rem;
       color: var(--rs-text-2);
     }
-    /* Genre filter: ONE labelled select in the filter row —
-       the controller renders it into the .rs-browse-genre-filter
-       mount point. No per-genre pill buttons anywhere. */
     .rs-browse-genre-filter {
       display: flex;
       align-items: center;
@@ -221,10 +244,6 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       color: var(--rs-text);
       font-size: 1.125rem;
     }
-    /* Runtime filter (B09): same treatment as the genre filter —
-       the controller renders ONE labelled Length select into the
-       .rs-browse-runtime-filter mount point, only when the catalogue
-       carries runtime metadata. */
     .rs-browse-runtime-filter {
       display: flex;
       align-items: center;
@@ -239,21 +258,13 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       color: var(--rs-text);
       font-size: 1.125rem;
     }
-    /* Reset Filters (0.11.6, W4): same row treatment as the genre /
-       runtime mounts — the button itself reuses the shared
-       rs-hero__action--secondary styling, so no button CSS lives here. */
     .rs-browse-reset-filter {
       display: flex;
       align-items: center;
     }
-    /* List switcher: ONE joined segmented control — the segments
-       share a single border instead of floating as separate pills.
-       Same buttons, same aria-pressed behaviour as before. */
     .rs-browse-segmented {
       display: inline-flex;
       flex-wrap: wrap;
-      /* Hug the segments: the page main is a flex column, and a bare
-         inline-flex item would otherwise stretch the full width. */
       align-self: flex-start;
       max-width: 100%;
       border: 1px solid var(--rs-line);
