@@ -4,6 +4,17 @@ import Layout from "@/layouts/Layout.astro"
 
 <Layout pageTitle="Documentation" showVersion={false}>
   <main class="flex flex-1 min-h-0 flex-col">
+    <!-- W5 (0.11.10): in-app Back/Exit stays reachable above the
+         cross-origin iframe (no control inside the iframe is
+         claimed): D-pad/A on this link, or B anywhere on the page,
+         returns to Help & Diagnostics. -->
+    <div class="shrink-0 px-4 pt-3">
+      <a
+        href="/settings/help-diagnostics"
+        class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-medium text-fg hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+        ← Back to Help &amp; Diagnostics
+      </a>
+    </div>
     <noscript>
       <p class="m-4 text-sm text-fg-2">
         Documentation requires JavaScript and a network connection. Open it directly at
@@ -110,6 +121,30 @@ import Layout from "@/layouts/Layout.astro"
       const systemMql = window.matchMedia("(prefers-color-scheme: dark)")
       systemMql.addEventListener?.("change", pushTheme)
     })()
+  </script>
+
+  <script>
+    // W5 (0.11.10): B anywhere on this page — including while the
+    // iframe element holds focus — returns to Help & Diagnostics.
+    // The gamepad layer dispatches Escape to the focused element
+    // (the iframe element in the parent document), which bubbles to
+    // the Back dispatcher. Nothing inside the cross-origin frame is
+    // touched.
+    import {
+      registerBackLayer,
+      BACK_PRIORITY,
+      setLogicalView,
+    } from "@/scripts/lib/controller-seams-0110.ts"
+
+    setLogicalView("docs")
+    registerBackLayer({
+      id: "docs-root",
+      priority: BACK_PRIORITY.PAGE,
+      isActive: () => true,
+      handle: () => {
+        window.location.assign("/settings/help-diagnostics")
+      },
+    })
   </script>
 </Layout>
 

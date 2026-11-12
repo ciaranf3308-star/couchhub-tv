@@ -383,6 +383,29 @@ function withAutoplay(href: string): string {
   return href.includes("?") ? `${href}&autoplay=1` : `${href}?autoplay=1`
 }
 
+/**
+ * The detail destination for a href, with any autoplay request
+ * removed — the X / "More Info" destination (Controller Experience
+ * 2.0, 0.11.10, W5). Unlike gamepad.ts's openDetailsOfFocused, which
+ * infers "details" by string-surgery on the focused link at press
+ * time, views render this as an explicit data-couch-detail-href
+ * attribute so the controller layer never has to parse URLs. Other
+ * params (season, epnum, episode) are preserved: a new-episode card
+ * still lands on its actual episode, just without autoplay.
+ * Unparseable hrefs are returned unchanged.
+ */
+export function detailHrefWithoutAutoplay(href: string): string {
+  if (!href.includes("autoplay")) return href
+  try {
+    const url = new URL(href, "https://couchhub.invalid")
+    if (!url.searchParams.has("autoplay")) return href
+    url.searchParams.delete("autoplay")
+    return url.pathname + url.search + url.hash
+  } catch {
+    return href
+  }
+}
+
 function candidateToItem(
   candidate: DiscoverCandidate,
   overrides: Partial<HomeRailItem> = {},

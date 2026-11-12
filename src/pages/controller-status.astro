@@ -30,7 +30,31 @@ import ControllerStatus from "@/components/ControllerStatus.svelte";
     <p class="text-xs text-fg-3">
       D-pad / A / B / X / Y / LB / RB / LT / RT / Menu / View all drive
       this screen's focus engine — the same pipeline every other screen
-      uses. View + Menu held for 2 seconds returns home.
+      uses. Pressing the right stick (R3) registers as RIGHT_STICK in
+      the log below; it takes no action. View + Menu held for 2 seconds returns home.
     </p>
   </main>
+
+  <script>
+    // W5 (0.11.10): B steps back to the origin page (or Home). This
+    // screen is display-only diagnostics: it never generates app
+    // actions from the input it shows.
+    import {
+      registerBackLayer,
+      BACK_PRIORITY,
+      recordOriginFromReferrer,
+      navigateBackWithOrigin,
+      setLogicalView,
+    } from "@/scripts/lib/controller-seams-0110.ts"
+    import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+
+    setLogicalView("controller-status")
+    recordOriginFromReferrer()
+    registerBackLayer({
+      id: "controller-status-root",
+      priority: BACK_PRIORITY.PAGE,
+      isActive: () => !findOpenModal(),
+      handle: () => navigateBackWithOrigin("/"),
+    })
+  </script>
 </TvLayout>

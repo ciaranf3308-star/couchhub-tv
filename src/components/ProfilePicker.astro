@@ -187,10 +187,16 @@
     SHOW_PROFILE_PICKER_EVENT,
   } from "@/scripts/lib/profiles.ts"
   import { attachPopoverSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
+  import {
+    registerBackLayer,
+    BACK_PRIORITY,
+  } from "@/scripts/lib/controller-seams-0110.ts"
 
   const overlay = document.querySelector<HTMLElement>("[data-profile-picker]")
   if (overlay) {
     const DISMISSED_KEY = "nylah_profile_picker_dismissed_v1"
+    let invoker: HTMLElement | null = null
+    let backUnregister: (() => void) | null = null
 
     // Trap keyboard + gamepad navigation inside the picker while it is
     // open (v0.2.1): registers a self-only spatial-nav section for the
@@ -214,10 +220,43 @@
     }
 
     function show(focusFirst) {
+      if (overlay.hidden) {
+        invoker =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
+      }
       overlay.hidden = false
       pickerNav.open()
+      // Back owns B while the picker is open (modal priority): one
+      // press dismisses as "Ask me later", never navigates behind
+      // the picker. The overlay's own Escape handler covers the
+      // keyboard path and preventDefaults, so the layer never
+      // double-fires on this branch; at integration the W1
+      // coordinator calls this layer.
+      if (!backUnregister) {
+        backUnregister = registerBackLayer({
+          id: "profile-picker",
+          priority: BACK_PRIORITY.MODAL,
+          isActive: () => !overlay.hidden,
+          handle: () => dismissAsLater(),
+        })
+      }
       if (focusFirst) {
-        const first = overlay.querySelector<HTMLElement>("[data-profile-pick]")
+        // Focus the CURRENT profile when one is active (reopened
+        // from Settings to switch), else the first choice. Never
+        // let Back create an invalid profile state: dismissing
+        // keeps whatever profile was active (possibly none, in
+        // which case the picker returns on the next trigger).
+        const activeId = getActiveProfileId()
+        const current = activeId
+          ? overlay.querySelector<HTMLElement>(
+              `[data-profile-pick="${activeId}"]`,
+            )
+          : null
+        const first =
+          current ??
+          overlay.querySelector<HTMLElement>("[data-profile-pick]")
         if (first) first.focus()
       }
     }
@@ -225,6 +264,22 @@
     function hide() {
       pickerNav.close()
       overlay.hidden = true
+      backUnregister?.()
+      backUnregister = null
+      if (invoker && invoker.isConnected) {
+        invoker.focus({ preventScroll: true })
+      }
+      invoker = null
+    }
+
+    /** Ask Me Later: session dismissal + hide. B maps here because the picker is genuinely dismissible. */
+    function dismissAsLater() {
+      try {
+        sessionStorage.setItem(DISMISSED_KEY, "1")
+      } catch {
+        // Dismissal is session-only; storage failure just re-shows later.
+      }
+      hide()
     }
 
     async function maybeShow() {
@@ -247,18 +302,20 @@
         return
       }
       if (target.closest("[data-profile-pick-later]")) {
-        try {
-          sessionStorage.setItem(DISMISSED_KEY, "1")
-        } catch {
-          // Dismissal is session-only; storage failure just re-shows later.
-        }
-        hide()
+        dismissAsLater()
       }
     })
 
-    // Escape closes without picking (picker returns until a profile is set).
+    // Escape/B closes as Ask Me Later (the picker is genuinely
+    // dismissible — a profile is never forced). preventDefault +
+    // stopPropagation keep the press from also firing a page-level
+    // Back step behind the picker.
     overlay.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") hide()
+      if (event.key === "Escape") {
+        event.preventDefault()
+        event.stopPropagation()
+        dismissAsLater()
+      }
     })
 
     document.addEventListener(SHOW_PROFILE_PICKER_EVENT, () => show(true))
