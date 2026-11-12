@@ -94,6 +94,14 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
           rows carry none, so the mount stays empty on /series).
         */}
         <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
+        {/*
+          RESET FILTERS (0.11.6, W4): the controller renders ONE
+          "Reset filters" button into this mount point — the last
+          control in the filter row. One press clears every filter
+          (genre, decade, rating, length, sort, search, list tab)
+          and the persisted filter state. No filter pills.
+        */}
+        <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
     </div>
   </section>
 
@@ -230,6 +238,13 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       background: var(--rs-surface);
       color: var(--rs-text);
       font-size: 1.125rem;
+    }
+    /* Reset Filters (0.11.6, W4): same row treatment as the genre /
+       runtime mounts — the button itself reuses the shared
+       rs-hero__action--secondary styling, so no button CSS lives here. */
+    .rs-browse-reset-filter {
+      display: flex;
+      align-items: center;
     }
     /* List switcher: ONE joined segmented control — the segments
        share a single border instead of floating as separate pills.

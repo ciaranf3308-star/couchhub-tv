@@ -1,26 +1,38 @@
-<!-- RedSilk Discover (0.10.0) — the dedicated Discover destination.
-     A defining feature, not a lost input: a prominent natural-language
-     search with example prompts, six quick-pick cards, personalised
-     rails, and an always-visible mode badge that says honestly whether
-     the picks came from AI or from the local engine.
-     - AI requests happen ONLY on an explicit submit / "Ask AI" tap
-       (AI07). Typing, focus and scrolling never send anything.
+<!-- RedSilk Discover (0.11.6) — the dedicated Discover destination.
+     "What do you fancy watching?" — a natural question in, compelling
+     recommendations out. AI-first (0.11.6): the LLM generates
+     recommendations from its own knowledge, TMDB verifies each
+     identity, and the catalogue match decides playability. Every
+     recommendation says honestly whether it is in your library; an
+     unavailable pick is never replaced by a weaker available one,
+     and empty slots are never filled with random titles.
+     - AI requests happen ONLY on an explicit submit / "Ask AI" tap /
+       refinement submit (AI07). Typing, focus and scrolling never
+       send anything. Toggling "Available in My Library" filters the
+       results already returned — it never re-calls the model.
+     - Refinements keep the conversation (see ai/generation.ts); New
+       Search clears it. No chatbot UI: one subtle context line only.
      - First run with no AI configured shows the "Unlock AI Discovery"
        panel once; "Not Now" dismisses it for good (AI01). Browsing is
        never blocked by it.
      - No feedback buttons under posters here (B01): feedback lives on
        the detail screen. Cards show the reason line only.
      - Discover is separate from Live TV: no "On TV Right Now" row.
-     - Honesty (0.11.5): every search writes a per-search receipt
-       (ai/status.ts) — the rail title, the state note and the
+     - Honesty (0.11.5/0.11.6): every search writes a per-search
+       receipt (ai/status.ts) — the rail title, the state note and the
        diagnostics panel are derived from it, and only from it. "AI
        answered just now" is true only for a validated live answer;
        a cache hit is labelled cached, a local result local, and a
        local rail says why it is local (or why Ask AI is unavailable).
-     Logic: the catalogue loads once at mount, search and ranking run
-     in the page. The AI ranker is registered at mount and only
-     consulted (via rankDiscover) for natural-language questions — with
-     no ranker, or on any AI failure, local ranking runs and says so. -->
+       Unverified titles stay visibly unverified: no artwork, no
+       detail link, no invented metadata.
+     Logic: the catalogue loads once at mount. The AI path calls the
+     discovery orchestrator (ai/discovery-orchestrator.ts: LLM
+     generation -> TMDB verification -> catalogue matching); the
+     local engine (searchDiscover) stays for typing, quick picks,
+     and the explicitly-labelled "similar titles available locally"
+     option. The old rankDiscover/AI-ranker path is retired: one
+     orchestration layer only. -->
 <script>
   import { onMount, tick } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -30,21 +42,48 @@
     loadDiscoverData,
     getDiscoverRows,
     searchDiscover,
-    rankDiscover,
     candidateDetailHref,
     candidateKey,
     MOOD_PRESETS,
     EXAMPLE_PROMPTS,
-    registerAIRanker,
     registerFollowedProvider,
     isNaturalLanguageQuery,
     detectMoodPresets,
   } from "@/scripts/lib/discover.ts"
-  import { aiRanker, subscribeAiActivity } from "@/scripts/lib/ai/ranking.ts"
+  // AI-first discovery (0.11.6): the orchestrator (W1) + verification
+  // (W2) + state transitions (W4) are the real modules; in-flight
+  // progress arrives via subscribeAiDiscoveryPhase (the orchestrator
+  // has no onPhase dep). The presentation helpers are pure, tested
+  // code.
+  import {
+    runAiDiscovery,
+    subscribeAiDiscoveryPhase,
+  } from "@/scripts/lib/ai/discovery-orchestrator.ts"
+  import {
+    newConversation,
+  } from "@/scripts/lib/ai/generation.ts"
+  import {
+    applyQuickPick,
+    applyNewSearch,
+  } from "@/scripts/lib/discover-state.ts"
+  import {
+    visibleRecommendations,
+    countMatched,
+    recommendationDetailHref,
+    isRefinementSubmit,
+    refinementContextLabel,
+    formatTasteSummaryForAi,
+    providerErrorMessage,
+    providerErrorCodeFor,
+    aiDiscoveryProgressText,
+  } from "@/scripts/lib/ai/discovery-presentation.ts"
+  import { summarizeTaste } from "@/scripts/lib/taste.ts"
+  import { registerBackInterceptor } from "@/scripts/lib/back-handler.ts"
   import { initAI } from "@/scripts/lib/ai/init.ts"
   import {
     getAiStatus,
     getAiAutoRequests,
+    getAiShareTaste,
     hasDismissedAiOnboarding,
     dismissAiOnboarding,
     AI_MODE_LABELS,
@@ -52,7 +91,6 @@
     aiSearchRailTitle,
     aiSearchStateNote,
   } from "@/scripts/lib/ai/status.ts"
-  import { getAiModel } from "@/scripts/lib/app-settings.js"
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
@@ -136,7 +174,6 @@
   let searchingAi = $state(false)
   /** @type {"ai" | "local" | null} */
   let resultsSource = $state(null)
-  let fallbackNotice = $state("")
   /** Per-search engine receipt (0.11.5): the ONLY source for the rail
       title and the "AI answered" note — see ai/status.ts. A rail is
       labelled by the engine that actually produced it, and "AI answered
@@ -146,22 +183,46 @@
   let receipt = $state(
     /** @type {import("@/scripts/lib/ai/status.ts").AiSearchReceipt | null} */ (null)
   )
+  // -- AI-first discovery state (0.11.6) -------------------------------
+  /** Conversational context for refinements; cleared by New Search. */
+  let conversation = $state(newConversation())
+  /** "Available in My Library" toggle: client-side filter only — the
+      orchestrator is always asked for the full verified set (see
+      runAiSearch), so toggling never re-calls the model. */
+  let availableOnly = $state(false)
+  /** Verified recommendations from the last AI run, or null when no
+      AI rail is on screen. An empty array means the run returned
+      nothing (honest empty state, never filler). */
+  let aiResults = $state(
+    /** @type {Array<import("@/scripts/lib/ai/verification.ts").VerifiedRecommendation> | null} */ (null)
+  )
+  /** In-flight orchestrator phase, when the orchestrator reports one
+      via subscribeAiDiscoveryPhase. Only the three in-flight phases
+      are shown; terminal phases clear it. Null when idle (the UI then
+      shows a single "Asking AI…" state — never invented stages). */
+  let aiPhase = $state(
+    /** @type {import("@/scripts/lib/ai/status.ts").AiSearchPhase | null} */ (null)
+  )
+  /** Provider failure for the last AI attempt, or null. */
+  let aiUnavailable = $state(
+    /** @type {{ providerError: string; message: string } | null} */ (null)
+  )
+  /** Explicitly-labelled local similar titles, shown only when the
+      user asks for them from a none-available / unavailable state.
+      Never masquerades as AI recommendations. */
+  let localSimilar = $state(
+    /** @type {{ query: string; items: Array<import("@/scripts/lib/discover.ts").RankedCandidate> } | null} */ (null)
+  )
+  /** AbortController for the in-flight AI run, if any. A new submit,
+      New Search, Clear, or leaving Discover cancels it. */
+  let aiAbort = /** @type {AbortController | null} */ (null)
   let diagnosticsOpen = $state(false)
-  /** @type {string} */
-  let aiModel = $state("")
   /** @type {boolean} */
   let canAskAi = $state(false)
   /** @type {boolean} */
   let aiKeySaved = $state(false)
   /** Clock tick so a "just now" note ages out without a new search. */
   let nowTick = $state(0)
-  /** Activity probe for the in-flight AI call. The ranker emits
-      "start" only when a request really leaves the device, and "done"
-      only after a reply parses + validates — so a source-"ai" result
-      with no "start" is a cache hit, not a fresh answer. Read
-      synchronously after the awaited rankDiscover call; reset before
-      each AI attempt. */
-  const activityProbe = { started: false, done: false, error: false }
   /** @type {string | null} */
   let activeMood = $state(null)
   /** @type {import("@/scripts/lib/ai/status.ts").AiMode | null} */
@@ -171,19 +232,57 @@
   let showOnboarding = $state(false)
 
   const showingSearch = $derived(
-    queryDebounced.trim() !== "" || !!activeMood
+    queryDebounced.trim() !== "" || !!activeMood || aiResults !== null || aiUnavailable !== null
+  )
+  /** Whether an AI rail (results, or an honest empty/unavailable
+      state) is on screen, as opposed to a local rail. */
+  const hasAiResults = $derived(aiResults !== null)
+  /** Recommendations to show for the current toggle state — a pure
+      client-side filter; toggling never re-calls the model. */
+  const visibleAiResults = $derived(
+    visibleRecommendations(aiResults ?? [], availableOnly)
+  )
+  const matchedAiCount = $derived(countMatched(aiResults ?? []))
+  /** True when every AI recommendation on screen is TMDB-verified —
+      the toggle note may only claim "verified" when that holds. */
+  const allAiVerified = $derived(
+    (aiResults ?? []).length > 0 && (aiResults ?? []).every((rec) => rec.verified)
+  )
+  /** Subtle refinement context ("Refining: “dark anime”"), or "". */
+  const refineLabel = $derived(refinementContextLabel(conversation))
+  /** In-flight status text: the orchestrator's reported phase when
+      there is one, else the single honest "Asking AI" state. */
+  const aiStatusText = $derived(
+    aiPhase ? aiDiscoveryProgressText(aiPhase) : "Asking AI for recommendations…"
+  )
+  /** Submit button label: refining is a refinement, not a new search. */
+  const submitLabel = $derived(
+    isRefinementSubmit(conversation, hasAiResults, query)
+      ? "Refine"
+      : aiAuto
+        ? "Ask AI"
+        : "Search"
+  )
+  const searchPlaceholder = $derived(
+    hasAiResults && conversation.turns.length > 0
+      ? "Refine these picks… e.g. Darker, only movies"
+      : "What are you in the mood for?"
   )
   const modeLabel = $derived(aiMode ? AI_MODE_LABELS[aiMode] : "Checking AI…")
-  /** Rail title, from the receipt only: "AI picks" for a validated
-      live answer, "Cached AI picks" for a cache hit, "Local
-      recommendations" for the local engine. A quick pick keeps its own
-      label (it is filtered locally by design). */
+  /** Rail title, from the receipt only — except while an AI run is in
+      flight (the title says the question is being asked), and when
+      the AI attempt failed (the title says so — never "Local
+      recommendations", because no local results were produced). */
   const railTitle = $derived(
-    activeMood
-      ? (MOOD_PRESETS.find((p) => p.id === activeMood)?.label ?? activeMood)
-      : receipt
-        ? aiSearchRailTitle(receipt)
-        : `Local recommendations for “${queryDebounced.trim()}”`
+    searchingAi
+      ? `Asking AI for “${queryDebounced.trim()}”`
+      : aiUnavailable
+        ? "AI unavailable"
+        : activeMood
+          ? (MOOD_PRESETS.find((p) => p.id === activeMood)?.label ?? activeMood)
+          : receipt
+            ? aiSearchRailTitle(receipt)
+            : `Local recommendations for “${queryDebounced.trim()}”`
   )
   /** One-line honest state note, from the receipt only. Re-evaluates
       on the clock tick so "just now" ages out (see aiSearchStateNote). */
@@ -298,18 +397,17 @@
 
   let searchToken = 0
   /**
-   * Run a search. Typing only ever runs the LOCAL engine; a paid AI
-   * request happens only when `ai` is true — submit with automatic
-   * requests on, or an explicit "Ask AI" tap (AI07).
+   * Run a LOCAL search (typing, quick picks, Manual submit). This
+   * function never sends an AI request: the AI path is runAiSearch,
+   * which calls the discovery orchestrator. A local search is
+   * authoritative for the rail — it clears any AI rail on screen, so
+   * a stale AI result can never sit above fresh local results.
    *
    * Every completed search writes a receipt (see ai/status.ts): the
    * rail title and the state note are derived from it, never from the
-   * mode badge or a stale "AI answered" string. The activity probe
-   * distinguishes a fresh answer from a cache hit — the ranker emits
-   * "start"/"done" only around a real request, so a source-"ai" result
-   * with no "start" is cached, and the receipt says so.
+   * mode badge or a stale "AI answered" string.
    */
-  async function runSearch({ ai = false } = {}) {
+  async function runSearch() {
     if (!data) return
     const token = ++searchToken
     const q = queryDebounced.trim()
@@ -318,13 +416,17 @@
       searching = false
       searchingAi = false
       resultsSource = null
-      fallbackNotice = ""
       receipt = null
+      aiResults = null
+      aiUnavailable = null
+      localSimilar = null
       return
     }
     searching = true
-    searchingAi = ai && !!q && !activeMood
-    fallbackNotice = ""
+    searchingAi = false
+    aiResults = null
+    aiUnavailable = null
+    localSimilar = null
     const searchStartedAt = performance.now()
     try {
       let results
@@ -352,106 +454,6 @@
             rejectedCount: 0,
             durationMs: Math.round(performance.now() - searchStartedAt),
           },
-        }
-      } else if (ai && q) {
-        // Explicit ask (submit with automatic on, or an "Ask AI" tap):
-        // force the ranker even for a short keyword query — the user
-        // consented to the request, so the natural-language gate in
-        // rankDiscover must not silently veto it back to local.
-        activityProbe.started = false
-        activityProbe.done = false
-        activityProbe.error = false
-        const t0 = performance.now()
-        // Cache identity (0.11.5, W1→W2 seam): the ranker must know
-        // WHICH playlist / catalogue revision / profile it ranked, or
-        // a changed playlist could reuse a stale cached ranking. All
-        // three are known here; a missing stamp degrades the cache to
-        // shortlist-identity only.
-        const ranked = await rankDiscover(q, data.candidates, data.taste, {
-          forceAi: true,
-          playlistId,
-          catalogueStamp: data.catalogueStamp,
-          profileId,
-        })
-        const durationMs = Math.round(performance.now() - t0)
-        results = ranked.results
-        source = ranked.source
-        if (ranked.fallbackReason) fallbackNotice = ranked.fallbackReason
-        const d = ranked.diagnostics
-        const diagnostics = {
-          queryType: queryTypeFor(q, null),
-          intention: intentionFor(q, null),
-          catalogueSize: data.candidates.length,
-          retrievedCount: d?.retrievedCount,
-          sentToModelCount: d?.sentToModelCount,
-          acceptedCount: d?.acceptedCount ?? results.length,
-          rejectedCount: d?.rejectedCount ?? 0,
-          cacheHit: d?.cacheHit,
-          durationMs,
-          fallbackReason: ranked.fallbackReason,
-        }
-        if (ranked.source === "ai" && activityProbe.started && activityProbe.done) {
-          // A real request left the device and a validated reply came
-          // back in THIS search: the only receipt that may ever say
-          // "AI answered just now" (and only while it is fresh).
-          nextReceipt = {
-            phase: "validated",
-            engine: "ai",
-            query: q,
-            model: aiModel || undefined,
-            answeredAt: Date.now(),
-            durationMs,
-            cacheHit: false,
-            diagnostics: { ...diagnostics, model: aiModel || undefined, cacheHit: false },
-          }
-        } else if (ranked.source === "ai" && activityProbe.started) {
-          // A request went out but no validated "done" was observed for
-          // it: the reply arrived, validation is unconfirmed. Say that
-          // — never upgrade it to "validated".
-          nextReceipt = {
-            phase: "received",
-            engine: "ai",
-            query: q,
-            durationMs,
-            diagnostics,
-          }
-        } else if (ranked.source === "ai") {
-          // No request left the device for this search: the ranker
-          // answered from its cache. Labelled cached, never "just now".
-          // (The ranker's own cacheHit report agrees when present; the
-          // probe is the evidence either way — no "start" fired.)
-          nextReceipt = {
-            phase: "cached",
-            engine: "cached-ai",
-            query: q,
-            answeredAt: null,
-            durationMs,
-            cacheHit: true,
-            diagnostics: { ...diagnostics, cacheHit: true },
-          }
-        } else if (ranked.aiRejected) {
-          // A real reply arrived but validation kept nothing — a
-          // terminal rejection from the ranker, not a transport
-          // failure. The note says the reply ranked nothing in the
-          // library; the diagnostics "Rejected" row carries the
-          // ranker's real drop count.
-          nextReceipt = {
-            phase: "rejected",
-            engine: "local",
-            query: q,
-            durationMs,
-            fallbackReason: ranked.fallbackReason,
-            diagnostics,
-          }
-        } else {
-          nextReceipt = {
-            phase: "fallback",
-            engine: "local",
-            query: q,
-            durationMs,
-            fallbackReason: ranked.fallbackReason,
-            diagnostics,
-          }
         }
       } else {
         results = searchDiscover(q, data.candidates, data.taste, {
@@ -488,19 +490,243 @@
   }
 
   let queryTimer = null
+  /**
+   * Cancel the pending debounced local search, if any. EVERY
+   * transition that replaces the typed query's meaning must call
+   * this FIRST: without it, typing then tapping a quick pick (or
+   * submitting, or clearing) within the 250ms window lets the stale
+   * timer fire afterwards, restoring the typed query, wiping the
+   * mood and running a stale local search (0.11.6 debounce hole).
+   */
+  function cancelQueryTimer() {
+    if (queryTimer) {
+      clearTimeout(queryTimer)
+      queryTimer = null
+    }
+  }
   function onQueryInput(value) {
     query = value
-    if (queryTimer) clearTimeout(queryTimer)
-    // Typing searches locally only — it never sends an AI request.
+    cancelQueryTimer()
+    // Typing a refinement must not clobber the AI results on screen:
+    // while an AI rail is showing, typing only edits the box — the
+    // refinement runs on submit. Otherwise typing searches locally
+    // only — it never sends an AI request.
+    if (aiResults !== null) return
     queryTimer = setTimeout(() => {
+      queryTimer = null
       queryDebounced = value
       activeMood = null
-      void runSearch({ ai: false })
+      void runSearch()
     }, 250)
   }
 
   function onOskInput(value) {
     onQueryInput(value)
+  }
+
+  /**
+   * Run the AI-first discovery flow: one explicit orchestrator call
+   * (submit with automatic requests on, "Ask AI", an example prompt,
+   * or a refinement submit). The previous AI rail stays on screen
+   * while a refinement runs, so the user never stares at a blank rail.
+   *
+   * - availableOnly is ALWAYS false at request time: the toggle is a
+   *   client-side filter over the full verified set (see
+   *   visibleAiResults), so toggling both ways never needs a new
+   *   model call. The orchestrator never filters on the flag and it
+   *   is not a cache dimension; the field is passed for API
+   *   stability only.
+   * - Taste is sent ONLY when the user opted in to sharing it
+   *   (default OFF, AI05), as a single formatted string.
+   * - The loaded catalogue is passed for playability matching; the
+   *   orchestrator decides the match, the UI only displays it. The
+   *   active profile id scopes the orchestrator's cache per profile.
+   * - In-flight progress arrives via subscribeAiDiscoveryPhase
+   *   (scoped to this run, unsubscribed in the finally below); the
+   *   orchestrator exposes no onPhase dep, and the model is resolved
+   *   from Settings inside the orchestrator, never passed by the UI.
+   * - Cancellation: a new submit, New Search, Clear, or leaving
+   *   Discover aborts the in-flight run; an aborted run updates no
+   *   state. The receipt comes from the orchestrator, verbatim.
+   */
+  async function runAiSearch() {
+    if (!data) return
+    const q = query.trim()
+    if (!q) return
+    // No doomed requests: when AI cannot run, fall back to a local
+    // search and let the rail say why Ask AI is unavailable.
+    if (!canAskAi) {
+      queryDebounced = q
+      activeMood = null
+      await runSearch()
+      return
+    }
+    if (aiAbort) aiAbort.abort()
+    const controller = new AbortController()
+    aiAbort = controller
+    const token = ++searchToken
+    queryDebounced = q
+    activeMood = null
+    searching = true
+    searchingAi = true
+    aiPhase = "asking-ai"
+    aiUnavailable = null
+    localSimilar = null
+    searchResults = null
+    resultsSource = null
+    const runStartedAt = performance.now()
+    const tasteSummary = getAiShareTaste()
+      ? formatTasteSummaryForAi(summarizeTaste(data.taste))
+      : null
+    // In-flight phases for THIS run only. Terminal phases
+    // (ready/unavailable/cached) are ignored here — the completion
+    // paths below clear aiPhase. The subscription replays the last
+    // phase on subscribe; the in-flight filter keeps a stale
+    // terminal phase out, and the run's own "asking-ai" emission
+    // lands in the same task.
+    const unsubscribePhase = subscribeAiDiscoveryPhase((phase) => {
+      if (token !== searchToken) return
+      if (
+        phase === "asking-ai" ||
+        phase === "verifying-tmdb" ||
+        phase === "checking-library"
+      ) {
+        aiPhase = phase
+      }
+    })
+    try {
+      const result = await runAiDiscovery(
+        {
+          query: q,
+          conversation,
+          tasteSummary,
+          availableOnly: false,
+          count: 12,
+          signal: controller.signal,
+        },
+        {
+          catalogue: data.candidates,
+          profileId,
+        }
+      )
+      if (token !== searchToken) return
+      // An orchestrator may report a provider failure as a result
+      // (empty + providerError) instead of throwing: treat that as
+      // unavailable too, never as an empty success.
+      if (
+        result.results.length === 0 &&
+        result.diagnostics.providerError
+      ) {
+        const providerError = result.diagnostics.providerError
+        aiUnavailable = {
+          providerError,
+          message: providerErrorMessage(providerError),
+        }
+        aiResults = []
+        receipt = result.receipt
+        resultsSource = "local"
+        aiPhase = null
+        return
+      }
+      conversation = result.conversation
+      aiResults = result.results
+      receipt = result.receipt
+      resultsSource = "ai"
+      aiPhase = null
+      // Focus the first recommendation once it has rendered (the
+      // keyboard-dismiss-first discipline lives in focusFirstAiResult).
+      await tick()
+      if (token === searchToken) focusFirstAiResult()
+    } catch (error) {
+      if (token !== searchToken) return
+      if (controller.signal.aborted || error?.name === "AbortError") return
+      const providerError = providerErrorCodeFor(error)
+      aiUnavailable = {
+        providerError,
+        message: providerErrorMessage(providerError),
+      }
+      aiResults = []
+      resultsSource = "local"
+      aiPhase = null
+      receipt = {
+        phase: "fallback",
+        engine: "ai",
+        query: q,
+        durationMs: Math.round(performance.now() - runStartedAt),
+        fallbackReason: aiUnavailable.message,
+        diagnostics: {
+          queryType: queryTypeFor(q, null),
+          intention: intentionFor(q, null),
+          catalogueSize: data.candidates.length,
+          acceptedCount: 0,
+          rejectedCount: 0,
+          durationMs: Math.round(performance.now() - runStartedAt),
+          fallbackReason: aiUnavailable.message,
+          providerError,
+        },
+      }
+    } finally {
+      unsubscribePhase()
+      if (token === searchToken) {
+        searching = false
+        searchingAi = false
+      }
+    }
+  }
+
+  /**
+   * "Search for similar titles available locally": the EXISTING local
+   * engine, explicitly labelled as local similar titles — never
+   * masquerading as LLM recommendations. Only runs on the user's tap,
+   * from a none-available / unavailable state.
+   */
+  function searchLocalSimilar() {
+    if (!data) return
+    const q = (receipt?.query ?? queryDebounced ?? query).trim()
+    const items = searchDiscover(q, data.candidates, data.taste, {
+      excludeWatched: true,
+      watchedKeys: data.watchedKeys,
+      excludeKeys: new Set(data.taste.notInterestedKeys),
+      limit: 12,
+    })
+    localSimilar = { query: q, items: visibleResults(items).slice(0, 12) }
+    requestAnimationFrame(() => {
+      document
+        .querySelector("[data-local-similar] [data-nylah-item]")
+        ?.focus({ preventScroll: false })
+    })
+  }
+
+  /** "Available in My Library" toggle: filter only, never a new call. */
+  function toggleAvailableOnly() {
+    availableOnly = !availableOnly
+  }
+
+  /** New Search: clear EVERYTHING, including the conversation. */
+  function newSearch() {
+    cancelQueryTimer()
+    if (aiAbort) aiAbort.abort()
+    searchToken++
+    const fresh = applyNewSearch()
+    query = fresh.query
+    queryDebounced = ""
+    // Conversation + toggle are NOT part of DiscoverySearchState
+    // (W4): the view clears them alongside, explicitly.
+    conversation = newConversation()
+    availableOnly = false
+    activeMood = fresh.activeMood
+    searchResults = null
+    aiResults = null
+    resultsSource = null
+    receipt = null
+    aiUnavailable = null
+    localSimilar = null
+    aiPhase = null
+    searching = false
+    searchingAi = false
+    diagnosticsOpen = false
+    window.scrollTo(0, 0)
+    inputEl?.focus()
   }
 
   function focusFirstResult() {
@@ -529,19 +755,57 @@
     })
   }
 
-  /** Submit the search box: AI runs when automatic requests are on. */
+  /** Focus the first AI recommendation card, with the same
+      keyboard-dismiss-first + nearest-scroll discipline as
+      focusFirstResult (0.11.5 seam 6): the quick-pick row must sit
+      fully below the sticky nav after a search submit. The toggle and
+      other controls stay reachable by navigating up from the cards. */
+  function focusFirstAiResult() {
+    if (keyboard.dismiss()) syncKeyboard()
+    requestAnimationFrame(() => {
+      document
+        .querySelector("[data-ai-results] [data-ai-result-card]")
+        ?.scrollIntoView({ block: "nearest" })
+      document
+        .querySelector("[data-ai-results] [data-ai-result-card]")
+        ?.focus({ preventScroll: true })
+    })
+  }
+
+  /**
+   * Submit the search box.
+   * - An AI rail is showing and the user typed a follow-up: a
+   *   refinement submit — the orchestrator runs with the conversation.
+   * - Otherwise, with automatic requests on and AI runnable: a fresh
+   *   AI request. In Manual mode, or when AI cannot run: a local
+   *   search, with Ask AI offered at the results.
+   */
   function submitSearch() {
+    cancelQueryTimer()
+    const q = query.trim()
+    if (isRefinementSubmit(conversation, hasAiResults, q)) {
+      queryDebounced = q
+      void runAiSearch()
+      return
+    }
+    if (aiAuto && canAskAi && q) {
+      queryDebounced = q
+      activeMood = null
+      void runAiSearch()
+      return
+    }
     queryDebounced = query
     activeMood = null
-    void runSearch({ ai: aiAuto })
+    void runSearch()
     focusFirstResult()
   }
 
   /** Explicit "Ask AI" — one paid request, on the user's tap. */
   function askAi() {
+    cancelQueryTimer()
     // A quick pick is a preset, not a question: ask AI about the pick
     // itself (its label is the question — "Easy Watching", "Hidden
-    // Gems") and clear the mood so the AI branch runs. For a typed
+    // Gems") and clear the mood so the AI run asks it. For a typed
     // question, ask it exactly as typed.
     if (activeMood && !query.trim()) {
       const label = MOOD_PRESETS.find((p) => p.id === activeMood)?.label ?? activeMood
@@ -552,23 +816,59 @@
       queryDebounced = query
       activeMood = null
     }
-    void runSearch({ ai: true })
-    focusFirstResult()
+    void runAiSearch()
   }
 
   function pickExample(prompt) {
+    cancelQueryTimer()
+    // An example prompt is a NEW question: fresh conversation, no
+    // carried context — even when refining. When AI cannot run, it
+    // searches locally instead of firing a doomed request.
     query = prompt
     queryDebounced = prompt
     activeMood = null
-    void runSearch({ ai: true })
-    focusFirstResult()
+    conversation = newConversation()
+    if (canAskAi) {
+      void runAiSearch()
+    } else {
+      void runSearch()
+      focusFirstResult()
+    }
   }
 
   function pickMood(presetId) {
-    activeMood = activeMood === presetId ? null : presetId
-    query = ""
+    // A quick pick starts a NEW discovery request (applyQuickPick):
+    // no carried query, conversation or filters. Tapping the active
+    // pick again clears everything back to the landing state.
+    // Cancelling the debounce timer FIRST is what keeps a pick made
+    // within 250ms of typing from being undone by the stale timer.
+    cancelQueryTimer()
+    if (activeMood === presetId) {
+      const fresh = applyNewSearch()
+      query = fresh.query
+      activeMood = fresh.activeMood
+      conversation = newConversation()
+      availableOnly = false
+      queryDebounced = ""
+      searchResults = null
+      aiResults = null
+      resultsSource = null
+      receipt = null
+      aiUnavailable = null
+      localSimilar = null
+      return
+    }
+    // Discover holds no genre state of its own (no genre control on
+    // this screen), so the transition input carries genre: null;
+    // applyQuickPick returns a fresh state with only the new mood.
+    // Conversation + toggle are cleared alongside (see newSearch).
+    const next = applyQuickPick({ query, activeMood, genre: null }, presetId)
+    query = next.query
+    activeMood = next.activeMood
+    conversation = newConversation()
+    availableOnly = false
     queryDebounced = ""
-    void runSearch({ ai: false })
+    void runSearch()
   }
 
   /** Short subtitle for a quick-pick card, derived only from the
@@ -591,14 +891,49 @@
   }
 
   function clearSearch() {
+    cancelQueryTimer()
+    if (aiAbort) aiAbort.abort()
+    searchToken++
     query = ""
     queryDebounced = ""
     activeMood = null
     searchResults = null
+    aiResults = null
     resultsSource = null
-    fallbackNotice = ""
     receipt = null
+    conversation = newConversation()
+    availableOnly = false
+    aiUnavailable = null
+    localSimilar = null
+    aiPhase = null
+    searching = false
+    searchingAi = false
     inputEl?.focus()
+  }
+
+  /**
+   * B / Escape back steps (gamepad B dispatches Escape outside Live
+   * TV; Android BACK goes through the registered interceptor below).
+   * Predictable order: close diagnostics -> back out of the results
+   * to the search box -> otherwise fall through (at the landing
+   * state, B does nothing — Home is one D-pad move up, in the nav).
+   * The input's own Escape handler runs first for the on-screen
+   * keyboard and stops propagation when it dismisses it.
+   */
+  function onDiscoverKeyDown(ev) {
+    if (ev.key !== "Escape") return
+    if (diagnosticsOpen) {
+      diagnosticsOpen = false
+      ev.preventDefault()
+      ev.stopPropagation()
+      return
+    }
+    const active = /** @type {HTMLElement | null} */ (document.activeElement)
+    const inResults = active?.closest?.("[data-discover-results]")
+    if (inResults && active !== inputEl) {
+      ev.preventDefault()
+      inputEl?.focus()
+    }
   }
 
   function dismissOnboarding() {
@@ -607,11 +942,6 @@
   }
 
   async function refreshAiStatus() {
-    try {
-      aiModel = getAiModel()
-    } catch {
-      aiModel = ""
-    }
     try {
       const status = await getAiStatus()
       aiMode = status.mode
@@ -630,13 +960,24 @@
 
   onMount(async () => {
     aiAuto = getAiAutoRequests()
-    // Activity probe only: the receipt is built in runSearch after the
-    // awaited rankDiscover call. Never set note text here — a "done"
-    // from an earlier search must not describe a later cached result.
-    const unsubscribeActivity = subscribeAiActivity((event) => {
-      if (event.type === "start") activityProbe.started = true
-      else if (event.type === "done") activityProbe.done = true
-      else activityProbe.error = true
+    // Android BACK: same back steps as the Escape handler (close
+    // diagnostics -> back out of results to the landing state ->
+    // otherwise fall through to the WebView default).
+    const unregisterBack = registerBackInterceptor(() => {
+      if (diagnosticsOpen) {
+        diagnosticsOpen = false
+        return true
+      }
+      if (
+        aiResults !== null ||
+        searchResults !== null ||
+        queryDebounced.trim() !== "" ||
+        activeMood !== null
+      ) {
+        newSearch()
+        return true
+      }
+      return false
     })
     // Re-evaluate "just now" freshness while a validated receipt is on
     // screen; cheap, and it keeps the note honest without a new search.
@@ -653,7 +994,6 @@
       }
       playlistId = entry._id
       profileId = getActiveProfileId() ?? SHARED_PROFILE_ID
-      registerAIRanker(aiRanker)
       await initAI().catch(() => {})
       await refreshAiStatus()
       document.addEventListener("xt:ai-settings-changed", refreshAiStatus)
@@ -669,7 +1009,9 @@
     }
     return () => {
       clearInterval(clock)
-      unsubscribeActivity()
+      unregisterBack()
+      // Leaving Discover cancels any in-flight AI run.
+      if (aiAbort) aiAbort.abort()
       document.removeEventListener("xt:ai-settings-changed", refreshAiStatus)
     }
   })
@@ -677,13 +1019,15 @@
   $effect(() => {
     void rows
     void searchResults
+    void aiResults
+    void localSimilar
     void loading
     armTvImageFallbacks(document)
     void tick().then(() => restoreCouchFocus())
   })
 </script>
 
-<div class="rs-discover" data-discover-root>
+<div class="rs-discover" data-discover-root onkeydown={onDiscoverKeyDown}>
   <!-- Hero: Discover is a destination, with its purpose and its AI
        mode stated up front. -->
   <header class="rs-discover__hero">
@@ -691,9 +1035,10 @@
       <p class="rs-discover__eyebrow">Discover</p>
       <h1 class="rs-page-title">What are we watching?</h1>
       <p class="rs-discover__lede">
-        Ask in your own words, pick a quick pick, or browse picks made
-        for you — every recommendation comes from titles already in
-        your library.
+        Ask in your own words — AI suggests titles from its own
+        knowledge, checks each one against TMDB, and shows you which
+        are already in your library. Pick a quick pick, or browse
+        picks made for you.
       </p>
     </div>
     <div class="rs-discover__hero-side">
@@ -723,10 +1068,11 @@
         <h2>Unlock AI Discovery</h2>
         <p>
           Describe the night you're in the mood for — "something funny
-          for tonight" — and AI picks titles from your own library,
-          explaining each choice. Your watch history stays on this
-          device unless you choose to share it, and AI is billed
-          separately by your provider.
+          for tonight" — and AI suggests titles from its own knowledge,
+          verifies each one against TMDB, explains each choice, and
+          shows which ones are in your library. Your watch history
+          stays on this device unless you choose to share it, and AI
+          is billed separately by your provider.
         </p>
       </div>
       <div class="rs-discover-onboard__actions">
@@ -759,11 +1105,11 @@
           onfocus={onSearchInputFocus}
           onclick={onSearchInputFocus}
           onkeydown={onSearchInputKeyDown}
-          placeholder="What are you in the mood for?"
+          placeholder={searchPlaceholder}
           autocomplete="off"
           class="rs-discover-input" />
         <button type="submit" data-nylah-item class="rs-discover-ask">
-          {aiAuto ? "Ask AI" : "Search"}
+          {submitLabel}
         </button>
         {#if query || activeMood}
           <button
@@ -774,13 +1120,27 @@
         {/if}
       </form>
 
+      <!-- Refinement context: one subtle line, no chat bubbles. The
+           original question stays visible while follow-ups refine it,
+           and New Search is the obvious way back to a clean query. -->
+      {#if refineLabel && hasAiResults}
+        <div class="rs-discover-refine" data-refine-context>
+          <p class="rs-discover-refine__label">{refineLabel} — type a follow-up, or start fresh.</p>
+          <button
+            type="button"
+            onclick={newSearch}
+            data-nylah-item
+            class="rs-discover-refine__new">New Search</button>
+        </div>
+      {/if}
+
       <TvKeyboard
         bind:value={query}
         open={keyboardOpen}
         onInput={onOskInput}
         onCommit={onKeyboardCommit}
         onDismiss={dismissKeyboardToInput}
-        placeholder="What are you in the mood for?" />
+        placeholder={searchPlaceholder} />
     </div>
 
     <!-- Example prompts: tap one and it asks, exactly as typed. -->
@@ -846,68 +1206,180 @@
         <!-- Rail title comes from the per-search receipt only: "AI
              picks" for a validated live answer, "Cached AI picks" for
              a cache hit, "Local recommendations" for the local engine.
-             A quick pick keeps its own label. -->
+             A quick pick keeps its own label. While an AI run is in
+             flight the title says the question is being asked. -->
         <h2 class="rs-section-title">{railTitle}</h2>
         {#if searchingAi}
-          <p class="rs-meta">Asking {aiModel || "AI"}… one request for this question.</p>
+          <p class="rs-meta" aria-live="polite" data-ai-phase>{aiStatusText} One request for this question.</p>
         {:else if searching}
           <p class="rs-meta">Searching your library…</p>
         {/if}
       </div>
-      {#if !searching && stateNote}
+      {#if !searching && stateNote && !aiUnavailable}
         <p class="rs-meta" data-ai-state-note>{stateNote}</p>
       {/if}
-      {#if fallbackNotice}
-        <p class="rs-discover-fallback" role="status">{fallbackNotice}</p>
+      {#if !searching && refineLabel && hasAiResults && !aiUnavailable}
+        <!-- Refinement context at the results, where the user's focus
+             is: the original question, one line, no chat UI. The New
+             Search action lives with the same line under the input. -->
+        <p class="rs-meta" data-refine-context-rail>{refineLabel}</p>
       {/if}
-      {#if resultsSource === "local" && !searching && !fallbackNotice}
-        <!-- A "Local recommendations" rail must say why it is local,
-             next to the action that fixes it — or why there is no
-             action. Quick picks filter locally by design; a typed
-             query shows local results until AI is asked; with AI off
-             or no key saved, the rail says so and links to Settings. -->
-        <p class="rs-meta" data-local-note>
-          {canAskAi
-            ? activeMood
-              ? "Quick picks are filtered locally. Ask AI below to rank them for you."
-              : "Local results so far — Ask AI below for AI picks."
-            : askAiWhy}
-          {#if !canAskAi}
-            <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">Open AI settings</a>
+
+      {#if hasAiResults}
+        <!-- AI rail (0.11.6): verified recommendations, each with its
+             reason and an honest availability badge. Nothing is ever
+             substituted or padded: if only two are available, two
+             show as available and the rest say so. -->
+        {#if aiUnavailable}
+          <div class="rs-ai-panel" role="status" data-ai-unavailable>
+            <p class="rs-ai-panel__text">{aiUnavailable.message}</p>
+            <div class="rs-ai-panel__actions">
+              <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
+                Search for similar titles available locally
+              </button>
+              <button type="button" onclick={() => void runAiSearch()} data-nylah-item class="rs-ai-panel__secondary">
+                Try again
+              </button>
+            </div>
+          </div>
+        {:else if aiResults.length === 0 && !searching}
+          <div class="rs-ai-panel" role="status" data-ai-empty>
+            <h3 class="rs-ai-panel__title">AI couldn't suggest anything for that</h3>
+            <p class="rs-ai-panel__text">
+              Try rewording your question, or search for similar titles available in your library.
+            </p>
+            <div class="rs-ai-panel__actions">
+              <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
+                Search for similar titles available locally
+              </button>
+              <button type="button" onclick={newSearch} data-nylah-item class="rs-ai-panel__secondary">
+                New Search
+              </button>
+            </div>
+          </div>
+        {:else}
+          <div class="rs-ai-controls">
+            <button
+              type="button"
+              onclick={toggleAvailableOnly}
+              aria-pressed={availableOnly}
+              data-nylah-item
+              data-available-toggle
+              class="rs-ai-toggle"
+              class:is-on={availableOnly}>
+              <span class="rs-ai-toggle__box" aria-hidden="true">{availableOnly ? "✓" : ""}</span>
+              <span class="rs-ai-toggle__label">Available in My Library</span>
+              <span class="rs-ai-toggle__count">{matchedAiCount} of {aiResults.length} in your library</span>
+            </button>
+            <p class="rs-ai-controls__note">
+              {availableOnly
+                ? "Showing only titles in your library."
+                : allAiVerified
+                  ? "Showing all verified recommendations."
+                  : "Showing all recommendations — some couldn't be verified."} Toggling never asks AI again.
+            </p>
+          </div>
+          {#if matchedAiCount === 0 && aiResults.some((rec) => rec.verified) && !searching}
+            <div class="rs-ai-panel" role="status" data-none-available>
+              <h3 class="rs-ai-panel__title">None of these are in your library yet</h3>
+              <p class="rs-ai-panel__text">
+                These are AI's suggestions, verified against TMDB. Nothing has been
+                swapped for a weaker available title.
+              </p>
+              <div class="rs-ai-panel__actions">
+                <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
+                  Search for similar titles available locally
+                </button>
+              </div>
+            </div>
           {/if}
-        </p>
-      {/if}
-      {#if canAskAi && resultsSource === "local" && !searching && (queryDebounced.trim() || activeMood)}
-        <!-- 0.11.4: visible where AI can run — at the results, not only
-             as the small submit button in the search row (the TV
-             on-screen keyboard commits to the results instead of
-             submitting, so that button never fires in the TV flow).
-             0.11.5: gated on canAskAi (an attempt can run), not on a
-             passing test — an untested-but-configured AI is offered
-             here, and a failure surfaces through the fallback reason.
-             Shown in Manual AND Automatic: in Automatic it is the
-             only reachable ask for a typed query. Hides once AI
-             answers (source becomes "ai"); shows again on fallback. -->
-        <button type="button" onclick={askAi} data-nylah-item class="rs-discover-ask-ai">
-          Ask AI about “{askAiLabel}”
-        </button>
-      {/if}
-      {#if searchResults && searchResults.length}
-        <div class="rs-rail__row">
-          {#each searchResults as item (candidateKey(item.candidate))}
-            {@render discoverCard(item)}
-          {/each}
-        </div>
-      {:else if !searching}
-        <p class="rs-meta">Nothing matched — try a different word or a quick pick above. Discover only searches titles already in your library.</p>
+          {#if visibleAiResults.length}
+            <div class="rs-ai-grid" data-ai-results>
+              {#each visibleAiResults as rec, aiIndex (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${aiIndex}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
+                {@render aiRecommendationCard(rec, aiIndex)}
+              {/each}
+            </div>
+          {:else if !searching}
+            <div class="rs-ai-panel" role="status" data-available-empty>
+              <p class="rs-ai-panel__text">
+                None of these picks are in your library. Turn the toggle off to see
+                all of AI's suggestions, or search for similar titles available locally.
+              </p>
+              <div class="rs-ai-panel__actions">
+                <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
+                  Search for similar titles available locally
+                </button>
+              </div>
+            </div>
+          {/if}
+        {/if}
+
+        {#if localSimilar}
+          <!-- Local similar titles: explicitly labelled local search,
+               never masquerading as LLM recommendations. -->
+          <div class="rs-ai-similar" data-local-similar>
+            <h3 class="rs-section-title">Similar titles in your library</h3>
+            <p class="rs-meta">Local search — similar titles from your library, not AI recommendations.</p>
+            {#if localSimilar.items.length}
+              <div class="rs-rail__row">
+                {#each localSimilar.items as item (candidateKey(item.candidate))}
+                  {@render discoverCard(item)}
+                {/each}
+              </div>
+            {:else}
+              <p class="rs-meta">No similar titles in your library either — try a different question.</p>
+            {/if}
+          </div>
+        {/if}
+      {:else}
+        <!-- Local rail: typing, quick picks, Manual submit. A local
+             rail says why it is local, next to the action that fixes
+             it — or why there is no action. -->
+        {#if resultsSource === "local" && !searching}
+          <p class="rs-meta" data-local-note>
+            {canAskAi
+              ? activeMood
+                ? "Quick picks are filtered locally. Ask AI below for AI picks about this mood."
+                : "Local results so far — Ask AI below for AI picks."
+              : askAiWhy}
+            {#if !canAskAi}
+              <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">Open AI settings</a>
+            {/if}
+          </p>
+        {/if}
+        {#if canAskAi && resultsSource === "local" && !searching && (queryDebounced.trim() || activeMood)}
+          <!-- 0.11.4: visible where AI can run — at the results, not only
+               as the small submit button in the search row (the TV
+               on-screen keyboard commits to the results instead of
+               submitting, so that button never fires in the TV flow).
+               0.11.5: gated on canAskAi (an attempt can run), not on a
+               passing test — an untested-but-configured AI is offered
+               here, and a failure surfaces through the unavailable
+               state. Shown in Manual AND Automatic: in Automatic it is
+               the only reachable ask for a typed query. Hides once AI
+               answers (the AI rail replaces the local rail). -->
+          <button type="button" onclick={askAi} data-nylah-item class="rs-discover-ask-ai">
+            Ask AI about “{askAiLabel}”
+          </button>
+        {/if}
+        {#if searchResults && searchResults.length}
+          <div class="rs-rail__row">
+            {#each searchResults as item (candidateKey(item.candidate))}
+              {@render discoverCard(item)}
+            {/each}
+          </div>
+        {:else if !searching}
+          <p class="rs-meta">Nothing matched — try a different word or a quick pick above.</p>
+        {/if}
       {/if}
       {#if receipt}
-        <!-- Diagnostics (0.11.5): collapsible, off the main path, one
-             toggle reachable by controller. Shows what actually
-             produced this rail — engine, state, model, query type,
-             counts, cache, duration, fallback reason. Fields the
-             ranker does not report yet read "Not reported yet".
-             Never any API key, credential or request text. -->
+        <!-- Diagnostics (0.11.5/0.11.6): collapsible, off the main
+             path, one toggle reachable by controller. Shows what
+             actually produced this rail — engine, state, model, query
+             type, counts (generated / verified / matched / failures),
+             cache, duration, provider error, fallback reason. Fields
+             the orchestrator does not report yet read "Not reported
+             yet". Never any API key, credential or request text. -->
         <section class="rs-discover-diag" data-ai-diagnostics aria-label="Why these results">
           <button
             type="button"
@@ -929,12 +1401,17 @@
                 <dd data-diag-query-type>{diagQueryTypeText}{receipt.diagnostics.intention ? ` — ${receipt.diagnostics.intention}` : ""}</dd>
               </div>
               <div><dt>Catalogue size</dt><dd data-diag-catalogue>{diagCount(receipt.diagnostics.catalogueSize)} titles</dd></div>
+              <div><dt>Suggestions generated</dt><dd data-diag-generated>{diagCount(receipt.diagnostics.generatedCount)}</dd></div>
+              <div><dt>Verified by TMDB</dt><dd data-diag-verified>{diagCount(receipt.diagnostics.verifiedCount)}</dd></div>
+              <div><dt>Matched in library</dt><dd data-diag-matched>{diagCount(receipt.diagnostics.matchedCount)}</dd></div>
+              <div><dt>Verification failures</dt><dd data-diag-verification-failures>{diagCount(receipt.diagnostics.verificationFailures)}</dd></div>
               <div><dt>Retrieved candidates</dt><dd data-diag-retrieved>{diagCount(receipt.diagnostics.retrievedCount)}</dd></div>
               <div><dt>Sent to the model</dt><dd data-diag-sent>{diagCount(receipt.diagnostics.sentToModelCount)}</dd></div>
               <div><dt>Accepted</dt><dd data-diag-accepted>{diagCount(receipt.diagnostics.acceptedCount)}</dd></div>
               <div><dt>Rejected by catalogue check</dt><dd data-diag-rejected>{diagCount(receipt.diagnostics.rejectedCount)}</dd></div>
               <div><dt>Cache</dt><dd data-diag-cache>{diagCacheText}</dd></div>
               <div><dt>Request time</dt><dd data-diag-duration>{diagDurationText}</dd></div>
+              <div><dt>Provider error</dt><dd data-diag-provider-error>{receipt.diagnostics.providerError ?? "—"}</dd></div>
               <div><dt>Fallback reason</dt><dd data-diag-fallback>{receipt.diagnostics.fallbackReason ?? receipt.fallbackReason ?? "—"}</dd></div>
             </dl>
             <p class="rs-discover-diag__foot">Diagnostics never include API keys, credentials or request text.</p>
@@ -1015,6 +1492,87 @@
       </a>
     </article>
   </div>
+{/snippet}
+
+<!-- AI recommendation card (0.11.6): a horizontal card with room for
+     the reason — the point of the feature. Verified artwork only: an
+     unverified title gets fallback art, a "Couldn't verify" badge and
+     no detail link. Available titles link to the existing detail
+     flow (where playback starts); unavailable titles are focusable
+     but inert, with the genuine reason still shown. -->
+{#snippet aiCardBody(rec)}
+  {@const showArt = rec.verified && !!rec.posterUrl}
+  <span class="rs-ai-card__poster">
+    <span
+      class="rs-image rs-image--poster{showArt ? '' : ' is-fallback'}"
+      data-tv-image
+      data-kind="poster"
+    >
+      {#if showArt}
+        <img
+          src={rec.posterUrl}
+          alt=""
+          loading="lazy"
+          fetchpriority="low"
+          decoding="async"
+          referrerpolicy="no-referrer"
+          data-tv-image-img
+        />
+      {/if}
+      <span class="rs-image__fallback" aria-hidden="true">
+        <span class="rs-image__fallback-mark">{fallbackMarkFor("poster", rec.title)}</span>
+        <span class="rs-image__fallback-title">{rec.title}</span>
+      </span>
+    </span>
+  </span>
+  <span class="rs-ai-card__body">
+    <span class="rs-ai-card__title">{rec.title}</span>
+    <span class="rs-ai-card__badges">
+      <span class="rs-ai-badge">{rec.kind === "series" ? "Series" : "Film"}</span>
+      {#if !rec.verified}
+        <span class="rs-ai-badge rs-ai-badge--warn">Couldn't verify</span>
+      {:else if rec.match}
+        <span class="rs-ai-badge rs-ai-badge--ok">✓ In your library</span>
+      {:else}
+        <span class="rs-ai-badge rs-ai-badge--muted">Not in your library</span>
+      {/if}
+      {#if rec.year}<span class="rs-ai-card__year">{rec.year}</span>{/if}
+    </span>
+    <span class="rs-ai-card__reason">{rec.reason}</span>
+    <span class="rs-ai-card__meta">
+      {rec.tone + (rec.genres?.length ? ` · ${rec.genres.join(" · ")}` : "")}
+    </span>
+    {#if !rec.verified && rec.verificationNote}
+      <span class="rs-ai-card__note">{rec.verificationNote}</span>
+    {/if}
+  </span>
+{/snippet}
+
+{#snippet aiRecommendationCard(rec, index)}
+  {@const href = recommendationDetailHref(rec)}
+  {@const key = rec.match?.catalogueKey ?? (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${index}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
+  {@const kindLabel = rec.kind === "series" ? "Series" : "Film"}
+  {#if href}
+    <a
+      href={href}
+      data-nylah-item
+      data-ai-result-card
+      data-couch-key={key}
+      aria-label={`${rec.title}${rec.year ? ` (${rec.year})` : ""}, ${kindLabel}, in your library — open details`}
+      class="rs-ai-card">
+      {@render aiCardBody(rec)}
+    </a>
+  {:else}
+    <article
+      tabindex="0"
+      data-nylah-item
+      data-ai-result-card
+      data-couch-key={key}
+      aria-label={`${rec.title}${rec.year ? ` (${rec.year})` : ""}, ${kindLabel}, ${rec.verified ? "not in your library" : "could not be verified"}`}
+      class="rs-ai-card rs-ai-card--unavailable">
+      {@render aiCardBody(rec)}
+    </article>
+  {/if}
 {/snippet}
 
 <style>
@@ -1360,15 +1918,6 @@
   .rs-discover-mood.is-active .rs-discover-mood__sub {
     color: rgb(255 255 255 / 0.85);
   }
-  .rs-discover-fallback {
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    padding: 0.875rem 1.25rem;
-    font-size: 1.25rem;
-    color: var(--rs-text-2);
-    margin: 0;
-  }
   .rs-discover-ask-ai {
     align-self: flex-start;
     padding: 0.875rem 1.5rem;
@@ -1494,5 +2043,309 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+
+  /* -- AI-first Discover (0.11.6) ---------------------------------- */
+
+  /* Refinement context: one subtle line under the search box — the
+     original question plus the obvious New Search action. No chat
+     bubbles, no transcript. */
+  .rs-discover-refine {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 0 0.25rem;
+  }
+  .rs-discover-refine__label {
+    margin: 0;
+    font-size: 1.125rem;
+    color: var(--rs-text-2);
+  }
+  .rs-discover-refine__new {
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    font-size: 1.125rem;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+    white-space: nowrap;
+  }
+  .rs-discover-refine__new:hover,
+  .rs-discover-refine__new:focus-visible {
+    border-color: var(--rs-focus);
+  }
+  .rs-discover-refine__new:focus-visible {
+    box-shadow: 0 0 0 3px var(--rs-focus);
+  }
+
+  /* Available-only toggle row: the toggle is one controller-reachable
+     button; the note states the no-new-request guarantee plainly. */
+  .rs-ai-controls {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+  }
+  .rs-ai-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1.25rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    font-size: 1.25rem;
+    cursor: pointer;
+    outline: none;
+  }
+  .rs-ai-toggle:hover,
+  .rs-ai-toggle:focus-visible {
+    border-color: var(--rs-focus);
+  }
+  .rs-ai-toggle:focus-visible {
+    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .rs-ai-toggle.is-on {
+    border-color: var(--rs-focus);
+    background: var(--rs-bg-2);
+  }
+  .rs-ai-toggle__box {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    flex: none;
+    border-radius: 0.375rem;
+    border: 2px solid var(--rs-text-2);
+    color: #fff;
+    font-size: 1.125rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+  .rs-ai-toggle.is-on .rs-ai-toggle__box {
+    border-color: var(--rs-focus);
+    background: var(--rs-accent);
+  }
+  .rs-ai-toggle__label {
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .rs-ai-toggle__count {
+    color: var(--rs-text-2);
+    font-size: 1.125rem;
+    white-space: nowrap;
+  }
+  .rs-ai-controls__note {
+    margin: 0;
+    font-size: 1.125rem;
+    color: var(--rs-text-2);
+  }
+
+  /* AI recommendation grid: two horizontal cards per row at 1080p —
+     poster on the left, readable reason on the right. One column on
+     narrow viewports. No horizontal scrolling: the whole set reads
+     as one coherent answer. */
+  .rs-ai-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+    padding: 0.25rem;
+  }
+  @media (max-width: 64rem) {
+    .rs-ai-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .rs-ai-card {
+    display: flex;
+    gap: 1.25rem;
+    min-width: 0;
+    padding: 1rem;
+    border-radius: 1rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+    color: var(--rs-text);
+    text-decoration: none;
+    outline: none;
+  }
+  a.rs-ai-card {
+    cursor: pointer;
+  }
+  .rs-ai-card:hover,
+  .rs-ai-card:focus-visible {
+    border-color: var(--rs-focus);
+    background: var(--rs-bg-2);
+  }
+  .rs-ai-card:focus-visible {
+    box-shadow:
+      0 0 0 3px var(--rs-focus),
+      0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  /* Unavailable cards read as present-but-not-playable: full reason,
+     honest badge, slightly dimmed poster — never hidden, never
+     replaced. */
+  .rs-ai-card--unavailable .rs-ai-card__poster {
+    opacity: 0.62;
+  }
+  .rs-ai-card__poster {
+    flex: none;
+    width: clamp(7rem, 8.5vw, 9.5rem);
+  }
+  .rs-ai-card__poster .rs-image {
+    height: 100%;
+    border-radius: 0.625rem;
+    overflow: hidden;
+  }
+  .rs-ai-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+    padding: 0.25rem 0;
+  }
+  .rs-ai-card__title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+  .rs-ai-card__badges {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .rs-ai-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.625rem;
+    border-radius: 999px;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-bg-2);
+    color: var(--rs-text-2);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .rs-ai-badge--ok {
+    border-color: #3fb96f;
+    background: rgb(63 185 111 / 0.16);
+    color: #7fd6a4;
+  }
+  .rs-ai-badge--muted {
+    color: var(--rs-text-2);
+  }
+  .rs-ai-badge--warn {
+    border-color: #e0a63c;
+    background: rgb(224 166 60 / 0.16);
+    color: #f0c573;
+  }
+  .rs-ai-card__year {
+    font-size: 1.125rem;
+    color: var(--rs-text-2);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The reason is the point of the feature: full sentences, three
+     lines, never a clipped single-line meta. */
+  .rs-ai-card__reason {
+    font-size: 1.25rem;
+    line-height: 1.45;
+    color: var(--rs-text);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rs-ai-card__meta {
+    font-size: 1.125rem;
+    line-height: 1.4;
+    color: var(--rs-text-2);
+  }
+  .rs-ai-card__note {
+    font-size: 1.0625rem;
+    line-height: 1.4;
+    color: #f0c573;
+  }
+
+  /* Honest-state panels (none available / unavailable / empty): one
+     calm surface, plain explanation, labelled actions. */
+  .rs-ai-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: flex-start;
+    padding: 1.25rem 1.5rem;
+    border-radius: 1rem;
+    border: 1px solid var(--rs-line);
+    background: var(--rs-surface);
+  }
+  .rs-ai-panel__title {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--rs-text);
+  }
+  .rs-ai-panel__text {
+    margin: 0;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--rs-text-2);
+  }
+  .rs-ai-panel__actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .rs-ai-panel__primary {
+    padding: 0.875rem 1.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-focus);
+    background: var(--rs-accent);
+    color: #fff;
+    font-size: 1.25rem;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+    white-space: nowrap;
+  }
+  .rs-ai-panel__primary:hover,
+  .rs-ai-panel__primary:focus-visible {
+    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  }
+  .rs-ai-panel__secondary {
+    padding: 0.875rem 1.25rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--rs-line);
+    background: transparent;
+    color: var(--rs-text);
+    font-size: 1.25rem;
+    font-weight: 700;
+    cursor: pointer;
+    outline: none;
+    white-space: nowrap;
+  }
+  .rs-ai-panel__secondary:hover,
+  .rs-ai-panel__secondary:focus-visible {
+    border-color: var(--rs-focus);
+  }
+  .rs-ai-panel__secondary:focus-visible {
+    box-shadow: 0 0 0 3px var(--rs-focus);
+  }
+
+  /* Local similar titles: same rail language as the rest of Discover,
+     with its labelling carried in the markup, not the styling. */
+  .rs-ai-similar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 </style>

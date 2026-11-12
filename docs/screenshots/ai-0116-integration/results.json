@@ -1,0 +1,692 @@
+{
+  "landing": {
+    "railTitle": "",
+    "stateNote": "",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": false,
+    "scrollY": 0,
+    "navBottom": 106,
+    "moodGridTop": 609,
+    "activeElement": "A.rs-nav__link#",
+    "net": {
+      "aiCalls": 0,
+      "tmdbSearches": 0,
+      "tmdbBundles": 0
+    }
+  },
+  "mixed": {
+    "railTitle": "AI picks for “dark anime”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.1s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "Attack on Titan",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=202",
+        "tag": "A"
+      },
+      {
+        "title": "Death Note",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=203",
+        "tag": "A"
+      },
+      {
+        "title": "Akira",
+        "badges": [
+          "Film",
+          "✓ In your library"
+        ],
+        "href": "/movies/detail?id=108",
+        "tag": "A"
+      },
+      {
+        "title": "Perfect Blue",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Ghost in the Shell",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Cyberpunk: Edgerunners",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 3 of 6 in your library",
+    "togglePressed": "false",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 835,
+    "navBottom": 106,
+    "moodGridTop": -182,
+    "activeElement": "A.rs-ai-card#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 6,
+      "tmdbBundles": 6
+    }
+  },
+  "controller-nav": {
+    "sequence": [
+      "Attack on Titan",
+      "Death Note",
+      "Perfect Blue",
+      "Akira",
+      "Attack on Titan"
+    ]
+  },
+  "toggle-on": {
+    "railTitle": "AI picks for “dark anime”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.1s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "Attack on Titan",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=202",
+        "tag": "A"
+      },
+      {
+        "title": "Death Note",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=203",
+        "tag": "A"
+      },
+      {
+        "title": "Akira",
+        "badges": [
+          "Film",
+          "✓ In your library"
+        ],
+        "href": "/movies/detail?id=108",
+        "tag": "A"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "✓ Available in My Library 3 of 6 in your library",
+    "togglePressed": "true",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 753,
+    "navBottom": 106,
+    "moodGridTop": -100,
+    "activeElement": "BUTTON.rs-ai-toggle#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 6,
+      "tmdbBundles": 6
+    }
+  },
+  "diagnostics": {
+    "diagText": "EngineAI — live request StateRecommendations ready Modelgpt-4o-mini Query type Keyword / title search Catalogue size18 titles Suggestions generated6 Verified by TMDB6 Matched in library3 Verification failures0 Retrieved candidatesNot reported yet Sent to the model0 Accepted6 Rejected by catalogue check0 CacheMiss — live request Request time0.1s Provider error— Fallback reason—",
+    "railTitle": "AI picks for “dark anime”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.1s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "Attack on Titan",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=202",
+        "tag": "A"
+      },
+      {
+        "title": "Death Note",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=203",
+        "tag": "A"
+      },
+      {
+        "title": "Akira",
+        "badges": [
+          "Film",
+          "✓ In your library"
+        ],
+        "href": "/movies/detail?id=108",
+        "tag": "A"
+      },
+      {
+        "title": "Perfect Blue",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Ghost in the Shell",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Cyberpunk: Edgerunners",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 3 of 6 in your library",
+    "togglePressed": "false",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 1035,
+    "navBottom": 106,
+    "moodGridTop": -382,
+    "activeElement": "BUTTON.rs-discover-diag__toggle#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 6,
+      "tmdbBundles": 6
+    }
+  },
+  "refinement": {
+    "railTitle": "AI picks for “Darker”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.1s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "The Thing",
+        "badges": [
+          "Film",
+          "✓ In your library"
+        ],
+        "href": "/movies/detail?id=109",
+        "tag": "A"
+      },
+      {
+        "title": "Severance",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=205",
+        "tag": "A"
+      },
+      {
+        "title": "Fargo",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 2 of 3 in your library",
+    "togglePressed": "false",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 753,
+    "navBottom": 106,
+    "moodGridTop": -100,
+    "activeElement": "A.rs-ai-card#",
+    "net": {
+      "aiCalls": 2,
+      "tmdbSearches": 9,
+      "tmdbBundles": 9
+    }
+  },
+  "new-search": {
+    "railTitle": "",
+    "stateNote": "",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": false,
+    "scrollY": 0,
+    "navBottom": 106,
+    "moodGridTop": 1197,
+    "activeElement": "INPUT.rs-discover-input#discover-query",
+    "net": {
+      "aiCalls": 2,
+      "tmdbSearches": 9,
+      "tmdbBundles": 9
+    }
+  },
+  "cached": {
+    "railTitle": "Cached AI picks for “dark anime”",
+    "stateNote": "Cached AI answer — no new request was sent.",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "Attack on Titan",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=202",
+        "tag": "A"
+      },
+      {
+        "title": "Death Note",
+        "badges": [
+          "Series",
+          "✓ In your library"
+        ],
+        "href": "/series/detail?id=203",
+        "tag": "A"
+      },
+      {
+        "title": "Akira",
+        "badges": [
+          "Film",
+          "✓ In your library"
+        ],
+        "href": "/movies/detail?id=108",
+        "tag": "A"
+      },
+      {
+        "title": "Perfect Blue",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Ghost in the Shell",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Cyberpunk: Edgerunners",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 3 of 6 in your library",
+    "togglePressed": "false",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 835,
+    "navBottom": 106,
+    "moodGridTop": -182,
+    "activeElement": "A.rs-ai-card#",
+    "net": {
+      "aiCalls": 2,
+      "tmdbSearches": 9,
+      "tmdbBundles": 9
+    },
+    "callsBeforeCached": 2,
+    "cachedCallDelta": 0
+  },
+  "unavailable": {
+    "railTitle": "AI unavailable",
+    "stateNote": "",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": true,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 147,
+    "navBottom": 106,
+    "moodGridTop": 462,
+    "activeElement": "BUTTON.rs-discover-diag__toggle#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 0,
+      "tmdbBundles": 0
+    }
+  },
+  "unavailable-local-similar": {
+    "railTitle": "AI unavailable",
+    "stateNote": "",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [
+      "A Funny Thing",
+      "Airplane!",
+      "Amélie",
+      "Brooklyn Nine-Nine",
+      "Hot Fuzz",
+      "Knives Out",
+      "Paddington 2",
+      "The Grand Budapest Hotel",
+      "The Pranksters",
+      "Akira",
+      "Attack on Titan",
+      "Death Note"
+    ],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": true,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": true,
+    "diagToggleVisible": true,
+    "scrollY": 669,
+    "navBottom": 106,
+    "moodGridTop": -60,
+    "activeElement": "A.rs-card#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 0,
+      "tmdbBundles": 0
+    }
+  },
+  "empty-catalogue": {
+    "railTitle": "AI picks for “dark anime”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.2s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "Attack on Titan",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Death Note",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Akira",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Perfect Blue",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Ghost in the Shell",
+        "badges": [
+          "Film",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Cyberpunk: Edgerunners",
+        "badges": [
+          "Series",
+          "Not in your library"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 0 of 6 in your library",
+    "togglePressed": "false",
+    "noneAvailable": true,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 835,
+    "navBottom": 106,
+    "moodGridTop": -182,
+    "activeElement": "ARTICLE.rs-ai-card#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 6,
+      "tmdbBundles": 6
+    }
+  },
+  "unverified": {
+    "railTitle": "AI picks for “dark anime”",
+    "stateNote": "Recommendations ready · gpt-4o-mini · 0.0s",
+    "phase": "",
+    "localNote": "",
+    "askAiVisible": false,
+    "askAiText": "",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [
+      {
+        "title": "The Glimmering Void",
+        "badges": [
+          "Film",
+          "Couldn't verify"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Zorblax Rising",
+        "badges": [
+          "Film",
+          "Couldn't verify"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      },
+      {
+        "title": "Captain Moonbeard's Revenge",
+        "badges": [
+          "Series",
+          "Couldn't verify"
+        ],
+        "href": null,
+        "tag": "ARTICLE"
+      }
+    ],
+    "localCards": [],
+    "refineContext": "Refining: “dark anime” — type a follow-up, or start fresh. New Search",
+    "toggleText": "Available in My Library 0 of 3 in your library",
+    "togglePressed": "false",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 753,
+    "navBottom": 106,
+    "moodGridTop": -100,
+    "activeElement": "ARTICLE.rs-ai-card#",
+    "net": {
+      "aiCalls": 1,
+      "tmdbSearches": 3,
+      "tmdbBundles": 0
+    }
+  },
+  "quick-picks-after-submit": {
+    "railTitle": "Local recommendations for “COMEDY”",
+    "stateNote": "Local search — AI wasn't asked.",
+    "phase": "",
+    "localNote": "Local results so far — Ask AI below for AI picks.",
+    "askAiVisible": true,
+    "askAiText": "Ask AI about “COMEDY”",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [
+      "A Funny Thing",
+      "Airplane!",
+      "Amélie",
+      "Brooklyn Nine-Nine",
+      "Hot Fuzz",
+      "Knives Out",
+      "Paddington 2",
+      "The Grand Budapest Hotel",
+      "The Pranksters"
+    ],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 0,
+    "navBottom": 106,
+    "moodGridTop": 609,
+    "activeElement": "BUTTON.rs-discover-ask-ai#",
+    "clippingOk": true
+  }
+}

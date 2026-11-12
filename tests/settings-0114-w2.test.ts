@@ -326,7 +326,12 @@ describe("Discover agrees with Settings (0.11.4)", () => {
   })
 
   it("Discover fires AI for a typed query or a quick pick when asked", () => {
-    expect(discoverView).toContain("forceAi: true")
+    // 0.11.6: the AI path is the discovery orchestrator, not the
+    // retired rankDiscover/forceAi call — one call site, in
+    // runAiSearch, reached from submit / Ask AI / refinement.
+    expect(discoverView).toContain("runAiDiscovery(")
+    expect(discoverView).toContain("async function runAiSearch()")
+    expect(discoverView).not.toContain("forceAi: true")
     // askAi is mood-aware: a quick pick asks about its label.
     expect(discoverView).toContain(
       "MOOD_PRESETS.find((p) => p.id === activeMood)?.label"

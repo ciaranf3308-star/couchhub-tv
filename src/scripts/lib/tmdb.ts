@@ -75,6 +75,7 @@ export interface TmdbSearchResult {
   vote_count?: number
   popularity?: number
   poster_path?: string | null
+  backdrop_path?: string | null
   overview?: string
 }
 
@@ -409,6 +410,72 @@ export async function tmdbPersonCredits(
   language?: string
 ): Promise<TmdbPersonCreditsResponse> {
   return tmdbFetch<TmdbPersonCreditsResponse>(key, `/person/${personId}/combined_credits`, { language })
+}
+
+// ---------------------------------------------------------------------------
+// Alternative titles + external-id lookup (AI Discovery 3.0 verification).
+// Minimal additions, used only for identity verification and catalogue
+// matching: alternative titles widen conservative title matching, and
+// /find independently checks a model-supplied IMDb/TVDb id.
+// ---------------------------------------------------------------------------
+
+interface TmdbAlternativeTitleEntry {
+  iso_639_1?: string
+  title: string
+}
+
+interface TmdbAlternativeTitlesResponse {
+  // Movie endpoint returns `titles`; TV returns `results`. Accept both.
+  titles?: TmdbAlternativeTitleEntry[]
+  results?: TmdbAlternativeTitleEntry[]
+}
+
+function alternativeTitleList(data: TmdbAlternativeTitlesResponse): string[] {
+  const entries = data.titles || data.results || []
+  return [...new Set(entries.map((entry) => entry.title).filter(Boolean))]
+}
+
+export async function tmdbMovieAlternativeTitles(key: string, tmdbId: number): Promise<string[]> {
+  const data = await tmdbFetch<TmdbAlternativeTitlesResponse>(
+    key,
+    `/movie/${tmdbId}/alternative_titles`,
+    {}
+  )
+  return alternativeTitleList(data)
+}
+
+export async function tmdbTvAlternativeTitles(key: string, tmdbId: number): Promise<string[]> {
+  const data = await tmdbFetch<TmdbAlternativeTitlesResponse>(
+    key,
+    `/tv/${tmdbId}/alternative_titles`,
+    {}
+  )
+  return alternativeTitleList(data)
+}
+
+export interface TmdbFindResult {
+  movieResults: TmdbSearchResult[]
+  tvResults: TmdbSearchResult[]
+}
+
+interface TmdbFindResponse {
+  movie_results?: TmdbSearchResult[]
+  tv_results?: TmdbSearchResult[]
+}
+
+/** Resolve an IMDb or TVDb id to TMDb identities via TMDb's /find endpoint. */
+export async function tmdbFindByExternalId(
+  key: string,
+  externalSource: "imdb_id" | "tvdb_id",
+  externalId: string
+): Promise<TmdbFindResult> {
+  const data = await tmdbFetch<TmdbFindResponse>(key, `/find/${encodeURIComponent(externalId)}`, {
+    external_source: externalSource,
+  })
+  return {
+    movieResults: data.movie_results || [],
+    tvResults: data.tv_results || [],
+  }
 }
 
 const LOCALE_TO_TMDB_LANGUAGE: Record<string, string> = {
