@@ -86,11 +86,13 @@ export interface PlaybackEngine {
   tune(channelId: string | number): void;
   /**
    * Release the currently held stream (provider connection) before a
-   * replacement is opened. Optional: engines that tear the previous
-   * mount down inside tune() (stream.ts's play() resets/disposes the
-   * prior mount before mounting the replacement) may omit it —
-   * `switchChannel` still orders release-before-tune whenever a
-   * release hook exists. Never called for a highlight move either.
+   * replacement is opened. `switchChannel` and `tuneToChannel`
+   * always call it first when the hook exists, and the engine's
+   * `livetv:tune` listener releases again before `play()` — so a
+   * tune can never open a second connection while the previous
+   * stream is still held. Optional only so engines that tear the
+   * prior mount down inside tune() (and test fakes) may omit it.
+   * Never called for a highlight move.
    */
   release?(channelId: string | number | null | undefined): void;
 }
@@ -106,8 +108,15 @@ export function dispatchTune(channelId: string | number): void {
  * window event (`livetv:release {channelId}`) so the stream owner
  * can wire it to its release path (stream.ts's
  * releaseLocalPlaybackForHandoff); dispatching it with no listener
- * is a harmless no-op — the one-stream guarantee does not depend on
- * it, because play() already tears the prior mount down on a tune.
+ * is a harmless no-op.
+ *
+ * 0.11.4 W5 — this is the ONE release-before-tune gate every tune
+ * path goes through: `switchChannel` and `tuneToChannel` both
+ * release first, and the engine's own `livetv:tune` listener
+ * (stream.ts) releases again before `play()`, so a path that
+ * dispatches the raw event (Guide, browser, landing Watch Live,
+ * hero, deep link, resume-last auto-tune) can never open a second
+ * connection while the previous stream is still held.
  */
 export function dispatchRelease(
   channelId: string | number | null | undefined,
@@ -124,18 +133,67 @@ export function dispatchRelease(
  * to the landing screen does. Exiting used to only hide the shell,
  * so the tuned channel kept playing hidden and held the provider's
  * single connection — the next tune was refused as connection-limit
- * ("already open" / "something else may still be playing") and went
- * black a second after loading. Guide / browser keep the session by
- * design: the tuned session survives mode switches (the Guide returns
- * to playback, and the error overlay's "previous channel keeps
- * playing underneath" is only true while it does), so they never
- * release. "home" is the legacy landing name (requestLivetvMode maps
- * it before dispatching, but the shell's setMode sees raw modes).
+ * ("already open") and went black a second after loading. Guide /
+ * browser keep the session by design: the tuned session survives
+ * mode switches (the Guide returns to playback), so they never
+ * release on entry — but see `shouldReleaseHeldStreamOnModeLeave`:
+ * a Guide detour must not swallow the release when the user then
+ * leaves for landing. "home" is the legacy landing name
+ * (requestLivetvMode maps it before dispatching, but the shell's
+ * setMode sees raw modes).
  */
 export function shouldReleaseStreamOnModeLeave(
   mode: string | null | undefined,
 ): boolean {
   return mode === "landing" || mode === "home";
+}
+
+/**
+ * Does leaving for `mode` release a HELD stream? The mode rule
+ * above, plus the fact that a stream is actually held.
+ *
+ * 0.11.4 W5 — the Guide detour: the 0.11.2 shell gate required the
+ * document mode to still read "playback" when leaving for landing,
+ * but a detour through the Guide had already rewritten it to
+ * "guide", so playback → Guide → Landing never released and the
+ * channel kept playing hidden, holding the provider's single
+ * connection. The tuned channel id is the held-session signal, not
+ * the mode the document happens to read — a landing leave releases
+ * whenever a channel is tuned, however the user got there.
+ */
+export function shouldReleaseHeldStreamOnModeLeave(
+  mode: string | null | undefined,
+  tunedChannelId: string | number | null | undefined,
+): boolean {
+  if (tunedChannelId === null || tunedChannelId === undefined) {
+    return false;
+  }
+  return shouldReleaseStreamOnModeLeave(mode);
+}
+
+/**
+ * Settle delay before the automatic connection-limit retry
+ * (stream.ts). Xtream panels free a stream slot only once the
+ * sender's socket has closed (tv-cast's PROVIDER_SLOT_SETTLE_MS is
+ * 600 ms for the same reason); 2 s covers the local teardown
+ * (player reset + ffmpeg proxy kill) plus the slot linger, so the
+ * retry opens a genuinely free slot instead of racing the release.
+ */
+export const CONNECTION_LIMIT_RETRY_DELAY_MS = 2000;
+
+/**
+ * Should a refused tune be retried automatically after releasing
+ * the stale session? Only a provider connection-limit refusal, and
+ * only once per user tune. Every other failure kind goes straight
+ * to the error overlay, and a second connection-limit refusal
+ * means the slot genuinely is not freeing — the user gets the
+ * honest error, not a retry loop.
+ */
+export function shouldAutoRetryConnectionLimit(
+  kind: string | null | undefined,
+  alreadyRetried: boolean,
+): boolean {
+  return kind === "connection-limit" && !alreadyRetried;
 }
 
 /** The window-event engine: `livetv:tune` -> stream.ts `play()`. */
@@ -197,12 +255,22 @@ export function confirmHighlight(
   return highlightedId;
 }
 
-/** Tune to an explicit channel id through the engine seam. */
+/** Tune to an explicit channel id through the engine seam.
+ * Release-before-tune, like `switchChannel`: the previous stream
+ * is released before the replacement opens, so the provider's
+ * one-stream limit is never exceeded — this is the same gate every
+ * tune path goes through, and the engine's `livetv:tune` listener
+ * releases again before `play()`, so a caller that dispatches the
+ * raw event is covered too. The release carries no channel id (the
+ * engine's listener releases whatever is held); engines without a
+ * release hook simply tune.
+ */
 export function tuneToChannel(
   engine: PlaybackEngine,
   channelId: string | number | null | undefined,
 ): boolean {
   if (channelId === null || channelId === undefined) return false;
+  engine.release?.(null);
   engine.tune(channelId);
   return true;
 }

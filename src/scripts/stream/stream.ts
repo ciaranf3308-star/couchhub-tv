@@ -162,6 +162,10 @@ import {
 import { decodedFrameCount, droppedFrameCount } from "@/scripts/lib/player-telemetry.js"
 import { attachPlayerInsights } from "@/scripts/lib/player-stats.ts"
 import { isAutomaticRetuneReason } from "@/scripts/lib/stream-health.ts"
+import {
+  CONNECTION_LIMIT_RETRY_DELAY_MS,
+  shouldAutoRetryConnectionLimit,
+} from "@/scripts/lib/livetv-playback.ts"
 import { attachQualityChip } from "@/scripts/lib/quality-badge.ts"
 import { isCastRoutingActive, routePlayToCast, buildLiveCastContext, CAST_SUPERSEDED, castUncastableScheme } from "@/scripts/lib/tv-cast.ts"
 
@@ -193,6 +197,19 @@ function setNowPlaying(id) {
 // Listened to once at module scope; `all` is read at event time,
 // so tunes dispatched before loadChannels finishes resolve to a
 // name-less play() that still finds the channel once loaded.
+//
+// 0.11.4 W5 — this listener is the ONE release-before-tune gate:
+// every tune path (Guide's raw dispatch, browser / landing / hero
+// Watch via dispatchLivetvTune, deep link, resume-last auto-tune,
+// Quick Surf, shell retry) enters here, so the previous stream is
+// released BEFORE play() opens the replacement. The 0.11.2 fix
+// released only on the shell's own switchChannel / exit paths, and
+// the paths that dispatch the raw event never released — the next
+// tune was refused as connection-limit while the previous stream
+// was still held. The release is the existing
+// releaseLocalPlaybackForHandoff primitive (idempotent when idle);
+// play() still tears the prior mount down at mount time, this just
+// makes the release land first, before URL resolution.
 window.addEventListener("livetv:tune", (ev) => {
   const channelId = (ev as CustomEvent).detail?.channelId
   if (channelId === undefined || channelId === null) return
@@ -206,6 +223,7 @@ window.addEventListener("livetv:tune", (ev) => {
   ;(ev as CustomEvent).preventDefault()
   const channel = all.find((entry) => String(entry.id) === String(channelId))
   const id = channel ? channel.id : channelId
+  releaseLocalPlaybackForHandoff()
   void play(id, channel?.name ?? String(channelId))
 })
 
@@ -248,10 +266,10 @@ window.addEventListener("livetv:programme", (ev) => {
 // BEFORE tune, so the provider's one-stream limit is never
 // exceeded by two live connections). Wired to the existing
 // releaseLocalPlaybackForHandoff — the same path the engine's
-// own stopLocal hooks already use. The one-stream guarantee does
-// NOT depend on this listener (play() tears the prior mount down
-// on a tune); it only makes the release land earlier, before the
-// replacement opens. Idempotent when idle.
+// own stopLocal hooks already use. 0.11.4 W5: this listener is one
+// half of the one-stream guarantee — the other half is the
+// `livetv:tune` listener above, which releases before every play().
+// Idempotent when idle.
 window.addEventListener("livetv:release", () => {
   releaseLocalPlaybackForHandoff()
 })
@@ -1909,6 +1927,11 @@ let vjs = null
 let embeddedPlayerBackend = null
 let playSeq = 0
 let lastPlayContext = null
+// 0.11.4 W5 — connection-limit auto-retry budget: stream ids that
+// already spent their one automatic release-and-retry after a
+// provider refusal, since the last user tune. A second refusal
+// means the slot genuinely is not freeing — show the error, don't loop.
+const connectionLimitAutoRetrySet = new Set()
 let playerInsights = null
 // Detach for the auto-hiding quality chip overlaid on the player edge - rebuilt every tune.
 let qualityChipDetach = null
@@ -2231,7 +2254,7 @@ function giveUpOnPlayback(ctx) {
       toast({ title: t("stream.failure.nativeFallback") })
       launchNativeLiveSession(ctx.streamId, ctx.name).then((launched) => {
         if (launched) return
-        showPlaybackFailurePanel(ctx)
+        if (showPlaybackFailurePanel(ctx)) return
         runAutoDiagnostic(ctx, null)
       })
       return
@@ -2292,7 +2315,7 @@ function giveUpOnPlayback(ctx) {
     audioProxyBypassSet.add(ctx.streamId)
   }
   if (!ctx.started) {
-    showPlaybackFailurePanel(ctx)
+    if (showPlaybackFailurePanel(ctx)) return
     runAutoDiagnostic(ctx, null)
     return
   }
@@ -3712,16 +3735,19 @@ function applyDiagnosticToFailurePanel(seq, verdict, reason) {
 }
 
 function showPlaybackFailurePanel(ctx, opts = {}) {
-  if (failurePanelSeq === ctx.seq) return
+  if (failurePanelSeq === ctx.seq) return false
   hidePlaybackFailurePanel()
-  // No automatic retune follows this panel - close the session now, not on the next tune.
+  // No automatic retune follows this panel — except the
+  // connection-limit auto-recovery below, which releases the stale
+  // session and retries once instead of showing the panel at all.
+  // Close the session now, not on the next tune.
   getPlayerInsights().endSession("giveup")
   log.warn("[xt:livetv] playback failure panel shown", {
     streamId: ctx.streamId,
     decodeFailure: !!opts.decodeFailure,
   })
   const playerWrap = document.getElementById("player")?.parentElement
-  if (!playerWrap) return
+  if (!playerWrap) return false
 
   const info = vjs?.codecInfo?.() || { videoCodec: null, audioCodec: null, errorDetail: null }
   const failure = classifyStartFailure({
@@ -3761,10 +3787,49 @@ function showPlaybackFailurePanel(ctx, opts = {}) {
   failurePanelReasonKind =
     failure.kind === "hevc" && !failure.codec ? "hevc-likely" : failure.kind
 
+  // 0.11.4 W5 — connection-limit auto-recovery (hard requirement):
+  // when the provider refuses the tune, the app releases the stale
+  // session itself and retries automatically — it must never sit
+  // stuck showing the error while a held session blocks every tune.
+  // The retry is one-shot per user tune (budget in
+  // connectionLimitAutoRetrySet, refilled on the next user tune):
+  // a second refusal means the slot genuinely is not freeing, so
+  // the panel below shows with the honest error copy. No error
+  // event is dispatched while the retry is pending, so the shell
+  // shows no overlay for a failure the app is already fixing. The
+  // seq / held-context guards stop the timer from clobbering a
+  // newer tune or re-opening a stream the user already left.
+  // Returns true: the caller must skip the auto-diagnostic (it
+  // would toast a diagnosis for a failure being retried).
+  if (
+    shouldAutoRetryConnectionLimit(
+      failurePanelReasonKind,
+      connectionLimitAutoRetrySet.has(ctx.streamId),
+    )
+  ) {
+    connectionLimitAutoRetrySet.add(ctx.streamId)
+    const seqAtFailure = ctx.seq
+    const streamId = ctx.streamId
+    const name = ctx.name
+    log.warn("[xt:livetv] connection-limit - releasing stale session and retrying", {
+      streamId,
+    })
+    toast({ title: t("stream.failure.connectionLimitRetrying") })
+    setTimeout(() => {
+      if (seqAtFailure !== playSeq) return
+      if (!lastPlayContext || lastPlayContext.streamId !== streamId) return
+      releaseLocalPlaybackForHandoff()
+      void play(streamId, name, "auto:connection-limit-retry")
+    }, CONNECTION_LIMIT_RETRY_DELAY_MS)
+    return true
+  }
+
   // W2 seam: tell the RedSilk playback shell the tune failed so it
   // can show its own retry overlay. The legacy panel below still
-  // paints (unchanged behaviour); the shell's overlay sits over the
-  // still-playing previous stream and offers Retry / Previous / Home.
+  // paints (unchanged behaviour). (0.11.4 W5: the previous stream
+  // was released before this tune, so there is no still-playing
+  // stream under the overlay — a failed tune leaves a blank player,
+  // and the shell offers Retry / Previous / Home from there.)
   try {
     window.dispatchEvent(
       new CustomEvent("livetv:playback-error", {
@@ -3794,7 +3859,7 @@ function showPlaybackFailurePanel(ctx, opts = {}) {
     !(playbackShell as HTMLElement).hidden &&
     document.documentElement.dataset.livetvMode === "playback"
   ) {
-    return
+    return false
   }
 
   const panel = document.createElement("div")
@@ -3941,6 +4006,7 @@ function showPlaybackFailurePanel(ctx, opts = {}) {
 
   panel.appendChild(actions)
   playerWrap.appendChild(panel)
+  return false
 }
 
 function runScanLineSweep() {
@@ -3957,6 +4023,19 @@ window.addEventListener("pagehide", () => {
   externalPlaybackActive = false
   externalPlaybackKind = null
   void stopAudioTranscode()
+})
+
+// 0.11.4 W5 — hide releases unconditionally (backstop). The
+// tray-hide path already releases via W3's `xt:tray:hidden-to-tray`
+// handler, but an OS-level minimise (taskbar / Win+D), return-home
+// minimise, or screen lock hides the window with no Tauri event —
+// and a hidden window kept playing, holding the provider's single
+// connection indefinitely while the user believed the app was
+// closed. A document that is not visible has no viewer: release
+// the stream the moment visibility flips to hidden. The release is
+// idempotent, so the tray-hide double-fire is harmless.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") releaseLocalPlaybackForHandoff()
 })
 
 function pushDiscordPresence(channel, kind) {
@@ -4086,6 +4165,19 @@ function releaseLocalPlaybackForHandoff() {
       }
     })
   }
+  // 0.11.4 W5 — the audio proxy holds a provider connection of its
+  // own: the ffmpeg process keeps pulling the upstream stream until
+  // it is unregistered, even after the player stops consuming it.
+  // Releasing without stopping it orphaned the proxy, so the slot
+  // stayed held after every exit / channel switch on proxy channels.
+  // (The Rust side tears a session down on the next register, but a
+  // tune to a non-proxy channel never registers — the orphan lived
+  // until pagehide or app exit.)
+  void stopAudioTranscode()
+  // Radio (audio-only) playback runs through the same player, but
+  // its ICY metadata probe is a separate fetch — abort it and clear
+  // the radio chrome, or a released radio channel keeps its probe.
+  clearRadioMode()
   suppressPauseTrackingUntilMs = Date.now() + 500
   if (qualityChipDetach) {
     qualityChipDetach()
@@ -4108,6 +4200,7 @@ async function play(streamId, name, reason = "user") {
     freezeRetuneCounts.delete(streamId)
     nativeRelatchAttempts.delete(streamId)
     liveStallRetuneCounts.delete(streamId)
+    connectionLimitAutoRetrySet.delete(streamId)
   }
   const targetChannel = all.find((channel) => channel.id === streamId)
   if (targetChannel?.unresolved) {
