@@ -60,6 +60,10 @@ import {
 import {
   verifyRecommendations,
   defaultTmdbSearch,
+  defaultFetchDetails,
+  defaultResolveExternalId,
+  type ExternalIdResolver,
+  type TmdbDetailsFn,
   type TmdbSearchFn,
   type VerifiedRecommendation,
 } from "./verification.js"
@@ -99,6 +103,10 @@ export interface DiscoveryRunResult {
 export interface DiscoveryRunDeps {
   chat?: AiChatTransport
   searchTmdb?: TmdbSearchFn
+  /** Details fetch for genres/backdrops; defaults to defaultFetchDetails. */
+  fetchDetails?: TmdbDetailsFn
+  /** External-id resolver; defaults to defaultResolveExternalId(). */
+  resolveExternalId?: ExternalIdResolver
   catalogue?: DiscoverCandidate[]
   profileId?: string
   tasteRevision?: string
@@ -488,8 +496,15 @@ export async function runAiDiscovery(
   emitDiscoveryPhase("verifying-tmdb")
   let results: VerifiedRecommendation[]
   try {
+    // Production defaults: defaultTmdbSearch/defaultResolveExternalId
+    // are factories (called here); defaultFetchDetails is the fetch
+    // function itself. Without the details default, genres/backdrops
+    // stay empty; without the resolver, model-supplied external ids
+    // are ignored. Tests inject all three through deps.
     results = await verifyRecommendations(generated, {
-      searchTmdb: deps.searchTmdb ?? defaultTmdbSearch,
+      searchTmdb: deps.searchTmdb ?? defaultTmdbSearch(),
+      fetchDetails: deps.fetchDetails ?? defaultFetchDetails,
+      resolveExternalId: deps.resolveExternalId ?? defaultResolveExternalId(),
       catalogue: deps.catalogue,
     })
   } catch (error) {
