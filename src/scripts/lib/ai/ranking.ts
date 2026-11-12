@@ -64,12 +64,25 @@ export interface DiscoverCandidate {
   title: string
   year?: number
   rating?: number
+  /** TMDB vote count behind the rating, when the row carries one.
+   * Absent means "no evidence" — never guessed (home-rails treats
+   * it as zero support). Added by the Home Production Pass (W2). */
+  voteCount?: number
+  /** TMDb id the provider itself attached to this row (mapped from
+   * the row's `tmdb` field). A title carrying one is TMDb-matched by
+   * definition — its provider rating is TMDb's vote_average surfaced
+   * through the provider, so the rating is vote-backed in substance
+   * even though the count itself is unsurfaced (see home-rails.ts,
+   * "Vote-count decision"). Absent means "no TMDb match known". */
+  tmdbId?: number
   genres: string[]
   cast: string[]
   director?: string
   runtimeMinutes?: number
   overview?: string
   posterUrl?: string
+  /** Backdrop artwork URL, when the row carries one (W2). */
+  backdropUrl?: string
   source: "catalog" | "tmdb" | "epg"
 }
 
@@ -665,10 +678,10 @@ function hasRelatednessEvidence(
   }
   const candidateText = new Set([
     ...tokenize(candidate.title),
-    ...tokenize(candidate.genres.join(" ")),
+    ...tokenize((candidate.genres ?? []).join(" ")),
     ...tokenize(candidate.overview),
     ...tokenize(candidate.director),
-    ...candidate.cast.flatMap((name) => tokenize(name)),
+    ...(candidate.cast ?? []).flatMap((name) => tokenize(name)),
   ])
   for (const token of queryTokens) {
     for (const variant of expandToken(token)) {

@@ -120,12 +120,14 @@ export interface AiSearchDiagnostics {
   /** Results shown from this search. */
   acceptedCount?: number
   /**
-   * Model-ranked ids dropped by rankDiscover's catalogue validation.
-   * Gap (0.11.5, for W2): the production ranker ALSO validates inside
-   * parseAiRankResponse, so an invented id it drops never reaches
-   * rankDiscover and this count stays 0 for it. The ranker's own drop
-   * count is not reported yet — until W2 surfaces it, this row reads
-   * "Rejected by catalogue check" and counts only this layer's drops.
+   * Model-ranked ids dropped by validation. Since the 0.11.5
+   * integration this is the ranker's OWN drop count (W2's
+   * AiRankStatus.droppedCount — invented ids, unrelated picks,
+   * constraint violations it dropped internally) PLUS any ids
+   * rankDiscover's catalogue validation drops on top, as reported in
+   * DiscoverSearchDiagnostics. Rankers that report no status
+   * contribute only this layer's drops. A live AI answer that kept
+   * everything reports 0 honestly — it is not "not reported".
    */
   rejectedCount?: number
   /** Model id, only when a real request was made. */

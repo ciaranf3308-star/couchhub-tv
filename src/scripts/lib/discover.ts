@@ -428,7 +428,9 @@ function scoreOne(
   if (disliked && disliked.weight >= 1) return null
 
   const contributions: Contribution[] = []
-  const genres = candidate.genres.map((g) => g.toLowerCase())
+  // A catalogue row may arrive with no genres / cast at all (missing
+  // metadata is honest, never a crash): treat absent as "unknown".
+  const genres = (candidate.genres ?? []).map((g) => g.toLowerCase())
   const genreSet = new Set(genres)
   const favGenres = new Set(summary.favouriteGenres.map((g) => g.toLowerCase()))
 
@@ -443,7 +445,7 @@ function scoreOne(
     })
   }
 
-  const castLower = new Set(candidate.cast.map((c) => c.toLowerCase()))
+  const castLower = new Set((candidate.cast ?? []).map((c) => c.toLowerCase()))
   let castMatches = 0
   let castName = ""
   for (const name of Object.keys(taste.castWeights)) {
@@ -473,9 +475,9 @@ function scoreOne(
   if (opts.seedTitles?.length) {
     let bestSeed: { title: string; points: number; label: string } | null = null
     for (const seed of opts.seedTitles) {
-      const seedGenres = new Set(seed.genres.map((g) => g.toLowerCase()))
+      const seedGenres = new Set((seed.genres ?? []).map((g) => g.toLowerCase()))
       const sharedGenre = genres.some((g) => seedGenres.has(g))
-      const seedCast = new Set(seed.cast.map((c) => c.toLowerCase()))
+      const seedCast = new Set((seed.cast ?? []).map((c) => c.toLowerCase()))
       const sharedCast = [...castLower].some((c) => seedCast.has(c))
       const sharedDirector =
         !!candidate.director &&
@@ -591,7 +593,7 @@ export function moodMatches(candidate: DiscoverCandidate, mood: MoodPreset): boo
     if (!candidate.rating || candidate.rating < 7.5) return false
   }
   if (mood.genres?.length) {
-    const genres = new Set(candidate.genres.map((g) => g.toLowerCase()))
+    const genres = new Set((candidate.genres ?? []).map((g) => g.toLowerCase()))
     if (!mood.genres.some((g) => genres.has(g))) return false
   }
   return true
@@ -652,7 +654,7 @@ export function rankCandidates(
   const deferred: RankedCandidate[] = []
   for (const item of scored) {
     const group = titleGroupKey(item.candidate)
-    const genre = (item.candidate.genres[0] || "").toLowerCase()
+    const genre = ((item.candidate.genres ?? [])[0] || "").toLowerCase()
     const groupCount = groupCounts.get(group) || 0
     const genreCount = genre ? genreCounts.get(genre) || 0 : 0
     if (groupCount >= perGroupCap || (genre && genreCount >= perGenreCap)) {
@@ -1501,6 +1503,15 @@ export interface DiscoverData {
   recentlyAdded: DiscoverCandidate[]
   nowPlaying: DiscoverCandidate[]
   becauseItems: RankedCandidate[]
+  /**
+   * Catalogue revision stamp behind `candidates` (0.11.5, W1→W2 seam):
+   * the provider-cache timestamp loadCatalogCandidates keyed the
+   * candidate cache on. Passed to the AI ranker as cache context so a
+   * catalogue refresh is a cache miss, never a stale reuse. Undefined
+   * when no timestamp was readable — the ranker then caches on the
+   * shortlist identity only.
+   */
+  catalogueStamp?: number
 }
 
 function infoLookupFromRows(
@@ -1542,6 +1553,24 @@ function plotFromInfoRow(
  * Parsed metadata is cached in memory per playlist+stamp so reopening
  * Discover does not re-parse thousands of entries.
  */
+/**
+ * Catalogue revision stamp for one playlist (0.11.5, W1→W2 seam): the
+ * provider-cache timestamp loadCatalogCandidates keys the candidate
+ * cache on. 0 when no timestamp is readable — the ranker then caches
+ * on the shortlist identity only. Read at load time so the stamp
+ * matches the candidates DiscoverData carries.
+ */
+export async function loadCatalogStamp(playlistId: string): Promise<number | undefined> {
+  if (!playlistId) return undefined
+  try {
+    const cache = await import("@/scripts/lib/cache.js")
+    const stamp = (await cache.getNewestCacheTimeAsync?.(playlistId)) || 0
+    return stamp > 0 ? stamp : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export async function loadCatalogCandidates(
   playlistId: string
 ): Promise<DiscoverCandidate[]> {
@@ -1807,5 +1836,6 @@ export async function loadDiscoverData(
     recentlyAdded,
     nowPlaying: [],
     becauseItems: becauseItems.slice(0, 12),
+    catalogueStamp: await loadCatalogStamp(playlistId),
   }
 }

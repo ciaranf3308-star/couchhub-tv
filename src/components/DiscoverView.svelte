@@ -362,7 +362,17 @@
         activityProbe.done = false
         activityProbe.error = false
         const t0 = performance.now()
-        const ranked = await rankDiscover(q, data.candidates, data.taste, { forceAi: true })
+        // Cache identity (0.11.5, W1→W2 seam): the ranker must know
+        // WHICH playlist / catalogue revision / profile it ranked, or
+        // a changed playlist could reuse a stale cached ranking. All
+        // three are known here; a missing stamp degrades the cache to
+        // shortlist-identity only.
+        const ranked = await rankDiscover(q, data.candidates, data.taste, {
+          forceAi: true,
+          playlistId,
+          catalogueStamp: data.catalogueStamp,
+          profileId,
+        })
         const durationMs = Math.round(performance.now() - t0)
         results = ranked.results
         source = ranked.source
@@ -376,6 +386,7 @@
           sentToModelCount: d?.sentToModelCount,
           acceptedCount: d?.acceptedCount ?? results.length,
           rejectedCount: d?.rejectedCount ?? 0,
+          cacheHit: d?.cacheHit,
           durationMs,
           fallbackReason: ranked.fallbackReason,
         }
@@ -407,6 +418,8 @@
         } else if (ranked.source === "ai") {
           // No request left the device for this search: the ranker
           // answered from its cache. Labelled cached, never "just now".
+          // (The ranker's own cacheHit report agrees when present; the
+          // probe is the evidence either way — no "start" fired.)
           nextReceipt = {
             phase: "cached",
             engine: "cached-ai",
@@ -415,6 +428,20 @@
             durationMs,
             cacheHit: true,
             diagnostics: { ...diagnostics, cacheHit: true },
+          }
+        } else if (ranked.aiRejected) {
+          // A real reply arrived but validation kept nothing — a
+          // terminal rejection from the ranker, not a transport
+          // failure. The note says the reply ranked nothing in the
+          // library; the diagnostics "Rejected" row carries the
+          // ranker's real drop count.
+          nextReceipt = {
+            phase: "rejected",
+            engine: "local",
+            query: q,
+            durationMs,
+            fallbackReason: ranked.fallbackReason,
+            diagnostics,
           }
         } else {
           nextReceipt = {

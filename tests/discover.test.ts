@@ -538,10 +538,14 @@ describe("rankDiscover (AI04 / AI06)", () => {
     }
   })
 
-  it("reaches the ranker for a short category query without force (Bug 3)", async () => {
+  it("reaches the ranker for a short category query on an explicit ask (Bug 3, reconciled)", async () => {
     // "COMEDY" is a genre question, not a title lookup: the parsed
     // intent carries a hard genre constraint, so the model is eligible
-    // even without an explicit Ask AI tap.
+    // on an explicit Ask AI tap — and on submit with automatic
+    // requests on (the view passes forceAi there). It does NOT
+    // auto-spend in Manual mode: a typed genre search without an
+    // explicit ask stays local (see the T10 cost-control tests), so
+    // this test asks explicitly.
     let asked = ""
     let receivedCount = 0
     registerAIRanker({
@@ -552,7 +556,7 @@ describe("rankDiscover (AI04 / AI06)", () => {
       },
     })
     try {
-      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes())
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes(), { forceAi: true })
       expect(asked).toBe("COMEDY")
       expect(out.source).toBe("ai")
       // …and it only ever receives the hard-filtered shortlist:
@@ -622,7 +626,12 @@ describe("rankDiscover (AI04 / AI06)", () => {
       const empty = await rankDiscover("", CATALOG, tasteWithLikes())
       expect(called).toBe(false)
       expect(empty.source).toBe("local")
-      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes(), { shareTaste: false })
+      // Explicit ask (Ask AI tap / automatic submit): the category
+      // query reaches the ranker, and the taste opt-out is honoured.
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes(), {
+        shareTaste: false,
+        forceAi: true,
+      })
       expect(called).toBe(true)
       expect(out.source).toBe("ai")
       expect(receivedSummary).toEqual({ favouriteGenres: [], likedTitles: [], dislikedTitles: [] })
