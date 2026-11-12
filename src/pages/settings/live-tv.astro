@@ -65,42 +65,42 @@ import ChannelOverridesEditor from "@/components/ChannelOverridesEditor.svelte"
                   class="text-xs text-fg-3"></div>
               </div>
             </div>
+
+            <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
+            <div id="card-resume-last-channel-livetv" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
+                <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
+                  When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-resume-last-livetv"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Resume last channel on entering Live TV"
+                  data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
+                  <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
+                  <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var resumeLastOnTv = localStorage.getItem("xt_livetv_resume_last") === "1";
+                  var resumeLastGroupTv = document.getElementById("settings-resume-last-livetv");
+                  if (resumeLastGroupTv) {
+                    var resumeLastBtnsTv = resumeLastGroupTv.querySelectorAll(".resume-last-btn");
+                    for (var rIdxTv = 0; rIdxTv < resumeLastBtnsTv.length; rIdxTv++) {
+                      var resumeLastBtnOnTv = resumeLastBtnsTv[rIdxTv].getAttribute("data-resume") === "on";
+                      resumeLastBtnsTv[rIdxTv].setAttribute("aria-pressed", resumeLastBtnOnTv === resumeLastOnTv ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
           </div>
         </div>
-
-    <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
-    <div id="card-resume-last-channel-livetv" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-      <div class="settings-row__text">
-        <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
-        <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
-          When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
-        </p>
-      </div>
-      <div class="settings-row__control">
-        <div
-          id="settings-resume-last-livetv"
-          class="settings-seg"
-          role="radiogroup"
-          aria-label="Resume last channel on entering Live TV"
-          data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
-          <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
-          <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
-        </div>
-      </div>
-      <script is:inline>
-        try {
-          var resumeLastOnTv = localStorage.getItem("xt_livetv_resume_last") === "1";
-          var resumeLastGroupTv = document.getElementById("settings-resume-last-livetv");
-          if (resumeLastGroupTv) {
-            var resumeLastBtnsTv = resumeLastGroupTv.querySelectorAll(".resume-last-btn");
-            for (var rIdxTv = 0; rIdxTv < resumeLastBtnsTv.length; rIdxTv++) {
-              var resumeLastBtnOnTv = resumeLastBtnsTv[rIdxTv].getAttribute("data-resume") === "on";
-              resumeLastBtnsTv[rIdxTv].setAttribute("aria-pressed", resumeLastBtnOnTv === resumeLastOnTv ? "true" : "false");
-            }
-          }
-        } catch (e) {}
-      </script>
-    </div>
 
         <details id="card-categories" data-settings-item class="settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
           <summary class="settings-surface__header flex-wrap pb-5 sm:pb-6 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">

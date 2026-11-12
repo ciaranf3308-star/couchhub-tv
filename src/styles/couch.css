@@ -193,6 +193,16 @@ html[data-couch] a {
   text-decoration: none;
 }
 
+/* Anchors that explicitly ask for accent + underline (inline help links)
+   keep both: the reset above would otherwise flatten them to body text. */
+html[data-couch] a.text-accent {
+  color: var(--color-accent);
+}
+
+html[data-couch] a.underline {
+  text-decoration-line: underline;
+}
+
 html[data-couch] .rs-main {
   flex: 1;
   min-width: 0;
