@@ -63,7 +63,6 @@ import {
   aiRanker,
   clearAiRankCache,
   clearAiUsageState,
-  type DiscoverCandidate,
 } from "@/scripts/lib/ai/ranking"
 import {
   rankDiscover,
@@ -71,6 +70,7 @@ import {
   searchDiscover,
   rankCandidates,
   getDiscoverRows,
+  type DiscoverCandidate,
 } from "@/scripts/lib/discover"
 import {
   emptyTasteModel,
