@@ -1230,8 +1230,17 @@ export function mountBrowseEverything(
     const active = document.activeElement as HTMLElement | null;
     const card = active?.closest?.("[data-browse-key]") as HTMLElement | null;
     if (!card || !grid.el.contains(card)) return 0;
-    const children = Array.from(grid.el.children);
-    return Math.max(0, children.indexOf(card));
+    // Resolve the index from the derived page slice, NOT from DOM
+    // position: the keyed grid spares the focused node across a render
+    // (it is reaped on the next render), so grid.el.children holds one
+    // stale node after every page turn and children.indexOf() drifted
+    // the kept index by one per turn (0.11.8 integration fix — repeated
+    // LB/RB page turns walked focus diagonally across the grid).
+    const key = card.dataset.browseKey;
+    const info = browsePageInfo(state, derived.totalGroups);
+    const pageGroups = derived.groups.slice(info.startIndex, info.endIndex);
+    const at = pageGroups.findIndex((g) => g.id === key);
+    return at >= 0 ? at : 0;
   };
 
   const currentFocusedKey = (): string | null => {
