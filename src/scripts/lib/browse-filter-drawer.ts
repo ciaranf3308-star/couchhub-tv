@@ -462,12 +462,22 @@ export function mountBrowseFilterDrawer(
   );
   let focusIndex = 0;
   let destroyed = false;
+  // Hover guard (0.11.8 integration fix, brief §16.4): same parked-mouse
+  // focus steal as the category drawer — Chromium fires mouseenter
+  // when the drawer opens (or re-renders) under a stationary pointer.
+  // Hover only takes effect after real mouse movement; every render
+  // re-arms the guard. Clicks are unaffected.
+  let hoverEnabled = false;
+  const onMouseMove = (): void => {
+    hoverEnabled = true;
+  };
 
   const root = el("div", "rs-browse-filter-drawer");
   root.setAttribute("data-browse-filter-drawer", "");
   root.setAttribute("role", "dialog");
   root.setAttribute("aria-modal", "true");
   root.setAttribute("aria-label", "Filters");
+  root.addEventListener("mousemove", onMouseMove);
 
   const scrim = el("div", "rs-browse-filter-drawer__scrim");
   scrim.setAttribute("aria-hidden", "true");
@@ -514,6 +524,8 @@ export function mountBrowseFilterDrawer(
 
   function render(): void {
     if (destroyed) return;
+    // Re-arm the hover guard (see above).
+    hoverEnabled = false;
     families = buildFilterFamilies(opts.kind, draft, opts.availability, opts.genreIds);
     focusIndex = Math.max(0, Math.min(families.length - 1, focusIndex));
     list.replaceChildren();
@@ -550,7 +562,7 @@ export function mountBrowseFilterDrawer(
         activateRow();
       });
       row.addEventListener("mouseenter", () => {
-        if (destroyed) return;
+        if (destroyed || !hoverEnabled) return;
         focusIndex = index;
         paintFocus();
       });
@@ -655,6 +667,7 @@ export function mountBrowseFilterDrawer(
     focusCurrent,
     destroy(): void {
       destroyed = true;
+      root.removeEventListener("mousemove", onMouseMove);
       root.remove();
     },
   };

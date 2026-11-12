@@ -277,14 +277,27 @@ export function buildContinueWatchingItem(
     lastProgress.episodeNum > 0
       ? episodeCode(lastProgress.season, lastProgress.episodeNum)
       : "";
+  // The episode is unreliable (no cached list to prove S/E), but the
+  // position within the last-watched episode IS known from the record
+  // alone — surface it as the progress bar + subtitle % (brief §4.2)
+  // instead of discarding it. The % refers to that episode only.
+  const fraction = progressFractionOf(lastProgress ?? null);
+  const pct = Math.round(fraction * 100);
   return {
     ...base,
     episodeLabel: label,
     episodeTitle: lastProgress?.episodeTitle?.trim() || null,
     actionLabel: "Open series",
     href: seriesDetailHref(row.id),
-    progressFraction: 0,
-    subtitle: label ? `Last watched ${label}` : "Pick up where you left off",
+    progressFraction: fraction,
+    subtitle:
+      label && fraction > 0
+        ? `Last watched ${label} · ${pct}%`
+        : label
+          ? `Last watched ${label}`
+          : fraction > 0
+            ? `Pick up where you left off · ${pct}% into the episode`
+            : "Pick up where you left off",
     meta: seriesMetaLine(row, null),
     episodeReliable: false,
   };

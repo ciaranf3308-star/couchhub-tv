@@ -429,6 +429,17 @@ export function mountBrowseCategoryDrawer(
   let selected = opts.selected ?? null;
   let state = browseDrawerInitialState(families, selected);
   let destroyed = false;
+  // Hover guard (0.11.8 integration fix, brief §7.3): Chromium fires
+  // mouseenter when the drawer opens under a stationary pointer, and
+  // the hover handler moves state + DOM focus — a parked mouse stole
+  // focus off the selected row on open (screenshot gate). Hover only
+  // takes effect after real mouse movement; every render re-arms the
+  // guard so a re-render under a stationary pointer cannot steal
+  // focus either. Clicks are unaffected.
+  let hoverEnabled = false;
+  const onMouseMove = (): void => {
+    hoverEnabled = true;
+  };
 
   // Same classes as the 0.11.7 Live TV drawer (shared drawer
   // chrome) + a browse marker for the section-header addition.
@@ -437,6 +448,7 @@ export function mountBrowseCategoryDrawer(
   root.setAttribute("role", "dialog");
   root.setAttribute("aria-modal", "true");
   root.setAttribute("aria-label", opts.label ?? "Categories");
+  root.addEventListener("mousemove", onMouseMove);
 
   const scrim = el("div", "rs-tv-category-drawer__scrim");
   scrim.setAttribute("data-category-drawer-scrim", "");
@@ -522,6 +534,9 @@ export function mountBrowseCategoryDrawer(
 
   function render(): void {
     if (destroyed) return;
+    // Re-arm the hover guard: nodes replaced under a stationary
+    // pointer must not steal focus via mouseenter (see above).
+    hoverEnabled = false;
     breadcrumb.textContent = browseDrawerBreadcrumb(state, families, selectedLabel());
     title.textContent =
       state.level === "items"
@@ -578,7 +593,7 @@ export function mountBrowseCategoryDrawer(
         activate();
       });
       button.addEventListener("mouseenter", () => {
-        if (destroyed) return;
+        if (destroyed || !hoverEnabled) return;
         state =
           state.level === "items"
             ? { ...state, itemIndex: index }
@@ -717,6 +732,7 @@ export function mountBrowseCategoryDrawer(
     },
     destroy(): void {
       destroyed = true;
+      root.removeEventListener("mousemove", onMouseMove);
       root.remove();
     },
   };

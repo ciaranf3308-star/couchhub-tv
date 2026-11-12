@@ -279,6 +279,35 @@ describe("buildContinueWatchingItem — never play the wrong episode", () => {
     expect(item!.subtitle).toBe("Continue · S1 E3 · 10%");
   });
 
+  it("cold cache without S/E still shows the known progress fraction (§4.2)", () => {
+    // 0.11.8 integration fix (screenshot gate): the detail-fallback
+    // path used to discard the position/duration from the record, so
+    // the shelf showed a generic subtitle and no progress bar even
+    // though the fraction through the last-watched episode was known.
+    // The episode stays unreliable (no S/E claim), the % is honest.
+    const series = row(8, "Cold Cache Show");
+    const item = buildContinueWatchingItem(
+      continueInput(series, {
+        lastProgress: {
+          episodeId: 61,
+          season: null,
+          episodeNum: null,
+          position: 900,
+          duration: 2400,
+          completed: false,
+          updatedAt: 7000,
+        },
+        hasIncompleteEpisode: true,
+      }),
+    );
+    expect(item).not.toBeNull();
+    expect(item!.episodeReliable).toBe(false);
+    expect(item!.progressFraction).toBeCloseTo(0.375, 6);
+    expect(item!.subtitle).toBe("Pick up where you left off · 38% into the episode");
+    expect(item!.actionLabel).toBe("Open series");
+    expect(item!.href).toBe(seriesDetailHref(8));
+  });
+
   it("orders most-recently-touched first and caps the shelf", () => {
     const mk = (id: number, at: number) =>
       continueInput(row(id, `Show ${id}`), {
