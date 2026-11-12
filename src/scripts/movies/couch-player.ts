@@ -68,6 +68,29 @@ import type { StallWatchdogHandle } from "@/scripts/lib/stall-watchdog.ts";
 import { formatClock } from "@/scripts/movies/couch-movies.ts";
 import { log } from "@/scripts/lib/log.js";
 
+// ── Controller mapping (0.11.10, mapping only) ───────────────────
+// Engine, remux pipeline, progress and error handling below are
+// untouched by the 0.11.10 work. This section holds only the
+// controller-mapping helpers the detail pages use.
+
+/**
+ * Close any open Subtitles/Audio track list, B-first: when the
+ * viewer is choosing a track, B closes the selection instead of
+ * exiting playback. Returns true when a list was open (one Back
+ * step consumed). Pure DOM — no engine state touched.
+ */
+export function closeOpenTrackLists(listIds: readonly string[]): boolean {
+  let closed = false;
+  for (const id of listIds) {
+    const list = document.getElementById(id);
+    if (list && !list.hidden) {
+      list.hidden = true;
+      closed = true;
+    }
+  }
+  return closed;
+}
+
 export interface CouchVodPlayerIds {
   playPause: string;
   back10: string;
@@ -413,13 +436,43 @@ export async function createCouchVodPlayer(
   on(timeline, "change", () => reportProgress(true));
 
   // X = contextual playback action (play/pause) while the player is up.
-  // B/Escape is owned by the page: it exits the player to the detail.
+  // B/Escape is owned by the page: it exits the player to the detail
+  // (closing an open track list first — see closeOpenTrackLists).
+  // A / D-pad while the OSD is hidden reveals it and lands focus on
+  // Play/Pause: A with body focus dispatches Enter to <body>, which
+  // would otherwise do nothing while the controls are invisible.
+  // Y toggles fullscreen (keyboard parity with the gamepad's
+  // in-player Y binding). Mapping only — no engine behaviour here.
   const onKey = (ev: KeyboardEvent) => {
     if (disposed) return;
     if (ev.key === "x" || ev.key === "X") {
       togglePlay();
       ev.preventDefault();
+      return;
     }
+    if (ev.key === "y" || ev.key === "Y") {
+      fullscreenBtn?.click();
+      ev.preventDefault();
+      return;
+    }
+    const isRevealKey =
+      ev.key === "Enter" ||
+      ev.key === " " ||
+      ev.key === "ArrowUp" ||
+      ev.key === "ArrowDown" ||
+      ev.key === "ArrowLeft" ||
+      ev.key === "ArrowRight";
+    if (!isRevealKey) return;
+    const osd = playPauseBtn?.closest?.("[data-vod-osd]") as HTMLElement | null;
+    if (!osd || osd.getAttribute("data-hidden") !== "true") return;
+    // Only when nothing focusable holds focus: A/D-pad on a real
+    // control (detail hero action, OSD button) must activate/move,
+    // never be stolen by the reveal.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active !== document.body) return;
+    ev.preventDefault();
+    window.dispatchEvent(new CustomEvent("couch-osd:show"));
+    playPauseBtn?.focus({ preventScroll: true });
   };
   document.addEventListener("keydown", onKey);
   disposers.push(() => document.removeEventListener("keydown", onKey));

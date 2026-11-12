@@ -58,10 +58,13 @@
 //   column opens Categories, Up from the first row focuses the
 //   header, Down from the last row focuses pagination).
 //   A/Enter opens the focused card (onOpenDetail). B/Escape pops
-//   one layer (overlay → grid → onExit). X dispatches a
-//   `browse:card-context` event for the focused card (context
-//   menu is owned by the card/detail layer — flagged). Y opens
-//   search. LB/RB turn pages (PageUp/PageDown and [ / ] keys).
+//   one layer (overlay → grid → onExit) through the 0.11.10 Back
+//   layers (registerBackLayer, DRAWER/ROUTE priorities — the
+//   shim dispatcher claims the press before this controller's
+//   bubble handler, so exactly one layer pops per press). X opens
+//   the REAL title context menu (Contract F, poster-menu.ts) via
+//   the `browse:card-context` event this controller dispatches
+//   and listens for. Y opens search. LB/RB turn pages (PageUp/PageDown and [ / ] keys).
 //   Menu (m/ContextMenu) opens Filters. One press = one action:
 //   edge handlers preventDefault + stopPropagation so spatial
 //   nav never double-moves; all other keys pass through.
@@ -180,6 +183,26 @@ import {
 } from "@/scripts/lib/browse-search.ts";
 import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
 import {
+  BACK_PRIORITY,
+  closeCouchKeyboard,
+  isCouchKeyboardOpen,
+  openCouchKeyboard,
+  recordRouteOrigin,
+  registerBackLayer,
+  setControllerHints,
+  setLogicalView,
+} from "@/scripts/lib/controller-0110-seams.ts";
+// SHIM-0110: seam imports come from controller-0110-seams.ts until
+// W1/W3 land the real modules (integration re-points them).
+import {
+  RETURN_HOME_HINT,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+import {
+  openTitleContextMenu,
+  titleContextActionsForEntry,
+} from "@/scripts/lib/poster-menu.ts";
+import {
   browseStateFromMode,
   modeFromBrowseState,
   parseModeFromUrl,
@@ -252,6 +275,8 @@ export interface BrowseController {
   setSuspended(suspended: boolean): void;
   /** Open the search overlay (in-page Search action when already mounted). */
   openSearch(): void;
+  /** Re-apply the current layer's hints (series mode re-entry). */
+  refreshHints(): void;
 }
 
 export interface MountBrowseEverythingOptions {
@@ -747,6 +772,68 @@ export function deriveBrowseGroups(
 
 type BrowseLayer = "grid" | "categories" | "filters" | "search" | "sort";
 
+/** Shared-bar legend per Browse layer (0.11.10 hints unification). */
+function browseHintsForLayer(layer: BrowseLayer, kind: BrowseKind): HintConfig {
+  const searchLabel = kind === "movie" ? "Search Movies" : "Search Series";
+  switch (layer) {
+    case "grid":
+      return {
+        id: `browse-${kind}`,
+        items: [
+          { glyph: "dpad", label: "Move" },
+          { glyph: "a", label: "Open" },
+          { glyph: "b", label: "Back" },
+          { glyph: "x", label: "Options" },
+          { glyph: "y", label: searchLabel },
+          { glyph: "lb", label: "Prev page" },
+          { glyph: "rb", label: "Next page" },
+          { glyph: "menu", label: "Filters" },
+          RETURN_HOME_HINT,
+        ],
+      };
+    case "categories":
+      return {
+        id: `browse-${kind}-categories`,
+        items: [
+          { glyph: "dpad-v", label: "Move" },
+          { glyph: "a", label: "Select" },
+          { glyph: "b", label: "Back" },
+          RETURN_HOME_HINT,
+        ],
+      };
+    case "filters":
+      return {
+        id: `browse-${kind}-filters`,
+        items: [
+          { glyph: "dpad-v", label: "Family" },
+          { glyph: "dpad-h", label: "Value" },
+          { glyph: "a", label: "Select" },
+          { glyph: "b", label: "Cancel" },
+          RETURN_HOME_HINT,
+        ],
+      };
+    case "search":
+      return {
+        id: `browse-${kind}-search`,
+        items: [
+          { glyph: "a", label: "Apply" },
+          { glyph: "b", label: "Close" },
+          RETURN_HOME_HINT,
+        ],
+      };
+    case "sort":
+      return {
+        id: `browse-${kind}-sort`,
+        items: [
+          { glyph: "dpad-v", label: "Move" },
+          { glyph: "a", label: "Select" },
+          { glyph: "b", label: "Close without changing" },
+          RETURN_HOME_HINT,
+        ],
+      };
+  }
+}
+
 const MIN_CARD_WIDTH = 200;
 const GRID_GAP = 20;
 
@@ -766,6 +853,9 @@ export function mountBrowseEverything(
   const kind = opts.kind;
   const source = opts.source;
   const guard = createGenerationGuard();
+  // Logical view for focus memory (0.11.10): Browse focus never
+  // restores into a hidden Home view (series in-page switching).
+  setLogicalView(kind === "movie" ? "movies-browse" : "series-browse");
 
   // Initial state: explicit initialState wins; otherwise the URL
   // mode (home-browse-modes contract) so reloads restore the view.
@@ -988,14 +1078,87 @@ export function mountBrowseEverything(
 
   const renderHints = () => {
     const hints: Record<BrowseLayer, string> = {
-      grid: "D-pad Move · A Open · B Back · X Details · Y Search · LB/RB Page · Menu Filters",
+      grid: "D-pad Move · A Open · B Back · X Options · Y Search · LB/RB Page · Menu Filters",
       categories: "D-pad Move · A Select · B Back · ◀ ▶ List",
       filters: "↕ Family · ↔ Value · A Select · B Cancel",
       search: "Type to search · Enter Apply · B Close",
       sort: "D-pad Move · A Select · B Close without changing",
     };
     hintsEl.textContent = hints[layer];
+    // Route the same legend through the shared hints bar
+    // (0.11.10 unification). The local line stays until W1's
+    // TvButtonHints override lands — the shared bar re-renders
+    // from its view config today and would drop layer hints.
+    setControllerHints(browseHintsForLayer(layer, kind));
   };
+
+  // ── Back layers (0.11.10) ───────────────────────────────────
+  // Registered once per mount, unregistered on destroy. The shim
+  // dispatcher (window capture) claims Escape before the bubble
+  // handler below, so each press pops exactly one layer and the
+  // bubble handler's Escape branches stay as fallback only.
+  // isActive re-checks suspension: the series controller keeps a
+  // suspended mount alive behind Home, and it must never claim B.
+  const unregisterBackLayers = [
+    registerBackLayer({
+      id: `browse-${kind}-categories`,
+      priority: BACK_PRIORITY.DRAWER,
+      isActive: () => !destroyed && !suspended && layer === "categories" && categoryDrawer != null,
+      handle: () => {
+        categoryDrawer?.pressBack();
+        return true;
+      },
+    }),
+    registerBackLayer({
+      id: `browse-${kind}-filters`,
+      priority: BACK_PRIORITY.DRAWER,
+      isActive: () => !destroyed && !suspended && layer === "filters" && filterDrawer != null,
+      handle: () => {
+        filterDrawer?.pressBack();
+        return true;
+      },
+    }),
+    registerBackLayer({
+      id: `browse-${kind}-sort`,
+      priority: BACK_PRIORITY.DRAWER,
+      isActive: () => !destroyed && !suspended && layer === "sort" && sortOverlay != null,
+      handle: () => {
+        closeOverlay(true);
+        return true;
+      },
+    }),
+    registerBackLayer({
+      id: `browse-${kind}-search`,
+      priority: BACK_PRIORITY.DRAWER,
+      isActive: () => !destroyed && !suspended && layer === "search" && searchOverlay != null,
+      handle: () => {
+        // B exits editing/keyboard first, then cancels the
+        // search (position preserved) — one step per press.
+        if (isCouchKeyboardOpen()) {
+          closeCouchKeyboard(false);
+          return true;
+        }
+        if (document.activeElement === searchInput) {
+          searchInput?.blur();
+          return true;
+        }
+        cancelSearch();
+        return true;
+      },
+    }),
+    registerBackLayer({
+      id: `browse-${kind}-grid`,
+      priority: BACK_PRIORITY.ROUTE,
+      isActive: () => !destroyed && !suspended && layer === "grid",
+      handle: () => {
+        opts.onExit();
+        return true;
+      },
+    }),
+  ];
+  onDispose(() => {
+    for (const fn of unregisterBackLayers) fn();
+  });
 
   const renderHeader = () => {
     const info = browsePageInfo(state, derived.totalGroups);
@@ -1290,6 +1453,16 @@ export function mountBrowseEverything(
   const openDetailFor = (group: BrowseGroup) => {
     state = { ...state, selectedId: group.id };
     syncUrl();
+    // Provenance: B on the detail returns to THIS browse state
+    // (category/page/filters/sort/search live in the URL).
+    try {
+      recordRouteOrigin({
+        route: window.location.pathname + window.location.search,
+        label: kind === "movie" ? "Browse Movies" : "Browse Series",
+      });
+    } catch {
+      // Provenance is a nicety; detail Back falls back to the link.
+    }
     opts.onOpenDetail(source.detailId(group.row));
   };
 
@@ -1305,6 +1478,7 @@ export function mountBrowseEverything(
 
   const closeOverlay = (restoreFocusToGrid: boolean) => {
     searchDebounced.cancel();
+    if (isCouchKeyboardOpen()) closeCouchKeyboard(false);
     categoryDrawer?.destroy();
     categoryDrawer = null;
     filterDrawer?.destroy();
@@ -1639,6 +1813,7 @@ export function mountBrowseEverything(
     applyBtn.addEventListener("click", () => {
       searchDebounced.flush();
       const query = input.value;
+      closeCouchKeyboard(true);
       closeOverlay(false);
       state = setSearch(state, query, searchScope);
       applyDatasetChange();
@@ -1679,11 +1854,19 @@ export function mountBrowseEverything(
     };
     searchDebounced = createDebouncedSearch((q) => applySearchQuery(q, false), 200);
     input.addEventListener("input", () => searchDebounced.queue(input.value));
+    // Editing goes through the shared keyboard seam (0.11.10):
+    // A on the input enters editing via openCouchKeyboard, never a
+    // bare input focus. W3's OSK listens for the open event; until
+    // it lands, a physical keyboard types into the focused input.
+    input.addEventListener("focus", () => {
+      if (!isCouchKeyboardOpen()) openCouchKeyboard(input);
+    });
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
         searchDebounced.flush();
         const query = input.value;
+        closeCouchKeyboard(true);
         closeOverlay(false);
         state = setSearch(state, query, searchScope);
         applyDatasetChange();
@@ -1833,6 +2016,11 @@ export function mountBrowseEverything(
   // ── Key handling (shared pipeline: KeyboardEvents only) ─────
   const onKeyDown = (event: KeyboardEvent) => {
     if (destroyed || suspended) return;
+    // A Back layer already claimed this press (the shim dispatcher
+    // runs first and preventDefaults): never pop a second layer.
+    // This matters for synthetic window-dispatched presses, where
+    // stopPropagation cannot stop same-target bubble listeners.
+    if (event.defaultPrevented) return;
     // Never steal keys from a text field outside the search layer.
     const target = event.target as HTMLElement | null;
     const inField =
@@ -1918,15 +2106,29 @@ export function mountBrowseEverything(
       return;
     }
     if (key === "x" || key === "X") {
-      // X = context for the focused card. The context menu is
-      // owned by the card/detail layer; this dispatches the event
-      // it listens for and changes nothing itself.
-      const focused = currentFocusedKey();
-      if (focused) {
+      // X = context menu for the focused card (Contract F). The
+      // event carries everything the menu needs; the controller's
+      // own listener (below) opens the real menu. No focused card
+      // (header/pagination focus) → no menu, no-op.
+      const active = document.activeElement as HTMLElement | null;
+      const card = active?.closest?.("[data-browse-key]") as HTMLElement | null;
+      const focused = card && grid.el.contains(card) ? card.dataset.browseKey ?? null : null;
+      if (focused && card) {
         event.preventDefault();
         event.stopPropagation();
+        const group = index ? browseViewsFor(index).byGroupId.get(focused) : undefined;
         window.dispatchEvent(
-          new CustomEvent("browse:card-context", { detail: { kind, groupId: focused } }),
+          new CustomEvent("browse:card-context", {
+            detail: {
+              kind,
+              groupId: focused,
+              entryId: group?.row.id ?? null,
+              title: group?.row.name ?? group?.row.title ?? null,
+              logo: group?.row.logo ?? group?.row.cover ?? null,
+              playlistId,
+              anchor: card,
+            },
+          }),
         );
       }
       return;
@@ -1986,6 +2188,57 @@ export function mountBrowseEverything(
   };
   window.addEventListener("keydown", onKeyDown);
   onDispose(() => window.removeEventListener("keydown", onKeyDown));
+
+  // X context menu (Contract F): the `browse:card-context` event
+  // the X branch dispatches opens the REAL menu — favourite /
+  // Watch Later / watched toggles from the existing preference
+  // functions, plus Unfollow for followed series. Toggling
+  // refreshes the grid from fresh watch sets, keeping the card
+  // focused; B closes the menu (its MODAL layer) and focus
+  // returns to the card. Events for the other kind, or for a
+  // group this mount does not own, are ignored.
+  const onCardContext = (event: Event) => {
+    if (destroyed || suspended || layer !== "grid") return;
+    const detail = (event as CustomEvent).detail as {
+      kind?: BrowseKind;
+      groupId?: string;
+      entryId?: string | number | null;
+      title?: string | null;
+      logo?: string | null;
+      playlistId?: string;
+      anchor?: HTMLElement;
+    } | undefined;
+    if (!detail || detail.kind !== kind || !detail.groupId) return;
+    const group = index ? browseViewsFor(index).byGroupId.get(detail.groupId) : undefined;
+    if (!group) return;
+    const anchor =
+      detail.anchor && detail.anchor.isConnected ? detail.anchor : null;
+    if (!anchor) return;
+    const entryId = detail.entryId ?? group.row.id;
+    void titleContextActionsForEntry({
+      kind: kind === "movie" ? "vod" : "series",
+      entryId,
+      name: detail.title ?? group.row.name ?? group.row.title ?? "",
+      logo: detail.logo ?? group.row.logo ?? group.row.cover ?? null,
+      playlistId: detail.playlistId ?? playlistId,
+      onOpen: () => openDetailFor(group),
+      onChanged: () => {
+        if (destroyed || !index) return;
+        rederive();
+        renderAll({ mode: "keep-key", key: group.id, index: currentFocusedPageIndex() });
+      },
+    })
+      .then((actions) => {
+        if (destroyed || suspended || layer !== "grid") return;
+        if (!anchor.isConnected) return;
+        openTitleContextMenu(anchor, actions);
+      })
+      .catch(() => {
+        // A menu that cannot build never opens; the grid is untouched.
+      });
+  };
+  window.addEventListener("browse:card-context", onCardContext);
+  onDispose(() => window.removeEventListener("browse:card-context", onCardContext));
 
   // Focus tracking: record the selected poster (focus memory +
   // URL `selected`) without re-rendering anything.
@@ -2115,6 +2368,10 @@ export function mountBrowseEverything(
       }
       pendingOpenSearch = false;
       openSearch();
+    },
+    refreshHints(): void {
+      if (destroyed) return;
+      renderHints();
     },
   };
 }
