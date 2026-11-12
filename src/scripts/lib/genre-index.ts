@@ -1,6 +1,6 @@
 // Multi-source genre classification (bulk row genre, detail-page notes, category fallback) for movies/series.
 import { getCached, hydrate, setCached, CACHE_REVALIDATED_EVENT } from "@/scripts/lib/cache.js"
-import { parseGenreString, genreForCategoryName, CANONICAL_GENRES, type GenreId } from "@/scripts/lib/genres.ts"
+import { parseGenreString, genreForCategoryName, CANONICAL_GENRES, genresForEntryWithEvidence, type GenreId } from "@/scripts/lib/genres.ts"
 import { tmdbDiscoverByGenre, type TmdbDiscoverItem } from "@/scripts/lib/tmdb.ts"
 import { matchAllTitlesToCatalog } from "@/scripts/lib/tmdb-match.ts"
 import { isTmdbActive } from "@/scripts/lib/app-settings.js"
@@ -411,4 +411,86 @@ if (typeof document !== "undefined") {
       invalidateGenreIndex(detail.entryId, detail.kind)
     }
   })
+}
+
+// ── 0.11.8 W1: canonical taxonomies + series families (brief §5 / §1.7) ──
+// The taxonomy itself lives in genres.ts (pure, no fetch/storage/DOM)
+// and is re-exported here so both import paths work. This module's
+// async machinery above (getGenreIndex, noteDetailGenres,
+// ensureGenreBoost) is UNCHANGED: no new TMDb sweeps are introduced
+// anywhere in 0.11.8 — enrichment stays incremental, bounded and
+// cached, via the existing detail-page notes + backfill paths. The
+// prepared catalogue index (catalog-index.ts) is the consumer that
+// turns these pure classifiers into per-revision cached lookups; it
+// deliberately does NOT import this module, so index builds stay free
+// of cache/TMDb/DOM side effects.
+
+export {
+  CANONICAL_MOVIE_GENRES,
+  CANONICAL_SERIES_GENRES,
+  UNCATEGORISED_ID,
+  genresForEntry,
+  genresForEntryWithEvidence,
+  providerCategoryInfo,
+  registerProviderCategory,
+  clearProviderCategoryRegistry,
+  seriesFamiliesForTmdbIds,
+  seriesFamiliesForGenreIds,
+  parseSeriesGenreString,
+  genreLabelForId,
+  isKindOnlyCategory,
+  resolveGenreKind,
+} from "@/scripts/lib/genres.ts"
+export type {
+  CanonicalGenreEntry,
+  CanonicalSeriesFamily,
+  GenreEntryInput,
+  GenreIndexLike,
+  GenreProvenance,
+  GenreConfidence,
+  GenresForEntryResult,
+  ProviderCategoryInfo,
+} from "@/scripts/lib/genres.ts"
+
+export interface GenreFamilyIndex {
+  /** Family/genre id -> title ids (row-level; display-level distinct-title counts live in catalog-index.ts). */
+  sets: Map<string, Set<number>>
+  /** Title ids with no genre evidence at all (the UNCATEGORISED_ID bucket). */
+  uncategorised: Set<number>
+  /** Rows with any genre evidence (any provenance tier). */
+  classifiedCount: number
+  totalCount: number
+}
+
+/**
+ * Pure kind-aware classification core: one pass over rows through
+ * genresForEntry (verified ids > provider genre > category fallback),
+ * returning series families for kind "series" and the 18 movie genres
+ * for kind "vod". Genres are NOT mutually exclusive — a row lands in
+ * every family its evidence supports. Rows with no evidence land in
+ * `uncategorised`, never in a guessed genre.
+ */
+export function buildFamilyIndexFromRows(rows: GenreRow[], kind: GenreKind): GenreFamilyIndex {
+  const sets = new Map<string, Set<number>>()
+  const uncategorised = new Set<number>()
+  let classifiedCount = 0
+  for (const row of rows || []) {
+    const titleId = Number(row?.id)
+    if (!Number.isFinite(titleId)) continue
+    const { genreIds, provenance } = genresForEntryWithEvidence(row, kind)
+    if (!genreIds.length || provenance === "none") {
+      uncategorised.add(titleId)
+      continue
+    }
+    classifiedCount++
+    for (const genreId of genreIds) {
+      let bucket = sets.get(genreId)
+      if (!bucket) {
+        bucket = new Set()
+        sets.set(genreId, bucket)
+      }
+      bucket.add(titleId)
+    }
+  }
+  return { sets, uncategorised, classifiedCount, totalCount: (rows || []).length }
 }

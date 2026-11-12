@@ -10,12 +10,12 @@ export interface GroupableEntry {
   tmdb?: number | null
 }
 
-// Cached catalog rows go in as-is (ids and years arrive as strings or numbers), so no view has to copy them.
+// Cached catalog rows go in as-is (ids, years and tmdb ids arrive as strings or numbers), so no view has to copy them.
 export interface GroupableRow {
   id: number | string
   name?: string | null
   year?: string | number | null
-  tmdb?: number | null
+  tmdb?: number | string | null
 }
 
 export interface GroupInfo {
@@ -279,4 +279,294 @@ export function getSharedGroupingIndex(rows: GroupableRow[]): CatalogGroupingInd
   const index = buildGroupingIndex(rows)
   sharedIndexByRows.set(rows, index)
   return index
+}
+
+// ── 0.11.8 W1: safe title grouping (brief §13 / §1.6) ───────────────────
+// groupEntries() is the display-level grouping API the Movies & Series
+// 2.0 homes and Browse engine consume. It reuses buildGroupingIndex()
+// above — the richer variant handling (TMDb bridging, distinct-tag
+// rule, compound prefixes) — and adds the §13 safety contract on top:
+//
+//   - NEVER group a movie with a series: entries are partitioned by
+//     kind first (TMDb movie ids and TV ids share one namespace, so a
+//     shared TMDb id across kinds is NOT shared identity), and group
+//     ids are kind-prefixed.
+//   - NEVER group distinct films with similar titles: grouping uses
+//     exactly buildGroupingIndex's conservative rules (shared verified
+//     TMDb identity, or cleaned title + year with 2+ DISTINCT language
+//     tags). Same-tag dupes, ambiguous bridges and uncertain matches
+//     stay SEPARATE — a duplicate poster is less harmful than hiding
+//     the right film.
+//   - Counts reflect displayed groups: one TitleGroup is one displayed
+//     title, whatever the variant count.
+
+export type TitleGroupKind = "vod" | "series"
+export type TitleGroupConfidence = "high" | "medium"
+
+export interface TitleGroup {
+  /** Kind-prefixed group key, e.g. "vod:t:12345", "series:n:the batman|2022", "vod:e:7". */
+  id: string
+  /** String id of the deterministic representative entry (untagged / lowest quality-rank wins). */
+  primaryId: string
+  /**
+   * EVERY member id INCLUDING the primary, primary first, the rest in
+   * catalogue order. Callers iterating variants get the full set; use
+   * primaryId (or primaryEntryFor) to find the representative.
+   */
+  variantIds: string[]
+  kind: TitleGroupKind
+  /** Verified TMDb id when the group is TMDb-keyed. Absent otherwise — never guessed. */
+  tmdbId?: number
+  /** Resolved year (primary's, else the first known member year). Absent when unknown. */
+  year?: number
+  /**
+   * "high": shared verified TMDb identity with consistent years, or a
+   * singleton (identity is itself — no merge risk). "medium": title +
+   * year grouping, or a TMDb group whose members' known years
+   * conflict (provider year noise; the TMDb identity still holds).
+   * Uncertain matches never become groups at all.
+   */
+  confidence: TitleGroupConfidence
+  /** Distinct language tags present across variants, in catalogue order. */
+  tags?: string[]
+}
+
+/** A groupable row that may also carry an explicit kind marker. */
+export interface GroupableEntryInput extends GroupableRow {
+  kind?: unknown
+  type?: unknown
+  mediaType?: unknown
+}
+
+/**
+ * The index argument for groupEntries: a CatalogIndex-like object
+ * (structural — this module never imports catalog-index.ts), a kind
+ * string, or null. Defaults to "vod" when nothing says otherwise.
+ */
+export type GroupEntriesIndexLike =
+  | { kind?: string | null }
+  | TitleGroupKind
+  | "movie"
+  | "tv"
+  | null
+  | undefined
+
+function kindFromValue(value: unknown): TitleGroupKind | null {
+  const text = String(value ?? "").trim().toLowerCase()
+  if (text === "series" || text === "tv" || text === "show") return "series"
+  if (text === "vod" || text === "movie" || text === "film") return "vod"
+  return null
+}
+
+function resolveGroupKind(index: GroupEntriesIndexLike): TitleGroupKind {
+  if (typeof index === "string") return kindFromValue(index) ?? "vod"
+  if (index && typeof index === "object") return kindFromValue(index.kind) ?? "vod"
+  return "vod"
+}
+
+function resolveEntryKind(entry: GroupableEntryInput, fallback: TitleGroupKind): TitleGroupKind {
+  for (const field of [entry.kind, entry.type, entry.mediaType]) {
+    const resolved = kindFromValue(field)
+    if (resolved) return resolved
+  }
+  return fallback
+}
+
+function parseEntryYear(entry: GroupableRow): number | null {
+  const raw = entry.year
+  if (raw != null && raw !== "") {
+    const match = String(raw).match(/(\d{4})/)
+    if (match) {
+      const year = Number(match[1])
+      if (year >= 1900 && year <= 2100) return year
+    }
+  }
+  const { year } = cleanProviderTitle(entry.name || "")
+  return year
+}
+
+interface TitleGroupRegistryEntry {
+  group: TitleGroup
+  /** Reference to the primary row object (no copy) for primaryEntryFor. */
+  primaryRow: GroupableRow
+}
+
+// Per-kind registries, replaced wholesale by each groupEntries() call
+// for that kind, so a catalogue revision can never leave stale groups
+// behind. TitleGroup objects are shared by reference with the returned
+// array — the registry adds Map overhead only, no duplicated arrays.
+const titleGroupRegistry = new Map<TitleGroupKind, Map<string, TitleGroupRegistryEntry>>()
+
+/** Clear the group registries (tests). Catalog-index rebuilds replace them anyway. */
+export function clearTitleGroupRegistry(): void {
+  titleGroupRegistry.clear()
+}
+
+function registerTitleGroups(kind: TitleGroupKind, groups: TitleGroup[], primaryRowById: Map<string, GroupableRow>): void {
+  const next = new Map<string, TitleGroupRegistryEntry>()
+  for (const group of groups) {
+    const primaryRow = primaryRowById.get(group.primaryId)
+    if (primaryRow) next.set(group.id, { group, primaryRow })
+  }
+  titleGroupRegistry.set(kind, next)
+}
+
+/**
+ * Group provider variants of the same title into displayed titles.
+ * Entries are partitioned by kind, grouped per kind via
+ * buildGroupingIndex, and returned in catalogue order (first member
+ * appearance). The returned groups are registered so variantsFor() /
+ * primaryEntryFor() can resolve them later by id.
+ */
+export function groupEntries(
+  entries: GroupableEntryInput[],
+  index?: GroupEntriesIndexLike,
+): TitleGroup[] {
+  const defaultKind = resolveGroupKind(index)
+  const rows = entries || []
+
+  // Catalogue position per numeric id (first occurrence wins), for
+  // deterministic ordering and duplicate-id handling.
+  const positionById = new Map<number, number>()
+  const rowById = new Map<number, GroupableRow>()
+  const partitions = new Map<TitleGroupKind, GroupableRow[]>()
+  rows.forEach((entry, position) => {
+    const numericId = Number(entry?.id)
+    if (!Number.isFinite(numericId)) return
+    if (positionById.has(numericId)) return
+    positionById.set(numericId, position)
+    rowById.set(numericId, entry)
+    const kind = resolveEntryKind(entry, defaultKind)
+    const bucket = partitions.get(kind)
+    if (bucket) bucket.push(entry)
+    else partitions.set(kind, [entry])
+  })
+
+  const groups: TitleGroup[] = []
+  const primaryRowById = new Map<string, GroupableRow>()
+  // First-appearance position per group, computed once: sorting by it
+  // keeps group ordering O(n log n) instead of re-scanning member
+  // positions on every comparison (50k groups x spread/min per compare).
+  const orderKeyByGroupId = new Map<string, number>()
+
+  for (const [kind, partition] of partitions) {
+    const grouping = buildGroupingIndex(partition)
+    const built: TitleGroup[] = []
+    for (const info of grouping.groupsByKey.values()) {
+      const memberIds = [...info.entryIds].sort(
+        (a, b) => (positionById.get(a) ?? 0) - (positionById.get(b) ?? 0),
+      )
+      const primaryNumericId = pickPreferredEntryId(
+        memberIds,
+        grouping.tagByEntryId,
+        [],
+        grouping.qualityRankByEntryId,
+      )
+      const primaryId = String(primaryNumericId)
+      const variantIds = [
+        primaryId,
+        ...memberIds.filter((id) => id !== primaryNumericId).map((id) => String(id)),
+      ]
+      const tmdbMatch = /^t:(\d+)$/.exec(info.key)
+      const tmdbId = tmdbMatch ? Number(tmdbMatch[1]) : undefined
+
+      const knownYears = memberIds
+        .map((id) => parseEntryYear(rowById.get(id)!))
+        .filter((year): year is number => year != null)
+      const primaryYear = parseEntryYear(rowById.get(primaryNumericId)!)
+      const year = primaryYear ?? knownYears[0]
+      const yearsConflict =
+        knownYears.length > 1 && Math.max(...knownYears) - Math.min(...knownYears) > 1
+      const confidence: TitleGroupConfidence =
+        info.key.startsWith("n:") || yearsConflict ? "medium" : "high"
+
+      const group: TitleGroup = {
+        id: `${kind}:${info.key}`,
+        primaryId,
+        variantIds,
+        kind,
+        confidence,
+        tags: info.tags,
+      }
+      if (tmdbId != null) group.tmdbId = tmdbId
+      if (year != null) group.year = year
+      built.push(group)
+      // memberIds are in catalogue order, so the first member's position
+      // is the group's first-appearance position.
+      orderKeyByGroupId.set(group.id, positionById.get(memberIds[0]) ?? 0)
+      const primaryRow = rowById.get(primaryNumericId)
+      if (primaryRow) primaryRowById.set(primaryId, primaryRow)
+    }
+    built.sort(
+      (a, b) => (orderKeyByGroupId.get(a.id) ?? 0) - (orderKeyByGroupId.get(b.id) ?? 0),
+    )
+    registerTitleGroups(kind, built, primaryRowById)
+    groups.push(...built)
+  }
+
+  // Cross-kind calls keep global catalogue order.
+  groups.sort(
+    (a, b) => (orderKeyByGroupId.get(a.id) ?? 0) - (orderKeyByGroupId.get(b.id) ?? 0),
+  )
+  return groups
+}
+
+/**
+ * The representative entry object for a group: the registry's primary
+ * row reference when the group was built by groupEntries(), or the
+ * matching row from `entries` when supplied. Returns null when the
+ * group is unknown and no entries were supplied — callers holding a
+ * CatalogIndex should use `index.byId.get(group.primaryId)` instead.
+ */
+export function primaryEntryFor(
+  group: TitleGroup | string,
+  entries?: Iterable<GroupableRow> | Map<unknown, GroupableRow> | null,
+): GroupableRow | null {
+  const groupId = typeof group === "string" ? group : group.id
+  const primaryId = typeof group === "string" ? null : group.primaryId
+  if (entries) {
+    if (entries instanceof Map) {
+      if (primaryId != null) {
+        return entries.get(primaryId) ?? entries.get(Number(primaryId)) ?? null
+      }
+      return null
+    }
+    if (primaryId != null) {
+      for (const entry of entries) {
+        if (String(entry.id) === primaryId) return entry
+      }
+    }
+    return null
+  }
+  for (const registry of titleGroupRegistry.values()) {
+    const found = registry.get(groupId)
+    if (found) return found.primaryRow
+  }
+  return null
+}
+
+/** Every variant id of a group (primary included, primary first), or [] when unknown. */
+export function variantsFor(groupId: string): string[] {
+  for (const registry of titleGroupRegistry.values()) {
+    const found = registry.get(groupId)
+    if (found) return [...found.group.variantIds]
+  }
+  return []
+}
+
+/**
+ * A grouped title matches a language filter when ANY member variant
+ * satisfies it (brief §13.4). Accepts a TitleGroup or a registered
+ * group id; unknown groups match only the empty (no-filter) selection.
+ */
+export function titleGroupPassesLanguageFilter(
+  group: TitleGroup | string,
+  selected: string,
+): boolean {
+  if (!selected) return true
+  const tags =
+    typeof group === "string"
+      ? [...titleGroupRegistry.values()].map((r) => r.get(group)?.group.tags).find(Boolean)
+      : group.tags
+  return groupPassesLanguageFilter(tags ?? [], selected)
 }
