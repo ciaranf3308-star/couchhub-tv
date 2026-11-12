@@ -1495,6 +1495,32 @@ export const EPG_SOURCE_STATUS_EVENT = EVT_SOURCE_STATUS
 // ---------------------------------------------------------------------------
 
 /**
+ * Strip a leading provider-group prefix from a channel name
+ * ("Basic UK: BBC One" -> "BBC One", "UK | BBC One" -> "BBC One").
+ * Providers re-list the same broadcast under a group label, but
+ * XMLTV <display-name> entries never carry that label, so the
+ * fuzzy name match in resolveTvgId / effectiveTvgId misses
+ * every prefixed channel — including the resume channel on the
+ * Live TV landing, whose hero then shows no programme at all.
+ * Only the text after the FIRST ":" or "|" is tried, only when
+ * it is at least 2 chars, and only as a fallback after the full
+ * name misses — a miss here is harmless (callers fall back to
+ * the raw tvg-id), and a hit still goes through the unique-match
+ * index, so collisions refuse rather than guess.
+ *
+ * @param {string} name
+ * @returns {string} - the stripped remainder, or "" when there is no usable prefix
+ */
+export function stripChannelNamePrefix(name) {
+  if (!name) return ""
+  const text = String(name).trim()
+  const sep = text.search(/[:|]/)
+  if (sep <= 0) return ""
+  const rest = text.slice(sep + 1).trim()
+  return rest.length >= 2 ? rest : ""
+}
+
+/**
  * Resolve the tvg-id that should be used to look up EPG for a given channel.
  * Resolution order:
  *   1. user override from `channelEpgMap` (Jellyfin-style manual mapping)
@@ -1502,6 +1528,9 @@ export const EPG_SOURCE_STATUS_EVENT = EVT_SOURCE_STATUS
  *   3. fuzzy match on `channel.name` against XMLTV `<display-name>` entries
  *      after stripping quality suffixes ("HD", "FHD", "UHD", "4K", "SD") so
  *      "MDR Sachsen HD" auto-matches an EPG channel called "MDR Sachsen".
+ *   3b. the same fuzzy match on the name with a leading provider-group
+ *      prefix stripped ("Basic UK: BBC One" -> "BBC One") — see
+ *      stripChannelNamePrefix. Only tried when the full name misses.
  *
  * Pure-function variant for tests / non-Tauri contexts.
  *
@@ -1525,6 +1554,11 @@ export function resolveTvgId(channel, overrides, programmes, channelNames) {
   if (channel.name && channelNames && channelNames.size) {
     const match = findBestEpgChannelByName(channel.name, channelNames)
     if (match) return match
+    const stripped = stripChannelNamePrefix(channel.name)
+    if (stripped && stripped !== channel.name) {
+      const prefixMatch = findBestEpgChannelByName(stripped, channelNames)
+      if (prefixMatch) return prefixMatch
+    }
   }
   return rawTvgId
 }
@@ -1687,7 +1721,9 @@ export function effectiveTvgId(channel, playlistId) {
   const hit = tvgIdMemo.get(memoKey)
   if (hit && hit.fetchedAt === state.fetchedAt) return hit.tvgId
 
-  const match = findInChannelNameIndex(channel.name, state.nameIndex)
+  const match =
+    findInChannelNameIndex(channel.name, state.nameIndex) ||
+    findInChannelNameIndex(stripChannelNamePrefix(channel.name), state.nameIndex)
   const resolved = match || rawTvgId
   tvgIdMemo.set(memoKey, { tvgId: resolved, fetchedAt: state.fetchedAt })
   return resolved
@@ -1717,7 +1753,9 @@ export function classifyTvgIdSource(channel, playlistId) {
     : ""
   if (rawTvgId && state.programmes.has(rawTvgId)) return "tvg-id"
   if (channel.name) {
-    const match = findInChannelNameIndex(channel.name, state.nameIndex)
+    const match =
+      findInChannelNameIndex(channel.name, state.nameIndex) ||
+      findInChannelNameIndex(stripChannelNamePrefix(channel.name), state.nameIndex)
     if (match) return "name"
   }
   return "none"
