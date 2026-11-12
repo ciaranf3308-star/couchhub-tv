@@ -139,6 +139,13 @@
   )
   const aiConfigured = $derived(aiMode === "connected" || aiMode === "unavailable")
   const modeLabel = $derived(aiMode ? AI_MODE_LABELS[aiMode] : "Checking AI…")
+  /** What "Ask AI" would ask about right now: the typed question, or
+      the active quick pick's label when no question is typed. */
+  const askAiLabel = $derived(
+    activeMood
+      ? (MOOD_PRESETS.find((p) => p.id === activeMood)?.label ?? activeMood)
+      : queryDebounced.trim()
+  )
 
   function refreshRows() {
     if (!data) return
@@ -197,7 +204,11 @@
           limit: 12,
         })
       } else if (ai && q) {
-        const ranked = await rankDiscover(q, data.candidates, data.taste)
+        // Explicit ask (submit with automatic on, or an "Ask AI" tap):
+        // force the ranker even for a short keyword query — the user
+        // consented to the request, so the natural-language gate in
+        // rankDiscover must not silently veto it back to local.
+        const ranked = await rankDiscover(q, data.candidates, data.taste, { forceAi: true })
         results = ranked.results
         source = ranked.source
         if (ranked.fallbackReason) fallbackNotice = ranked.fallbackReason
@@ -254,8 +265,19 @@
 
   /** Explicit "Ask AI" — one paid request, on the user's tap. */
   function askAi() {
-    queryDebounced = query
-    activeMood = null
+    // A quick pick is a preset, not a question: ask AI about the pick
+    // itself (its label is the question — "Easy Watching", "Hidden
+    // Gems") and clear the mood so the AI branch runs. For a typed
+    // question, ask it exactly as typed.
+    if (activeMood && !query.trim()) {
+      const label = MOOD_PRESETS.find((p) => p.id === activeMood)?.label ?? activeMood
+      query = label
+      queryDebounced = label
+      activeMood = null
+    } else {
+      queryDebounced = query
+      activeMood = null
+    }
     void runSearch({ ai: true })
     focusFirstResult()
   }
@@ -549,9 +571,27 @@
       {#if fallbackNotice}
         <p class="rs-discover-fallback" role="status">{fallbackNotice}</p>
       {/if}
-      {#if !aiAuto && !activeMood && queryDebounced.trim() && aiConfigured && resultsSource === "local" && !searching}
+      {#if resultsSource === "local" && aiConfigured && !searching && !fallbackNotice}
+        <!-- 0.11.4: a "Local recommendations" rail with a connected AI
+             must say why it is local, next to the action that fixes it.
+             Quick picks filter locally by design; a typed query shows
+             local results until AI is asked. -->
+        <p class="rs-meta" data-local-note>
+          {activeMood
+            ? "Quick picks are filtered locally. Ask AI below to rank them for you."
+            : "Local results so far — Ask AI below for AI picks."}
+        </p>
+      {/if}
+      {#if aiConfigured && resultsSource === "local" && !searching && (queryDebounced.trim() || activeMood)}
+        <!-- 0.11.4: visible where AI can run — at the results, not only
+             as the small submit button in the search row (the TV
+             on-screen keyboard commits to the results instead of
+             submitting, so that button never fires in the TV flow).
+             Shown in Manual AND Automatic: in Automatic it is the
+             only reachable ask for a typed query. Hides once AI
+             answers (source becomes "ai"); shows again on fallback. -->
         <button type="button" onclick={askAi} data-nylah-item class="rs-discover-ask-ai">
-          Ask AI about “{queryDebounced.trim()}”
+          Ask AI about “{askAiLabel}”
         </button>
       {/if}
       {#if searchResults && searchResults.length}

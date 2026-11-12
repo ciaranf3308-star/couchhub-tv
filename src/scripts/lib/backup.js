@@ -5,12 +5,30 @@
 //     no upload)
 //   - preferences (favorites, recents, progress, hidden categories, view
 //     sorts, favorites order)
-//   - app settings: UA/download/player/TMDb, display, language, playback,
-//     behavior, Discord, and receiver (not the device-unique receiver id)
+//   - app settings: UA/download/player/FFmpeg/TMDb-enabled, display,
+//     language, playback, behavior, and receiver (not the device-unique
+//     receiver id)
+//   - AI Discovery config (endpoint/model/provider/share/auto/enabled).
+//     The AI key itself is NOT exported: it lives in the OS credential
+//     store and cannot be read back from JS.
+//   - followed series: subscriptions, notification groups, check settings
+//     and last-check time (followed.ts IndexedDB store + localStorage flags)
+//   - profiles: every `nylah_*` localStorage key (registry, active
+//     profile, per-profile history/favorites/continue-watching buckets)
 //   - per-entry local content (local-m3u text + custom-playlist docs, keyed
 //     by entry `_id` in the same local-content.js store)
 //   - per-playlist EPG UTC offsets (user-set only, keyed by entry `_id`)
 //   - paired TV receivers (tv-cast.js device list)
+//
+// Deliberately NOT exported (0.11.4):
+//   - TMDb API key: it used to be written into the file in plaintext.
+//     It is no longer exported; a restore leaves the key on the device
+//     untouched, and a fresh device needs the key re-entered.
+//   - xt_theme / xt_accent: stored values are ignored since 0.11.1
+//     (Layout forces dark + burgundy), so exporting them is dead weight.
+//   - Discord client id + per-playlist mute: no UI sets them.
+//   - xt_haptics: no Settings UI sets it.
+//   - cache, downloads queue, receiver id: device-local / rebuildable.
 
 import { getState as getCredsState, restoreState as restoreCredsState } from "@/scripts/lib/creds.js"
 import {
@@ -34,18 +52,16 @@ import {
   setPlayerExtraArgs,
   getPlayerReuseInstance,
   setPlayerReuseInstance,
-  getTmdbApiKey,
-  setTmdbApiKey,
+  getFfmpegPath,
+  setFfmpegPath,
+  getLivetvResumeLastChannel,
+  setLivetvResumeLastChannel,
   getTmdbEnabled,
   setTmdbEnabled,
   getTvdbEnabled,
   setTvdbEnabled,
   getPerfMode,
   setPerfMode,
-  getAccent,
-  setAccent,
-  ACCENT_PRESETS,
-  ACCENT_RANDOM_ID,
   getDensity,
   setDensity,
   DENSITY_PRESETS,
@@ -53,8 +69,6 @@ import {
   setHubStripIds,
   getUiSoundsEnabled,
   setUiSoundsEnabled,
-  getHapticsEnabled,
-  setHapticsEnabled,
   getContentLanguage,
   setContentLanguage,
   getLanguageGroupingEnabled,
@@ -89,10 +103,12 @@ import {
   setCloseToTray,
   getDevModeEnabled,
   setDevModeEnabled,
-  getDiscordClientId,
-  setDiscordClientId,
-  isDiscordEnabledForPlaylist,
-  setDiscordEnabledForPlaylist,
+  getAiEndpoint,
+  setAiEndpoint,
+  getAiModel,
+  setAiModel,
+  getAiEnabled,
+  setAiEnabled,
   getReceiverDeviceName,
   setReceiverDeviceName,
   getReceiverModeEnabled,
@@ -104,6 +120,23 @@ import {
   PLAYER_BACKENDS,
   EXTERNAL_PLAYER_BACKENDS,
 } from "@/scripts/lib/app-settings.js"
+import {
+  getAiProvider,
+  setAiProvider,
+  getAiShareTaste,
+  setAiShareTaste,
+  getAiAutoRequests,
+  setAiAutoRequests,
+} from "@/scripts/lib/ai/status.ts"
+import {
+  getFollowedStore,
+  getFollowedCheckEnabled,
+  setFollowedCheckEnabled,
+  getFollowedCheckIntervalHours,
+  setFollowedCheckIntervalHours,
+  getFollowedLastCheckAt,
+  FOLLOWED_LAST_CHECK_META_KEY,
+} from "@/scripts/lib/followed.ts"
 import {
   getLocalContent,
   setLocalContent,
@@ -117,18 +150,25 @@ const FORMAT_VERSION = 1
 const FORMAT_NAME = "extreme-infinitv-backup"
 const LEGACY_FORMAT_NAMES = ["xtream-infinitv-backup"]
 
-// Theme, font scale, channel column width and sidebar-collapsed are written
+// Font scale, channel column width and sidebar-collapsed are written
 // directly by Layout.astro / Settings / Sidebar.astro - no app-settings.js
 // accessor owns them, so we mirror their exact localStorage format here.
-const KEY_THEME = "xt_theme"
+// (xt_theme / xt_accent are NOT exported: stored values are ignored since
+// 0.11.1, Layout forces dark + burgundy.)
 const KEY_FONT_SCALE = "xt_font_scale"
 const KEY_CHANNELS_W = "xt_channels_w"
 const KEY_SIDEBAR_COLLAPSED = "xt_sidebar_collapsed"
 // No exported setter yet (see getReceiverEngine in app-settings.js).
 const KEY_RECEIVER_ENGINE = "xt_receiver_engine"
-const THEME_VALUES = ["system", "light", "dark"]
 const FONT_SCALE_DEFAULT = 1
 const CHANNELS_WIDTH_DEFAULT = 28
+
+// Profiles live entirely in localStorage under `nylah_*` keys (see
+// profiles.ts): registry, active profile, per-profile data buckets.
+const PROFILE_KEY_PREFIX = "nylah_"
+// Cap the profiles blob so a hand-edited backup cannot stuff unbounded
+// data into localStorage on import.
+const PROFILES_BLOB_MAX_BYTES = 1024 * 1024
 
 function readRawLS(key) {
   try {
@@ -190,6 +230,75 @@ function isAcceptablePath(value) {
   return false
 }
 
+/** Snapshot every `nylah_*` localStorage key (profiles). Values are kept
+ * verbatim strings; the registry/active/data keys are all JSON, but the
+ * backup layer does not parse them — restore writes them back as-is. */
+function snapshotProfileKeys() {
+  const out = {}
+  try {
+    if (typeof localStorage === "undefined") return out
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (typeof key === "string" && key.startsWith(PROFILE_KEY_PREFIX)) {
+        const value = localStorage.getItem(key)
+        if (typeof value === "string") out[key] = value
+      }
+    }
+  } catch {
+    return out
+  }
+  return out
+}
+
+function restoreProfileKeys(keys) {
+  if (!keys || typeof keys !== "object" || Array.isArray(keys)) return 0
+  const entries = Object.entries(keys)
+  const totalBytes = entries.reduce(
+    (sum, [key, value]) => sum + key.length + (typeof value === "string" ? value.length : 0),
+    0
+  )
+  if (totalBytes > PROFILES_BLOB_MAX_BYTES) {
+    log.warn("[xt:backup] profiles blob too large, skipping:", totalBytes)
+    return 0
+  }
+  let restored = 0
+  for (const [key, value] of entries) {
+    if (
+      typeof key !== "string" ||
+      !key.startsWith(PROFILE_KEY_PREFIX) ||
+      typeof value !== "string"
+    ) {
+      continue
+    }
+    writeRawLS(key, value)
+    restored++
+  }
+  return restored
+}
+
+function isPlausibleFollowedSubscription(value) {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof value.key === "string" &&
+    value.key.length > 0 &&
+    typeof value.playlistId === "string" &&
+    typeof value.seriesId === "string" &&
+    typeof value.seriesTitle === "string" &&
+    Array.isArray(value.baseline)
+  )
+}
+
+function isPlausibleFollowedNotification(value) {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof value.id === "string" &&
+    value.id.length > 0 &&
+    Array.isArray(value.episodes)
+  )
+}
+
 /**
  * Build a JSON-serialisable snapshot of all user state.
  * @returns {Promise<object>}
@@ -212,9 +321,33 @@ export async function exportAll() {
     const offset = getOffsetSetting(entry._id)
     if (typeof offset === "number") epgOffsets[entry._id] = offset
   }
-  const discordMutedPlaylistIds = entries
-    .map((entry) => entry?._id)
-    .filter((entryId) => entryId && !isDiscordEnabledForPlaylist(entryId))
+  // Followed series live in IndexedDB (subscriptions + notifications) with
+  // the check flags in localStorage; all three are exported together so a
+  // restore brings back the follows, not just the toggle.
+  let followed = {
+    subscriptions: [],
+    notifications: [],
+    checkEnabled: getFollowedCheckEnabled(),
+    checkIntervalHours: getFollowedCheckIntervalHours(),
+    lastCheckAt: null,
+  }
+  try {
+    const store = getFollowedStore()
+    const [subscriptions, notifications, lastCheckAt] = await Promise.all([
+      store.getAllSubscriptions(),
+      store.getAllNotifications(),
+      getFollowedLastCheckAt(),
+    ])
+    followed = {
+      subscriptions: Array.isArray(subscriptions) ? subscriptions : [],
+      notifications: Array.isArray(notifications) ? notifications : [],
+      checkEnabled: getFollowedCheckEnabled(),
+      checkIntervalHours: getFollowedCheckIntervalHours(),
+      lastCheckAt: typeof lastCheckAt === "string" ? lastCheckAt : null,
+    }
+  } catch (err) {
+    log.warn("[xt:backup] followed export failed, exporting empty followed state:", err)
+  }
   return {
     format: FORMAT_NAME,
     version: FORMAT_VERSION,
@@ -227,6 +360,16 @@ export async function exportAll() {
     epgOffsets,
     tvDevices: listTvDevices(),
     prefs: snapshotPrefs(),
+    followed,
+    profiles: { keys: snapshotProfileKeys() },
+    ai: {
+      endpoint: getAiEndpoint(),
+      model: getAiModel(),
+      provider: getAiProvider(),
+      shareTaste: getAiShareTaste(),
+      autoRequests: getAiAutoRequests(),
+      enabled: getAiEnabled(),
+    },
     appSettings: {
       userAgent: getUserAgent(),
       downloadDir: getDownloadDir(),
@@ -244,19 +387,17 @@ export async function exportAll() {
         mpv: getPlayerReuseInstance("mpv"),
         vlc: getPlayerReuseInstance("vlc"),
       },
-      tmdbKey: getTmdbApiKey(),
+      // No tmdbKey here by design (0.11.4): the key used to be exported
+      // in plaintext. Restores leave the on-device key untouched.
       tmdbEnabled: getTmdbEnabled(),
       tvdbEnabled: getTvdbEnabled(),
       display: {
-        theme: readRawLS(KEY_THEME) || "system",
         fontScale: getFontScale(),
-        accent: getAccent(),
         density: getDensity(),
         perfMode: getPerfMode(),
         channelsWidth: getChannelsWidth(),
         hubStrips: getHubStripIds(),
         uiSounds: getUiSoundsEnabled(),
-        haptics: getHapticsEnabled(),
         sidebarCollapsed: readRawLS(KEY_SIDEBAR_COLLAPSED) === "1",
       },
       language: {
@@ -272,6 +413,7 @@ export async function exportAll() {
         externalPlayerPref: getExternalPlayerPref(),
         androidNativePlayer: getAndroidNativePlayerEnabled(),
         writeNfo: getWriteNfoEnabled(),
+        ffmpegPath: getFfmpegPath(),
       },
       behavior: {
         progressRetentionDays: getProgressRetentionDays(),
@@ -280,10 +422,7 @@ export async function exportAll() {
         autoUpdate: getAutoUpdateEnabled(),
         closeToTray: getCloseToTray(),
         devMode: getDevModeEnabled(),
-      },
-      discord: {
-        clientId: getDiscordClientId(),
-        mutedPlaylistIds: discordMutedPlaylistIds,
+        livetvResumeLast: getLivetvResumeLastChannel(),
       },
       receiver: {
         deviceName: getReceiverDeviceName(),
@@ -364,6 +503,85 @@ export async function importAll(blob) {
     summary.prefsPlaylists = Object.keys(b.prefs).length
   }
 
+  // Followed series: subscriptions + notifications go back into the
+  // IndexedDB store, check flags + last-check time alongside. A bad
+  // entry is skipped, never fatal: one corrupt follow must not abort
+  // the whole restore.
+  if (b.followed && typeof b.followed === "object") {
+    try {
+      const store = getFollowedStore()
+      if (Array.isArray(b.followed.subscriptions)) {
+        for (const sub of b.followed.subscriptions) {
+          if (isPlausibleFollowedSubscription(sub)) {
+            await store.putSubscription(sub)
+            summary.appSettings++
+          }
+        }
+      }
+      if (Array.isArray(b.followed.notifications)) {
+        for (const group of b.followed.notifications) {
+          if (isPlausibleFollowedNotification(group)) {
+            await store.putNotification(group)
+            summary.appSettings++
+          }
+        }
+      }
+      if (typeof b.followed.checkEnabled === "boolean") {
+        setFollowedCheckEnabled(b.followed.checkEnabled)
+        summary.appSettings++
+      }
+      if (
+        typeof b.followed.checkIntervalHours === "number" &&
+        [3, 6, 12, 24].includes(b.followed.checkIntervalHours)
+      ) {
+        setFollowedCheckIntervalHours(b.followed.checkIntervalHours)
+        summary.appSettings++
+      }
+      if (typeof b.followed.lastCheckAt === "string" && b.followed.lastCheckAt) {
+        await store.putMeta(FOLLOWED_LAST_CHECK_META_KEY, b.followed.lastCheckAt)
+        summary.appSettings++
+      }
+    } catch (err) {
+      log.warn("[xt:backup] followed restore failed (continuing):", err)
+    }
+  }
+
+  // Profiles: verbatim `nylah_*` localStorage keys (registry, active
+  // profile, per-profile data). Old backups without them simply skip.
+  if (b.profiles && typeof b.profiles === "object") {
+    summary.appSettings += restoreProfileKeys(b.profiles.keys)
+  }
+
+  // AI Discovery config (endpoint/model/provider/share/auto/enabled).
+  // The AI key is never in a backup (OS credential store), so there is
+  // nothing to restore for it.
+  if (b.ai && typeof b.ai === "object") {
+    if (typeof b.ai.endpoint === "string") {
+      setAiEndpoint(b.ai.endpoint)
+      summary.appSettings++
+    }
+    if (typeof b.ai.model === "string") {
+      setAiModel(b.ai.model)
+      summary.appSettings++
+    }
+    if (b.ai.provider === "openai" || b.ai.provider === "other") {
+      setAiProvider(b.ai.provider)
+      summary.appSettings++
+    }
+    if (typeof b.ai.shareTaste === "boolean") {
+      setAiShareTaste(b.ai.shareTaste)
+      summary.appSettings++
+    }
+    if (typeof b.ai.autoRequests === "boolean") {
+      setAiAutoRequests(b.ai.autoRequests)
+      summary.appSettings++
+    }
+    if (typeof b.ai.enabled === "boolean") {
+      setAiEnabled(b.ai.enabled)
+      summary.appSettings++
+    }
+  }
+
   if (b.appSettings && typeof b.appSettings === "object") {
     if (typeof b.appSettings.userAgent === "string") {
       setUserAgent(b.appSettings.userAgent)
@@ -426,10 +644,9 @@ export async function importAll(blob) {
         }
       }
     }
-    if (typeof b.appSettings.tmdbKey === "string") {
-      setTmdbApiKey(b.appSettings.tmdbKey)
-      summary.appSettings++
-    }
+    // A tmdbKey in an old backup is deliberately ignored (0.11.4): keys
+    // are never exported any more, and a file must not overwrite the
+    // key already on this device.
     if (typeof b.appSettings.tmdbEnabled === "boolean") {
       setTmdbEnabled(b.appSettings.tmdbEnabled)
       summary.appSettings++
@@ -441,20 +658,12 @@ export async function importAll(blob) {
 
     const display = b.appSettings.display
     if (display && typeof display === "object") {
-      if (typeof display.theme === "string" && THEME_VALUES.includes(display.theme)) {
-        writeRawLS(KEY_THEME, display.theme)
-        summary.appSettings++
-      }
+      // Legacy theme/accent/haptics fields in old backups are ignored:
+      // theme + accent are forced by Layout since 0.11.1 and haptics has
+      // no Settings UI.
       if (typeof display.fontScale === "number" && display.fontScale >= 0.75 && display.fontScale <= 2) {
         if (display.fontScale === FONT_SCALE_DEFAULT) removeRawLS(KEY_FONT_SCALE)
         else writeRawLS(KEY_FONT_SCALE, String(display.fontScale))
-        summary.appSettings++
-      }
-      if (
-        typeof display.accent === "string" &&
-        (display.accent === ACCENT_RANDOM_ID || ACCENT_PRESETS.includes(display.accent))
-      ) {
-        setAccent(display.accent)
         summary.appSettings++
       }
       if (typeof display.density === "string" && Object.prototype.hasOwnProperty.call(DENSITY_PRESETS, display.density)) {
@@ -476,10 +685,6 @@ export async function importAll(blob) {
       }
       if (typeof display.uiSounds === "boolean") {
         setUiSoundsEnabled(display.uiSounds)
-        summary.appSettings++
-      }
-      if (typeof display.haptics === "boolean") {
-        setHapticsEnabled(display.haptics)
         summary.appSettings++
       }
       if (typeof display.sidebarCollapsed === "boolean") {
@@ -537,6 +742,13 @@ export async function importAll(blob) {
         setWriteNfoEnabled(playback.writeNfo)
         summary.appSettings++
       }
+      if (
+        typeof playback.ffmpegPath === "string" &&
+        (playback.ffmpegPath === "" || isAcceptablePath(playback.ffmpegPath))
+      ) {
+        setFfmpegPath(playback.ffmpegPath)
+        summary.appSettings++
+      }
     }
 
     const behavior = b.appSettings.behavior
@@ -571,23 +783,14 @@ export async function importAll(blob) {
         setDevModeEnabled(behavior.devMode)
         summary.appSettings++
       }
-    }
-
-    const discord = b.appSettings.discord
-    if (discord && typeof discord === "object") {
-      if (typeof discord.clientId === "string") {
-        setDiscordClientId(discord.clientId)
+      if (typeof behavior.livetvResumeLast === "boolean") {
+        setLivetvResumeLastChannel(behavior.livetvResumeLast)
         summary.appSettings++
       }
-      if (Array.isArray(discord.mutedPlaylistIds)) {
-        for (const entryId of discord.mutedPlaylistIds) {
-          if (typeof entryId === "string" && importedEntryIds.has(entryId)) {
-            setDiscordEnabledForPlaylist(entryId, false)
-            summary.appSettings++
-          }
-        }
-      }
     }
+
+    // Legacy discord block in old backups is ignored (0.11.4): no UI
+    // sets the Discord client id or per-playlist mute any more.
 
     const receiver = b.appSettings.receiver
     if (receiver && typeof receiver === "object") {

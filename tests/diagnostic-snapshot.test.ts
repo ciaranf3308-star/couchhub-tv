@@ -39,6 +39,7 @@ const BASE_INPUTS: SessionSnapshotInputs = {
     mirrors: [{ serverUrl: "http://mirror.test", username: "bob", password: "hunter2" }],
     liveContainer: "ts",
   },
+  displayDiagnostics: "Display: scheme dark · html rgb(20, 8, 12) · bg #14080c · OS dark · css 3/3 · Chrome 130.0.0.0",
 }
 
 describe("buildSessionSnapshot", () => {
@@ -112,6 +113,7 @@ describe("buildSessionSnapshot", () => {
       locale: null,
       playlistCount: null,
       activePlaylistEntry: null,
+      displayDiagnostics: null,
     }
     let snapshot: ReturnType<typeof buildSessionSnapshot> | null = null
     expect(() => {
@@ -147,5 +149,13 @@ describe("buildSessionSnapshot", () => {
     // The only xtream fields that do surface are the boolean/enum shape, not the values above.
     expect(snapshot.activePlaylistMirrorsConfigured).toBe(true)
     expect(snapshot.activePlaylistLiveContainer).toBe("m3u8")
+  })
+
+  it("carries the display-diagnostics line into the snapshot (0.11.4: diagnostics export only, not the About surface)", () => {
+    const snapshot = buildSessionSnapshot(BASE_INPUTS)
+    expect(snapshot.displayDiagnostics).toContain("Display: scheme dark")
+    expect(snapshot.displayDiagnostics).toContain("Chrome 130.0.0.0")
+    const without = buildSessionSnapshot({ ...BASE_INPUTS, displayDiagnostics: null })
+    expect(without.displayDiagnostics).toBeNull()
   })
 })

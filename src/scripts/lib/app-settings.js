@@ -149,6 +149,20 @@ export const UA_PRESETS = [
   },
 ]
 
+/**
+ * Resolve the effective User-Agent from the Settings form (0.11.4).
+ * A non-empty custom string silently overrides whatever preset is picked,
+ * so the caller must surface `overriddenByCustom` instead of pretending
+ * the preset applied. Pure: no storage access.
+ */
+export function resolveUserAgentSelection(presetId, customValue) {
+  const custom = typeof customValue === "string" ? customValue.trim() : ""
+  if (custom) return { value: custom, overriddenByCustom: true }
+  if (!presetId || presetId === "custom") return { value: "", overriddenByCustom: false }
+  const preset = UA_PRESETS.find((p) => p.id === presetId)
+  return { value: preset ? preset.value : "", overriddenByCustom: false }
+}
+
 function readLS(key, fallback = "") {
   try {
     return localStorage.getItem(key) ?? fallback
@@ -1220,6 +1234,17 @@ export function setTvdbEnabled(enabled) {
 
 export function isTmdbActive() {
   return getTmdbEnabled() && !!getTmdbApiKey()
+}
+
+/**
+ * Honest enrichment state for the Settings toggle (0.11.4): with no key,
+ * On and Off are indistinguishable to the user, so the UI must say so.
+ * "active" — toggle on and a key is saved; "on-no-key" — toggle on but
+ * no key, so nothing is enriched; "off" — toggle off.
+ */
+export function getTmdbEnrichmentState() {
+  if (!getTmdbEnabled()) return "off"
+  return getTmdbApiKey() ? "active" : "on-no-key"
 }
 
 export function isEnrichmentActive() {

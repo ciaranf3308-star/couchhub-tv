@@ -101,6 +101,16 @@ describe("getAiStatus", () => {
     expect(status.lastTestedAt).toBeNull()
   })
 
+  it("is local with a key-saved detail when AI is off but a key is saved", async () => {
+    // 0.11.4: a saved key with the toggle off is NOT "not set up" — the
+    // key is saved, AI is just off. Discover reads the same mode, so
+    // Settings and Discover agree.
+    hoisted.keyPresent.value = true
+    const status = await getAiStatus()
+    expect(status.mode).toBe("local")
+    expect(status.detail).toBe("Key saved. Turn on AI Discovery to use it.")
+  })
+
   it("is not-configured when enabled but no key is saved", async () => {
     hoisted.enabled.value = true
     const status = await getAiStatus()
@@ -178,10 +188,28 @@ describe("getAiStatus", () => {
 })
 
 describe("testAiConnection", () => {
-  it("refuses to test when AI is off", async () => {
+  it("tests against the stored key even when AI is off", async () => {
+    // 0.11.4: the toggle gates whether Discover USES AI, never whether
+    // the connection can be verified. The old code refused here and
+    // returned "not_configured", so Test connection answered "AI
+    // Discovery isn't set up yet." on a device with a saved key, a set
+    // endpoint and a picked model — the test never actually tested.
+    hoisted.keyValue.value = "sk-test"
     const result = await testAiConnection()
-    expect(result).toEqual({ ok: false, error: "not_configured" })
-    expect(hoisted.rustTest).not.toHaveBeenCalled()
+    expect(result.ok).toBe(true)
+    expect(result.modelVerified).toBe(true)
+    expect(hoisted.rustTest).toHaveBeenCalledWith(
+      "https://api.openai.com/v1",
+      "gpt-4o-mini"
+    )
+    expect(hoisted.fetchMock).toHaveBeenCalled()
+  })
+
+  it("reports no_key, never not_configured, when AI is off and no key is saved", async () => {
+    hoisted.rustTest.mockResolvedValue({ ok: false, status: 401, error: "no_key" })
+    const result = await testAiConnection()
+    expect(result).toEqual({ ok: false, error: "no_key" })
+    expect(aiStatusMessage(result.error)).toMatch(/API key is saved/)
   })
 
   it("returns ok and records the test when endpoint, key and model verify", async () => {

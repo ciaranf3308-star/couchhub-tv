@@ -664,6 +664,40 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
+            <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
+            <div id="card-resume-last-channel-livetv" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
+                <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
+                  When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-resume-last-livetv"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Resume last channel on entering Live TV"
+                  data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
+                  <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
+                  <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var resumeLastOnTv = localStorage.getItem("xt_livetv_resume_last") === "1";
+                  var resumeLastGroupTv = document.getElementById("settings-resume-last-livetv");
+                  if (resumeLastGroupTv) {
+                    var resumeLastBtnsTv = resumeLastGroupTv.querySelectorAll(".resume-last-btn");
+                    for (var rIdxTv = 0; rIdxTv < resumeLastBtnsTv.length; rIdxTv++) {
+                      var resumeLastBtnOnTv = resumeLastBtnsTv[rIdxTv].getAttribute("data-resume") === "on";
+                      resumeLastBtnsTv[rIdxTv].setAttribute("aria-pressed", resumeLastBtnOnTv === resumeLastOnTv ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
           </div>
         </div>
 
@@ -774,41 +808,6 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
-            <!-- Mono audio: downmixes embedded playback to one channel for single-earbud use -->
-            <div id="card-mono-audio" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-              <div class="settings-row__text">
-                <h3 data-i18n="settings.monoAudio.title" class="text-sm font-medium leading-snug">Mono audio</h3>
-                <p data-i18n="settings.monoAudio.helperLong" class="text-xs text-fg-3">
-                  Play all audio in both ears as a single channel - useful with one earbud. Applies to streams played by the built-in engines; some directly played files keep their original stereo.
-                </p>
-              </div>
-              <div class="settings-row__control">
-                <div
-                  id="settings-mono-audio"
-                  class="settings-seg"
-                  role="radiogroup"
-                  aria-label="Mono audio"
-                  data-i18n-attr="aria-label:settings.monoAudio.label">
-                  <button type="button" data-mono="on"  aria-pressed="false" data-i18n="settings.monoAudio.on"  class="mono-audio-btn btn">On</button>
-                  <button type="button" data-mono="off" aria-pressed="false" data-i18n="settings.monoAudio.off" class="mono-audio-btn btn">Off</button>
-                </div>
-              </div>
-              <script is:inline>
-                try {
-                  var monoAudioRaw = localStorage.getItem("xt_mono_audio");
-                  var monoAudioOn = monoAudioRaw === "1";
-                  var monoAudioGroup = document.getElementById("settings-mono-audio");
-                  if (monoAudioGroup) {
-                    var monoAudioBtns = monoAudioGroup.querySelectorAll(".mono-audio-btn");
-                    for (var mIdx = 0; mIdx < monoAudioBtns.length; mIdx++) {
-                      var monoAudioBtnOn = monoAudioBtns[mIdx].getAttribute("data-mono") === "on";
-                      monoAudioBtns[mIdx].setAttribute("aria-pressed", monoAudioBtnOn === monoAudioOn ? "true" : "false");
-                    }
-                  }
-                } catch (e) {}
-              </script>
-            </div>
-
             <!-- Captions auto: turns on subtitles at playback start when the title has them -->
             <div id="card-captions-auto" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
@@ -838,6 +837,40 @@ const navStructure: NavSection[] = [
                     for (var cIdx = 0; cIdx < captionsAutoBtns.length; cIdx++) {
                       var captionsAutoBtnOn = captionsAutoBtns[cIdx].getAttribute("data-captions") === "on";
                       captionsAutoBtns[cIdx].setAttribute("aria-pressed", captionsAutoBtnOn === captionsAutoOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
+            <div id="card-resume-last-channel" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
+                <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
+                  When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-resume-last-playback"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Resume last channel on entering Live TV"
+                  data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
+                  <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
+                  <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var resumeLastOn = localStorage.getItem("xt_livetv_resume_last") === "1";
+                  var resumeLastGroup = document.getElementById("settings-resume-last-playback");
+                  if (resumeLastGroup) {
+                    var resumeLastBtns = resumeLastGroup.querySelectorAll(".resume-last-btn");
+                    for (var rIdx = 0; rIdx < resumeLastBtns.length; rIdx++) {
+                      var resumeLastBtnOn = resumeLastBtns[rIdx].getAttribute("data-resume") === "on";
+                      resumeLastBtns[rIdx].setAttribute("aria-pressed", resumeLastBtnOn === resumeLastOn ? "true" : "false");
                     }
                   }
                 } catch (e) {}
@@ -875,9 +908,10 @@ const navStructure: NavSection[] = [
             <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
                 <h3 data-i18n="settings.followed.scheduledLabel" class="text-sm font-medium leading-snug">Scheduled background checks</h3>
-                <p data-i18n="settings.followed.scheduledHint" class="text-xs text-fg-3">
+                <p id="settings-followed-scheduled-hint" data-i18n="settings.followed.scheduledHint" class="text-xs text-fg-3">
                   When on, the app checks every few hours even while closed, using a Windows Scheduled Task. Turning it off removes the task; in-app checks still work.
                 </p>
+                <p id="settings-followed-task-error" aria-live="polite" class="text-xs text-bad hidden empty:hidden"></p>
               </div>
               <div class="settings-row__control">
                 <div
@@ -931,7 +965,7 @@ const navStructure: NavSection[] = [
               </div>
             </div>
 
-            <p data-i18n="settings.followed.taskNote" class="text-xs text-fg-3">
+            <p id="settings-followed-task-note" data-i18n="settings.followed.taskNote" class="text-xs text-fg-3">
               Scheduled task: “NylahBox Studios Followed Series Check”. Uninstalling the app does not remove the task automatically — delete it in Task Scheduler, or turn scheduled checks off before uninstalling.
             </p>
           </div>
@@ -993,6 +1027,10 @@ const navStructure: NavSection[] = [
                     <span data-i18n="common.save">Save</span>
                   </button>
                 </div>
+                <span
+                  id="ua-override-note"
+                  aria-live="polite"
+                  class="text-xs text-warn empty:hidden"></span>
                 <span
                   id="ua-msg"
                   aria-live="polite"
@@ -1332,6 +1370,7 @@ const navStructure: NavSection[] = [
                 <p data-i18n="settings.tmdb.privacy" class="text-xs text-fg-3">
                   Optional: adds trailers, cast, and similar titles once you add a TMDB key below. Titles you open are sent to TMDB for matching.
                 </p>
+                <p id="settings-tmdb-state" aria-live="polite" class="text-xs text-fg-3"></p>
               </div>
               <div class="settings-row__control">
                 <div
@@ -1384,15 +1423,6 @@ const navStructure: NavSection[] = [
                     spellcheck="false"
                     class="field-input font-mono flex-1 min-w-0"
                   />
-                  <button
-                    id="settings-tmdb-reveal"
-                    type="button"
-                    class="btn flex-none w-11 justify-center p-0"
-                    aria-label="Show key"
-                    data-i18n-attr="aria-label:settings.tmdb.reveal">
-                    <IconEye aria-hidden="true" class="btn-icon" data-tmdb-reveal-icon="show" />
-                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-tmdb-reveal-icon="hide" />
-                  </button>
                   <button id="settings-tmdb-test" type="button" class="btn flex-none w-auto justify-center">
                     <span data-i18n="settings.tmdb.test">Test key</span>
                   </button>
@@ -1419,7 +1449,7 @@ const navStructure: NavSection[] = [
             <h3 class="text-base font-semibold">AI &amp; Recommendations</h3>
           </div>
           <p class="settings-surface__helper text-xs text-fg-3">
-            Optional AI-powered ranking for Discover. Your search text and a short list of candidate titles go to your chosen AI provider only when you ask a question. Your watch history, IPTV credentials and stream links are never sent unless you switch sharing on below. AI use is billed separately by your provider.
+            Only your question and a short list of candidate titles go to your provider — never your watch history, credentials or stream links, unless you switch sharing on below. Billed separately by your provider; a ChatGPT subscription does not cover API use.
           </p>
           <div class="settings-rows">
 
@@ -1442,7 +1472,7 @@ const navStructure: NavSection[] = [
               <div class="settings-row__text">
                 <h3 data-i18n="settings.ai.enable" class="text-sm font-medium leading-snug">Enable AI Discovery</h3>
                 <p data-i18n="settings.ai.enableHelper" class="text-xs text-fg-3">
-                  Off by default. Discover works fully without AI, using the local engine.
+                  Discover works fully without AI, using the local engine.
                 </p>
               </div>
               <div class="settings-row__control">
@@ -1521,25 +1551,31 @@ const navStructure: NavSection[] = [
                 </p>
               </div>
               <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
-                <select
-                  id="settings-ai-model"
-                  class="field-input flex-1 min-w-0"
-                  aria-label="AI model">
-                  <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
-                  <option value="gpt-4o">gpt-4o — higher quality</option>
-                  <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
-                  <option value="gpt-4.1">gpt-4.1 — higher quality</option>
-                  <option value="o4-mini">o4-mini — reasoning, low cost</option>
-                  <option value="custom">Custom…</option>
-                </select>
-                <input
-                  id="settings-ai-model-custom"
-                  type="text"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="Custom model name"
-                  class="field-input font-mono flex-1 min-w-0 hidden"
-                />
+                <!-- One control: a model select with a Custom entry. Picking
+                     Custom reveals a single inline text field inside this
+                     same bordered group — never a second, separate row. -->
+                <div id="settings-ai-model-control" class="flex flex-col gap-1 rounded-xl border border-line/60 bg-surface-2/40 p-2">
+                  <select
+                    id="settings-ai-model"
+                    class="field-input flex-1 min-w-0"
+                    aria-label="AI model">
+                    <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
+                    <option value="gpt-4o">gpt-4o — higher quality</option>
+                    <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
+                    <option value="gpt-4.1">gpt-4.1 — higher quality</option>
+                    <option value="o4-mini">o4-mini — reasoning, low cost</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <label id="settings-ai-model-custom-label" for="settings-ai-model-custom" class="text-2xs text-fg-3 hidden">Custom model name</label>
+                  <input
+                    id="settings-ai-model-custom"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Custom model name"
+                    class="field-input font-mono flex-1 min-w-0 hidden"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1567,33 +1603,24 @@ const navStructure: NavSection[] = [
                     spellcheck="false"
                     class="field-input font-mono flex-1 min-w-0"
                   />
-                  <button
-                    id="settings-ai-reveal"
-                    type="button"
-                    class="btn flex-none w-11 justify-center p-0"
-                    aria-label="Show key"
-                    data-i18n-attr="aria-label:settings.ai.reveal">
-                    <IconEye aria-hidden="true" class="btn-icon" data-ai-reveal-icon="show" />
-                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-ai-reveal-icon="hide" />
-                  </button>
                   <button id="settings-ai-clear" type="button" class="btn flex-none w-auto justify-center">
                     <span data-i18n="settings.ai.clearKey">Clear key</span>
                   </button>
                 </div>
+                <!-- Key-saved state, on the field itself (0.11.4): the
+                     field is empty by design (the key is never read back
+                     from the credential store), so without this the save
+                     reads as "the key disappeared". The badge + the
+                     placeholder below say the key is saved. There is no
+                     reveal button here on purpose: a secret must never
+                     render in clear text on a living-room screen. -->
+                <span
+                  id="settings-ai-key-saved-badge"
+                  class="hidden items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft/40 px-2.5 py-1 text-xs font-medium text-accent w-fit">✓ <span data-i18n="settings.ai.keySavedBadge">Key saved</span></span>
                 <span
                   id="settings-ai-key-status"
                   aria-live="polite"
                   class="text-xs text-fg-3"></span>
-              </div>
-            </div>
-
-            <!-- Cost + privacy (AI05) -->
-            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-              <div class="settings-row__text">
-                <h3 class="text-sm font-medium leading-snug">Cost</h3>
-                <p class="text-xs text-fg-3">
-                  AI questions are billed separately by your provider, per question. A ChatGPT subscription does not include API usage — API calls are charged on top, even if you already pay for ChatGPT.
-                </p>
               </div>
             </div>
 
@@ -1632,16 +1659,6 @@ const navStructure: NavSection[] = [
                   <button type="button" data-auto="manual" aria-pressed="false" class="ai-auto-btn btn">Manual</button>
                   <button type="button" data-auto="auto" aria-pressed="false" class="ai-auto-btn btn">Automatic</button>
                 </div>
-              </div>
-            </div>
-
-            <!-- Setup steps (AI02) -->
-            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-              <div class="settings-row__text">
-                <h3 class="text-sm font-medium leading-snug">Set up in four steps</h3>
-                <p class="text-xs text-fg-3">
-                  1. Create an API key at your provider (link above) and make sure billing is enabled there. 2. Paste the key here — it is saved in the credential store, never in a file. 3. Pick a model. 4. Press Test connection below. Discover keeps working locally until then.
-                </p>
               </div>
             </div>
 
@@ -2091,10 +2108,6 @@ const navStructure: NavSection[] = [
                   </div>
                 </dl>
 
-                <p
-                  id="update-display-diag"
-                  class="text-xs text-fg-3 tabular-nums break-words">Display: checking…</p>
-
                 <div
                   id="update-progress-wrap"
                   class="hidden flex-col gap-1.5">
@@ -2419,7 +2432,7 @@ const navStructure: NavSection[] = [
           <div class="px-5 sm:px-6 pb-5">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <a
-                href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+                href="https://github.com/ciaranf3308-star/couchhub-tv/issues/new/choose"
                 target="_blank"
                 rel="noopener noreferrer"
                 data-external
@@ -2428,7 +2441,7 @@ const navStructure: NavSection[] = [
                 <span data-i18n="settings.help.reportIssue">Report a bug</span>
               </a>
               <a
-                href="https://github.com/infinitel8p/Extreme-InfiniTV/discussions/new/choose"
+                href="https://github.com/ciaranf3308-star/couchhub-tv/discussions/new/choose"
                 target="_blank"
                 rel="noopener noreferrer"
                 data-external
@@ -2485,7 +2498,7 @@ const navStructure: NavSection[] = [
           <h3 data-i18n="settings.danger.heading" class="text-base font-semibold text-bad">Reset everything</h3>
         </div>
         <p data-i18n-html="settings.danger.helperLong" class="text-sm text-fg-2">
-          Wipes <span class="text-fg font-medium">all</span> app data: playlists, cached lists, favorites, recents, and locally stored EPG references. Next launch starts from a clean slate.
+          Wipes <span class="text-fg font-medium">all</span> app data: playlists, favorites, recents, watched progress, profiles, app settings and cached lists. A snapshot is saved first — Restore last backup below brings it back, except the TMDb key and cached lists.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
           <button id="settings-reset-all" type="button" class="btn-danger justify-start sm:justify-center">
@@ -2498,7 +2511,7 @@ const navStructure: NavSection[] = [
           </button>
         </div>
         <p id="settings-restore-last-helper" data-i18n="settings.danger.restoreLastHelper" class="text-2xs text-fg-3" hidden>
-          Restores the snapshot saved automatically at your last export or right before your last reset.
+          Restores the snapshot saved automatically at your last export or right before your last reset: playlists, favorites, recents, progress, followed series, profiles and app settings. It does not restore the TMDb key or cached lists.
         </p>
         <span
           id="settings-reset-msg"
@@ -2531,8 +2544,7 @@ const navStructure: NavSection[] = [
             Reset everything?
           </h2>
           <p id="settings-reset-desc" data-i18n-html="settings.danger.dialogBody" class="text-sm text-fg-2">
-            This wipes <span class="text-fg font-medium">all</span> playlists, favorites,
-            recents, and cached lists. This can't be undone.
+            This wipes <span class="text-fg font-medium">all</span> playlists, favorites, recents, watched progress, profiles, app settings and cached lists. A snapshot is saved just before the reset: Restore last backup brings back everything above except the TMDb key (never stored in a backup — re-enter it) and cached lists (they rebuild on the next refresh). Without that snapshot, the wipe is permanent.
           </p>
         </div>
       </div>
@@ -2638,6 +2650,7 @@ const navStructure: NavSection[] = [
     import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
     import {
       UA_PRESETS,
+      resolveUserAgentSelection,
       getUserAgent,
       setUserAgent,
       getDownloadDir,
@@ -2650,10 +2663,10 @@ const navStructure: NavSection[] = [
       setPerfMode,
       getUiSoundsEnabled,
       setUiSoundsEnabled,
-      getMonoAudioEnabled,
-      setMonoAudioEnabled,
       getCaptionsAutoEnabled,
       setCaptionsAutoEnabled,
+      getLivetvResumeLastChannel,
+      setLivetvResumeLastChannel,
       getDensity,
       setDensity,
       getProgressRetentionDays,
@@ -2692,6 +2705,7 @@ const navStructure: NavSection[] = [
       setTmdbApiKey,
       getTmdbEnabled,
       setTmdbEnabled,
+      getTmdbEnrichmentState,
       getTvdbEnabled,
       setTvdbEnabled,
       getAiEndpoint,
@@ -2714,6 +2728,7 @@ const navStructure: NavSection[] = [
       setAiAutoRequests,
       getAiProvider,
       setAiProvider,
+      resolveAiModelControl,
       AI_MODE_LABELS,
       OPENAI_ENDPOINT,
       OPENAI_KEYS_URL,
@@ -3813,24 +3828,33 @@ const navStructure: NavSection[] = [
     initRenderingCard()
 
     // ---------------------------------------------------------------------
-    // Mono audio
+    // Resume last channel on entering Live TV (0.11.4). One store
+    // (xt_livetv_resume_last), two copies of the control — the Live TV
+    // surface and the Playback surface — kept in sync here.
     // ---------------------------------------------------------------------
-    const monoAudioGroup = document.getElementById("settings-mono-audio")
-    function syncMonoAudioButtons() {
-      const current = getMonoAudioEnabled()
-      for (const btn of monoAudioGroup?.querySelectorAll(".mono-audio-btn") || []) {
-        const isOn = btn.dataset.mono === "on"
-        btn.setAttribute("aria-pressed", String(isOn === current))
+    const resumeLastGroups = [
+      document.getElementById("settings-resume-last-livetv"),
+      document.getElementById("settings-resume-last-playback"),
+    ]
+    function syncResumeLastButtons() {
+      const current = getLivetvResumeLastChannel()
+      for (const group of resumeLastGroups) {
+        for (const btn of group?.querySelectorAll(".resume-last-btn") || []) {
+          const isOn = btn.dataset.resume === "on"
+          btn.setAttribute("aria-pressed", String(isOn === current))
+        }
       }
     }
-    monoAudioGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".mono-audio-btn")
-      if (!btn) return
-      setMonoAudioEnabled(btn.dataset.mono === "on")
-      syncMonoAudioButtons()
-    })
-    syncMonoAudioButtons()
+    for (const group of resumeLastGroups) {
+      group?.addEventListener("click", (event) => {
+        const target = /** @type {HTMLElement} */ (event.target)
+        const btn = target.closest(".resume-last-btn")
+        if (!btn) return
+        setLivetvResumeLastChannel(btn.dataset.resume === "on")
+        syncResumeLastButtons()
+      })
+    }
+    syncResumeLastButtons()
 
     // ---------------------------------------------------------------------
     // Captions on by default
@@ -4210,14 +4234,49 @@ const navStructure: NavSection[] = [
       }
     }
 
+    // A non-empty custom string overrides the preset — the override must
+    // be visible, never silent (0.11.4). The note is persistent (not a
+    // fading flashMsg) because it describes the live effective value.
+    const uaOverrideNoteEl = document.getElementById("ua-override-note")
+    function syncUaOverrideNote() {
+      if (!uaOverrideNoteEl) return
+      const { overriddenByCustom } = resolveUserAgentSelection(
+        uaPresetEl?.value ?? "",
+        uaCustomEl?.value ?? ""
+      )
+      uaOverrideNoteEl.textContent = overriddenByCustom
+        ? "Custom override is active — it overrides the preset above. Clear it to use the preset."
+        : ""
+    }
+
     function readUaFromForm() {
       if (!uaPresetEl) return ""
-      const custom = (uaCustomEl?.value || "").trim()
-      if (custom) return custom
-      if (uaPresetEl.value === "custom") return ""
-      const preset = UA_PRESETS.find((p) => p.id === uaPresetEl.value)
-      return preset ? preset.value : ""
+      return resolveUserAgentSelection(uaPresetEl.value, uaCustomEl?.value ?? "")
+        .value
     }
+
+    // Picking a preset applies it on selection (0.11.4) — no Save tap
+    // needed. With a custom override typed, the preset is recorded as the
+    // fallback but the override stays effective and the note says so.
+    uaPresetEl?.addEventListener("change", () => {
+      const { value, overriddenByCustom } = resolveUserAgentSelection(
+        uaPresetEl.value,
+        uaCustomEl?.value ?? ""
+      )
+      if (!overriddenByCustom) {
+        setUserAgent(value)
+        flashMsg(
+          uaMsgEl,
+          isTauri
+            ? "Saved. Reload pages to apply."
+            : "Saved. Active in the desktop build only."
+        )
+      }
+      syncUaOverrideNote()
+    })
+
+    uaCustomEl?.addEventListener("input", syncUaOverrideNote)
+    syncUaOverrideNote()
 
     uaSaveBtn?.addEventListener("click", () => {
       setUserAgent(readUaFromForm())
@@ -4228,6 +4287,7 @@ const navStructure: NavSection[] = [
           : "Saved. Active in the desktop build only."
       )
       flashSuccess(uaSaveBtn)
+      syncUaOverrideNote()
     })
 
     // ---------------------------------------------------------------------
@@ -4662,15 +4722,16 @@ const navStructure: NavSection[] = [
     // could not be reproduced from the bundle: the built Settings page
     // renders burgundy headless under every combination tried (default,
     // OS light scheme, couch.css blocked, forced light + violet accent),
-    // so the packaged build's LIVE values are surfaced here for a
+    // so the packaged build's LIVE values are captured here for a
     // one-photo check on the PC — no devtools needed. Read it as:
     // computed colour scheme, the html background actually painted, the
     // --color-bg token as specified (its hue decides burgundy vs
     // purple), the OS scheme, how many of the 3 linked stylesheets
     // loaded, and the WebView Chrome version.
+    // 0.11.4: the raw line no longer sits on the About surface — it goes
+    // into the diagnostics export only (see diagnostic-snapshot.ts,
+    // `displayDiagnostics`, surfaced via Export diagnostics).
     function fillDisplayDiagnostics() {
-      const el = document.getElementById("update-display-diag")
-      if (!el) return
       try {
         const root = document.documentElement
         const cs = getComputedStyle(root)
@@ -4688,10 +4749,10 @@ const navStructure: NavSection[] = [
         const osScheme = window.matchMedia("(prefers-color-scheme: dark)").matches
           ? "dark"
           : "light"
-        el.textContent =
+        window.__xtDisplayDiagnostics =
           `Display: scheme ${cs.colorScheme} · html ${cs.backgroundColor} · bg ${cs.getPropertyValue("--color-bg").trim() || "?"} · OS ${osScheme} · css ${loaded}/${linkSheets.length} · Chrome ${chrome}`
       } catch {
-        el.textContent = "Display: unavailable"
+        window.__xtDisplayDiagnostics = "Display: unavailable"
       }
     }
     fillDisplayDiagnostics()
@@ -5071,13 +5132,24 @@ const navStructure: NavSection[] = [
     const tmdbKeyInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-tmdb-key")
     )
-    const tmdbRevealBtn = /** @type {HTMLButtonElement|null} */ (
-      document.getElementById("settings-tmdb-reveal")
-    )
     const tmdbTestBtn = /** @type {HTMLButtonElement|null} */ (
       document.getElementById("settings-tmdb-test")
     )
     const tmdbMsgEl = document.getElementById("settings-tmdb-msg")
+    const tmdbStateEl = document.getElementById("settings-tmdb-state")
+
+    /** Honest toggle state (0.11.4): with no key, On and Off are
+     * indistinguishable unless the line below says the key is missing. */
+    function syncTmdbState() {
+      if (!tmdbStateEl) return
+      const state = getTmdbEnrichmentState()
+      tmdbStateEl.textContent =
+        state === "active"
+          ? "Enrichment active."
+          : state === "on-no-key"
+            ? "On, no key — enrichment inactive. Add a key below."
+            : "Off — enrichment disabled."
+    }
 
     function syncTmdbEnabled() {
       if (!tmdbEnabledGroup) return
@@ -5086,6 +5158,7 @@ const navStructure: NavSection[] = [
         const isOn = btn.getAttribute("data-tmdb") === "on"
         btn.setAttribute("aria-pressed", isOn === enabled ? "true" : "false")
       }
+      syncTmdbState()
     }
     syncTmdbEnabled()
 
@@ -5134,9 +5207,11 @@ const navStructure: NavSection[] = [
       }
       tmdbKeyInput.addEventListener("input", () => {
         syncTmdbTestDisabled()
+        syncTmdbState()
         if (tmdbSaveTimer) window.clearTimeout(tmdbSaveTimer)
         tmdbSaveTimer = window.setTimeout(() => {
           saveTmdbKey()
+          syncTmdbState()
         }, 350)
       })
       tmdbKeyInput.addEventListener("blur", () => {
@@ -5145,18 +5220,10 @@ const navStructure: NavSection[] = [
           tmdbSaveTimer = null
         }
         if (tmdbKeyInput.value !== getTmdbApiKey()) saveTmdbKey()
+        syncTmdbState()
       })
       syncTmdbTestDisabled()
     }
-
-    tmdbRevealBtn?.addEventListener("click", () => {
-      if (!tmdbKeyInput) return
-      const revealed = tmdbKeyInput.type === "text"
-      tmdbKeyInput.type = revealed ? "password" : "text"
-      tmdbRevealBtn.setAttribute("aria-label", t(revealed ? "settings.tmdb.reveal" : "settings.tmdb.conceal"))
-      tmdbRevealBtn.querySelector('[data-tmdb-reveal-icon="show"]')?.classList.toggle("hidden", !revealed)
-      tmdbRevealBtn.querySelector('[data-tmdb-reveal-icon="hide"]')?.classList.toggle("hidden", revealed)
-    })
 
     tmdbTestBtn?.addEventListener("click", async () => {
       // Save the typed key first (mirrors the AI Test button): a key typed
@@ -5204,9 +5271,6 @@ const navStructure: NavSection[] = [
     const aiKeyInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-ai-key")
     )
-    const aiRevealBtn = /** @type {HTMLButtonElement|null} */ (
-      document.getElementById("settings-ai-reveal")
-    )
     const aiClearBtn = /** @type {HTMLButtonElement|null} */ (
       document.getElementById("settings-ai-clear")
     )
@@ -5214,6 +5278,7 @@ const navStructure: NavSection[] = [
       document.getElementById("settings-ai-test")
     )
     const aiKeyStatusEl = document.getElementById("settings-ai-key-status")
+    const aiKeySavedBadgeEl = document.getElementById("settings-ai-key-saved-badge")
     const aiMsgEl = document.getElementById("settings-ai-msg")
     const aiTestDetailEl = document.getElementById("settings-ai-test-detail")
     const aiStatusEl = document.getElementById("settings-ai-status")
@@ -5327,6 +5392,18 @@ const navStructure: NavSection[] = [
       const has = await hasAiKey()
       aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
       if (aiClearBtn) aiClearBtn.disabled = !has
+      // Saved state on the field itself (0.11.4): the input stays empty
+      // by design (the key is never read back), so the placeholder +
+      // badge say the key is saved — an empty box must never read as
+      // "nothing saved". There is no reveal anywhere on this card: the
+      // key is never shown back in full.
+      if (aiKeyInput) {
+        aiKeyInput.placeholder = has ? t("settings.ai.keySavedPlaceholder") : ""
+      }
+      if (aiKeySavedBadgeEl) {
+        aiKeySavedBadgeEl.classList.toggle("hidden", !has)
+        aiKeySavedBadgeEl.classList.toggle("inline-flex", has)
+      }
     }
     syncAiKeyStatus()
 
@@ -5348,22 +5425,18 @@ const navStructure: NavSection[] = [
     }
     bindAiTextInput(aiEndpointInput, getAiEndpoint, setAiEndpoint)
 
-    // Model: a select of supported models, with a free-text box for
-    // anything else (other providers, newer models).
+    // Model: one control — a select of supported models, with a free-text
+    // box for anything else (other providers, newer models). The text
+    // field + its label live inside the same bordered group as the
+    // select, so it reads as one control, never two stacked rows.
+    const aiModelCustomLabel = document.getElementById("settings-ai-model-custom-label")
     function syncAiModel() {
       if (!aiModelSelect) return
-      const current = getAiModel()
-      const known = [...aiModelSelect.options].some((opt) => opt.value === current)
-      if (known && current) {
-        aiModelSelect.value = current
-        aiModelCustomInput?.classList.add("hidden")
-      } else {
-        aiModelSelect.value = "custom"
-        if (aiModelCustomInput) {
-          aiModelCustomInput.classList.remove("hidden")
-          aiModelCustomInput.value = current
-        }
-      }
+      const { selectValue, showCustom, customValue } = resolveAiModelControl(getAiModel())
+      aiModelSelect.value = selectValue
+      aiModelCustomInput?.classList.toggle("hidden", !showCustom)
+      aiModelCustomLabel?.classList.toggle("hidden", !showCustom)
+      if (showCustom && aiModelCustomInput) aiModelCustomInput.value = customValue
     }
     syncAiModel()
 
@@ -5371,25 +5444,18 @@ const navStructure: NavSection[] = [
       const value = aiModelSelect.value
       if (value === "custom") {
         aiModelCustomInput?.classList.remove("hidden")
+        aiModelCustomLabel?.classList.remove("hidden")
         aiModelCustomInput?.focus()
         return
       }
       aiModelCustomInput?.classList.add("hidden")
+      aiModelCustomLabel?.classList.add("hidden")
       setAiModel(value)
       void syncAiStatus()
     })
     bindAiTextInput(aiModelCustomInput, getAiModel, (value) => {
       setAiModel(value)
       void syncAiStatus()
-    })
-
-    aiRevealBtn?.addEventListener("click", () => {
-      if (!aiKeyInput) return
-      const revealed = aiKeyInput.type === "text"
-      aiKeyInput.type = revealed ? "password" : "text"
-      aiRevealBtn.setAttribute("aria-label", t(revealed ? "settings.ai.reveal" : "settings.ai.conceal"))
-      aiRevealBtn.querySelector('[data-ai-reveal-icon="show"]')?.classList.toggle("hidden", !revealed)
-      aiRevealBtn.querySelector('[data-ai-reveal-icon="hide"]')?.classList.toggle("hidden", revealed)
     })
 
     // Save on blur (and on Test): the field is cleared on success so the
@@ -5448,8 +5514,10 @@ const navStructure: NavSection[] = [
           flashAiSaveFailed(error)
           return
         }
-        // Real verification (C4): endpoint + key + model, via the
-        // status model. A stored key alone is not proof AI works.
+        // Real verification (C4): endpoint + stored key + model, via the
+        // status model. A stored key alone is not proof AI works. The
+        // test runs against the STORED key whatever the Enable toggle
+        // says (0.11.4) — the toggle gates use, never verification.
         const result = await testAiConnection()
         await syncAiStatus()
         if (result.ok) {
@@ -5460,6 +5528,23 @@ const navStructure: NavSection[] = [
               : "Endpoint and key verified."
           }
           flashSuccess(aiTestBtn)
+        } else if (result.error === "not_configured") {
+          // Defensive: testAiConnection no longer returns this, but if
+          // it ever did, "isn't set up yet" must name what is missing —
+          // never fire while a key is saved without saying the toggle
+          // is the missing piece.
+          const missing = []
+          if (!getAiEnabled()) missing.push("turn on AI Discovery")
+          if (!(await hasAiKey().catch(() => false))) missing.push("save an API key")
+          if (!getAiEndpoint().trim()) missing.push("set an endpoint")
+          if (!getAiModel().trim()) missing.push("pick a model")
+          flashMsg(
+            aiMsgEl,
+            missing.length
+              ? `Not set up yet: ${missing.join(", ")}.`
+              : "AI Discovery isn't set up yet."
+          )
+          if (aiTestDetailEl) aiTestDetailEl.textContent = ""
         } else {
           flashMsg(aiMsgEl, aiStatusMessage(result.error))
           if (aiTestDetailEl) aiTestDetailEl.textContent = ""

@@ -762,10 +762,17 @@ function aiFallbackReason(error: unknown): string {
 export async function rankDiscover(
   query: string,
   candidates: DiscoverCandidate[],
-  taste: TasteModel
+  taste: TasteModel,
+  opts: { forceAi?: boolean } = {}
 ): Promise<DiscoverSearchResult> {
   const ranker = getAIRanker()
-  if (ranker && isNaturalLanguageQuery(query)) {
+  // 0.11.4: an explicit "Ask AI" tap is the user consenting to spend one
+  // request — it must reach the ranker even for a short keyword query
+  // ("COMEDY" is one word with no natural-language hint, so the gate
+  // below used to veto it silently and the rail came back "Local" with
+  // no reason given). The gate stays for non-explicit paths; forceAi
+  // only comes from an explicit ask.
+  if (ranker && (opts.forceAi || isNaturalLanguageQuery(query))) {
     try {
       const summary = summarizeTaste(taste) as TasteSummary
       const ranked = await ranker.rank(query, candidates, summary)

@@ -153,8 +153,8 @@ const BASELINE_SETTINGS_IDS: string[] = [
   "card-backup", "card-behavior", "card-captions-auto", "card-casting", "card-categories", "card-channel-overrides",
   "card-content-language", "card-display", "card-docs", "card-favorites", "card-feedback", "card-followed",
   "card-hevc", "card-hub-strips", "card-lang-grouping", "card-language", "card-livetv",
-  "card-livetv-layout", "card-mono-audio", "card-net-log", "card-network", "card-perf-mode", "card-play-on-tv",
-  "card-progress-retention", "card-rendering", "card-storage", "card-tmdb", "card-tv-overscan", "card-tv-receiver",
+  "card-livetv-layout", "card-net-log", "card-network", "card-perf-mode", "card-play-on-tv",
+  "card-progress-retention", "card-rendering", "card-resume-last-channel", "card-resume-last-channel-livetv", "card-storage", "card-tmdb", "card-tv-overscan", "card-tv-receiver",
   "card-ui-sounds", "card-write-nfo", "changelog-body", "changelog-section", "changelog-status", "content-lang-select",
   "download-dir-clear",
   "download-dir-input", "download-dir-pick", "downloads-availability", "downloads-folder-section", "downloads-scan", "downloads-scan-msg",
@@ -169,21 +169,22 @@ const BASELINE_SETTINGS_IDS: string[] = [
   "receiver-summary-helper", "receiver-summary-status", "rendering-env-override-note", "rendering-hint", "rendering-restart", "rendering-restart-note",
   "rendering-select", "rendering-status", "settings-about", "settings-add-from-website",
   "settings-ai-clear", "settings-ai-enabled", "settings-ai-endpoint", "settings-ai-key", "settings-ai-key-status", "settings-ai-model",
-  "settings-ai-msg", "settings-ai-reveal", "settings-ai-test", "settings-appearance", "settings-audio-transcode-auto", "settings-backup-msg",
+  "settings-ai-model-control", "settings-ai-model-custom", "settings-ai-model-custom-label", "settings-ai-key-saved-badge",
+  "settings-ai-msg", "settings-ai-test", "settings-appearance", "settings-audio-transcode-auto", "settings-backup-msg",
   "settings-cache-msg", "settings-cache-newest", "settings-cache-size", "settings-captions-auto", "settings-channel-width", "settings-clear-cache",
   "settings-clear-history", "settings-danger", "settings-data", "settings-density", "settings-dev-mode", "settings-dev-mode-helper",
   "settings-download-concurrency", "settings-download-concurrency-cap", "settings-export", "settings-export-diagnostics", "settings-export-diagnostics-msg",
-  "settings-followed", "settings-followed-check-now", "settings-followed-interval", "settings-followed-scheduled", "settings-followed-status", "settings-font-scale",
+  "settings-followed", "settings-followed-check-now", "settings-followed-interval", "settings-followed-scheduled", "settings-followed-scheduled-hint", "settings-followed-status", "settings-followed-task-error", "settings-followed-task-note", "settings-font-scale",
   "settings-help", "settings-hevc-install", "settings-hevc-status", "settings-import", "settings-import-cancel",
   "settings-import-confirm", "settings-import-desc", "settings-import-dialog", "settings-import-input", "settings-import-title", "settings-library",
-  "settings-mono-audio", "settings-network", "settings-network-timeout", "settings-network-timeout-helper", "settings-new-custom-playlist", "settings-new-custom-playlist-dialog",
+  "settings-network", "settings-network-timeout", "settings-network-timeout-helper", "settings-new-custom-playlist", "settings-new-custom-playlist-dialog",
   "settings-new-custom-playlist-name", "settings-new-custom-playlist-title", "settings-open-appdata", "settings-open-downloads", "settings-open-logs", "settings-perf-mode",
   "settings-playlists", "settings-playlists-list", "settings-profile", "settings-progress-retention", "settings-receiver-screensaver-hint", "settings-receiver-screensaver-open",
   "settings-refresh-active", "settings-reset-all", "settings-reset-cancel", "settings-reset-confirm", "settings-reset-desc", "settings-reset-dialog",
-  "settings-reset-msg", "settings-reset-title", "settings-restore-last", "settings-restore-last-helper", "settings-search-clear", "settings-search-empty",
+  "settings-reset-msg", "settings-reset-title", "settings-restore-last", "settings-restore-last-helper", "settings-resume-last-livetv", "settings-resume-last-playback", "settings-search-clear", "settings-search-empty",
   "settings-search-input", "settings-share-logs", "settings-tmdb-enabled", "settings-tmdb-key",
-  "settings-tmdb-msg", "settings-tmdb-reveal", "settings-tmdb-test", "settings-tvdb-enabled", "settings-ui-sounds", "settings-watching",
-  "settings-write-nfo", "ua-custom", "ua-msg", "ua-preset", "ua-save", "update-channel-hint",
+  "settings-tmdb-msg", "settings-tmdb-state", "settings-tmdb-test", "settings-tvdb-enabled", "settings-ui-sounds", "settings-watching",
+  "settings-write-nfo", "ua-custom", "ua-msg", "ua-override-note", "ua-preset", "ua-save", "update-channel-hint",
   "update-channel-row", "update-channel-select", "update-check", "update-current", "update-degraded", "update-get",
   "update-get-label", "update-github", "update-install", "update-install-label", "update-latest", "update-manual-only",
   "update-msg", "update-notes", "update-pill", "update-progress-bar", "update-progress-text", "update-progress-track",
@@ -213,6 +214,11 @@ describe("couch-settings: preservation", () => {
     // xt_epg_open_default key was never read), the TV-irrelevant haptics
     // row, the Discord Rich Presence section, and the action-less support
     // card. None of these may come back as a control on the Settings page.
+    // 0.11.4: the Mono audio row joins them — it lives in the player
+    // "More" menu, where it belongs. The AI + TMDb key reveal buttons
+    // join them too — video evidence showed a pasted key rendering in
+    // clear text on the projector, and a secret must never render in
+    // clear text on a living-room screen.
     const removedIds = [
       "settings-theme",
       "settings-accent",
@@ -224,6 +230,10 @@ describe("couch-settings: preservation", () => {
       "discord-client-id",
       "discord-playlists",
       "settings-support",
+      "card-mono-audio",
+      "settings-mono-audio",
+      "settings-ai-reveal",
+      "settings-tmdb-reveal",
     ];
     for (const id of removedIds) {
       expect(src, `culled control ${id} is back`).not.toContain(`id="${id}"`);

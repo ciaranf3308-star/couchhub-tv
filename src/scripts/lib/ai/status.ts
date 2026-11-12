@@ -83,6 +83,24 @@ export const SUPPORTED_MODELS: ReadonlyArray<{ id: string; label: string }> = [
 export const OPENAI_ENDPOINT = "https://api.openai.com/v1"
 export const OPENAI_KEYS_URL = "https://platform.openai.com/api-keys"
 
+/**
+ * Resolve the Model control's state from the stored model (0.11.4): one
+ * select with a Custom entry — selecting Custom reveals a single inline
+ * text field that is visibly part of the same control. Pure helper so the
+ * select/custom pairing is testable without a DOM.
+ */
+export function resolveAiModelControl(current: string): {
+  selectValue: string
+  showCustom: boolean
+  customValue: string
+} {
+  const model = typeof current === "string" ? current.trim() : ""
+  if (model && SUPPORTED_MODELS.some((entry) => entry.id === model)) {
+    return { selectValue: model, showCustom: false, customValue: "" }
+  }
+  return { selectValue: "custom", showCustom: true, customValue: model }
+}
+
 interface LastTestRecord {
   ok: boolean
   at: number
@@ -227,9 +245,26 @@ export async function getAiStatus(): Promise<AiStatus> {
   const endpoint = getAiEndpoint().trim()
   const model = getAiModel().trim()
   if (!enabled) {
+    // 0.11.4: a saved key with the toggle off is NOT "not set up" — the
+    // key is saved, AI is just off. Say so, and use the "local" mode
+    // (Discover really is using local recommendations; Ask AI stays
+    // unavailable because aiConfigured only counts connected/unavailable).
+    let keyPresent = false
+    try {
+      keyPresent = await hasAiKey()
+    } catch {
+      keyPresent = false
+    }
+    if (keyPresent) {
+      return {
+        mode: "local",
+        detail: "Key saved. Turn on AI Discovery to use it.",
+        lastTestedAt: readLastTest()?.at ?? null,
+      }
+    }
     return {
       mode: "not-configured",
-      detail: "AI Discovery is off. Discover is using local recommendations.",
+      detail: "AI Discovery is off.",
       lastTestedAt: readLastTest()?.at ?? null,
     }
   }
@@ -297,9 +332,13 @@ const MODEL_LIST_TIMEOUT_MS = 10_000
 export async function testAiConnection(): Promise<AiTestResult> {
   const endpoint = getAiEndpoint().trim().replace(/\/+$/, "")
   const model = getAiModel().trim()
-  if (!getAiEnabled()) {
-    return { ok: false, error: "not_configured" }
-  }
+  // 0.11.4: testing is a diagnostic, not a use of AI — it runs against
+  // the STORED key whatever the Enable toggle says. The old code refused
+  // to test while the toggle was off and returned "not_configured", so
+  // Test connection answered "AI Discovery isn't set up yet." on a
+  // device with a saved key, a set endpoint and a picked model, and the
+  // test never actually tested. The toggle only gates whether Discover
+  // USES AI; it must never gate whether the connection can be verified.
   if (!endpoint || !/^https?:\/\//i.test(endpoint)) {
     const result: AiTestResult = { ok: false, error: "invalid_endpoint" }
     recordAiTestResult(result, endpoint, model)
