@@ -19,6 +19,9 @@
 // (options / Quick Surf / channel browser / error) is visible — those
 // surfaces already name their own keys (OSD shortcuts line, overlay
 // buttons), so the legend would only duplicate them over the video.
+// While Controller Cursor Mode is active (0.11.10 W6,
+// html[data-cursor-mode="active"]) the legend shows the cursor hint
+// set (CURSOR_MODE_HINTS) instead of the view's config.
 // View+Menu held 2 s = return home is global and is never hidden
 // with the legend: the hold is owned by gamepad.ts, not by this bar.
 import {
@@ -56,6 +59,14 @@ const initial: HintConfig = hintsForView(view);
     hintsForView,
     hintItemHtml,
   } from "@/scripts/lib/couch-button-hints.ts";
+  // 0.11.10 (W6): while Cursor Mode is active (cursor-mode.ts sets
+  // html[data-cursor-mode="active"]) the legend shows the cursor
+  // hint set instead of the view's — the attribute is the signal,
+  // so this render() stays the single writer of the legend and no
+  // other module fights it. W1's setControllerHints (Contract C)
+  // may replace this branch at integration; CURSOR_MODE_HINTS is
+  // the config it should show.
+  import { CURSOR_MODE_HINTS } from "@/scripts/lib/cursor-mode.ts";
 
   const nav = document.querySelector<HTMLElement>("[data-button-hints]");
   const list = nav?.querySelector<HTMLElement>("[data-button-hints-list]");
@@ -105,7 +116,13 @@ const initial: HintConfig = hintsForView(view);
       // (day nav in By Channel, time nav in grid). Unset → the
       // base guide config.
       const guideMode = document.documentElement.dataset.livetvGuideMode ?? null;
-      const config = hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
+      // 0.11.10 (W6): Cursor Mode overrides the view config while
+      // active — the pointer's legend, not the screen's.
+      const cursorActive =
+        document.documentElement.dataset.cursorMode === "active";
+      const config = cursorActive
+        ? CURSOR_MODE_HINTS
+        : hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
       // Hide while a dialog owns input; in Live TV playback hide
       // while the OSD / an overlay is up (it names its own keys).
       const hidden =
@@ -122,7 +139,9 @@ const initial: HintConfig = hintsForView(view);
     const modeObserver = new MutationObserver(render);
     modeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode"],
+      // 0.11.10 (W6): data-cursor-mode joins the filter so Cursor
+      // Mode activation/exit re-renders the legend immediately.
+      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode", "data-cursor-mode"],
     });
     const domObserver = new MutationObserver(render);
     domObserver.observe(document.body, {

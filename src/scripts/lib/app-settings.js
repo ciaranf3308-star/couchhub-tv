@@ -32,6 +32,7 @@ const KEY_VIDEO_SCALE = "xt_video_scale"
 const KEY_UPDATE_CHANNEL = "xt_update_channel"
 const KEY_AUTO_UPDATE = "xt_auto_update"
 const KEY_UI_SOUNDS = "xt_ui_sounds"
+const KEY_CURSOR_MODE = "xt_cursor_mode"
 const KEY_HAPTICS = "xt_haptics"
 const KEY_MONO_AUDIO = "xt_mono_audio"
 const KEY_CAPTIONS_AUTO = "xt_captions_auto"
@@ -57,6 +58,7 @@ const KEY_LANGUAGE_GROUPING = "xt_lang_grouping"
 const EVT_CHANGED = "xt:settings-changed"
 
 export const PERF_MODE_EVENT = "xt:perf-mode-changed"
+export const CURSOR_MODE_EVENT = "xt:cursor-mode-changed"
 export const CONTENT_LANGUAGE_EVENT = "xt:content-language-changed"
 export const ACCENT_EVENT = "xt:accent-changed"
 export const ACCENT_PRESETS = ["fuchsia", "rose", "ember", "emerald", "cyan", "blue", "violet", "gold", "burgundy", "lime", "teal", "silver", "white"]
@@ -299,6 +301,25 @@ export function setPerfMode(on) {
     else document.documentElement.removeAttribute("data-perf-mode")
     document.dispatchEvent(
       new CustomEvent(PERF_MODE_EVENT, { detail: { value: !!on } })
+    )
+  }
+}
+
+// Controller Cursor Mode (0.11.10, W6): R3 toggles an on-screen
+// pointer driven by the right stick. DEFAULT DISABLED — the key is
+// absent until the user enables it in Settings → Display → Behavior,
+// and an absent key reads as off. cursor-mode.ts listens for
+// CURSOR_MODE_EVENT and exits immediately when the setting is turned
+// off mid-session.
+export function getCursorMode() {
+  return readLS(KEY_CURSOR_MODE, "") === "1"
+}
+
+export function setCursorMode(on) {
+  writeLS(KEY_CURSOR_MODE, on ? "1" : "")
+  if (typeof document !== "undefined") {
+    document.dispatchEvent(
+      new CustomEvent(CURSOR_MODE_EVENT, { detail: { value: !!on } })
     )
   }
 }

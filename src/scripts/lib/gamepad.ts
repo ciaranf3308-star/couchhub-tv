@@ -67,6 +67,16 @@ import {
   firstFocusableInModal,
 } from "@/scripts/lib/dialog-spatial-nav.js";
 import { dispatchLivetvBack } from "@/scripts/lib/livetv-keys.ts";
+// 0.11.10 (W6): Cursor Mode guard — see the guard at the top of
+// handleGamepadButtonPress. This module owns the guard region only;
+// cursor-mode.ts owns the pointer state machine.
+import {
+  dispatchCursorClick,
+  isCursorModeActive,
+  isCursorModeEnabled,
+  setCursorModeActive,
+  toggleCursorMode,
+} from "@/scripts/lib/cursor-mode.ts";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -84,6 +94,10 @@ const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_VIEW = 8;
 const BTN_MENU = 9;
+// 0.11.10 (W6): R3 — right-stick click. Toggles Cursor Mode when the
+// setting is enabled; otherwise the same no-op it always was. L3 (10)
+// stays unmapped.
+const BTN_RIGHT_THUMB = 11;
 const BTN_DPAD_UP = 12;
 const BTN_DPAD_DOWN = 13;
 const BTN_DPAD_LEFT = 14;
@@ -258,6 +272,30 @@ function handleDirection(dir: Direction | null, now: number): void {
  * B works (blur + back), every other button is swallowed.
  */
 export function handleGamepadButtonPress(index: number, _now: number): void {
+  // 0.11.10 (W6) CURSOR MODE GUARD — runs before ALL button routing.
+  // Both input paths (native XInput + browser Gamepad API) share this
+  // function, so guarding once here consumes A / RB everywhere: while
+  // Cursor Mode is active they can never also activate a focused
+  // control, change Live TV categories, turn Browse pages, seek
+  // playback, or open a second context menu. R3 toggles (only when
+  // the setting is enabled); B exits without changing the page.
+  // View+Menu return-home is unaffected: the chord fires in
+  // noteViewMenuHeld before this function runs on either path.
+  if (index === BTN_RIGHT_THUMB) {
+    if (isCursorModeEnabled()) {
+      markGamepadActive();
+      toggleCursorMode();
+    }
+    return;
+  }
+  if (isCursorModeActive()) {
+    markGamepadActive();
+    if (index === BTN_B) setCursorModeActive(false);
+    else if (index === BTN_A) dispatchCursorClick("left");
+    else if (index === BTN_RB) dispatchCursorClick("right");
+    // Every other button is swallowed while Cursor Mode is active.
+    return;
+  }
   if (isEditingTarget(document.activeElement)) {
     if (index === BTN_B) {
       markGamepadActive();
@@ -996,8 +1034,11 @@ export function mountGamepad(): void {
       // In a text field the controller only gets B (blur/back) and the
       // View+Menu return-home hold — arrows and A belong to the field.
       // The gate lives in handleGamepadButtonPress; calling it for B
-      // is enough here.
+      // is enough here. R3 is routed too, so Cursor Mode can always
+      // be exited from a field on the fallback path (0.11.10 W6).
       if (justPressed(BTN_B)) handleGamepadButtonPress(BTN_B, now);
+      if (justPressed(BTN_RIGHT_THUMB))
+        handleGamepadButtonPress(BTN_RIGHT_THUMB, now);
       actionState.held = null;
       return;
     }
@@ -1012,7 +1053,8 @@ export function mountGamepad(): void {
     handleDirection(dir, now);
 
     // Every button runs the shared pipeline (same code the native
-    // XInput path calls) — see handleGamepadButtonPress.
+    // XInput path calls) — see handleGamepadButtonPress. R3 (11) is
+    // the Cursor Mode toggle (0.11.10 W6); L3 (10) stays unmapped.
     for (const index of [
       BTN_A,
       BTN_B,
@@ -1023,6 +1065,7 @@ export function mountGamepad(): void {
       BTN_LT,
       BTN_RT,
       BTN_MENU,
+      BTN_RIGHT_THUMB,
     ]) {
       if (justPressed(index)) handleGamepadButtonPress(index, now);
     }
