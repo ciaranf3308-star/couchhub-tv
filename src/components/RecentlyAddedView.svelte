@@ -11,11 +11,43 @@
   import { fmtImdbRating } from "@/scripts/lib/format.js"
   import { kindLabel } from "@/scripts/lib/kinds.js"
   import { cachedImg } from "@/scripts/lib/img-cache.ts"
+  import {
+    registerBackLayer,
+    BACK_PRIORITY,
+    recordOriginFromReferrer,
+    navigateBackWithOrigin,
+    setLogicalView,
+    openTitleContextMenu,
+    isTitleContextMenuOpen,
+  } from "@/scripts/lib/controller-seams-0110.ts"
+  import {
+    initListFocusMemory,
+    restoreListFocus,
+    readListFilter,
+    writeListFilter,
+  } from "@/scripts/lib/couch-list-focus.ts"
+  import {
+    buildCardContextActions,
+    cardContextLabels,
+  } from "@/scripts/lib/title-context-actions.ts"
+  import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+
+  const ROUTE = "/recently-added"
+  const FILTERS = ["all", "vod", "series"]
+  /** Filter restored from the last visit (the mixed "all" view is never lost without a replacement). */
+  function initialFilter() {
+    try {
+      const saved = readListFilter(sessionStorage, ROUTE, "all")
+      return FILTERS.includes(saved) ? saved : "all"
+    } catch {
+      return "all"
+    }
+  }
 
   const PAGE_SIZE = 200
 
   /** @type {"all"|"vod"|"series"} */
-  let filter = $state("all")
+  let filter = $state(initialFilter())
   let locale = $state(0)
   // Wrappers read the locale rune so {tr(...)} / {kl(...)} template effects
   // track it and re-evaluate on LOCALE_EVENT.
@@ -117,13 +149,121 @@
   function setFilter(next) {
     filter = next
     renderLimit = PAGE_SIZE
+    try {
+      writeListFilter(sessionStorage, ROUTE, next)
+    } catch {
+      // Filter memory is a nicety, never fatal.
+    }
   }
 
   function loadMore() {
     renderLimit += PAGE_SIZE
+    // Focus stays on the Load More button (it survives the render,
+    // pushed below the new cards) — Up from it reaches the new
+    // rows, and pressing it again loads the next page.
   }
 
+  function rowKey(row) {
+    return `${row.kind}:${row.item.id}`
+  }
+
+  // W5 (0.11.10): X on a poster opens the title context menu.
+  // Controller X reaches here as the "x" key once W1 routes it to
+  // views; physical keyboards get it today.
+  async function openRowMenu(anchor, row) {
+    const prefs = await import("@/scripts/lib/preferences.js")
+    const href = buildHref(row.kind, row.item.id)
+    const playHref = `${href}&autoplay=1`
+    const extras = { name: row.item.name || "", logo: row.item.logo || null }
+    openTitleContextMenu(
+      anchor,
+      buildCardContextActions(
+        { kind: row.kind, id: row.item.id, detailHref: href, playHref },
+        {
+          favorited: activePlaylistId
+            ? prefs.isFavorite(activePlaylistId, row.kind, row.item.id)
+            : false,
+          onWatchlist: activePlaylistId
+            ? prefs.isOnWatchlist(activePlaylistId, row.kind, row.item.id)
+            : false,
+          watched: activePlaylistId
+            ? row.kind === "vod"
+              ? prefs.isCompleted(activePlaylistId, "vod", row.item.id)
+              : prefs.hasSeriesWatchedOverride(activePlaylistId, row.item.id)
+            : false,
+        },
+        {
+          onOpen: () => {
+            window.location.href = href
+          },
+          onPlay: () => {
+            window.location.href = playHref
+          },
+          onToggleFavorite: () => {
+            if (activePlaylistId)
+              prefs.toggleFavorite(activePlaylistId, row.kind, row.item.id, extras)
+          },
+          onToggleWatchlist: () => {
+            if (activePlaylistId)
+              prefs.toggleWatchlist(activePlaylistId, row.kind, row.item.id, extras)
+          },
+          onToggleWatched: (currently) => {
+            if (!activePlaylistId) return
+            if (row.kind === "vod") {
+              if (currently) prefs.clearProgress(activePlaylistId, "vod", row.item.id)
+              else prefs.markCompleted(activePlaylistId, "vod", row.item.id, extras)
+            } else {
+              prefs.setSeriesWatchedOverride(activePlaylistId, row.item.id, !currently)
+            }
+          },
+        },
+        cardContextLabels(t),
+      ),
+    )
+  }
+
+  function onCardKey(event) {
+    if (event.key !== "x" && event.key !== "X") return
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+    const target = event.target
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return
+    }
+    if (findOpenModal() || isTitleContextMenuOpen()) return
+    const anchor = target?.closest?.("[data-couch-key]")
+    if (!anchor) return
+    const key = anchor.getAttribute("data-couch-key")
+    const row = visible.find((candidate) => rowKey(candidate) === key)
+    if (!row) return
+    event.preventDefault()
+    void openRowMenu(anchor, row)
+  }
+
+  // Returning from a detail page restores the same poster; restore
+  // is a no-op while anything holds focus, so catalog refreshes
+  // never yank focus.
+  $effect(() => {
+    void visible
+    void loading
+    if (!loading) restoreListFocus(document, ROUTE)
+  })
+
   onMount(() => {
+    setLogicalView("recently-added")
+    recordOriginFromReferrer()
+    const stopFocusMemory = initListFocusMemory(document, ROUTE)
+    const unregisterBack = registerBackLayer({
+      id: "recently-added-root",
+      priority: BACK_PRIORITY.PAGE,
+      isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+      handle: () => navigateBackWithOrigin("/"),
+    })
+    document.addEventListener("keydown", onCardKey)
     reload()
     const onLocale = () => { locale++ }
     const handlers = {
@@ -135,6 +275,9 @@
       document.addEventListener(eventName, handler)
     }
     return () => {
+      stopFocusMemory()
+      unregisterBack()
+      document.removeEventListener("keydown", onCardKey)
       for (const [eventName, handler] of Object.entries(handlers)) {
         document.removeEventListener(eventName, handler)
       }
@@ -154,6 +297,7 @@
         role="tab"
         aria-selected={filter === chip.id}
         onclick={() => setFilter(chip.id)}
+        data-couch-key={`filter:${chip.id}`}
         class:active={filter === chip.id}
         class="filter-chip rounded-full border border-line bg-surface px-3.5 py-1.5 text-sm
                hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:border-accent
@@ -190,6 +334,9 @@
       {@const ratingText = fmtImdbRating(row.item.rating)}
       <a
         href={buildHref(row.kind, row.item.id)}
+        data-couch-key={row.kind + ":" + row.item.id}
+        data-couch-detail-href={buildHref(row.kind, row.item.id)}
+        data-couch-play-href={buildHref(row.kind, row.item.id) + "&autoplay=1"}
         aria-label={`Open ${row.item.name || row.kind}`}
         class="ra-card group relative rounded-xl overflow-hidden bg-surface-2
                ring-1 ring-line
@@ -247,7 +394,7 @@
 
     {#if visible.length < (filter === "all" ? merged.length : counts[filter])}
       <div class="col-span-full flex justify-center py-3">
-        <button type="button" onclick={loadMore} class="btn">
+        <button type="button" onclick={loadMore} data-couch-key="load-more" class="btn">
           {tr("recentlyAdded.loadMore")}
         </button>
       </div>

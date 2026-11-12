@@ -404,6 +404,53 @@ import {
   <script>
     import "@/scripts/editor/editor.ts"
   </script>
+
+  <script>
+    // W5 (0.11.10): B hierarchy — dialogs own B first (native
+    // <dialog> cancel), then text-field editing (blur), then the
+    // page steps to Settings/Playlists. No discard confirmation:
+    // the editor auto-saves every change (commitDoc + pagehide
+    // flush in editor.ts), so leaving can never silently discard.
+    // No redesign, no behaviour change to the editor itself.
+    import {
+      registerBackLayer,
+      BACK_PRIORITY,
+      recordOriginFromReferrer,
+      setLogicalView,
+      isTitleContextMenuOpen,
+    } from "@/scripts/lib/controller-seams-0110.ts"
+    import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+
+    setLogicalView("playlist-editor")
+    recordOriginFromReferrer()
+    registerBackLayer({
+      id: "playlist-editor-editing",
+      priority: BACK_PRIORITY.EDITING,
+      isActive: () => {
+        const active = document.activeElement
+        if (!(active instanceof HTMLElement)) return false
+        const tag = active.tagName.toLowerCase()
+        const editing =
+          tag === "textarea" ||
+          tag === "select" ||
+          (tag === "input" && active.getAttribute("type") !== "checkbox") ||
+          active.isContentEditable
+        return editing && !findOpenModal() && !isTitleContextMenuOpen()
+      },
+      handle: () => {
+        const active = document.activeElement
+        if (active instanceof HTMLElement) active.blur()
+      },
+    })
+    registerBackLayer({
+      id: "playlist-editor-root",
+      priority: BACK_PRIORITY.PAGE,
+      isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+      handle: () => {
+        window.location.assign("/settings/playlists")
+      },
+    })
+  </script>
 </Layout>
 
 <style>

@@ -10,12 +10,20 @@
 
 import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
 import { t } from "@/scripts/lib/i18n.js"
+import { findReplacementFocus } from "@/scripts/lib/couch-focus.js"
+import {
+  registerBackLayer,
+  BACK_PRIORITY,
+} from "@/scripts/lib/controller-seams-0110.js"
 
 const DIALOG_ID = "xt-confirm-dialog"
 
 let dlg: HTMLDialogElement | null = null
 let resolveFn: ((value: boolean) => void) | null = null
 let linkFn: (() => void) | null = null
+/** Element that had focus when the dialog opened — focus returns here on close (§38). */
+let invoker: HTMLElement | null = null
+let backUnregister: (() => void) | null = null
 
 export interface ConfirmDialogOptions {
   message: string
@@ -87,22 +95,36 @@ function ensureDialog(): HTMLDialogElement {
     '[data-role="link"]'
   ) as HTMLButtonElement
 
-  cancelBtn.addEventListener("click", () => node.close())
+  cancelBtn.addEventListener("click", () => node.close?.())
   confirmBtn.addEventListener("click", () => {
     settle(true)
-    node.close()
+    node.close?.()
   })
   linkBtn.addEventListener("click", () => {
     const fn = linkFn
-    node.close()
+    node.close?.()
     fn?.()
   })
   // Backdrop click closes (= cancel).
   node.addEventListener("click", (event) => {
-    if (event.target === node) node.close()
+    if (event.target === node) node.close?.()
   })
   // Esc or any non-confirm close resolves false.
-  node.addEventListener("close", () => settle(false))
+  node.addEventListener("close", () => {
+    settle(false)
+    backUnregister?.()
+    backUnregister = null
+    // Focus returns to the invoker, else the nearest surviving
+    // focusable — never left on the body, never a second Back.
+    const target = invoker
+    invoker = null
+    if (target && target.isConnected) {
+      target.focus({ preventScroll: true })
+      return
+    }
+    const replacement = findReplacementFocus(node)
+    replacement?.focus({ preventScroll: true })
+  })
 
   dlg = node
   return dlg
@@ -125,6 +147,11 @@ export function confirmDialog(
     // resolve once we attach to the new one.
     settle(false)
     resolveFn = resolve
+    // Record the invoker BEFORE showModal moves focus inside.
+    invoker =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
 
     const titleEl = node.querySelector(
       '[data-role="title"]'
@@ -162,5 +189,21 @@ export function confirmDialog(
 
     if (typeof node.showModal === "function") node.showModal()
     else node.setAttribute("open", "")
+
+    // Back layer for the W1 coordinator: while open, this dialog
+    // owns B (close = cancel). On this branch the shim dispatcher
+    // skips open dialogs and the native <dialog> cancel closes
+    // them, so this layer is dormant until integration.
+    backUnregister?.()
+    backUnregister = registerBackLayer({
+      id: "confirm-dialog",
+      priority: BACK_PRIORITY.MODAL,
+      isActive: () => node.open,
+      handle: () => node.close?.(),
+    })
+
+    // Focus Cancel by default: the safe action owns the first A
+    // press, and B/Escape cancels from anywhere in the dialog.
+    cancelBtn.focus({ preventScroll: true })
   })
 }
