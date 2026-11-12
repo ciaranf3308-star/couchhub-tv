@@ -10,6 +10,14 @@
 // one enormous category. Titles are INVENTED (combinatorial word
 // lists), never real film/series titles.
 //
+// Each entry is a REAL W1 CatalogRow (the mapped row's fields, plus
+// the enrichments the index reads: tmdbGenreIds, genre, category_id,
+// rating_5based, seasonCount, episodeCount, episodes) with
+// test-only ground-truth fields alongside (yearNum, ratingRaw,
+// categoryName, poster, language, quality, baseTitle). Tests build
+// REAL CatalogIndexes from these rows; no stub stands between the
+// fixture and the module under test.
+//
 // Determinism: one mulberry32 stream per catalogue, seeded. The same
 // seed + counts produce a byte-identical catalogue (proven by
 // tests/fixtures-0118-determinism.test.ts via hashCatalogue).
@@ -20,12 +28,160 @@ import { createHash } from "node:crypto"
 import { mapMovieRow } from "@/scripts/movies/couch-movies.ts"
 import { mapSeriesRow } from "@/scripts/series/couch-series.ts"
 import { parseYear } from "@/scripts/lib/browse-filters.ts"
-import {
-  baseTitleOf,
-  type CatalogEntry,
-  type EntryProgress,
-  type EpisodeRef,
-} from "./movies-series-2.0-stubs.ts"
+import type { CatalogRow } from "@/scripts/lib/catalog-index.ts"
+import { normalize } from "@/scripts/lib/text.ts"
+
+// ---------------------------------------------------------------------------
+// Fixture entry shape: a real W1 CatalogRow + ground-truth extras
+// ---------------------------------------------------------------------------
+
+export interface EpisodeRef {
+  id: number
+  season: number
+  episode: number
+  title: string
+}
+
+export interface EntryProgress {
+  position: number
+  duration: number
+  completed: boolean
+  updatedAt: number
+}
+
+export type ProgressMap =
+  | Map<number, EntryProgress>
+  | Record<number, EntryProgress>
+
+export function progressOf(
+  progress: ProgressMap | null | undefined,
+  id: number
+): EntryProgress | undefined {
+  if (!progress) return undefined
+  if (progress instanceof Map) return progress.get(id)
+  return (progress as Record<number, EntryProgress>)[id]
+}
+
+/**
+ * Variant-suffix vocabulary for the fixture's informational baseTitle
+ * (ported from the W5 stub contract — test ground truth, not
+ * production code). Mirrors the D4 strip list in language-groups.ts:
+ * quality/language/edition tokens that differ between variants of
+ * one title. A group's members must share one baseTitle.
+ */
+const VARIANT_TOKENS = new Set([
+  "2160p", "1080p", "720p", "480p", "360p",
+  "4k", "uhd", "fhd", "hd", "sd",
+  "web-dl", "webdl", "webrip", "web-rip", "bluray", "brrip",
+  "hdr", "hevc", "x265", "x264", "h265", "h264", "10bit",
+  "hindi", "tamil", "telugu", "malayalam", "kannada", "punjabi",
+  "bengali", "marathi", "english", "spanish", "french", "german",
+  "dual", "audio", "multi", "dubbed", "subbed", "subs", "esub",
+  "uncut", "extended", "remux", "proper", "repack",
+])
+const BRACKETED_VARIANT = /[[(][^\])]*[\])]\s*$/
+
+function stripVariantSuffix(name: string): string {
+  let title = String(name || "").trim().replace(/\s+/g, " ")
+  for (;;) {
+    const before = title
+    const bracket = title.match(BRACKETED_VARIANT)
+    if (bracket) {
+      const inner = bracket[0].replace(/^[[(]|[\])]$/g, " ").trim()
+      const words = inner.split(/[^a-z0-9]+/i).filter(Boolean)
+      if (
+        words.length > 0 &&
+        words.every((w) => VARIANT_TOKENS.has(w.toLowerCase()))
+      ) {
+        title = title.slice(0, title.length - bracket[0].length).trim()
+        continue
+      }
+    }
+    // The token may be hyphenated ("WEB-DL" is one variant token,
+    // not "DL") — without the compound match, "Title WEB-DL" would
+    // keep a "web dl" tail and disagree with W1's grouping key.
+    const tokenMatch = title.match(/[-–—:]?\s*([A-Za-z0-9]+(?:-[A-Za-z0-9]+)?)\s*$/)
+    if (tokenMatch) {
+      const token = tokenMatch[1].toLowerCase()
+      if (VARIANT_TOKENS.has(token)) {
+        title = title.slice(0, tokenMatch.index).trim()
+        continue
+      }
+    }
+    if (title === before) break
+  }
+  return title.replace(/[-–—:,\s]+$/, "").trim()
+}
+
+/**
+ * Normalised base title for grouping display in tests: variant
+ * suffixes stripped, then normalised. Informational only — the
+ * authoritative grouping is W1's TitleGroup (language-groups.ts),
+ * which applies its own variant-suffix stripping; the two must agree
+ * (acceptance test 9 pins it).
+ */
+export function baseTitleOf(name: string): string {
+  return normalize(stripVariantSuffix(name))
+}
+
+/**
+ * One catalogue entry: the mapped provider row (a real CatalogRow —
+ * id, name, year, rating, duration, category, category_id, logo,
+ * tmdb, added, seasonCount) plus the enrichments the index reads
+ * (tmdbGenreIds, genre, rating_5based, episodeCount, episodes) and
+ * test-only ground truth (yearNum, ratingRaw, ratingScale,
+ * durationRaw, categoryName, poster, language, quality, baseTitle).
+ * Unknown metadata stays unknown: "" / null / 0, never fabricated.
+ */
+export interface CatalogEntry extends CatalogRow {
+  id: number
+  kind: "vod" | "series"
+  name: string
+  /** Mapped-row fields: a CatalogEntry is assignable to MovieRow /
+   *  SeriesRow as well as CatalogRow, so the same fixture rows drive
+   *  the index, the selectors, and the Home models with no casts.
+   *  Series rows carry duration "" (real SeriesRows have no
+   *  duration; W1 runtime is vod-only, so "" is inert). */
+  logo: string | null
+  rating: string
+  duration: string
+  category: string
+  plot: string
+  norm: string
+  tmdb: number | null
+  category_id: string | null
+  rating_5based: string | null
+  /** Display title: the provider name as shown (trimmed, single-spaced). */
+  displayTitle: string
+  /** Normalised base title (see baseTitleOf). Informational. */
+  baseTitle: string
+  year: string
+  yearNum: number | null
+  /** Provider rating string verbatim ("" = unknown). */
+  ratingRaw: string
+  /** Scale the provider rating was supplied on. */
+  ratingScale: 10 | 5
+  /** Provider duration string verbatim ("" = unknown). */
+  durationRaw: string
+  categoryId: string | null
+  /** Provider category string verbatim ("" = uncategorised). */
+  categoryName: string
+  tmdbGenreIds: number[]
+  /** Raw genre string when the provider supplies one ("" = none). */
+  genreString: string
+  /** Provider `added` timestamp, unix seconds. 0 = unknown. */
+  added: number
+  poster: string | null
+  /** Confirmed season count, or null when unknown. Movies: always null. */
+  seasonCount: number | null
+  /** Confirmed episode count, or null when unknown. */
+  episodeCount: number | null
+  /** Confirmed episodes (series only). [] when unknown. */
+  episodes: EpisodeRef[]
+  /** Variant signals when the provider/name carries them. */
+  language: string | null
+  quality: string | null
+}
 
 // ---------------------------------------------------------------------------
 // Deterministic PRNG + hashing
@@ -344,6 +500,17 @@ export function generateCatalogue(
       id: mapped.id,
       kind: "vod",
       name: mapped.name,
+      // W1-visible row fields (the index reads these, not the extras).
+      rating: mapped.rating,
+      rating_5based: raw.rating_5based ?? null,
+      duration: mapped.duration,
+      category: mapped.category,
+      category_id: raw.category_id,
+      logo: mapped.logo,
+      tmdb: mapped.tmdb,
+      plot: mapped.plot,
+      norm: mapped.norm,
+      genre: extra.genreString ? extra.genreString : undefined,
       displayTitle: mapped.name.trim().replace(/\s+/g, " "),
       baseTitle: baseTitleOf(mapped.name),
       year: mapped.year,
@@ -483,6 +650,17 @@ export function generateCatalogue(
       id: mapped.id,
       kind: "series",
       name: mapped.name,
+      // W1-visible row fields (the index reads these, not the extras).
+      // Series rows carry no duration; W1 runtime is vod-only.
+      rating: mapped.rating,
+      rating_5based: mapped.rating_5based ?? null,
+      duration: "",
+      category: mapped.category,
+      category_id: raw.category_id,
+      logo: mapped.logo,
+      tmdb: mapped.tmdb,
+      plot: mapped.plot,
+      norm: mapped.norm,
       displayTitle: mapped.name.trim().replace(/\s+/g, " "),
       baseTitle: baseTitleOf(mapped.name),
       year: mapped.year,
@@ -573,6 +751,12 @@ export function reviseCatalogue(
     movies.push({
       ...entry,
       id: remapped ? entry.id + 1_000_000 : entry.id,
+      // The rename must reach the W1-visible `category` field too,
+      // not just the ground-truth label, or the index never sees it.
+      category:
+        entry.categoryId != null
+          ? (renamedMap.get(entry.categoryId) ?? entry.categoryName)
+          : entry.categoryName,
       categoryName:
         entry.categoryId != null
           ? (renamedMap.get(entry.categoryId) ?? entry.categoryName)
@@ -673,6 +857,17 @@ function buildAdversarialMovie(
     id: mapped.id,
     kind: "vod",
     name: mapped.name,
+    // W1-visible row fields (the index reads these, not the extras).
+    rating: mapped.rating,
+    rating_5based: raw.rating_5based ?? null,
+    duration: mapped.duration,
+    category: mapped.category,
+    category_id: raw.category_id,
+    logo: mapped.logo,
+    tmdb: mapped.tmdb,
+    plot: mapped.plot,
+    norm: mapped.norm,
+    genre: extra.genreString ? extra.genreString : undefined,
     displayTitle: mapped.name.trim().replace(/\s+/g, " "),
     baseTitle: baseTitleOf(mapped.name),
     year: mapped.year,
@@ -705,6 +900,17 @@ function buildAdversarialSeries(
     id: mapped.id,
     kind: "series",
     name: mapped.name,
+    // W1-visible row fields (the index reads these, not the extras).
+    rating: mapped.rating,
+    rating_5based: mapped.rating_5based ?? null,
+    duration: "",
+    category: mapped.category,
+    category_id: raw.category_id,
+    logo: mapped.logo,
+    tmdb: mapped.tmdb,
+    plot: mapped.plot,
+    norm: mapped.norm,
+    genre: extra.genreString ? extra.genreString : undefined,
     displayTitle: mapped.name.trim().replace(/\s+/g, " "),
     baseTitle: baseTitleOf(mapped.name),
     year: mapped.year,
