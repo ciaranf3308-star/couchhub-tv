@@ -404,10 +404,17 @@ describe("W4 — Movies/Series controller wiring (source level, repo convention)
     expect(read("src/pages/series/index.astro")).toContain("couch-browse-reset");
   });
 
-  it("DiscoverView.svelte is untouched by W4 (W3 owns its rewrite)", () => {
-    // The state helpers live in discover-state.ts; DiscoverView must
-    // not gain a second filter system from this branch.
-    expect(read("src/components/DiscoverView.svelte")).not.toContain("discover-state");
-    expect(read("src/components/DiscoverView.svelte")).not.toContain("selectGenreFilter");
+  it("DiscoverView uses the one W4 state module, not a second filter system", () => {
+    // Integration: W3's DiscoverView rewrite consumes W4's real
+    // transitions (applyQuickPick/applyNewSearch from
+    // discover-state.ts) — the branch-local "untouched" guard cannot
+    // hold once the branches merge. The durable invariant is that
+    // DiscoverView gains no SECOND filter system: no BrowseFilterState
+    // helper (selectGenreFilter) on a screen with no browse filters.
+    const view = read("src/components/DiscoverView.svelte")
+    expect(view).toContain("@/scripts/lib/discover-state.ts")
+    expect(view).toContain("applyQuickPick")
+    expect(view).toContain("applyNewSearch")
+    expect(view).not.toContain("selectGenreFilter")
   });
 });
