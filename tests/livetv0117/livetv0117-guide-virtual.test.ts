@@ -7,19 +7,23 @@
  *      entries.
  *
  * Rows are built by the REAL nowNextRows helper from fixture EPG
- * (channels with nothing on now never produce a row); mounting is
- * the STUB-FOR-INTEGRATION virtualised Guide list (the W3
- * contract). Integration re-points the mounting at W3's real
- * Guide lists, keeping the assertions.
+ * (channels with nothing on now never produce a row); mounting
+ * uses W3's REAL virtual-list engine (createVirtualList, spacer
+ * mode — the mode the Guide's On Now list and By Channel picker
+ * use) with the real row heights. The bound is the brief's row
+ * formula — ceil(viewport/rowHeight) + 2·overscan + 1 — computed
+ * through the real virtualListWindow math (+1 covers the engine's
+ * one pinned focused node).
  * Synthetic data only; nothing here plays a stream.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { nowNextRows } from "@/scripts/lib/livetv-guide";
+import { nowNextRows, type GuideNowRow } from "@/scripts/lib/livetv-guide";
+import { guideProgrammeKey } from "@/scripts/lib/livetv-state";
 import {
-  mountGuideList,
-  virtualRowBound,
-  type GuideChannelRow,
-} from "./stubs/guide.stub";
+  createVirtualList,
+  virtualListWindow,
+  type VirtualListHandle,
+} from "@/scripts/lib/livetv-guide-virtual";
 import {
   FIXTURE_NOW_MS,
   buildFixtureProgrammes,
@@ -35,9 +39,125 @@ afterEach(() => {
   root.remove();
 });
 
-const ROW_HEIGHT = 76;
 const VIEWPORT_HEIGHT = 600;
-const OVERSCAN = 3;
+const OVERSCAN = 4;
+/** Real Guide row heights (TvGuideView.astro fallbacks, measured after paint in production). */
+const NOW_ROW_HEIGHT = 112;
+const PICK_ROW_HEIGHT = 80;
+
+async function nextFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
+interface GuideChannelRow {
+  channelId: string;
+  channelName: string;
+  programmes: readonly unknown[];
+}
+
+type GuideListRow = GuideNowRow | GuideChannelRow;
+
+function isNowRow(row: GuideListRow): row is GuideNowRow {
+  return "current" in row;
+}
+
+/** The brief's row bound: the maximum window over all scroll positions (mid-list, overscan both sides) + 1 pinned focused node, through the real window math. */
+function rowBound(total: number, rowHeightPx: number): number {
+  const win = virtualListWindow({
+    total,
+    rowHeightPx,
+    scrollTopPx: rowHeightPx * 100,
+    viewportHeightPx: VIEWPORT_HEIGHT,
+    overscanRows: OVERSCAN,
+  });
+  return win.endIndex - win.startIndex + 1;
+}
+
+/**
+ * Mount W3's real virtual list over Guide rows, with a mocked
+ * scroll container (jsdom has no layout). Keys match production:
+ * On Now rows key by programme (channel + start), By Channel rows
+ * by channel.
+ */
+function mountRealGuideList(
+  rootEl: HTMLElement,
+  opts: { mode: "now" | "channel"; rows: readonly GuideListRow[]; rowHeightPx: number },
+): {
+  getRowCount(): number;
+  getMountedRowCount(): number;
+  getMountedKeys(): string[];
+  moveFocus(delta: number): string | null;
+  scrollByRows(rows: number): Promise<void>;
+  destroy(): void;
+} {
+  const container = document.createElement("div");
+  rootEl.appendChild(container);
+  let scrollTop = 0;
+  Object.defineProperty(container, "scrollTop", {
+    get: () => scrollTop,
+    set: (value: number) => {
+      scrollTop = value;
+    },
+    configurable: true,
+  });
+  Object.defineProperty(container, "clientHeight", {
+    get: () => VIEWPORT_HEIGHT,
+    configurable: true,
+  });
+  const keyOf = (row: GuideListRow): string =>
+    opts.mode === "now" && isNowRow(row)
+      ? guideProgrammeKey(row.channelId, row.current.startMs)
+      : (row as GuideChannelRow).channelId;
+  const list: VirtualListHandle<GuideListRow> = createVirtualList<GuideListRow>({
+    container,
+    mode: "spacer",
+    rowHeightPx: opts.rowHeightPx,
+    overscanRows: OVERSCAN,
+    keyOf: (row) => keyOf(row),
+    renderRow: (row, _index, existing) => {
+      const label = isNowRow(row) ? row.current.title : row.channelName;
+      if (existing) {
+        existing.textContent = label;
+        return existing;
+      }
+      const node = document.createElement("button");
+      node.setAttribute("data-focus-key", keyOf(row));
+      node.textContent = label;
+      return node;
+    },
+  });
+  list.setItems(opts.rows);
+  list.renderNow();
+  let focusIndex = 0;
+  return {
+    getRowCount: () => list.getItems().length,
+    getMountedRowCount: () => list.mountedCount(),
+    getMountedKeys: () =>
+      [...container.querySelectorAll("[data-focus-key]")].map(
+        (el) => el.getAttribute("data-focus-key") ?? "",
+      ),
+    moveFocus(delta: number): string | null {
+      const items = list.getItems();
+      if (items.length === 0) return null;
+      focusIndex = Math.max(0, Math.min(items.length - 1, focusIndex + delta));
+      const node = list.ensureIndexVisible(focusIndex);
+      node?.focus({ preventScroll: true });
+      return keyOf(items[focusIndex]!);
+    },
+    async scrollByRows(rows: number): Promise<void> {
+      scrollTop += rows * opts.rowHeightPx;
+      container.dispatchEvent(new Event("scroll"));
+      await nextFrames();
+      list.renderNow();
+    },
+    destroy(): void {
+      list.destroy();
+      container.remove();
+    },
+  };
+}
 
 describe("test 7 — Guide On Now and By Channel remain bounded", () => {
   it("On Now builds 2,500 real rows from fixture EPG", () => {
@@ -54,34 +174,30 @@ describe("test 7 — Guide On Now and By Channel remain bounded", () => {
   it("On Now mounts only a bounded window with 2,500 entries", () => {
     const { programmes } = buildGuideFixture(2500);
     const rows = nowNextRows(programmes, FIXTURE_NOW_MS);
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "now",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: NOW_ROW_HEIGHT,
     });
     expect(handle.getRowCount()).toBe(2500);
     expect(handle.getMountedRowCount()).toBeGreaterThan(0);
     expect(handle.getMountedRowCount()).toBeLessThanOrEqual(
-      virtualRowBound(VIEWPORT_HEIGHT, ROW_HEIGHT, OVERSCAN),
+      rowBound(2500, NOW_ROW_HEIGHT),
     );
     handle.destroy();
   });
 
-  it("On Now stays bounded across scrolling and focus movement", { timeout: 30_000 }, () => {
+  it("On Now stays bounded across scrolling and focus movement", { timeout: 30_000 }, async () => {
     const { programmes } = buildGuideFixture(2500);
     const rows = nowNextRows(programmes, FIXTURE_NOW_MS);
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "now",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: NOW_ROW_HEIGHT,
     });
-    const bound = virtualRowBound(VIEWPORT_HEIGHT, ROW_HEIGHT, OVERSCAN);
+    const bound = rowBound(2500, NOW_ROW_HEIGHT);
     for (let step = 0; step < 60; step++) {
-      handle.scrollByRows(17);
+      await handle.scrollByRows(17);
       expect(handle.getMountedRowCount()).toBeLessThanOrEqual(bound);
     }
     for (let step = 0; step < 400; step++) {
@@ -100,37 +216,33 @@ describe("test 7 — Guide On Now and By Channel remain bounded", () => {
       channelName: channel.displayName,
       programmes: programmes.get(String(channel.id)) ?? [],
     }));
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "channel",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: PICK_ROW_HEIGHT,
     });
     expect(handle.getRowCount()).toBe(2500);
     expect(handle.getMountedRowCount()).toBeLessThanOrEqual(
-      virtualRowBound(VIEWPORT_HEIGHT, ROW_HEIGHT, OVERSCAN),
+      rowBound(2500, PICK_ROW_HEIGHT),
     );
     handle.destroy();
   });
 
-  it("By Channel stays bounded across scrolling and focus movement", { timeout: 30_000 }, () => {
+  it("By Channel stays bounded across scrolling and focus movement", { timeout: 30_000 }, async () => {
     const { channels, programmes } = buildGuideFixture(2500);
     const rows: GuideChannelRow[] = channels.map((channel) => ({
       channelId: String(channel.id),
       channelName: channel.displayName,
       programmes: programmes.get(String(channel.id)) ?? [],
     }));
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "channel",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: PICK_ROW_HEIGHT,
     });
-    const bound = virtualRowBound(VIEWPORT_HEIGHT, ROW_HEIGHT, OVERSCAN);
+    const bound = rowBound(2500, PICK_ROW_HEIGHT);
     for (let step = 0; step < 60; step++) {
-      handle.scrollByRows(23);
+      await handle.scrollByRows(23);
       expect(handle.getMountedRowCount()).toBeLessThanOrEqual(bound);
     }
     for (let step = 0; step < 400; step++) {
@@ -147,15 +259,13 @@ describe("test 7 — Guide On Now and By Channel remain bounded", () => {
     const rows = nowNextRows(sparse, FIXTURE_NOW_MS);
     expect(rows.length).toBeGreaterThan(400);
     expect(rows.length).toBeLessThan(2500);
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "now",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: NOW_ROW_HEIGHT,
     });
     expect(handle.getMountedRowCount()).toBeLessThanOrEqual(
-      virtualRowBound(VIEWPORT_HEIGHT, ROW_HEIGHT, OVERSCAN),
+      rowBound(rows.length, NOW_ROW_HEIGHT),
     );
     handle.destroy();
   });
@@ -163,12 +273,10 @@ describe("test 7 — Guide On Now and By Channel remain bounded", () => {
   it("an empty guide mounts zero rows without crashing", () => {
     const rows = nowNextRows(new Map(), FIXTURE_NOW_MS);
     expect(rows).toEqual([]);
-    const handle = mountGuideList(root, {
+    const handle = mountRealGuideList(root, {
       mode: "now",
       rows,
-      rowHeight: ROW_HEIGHT,
-      viewportHeight: VIEWPORT_HEIGHT,
-      overscanRows: OVERSCAN,
+      rowHeightPx: NOW_ROW_HEIGHT,
     });
     expect(handle.getMountedRowCount()).toBe(0);
     expect(handle.moveFocus(1)).toBeNull();

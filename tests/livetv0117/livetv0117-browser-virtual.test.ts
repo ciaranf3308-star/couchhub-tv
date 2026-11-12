@@ -9,12 +9,14 @@
  *   6. Category changes do not trigger accidental playback.
  *   9. Search is correctly scoped and cleared.
  *
- * Each test asserts BOTH seams where they exist: the REAL
- * mountChannelBrowser / applyBrowserFilter (0.11.5 behaviour that
- * must not regress) and the STUB-FOR-INTEGRATION virtual list /
- * category index (the W2 contract). The stub parts are marked;
- * integration re-points them at W2's real list, keeping the
- * assertions.
+ * All tests run against the REAL merged modules: W2's
+ * mountChannelBrowser (keyed row pool, rAF-coalesced painting),
+ * W1's category index, and W4's overlay event contract. Search is
+ * driven through the real `livetv:search-submit` event (the
+ * overlay path — there is no inline search box any more), and
+ * category changes go through the drawer / cycleCategory (there
+ * are no pills any more). A category-scoped search is CLEARED on
+ * any category change (W4's applyCategoryChangeToSearch rule).
  * Synthetic data only; playback is observed via spies and the
  * real livetv:tune event — no stream is ever tuned.
  */
@@ -25,24 +27,32 @@ import {
   mountChannelBrowser,
   searchBrowserChannels,
 } from "@/scripts/lib/livetv-browser";
-import { LIVETV_TUNE_EVENT, dispatchLivetvTune } from "@/scripts/lib/livetv-data";
 import {
   buildCategoryIndex,
   getDerivedChannels,
-} from "./stubs/category-index.stub";
+} from "@/scripts/lib/livetv-category-index";
 import {
   dispatchLivetvCloseOverlay,
   dispatchLivetvSearchSubmit,
   dispatchLivetvSortSubmit,
-} from "./stubs/events.stub";
-import {
-  mountVirtualList,
-  virtualRowBound,
-} from "./stubs/virtual-list.stub";
+} from "@/scripts/lib/livetv-search-sort";
+import { LIVETV_TUNE_EVENT, dispatchLivetvTune } from "@/scripts/lib/livetv-data";
 import { buildFixtureChannels, fixture2000, fixture10000 } from "./fixtures";
 
 function keyOn(el: HTMLElement, key: string): void {
   el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+async function nextFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
+function mountedRowIds(root: HTMLElement): string[] {
+  return [...root.querySelectorAll<HTMLElement>("[data-browser-row]")].map(
+    (row) => row.getAttribute("data-channel-id") ?? "",
+  );
 }
 
 let root: HTMLElement;
@@ -54,6 +64,7 @@ afterEach(() => {
   root.remove();
   vi.useRealTimers();
   vi.restoreAllMocks();
+  sessionStorage.clear();
 });
 
 describe("test 4 — virtual lists mount a bounded number of DOM rows", () => {
@@ -69,100 +80,73 @@ describe("test 4 — virtual lists mount a bounded number of DOM rows", () => {
     handle.destroy();
   });
 
-  it("STUB harness (W2 contract): 10,000 items mount at most the row bound", () => {
+  it("REAL browser: 10,000 items mount at most the row-pool bound", () => {
     const channels = fixture10000();
-    const rowHeight = 76;
-    const viewportHeight = 600;
-    const overscanRows = 3;
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      rowHeight,
-      viewportHeight,
-      overscanRows,
-    });
-    const bound = virtualRowBound(viewportHeight, rowHeight, overscanRows);
-    expect(handle.getItemCount()).toBe(10_000);
-    expect(handle.getMountedRowCount()).toBeGreaterThan(0);
-    expect(handle.getMountedRowCount()).toBeLessThanOrEqual(bound);
+    const handle = mountChannelBrowser(root, { channels });
+    // The keyed row pool caps mounted rows (ROW_POOL_MAX = 40);
+    // the bound is independent of catalogue size.
+    expect(mountedRowIds(root).length).toBeGreaterThan(0);
+    expect(mountedRowIds(root).length).toBeLessThanOrEqual(40);
     handle.destroy();
   });
 
-  it("STUB harness: scrolling 100 windows never grows the mounted count past the bound", () => {
+  it("REAL browser: scrolling 100 windows never grows the mounted count past the bound", async () => {
     const channels = fixture10000();
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
-    });
-    const bound = virtualRowBound(600, 76, 3);
-    const firstWindow = handle.getMountedKeys();
+    const handle = mountChannelBrowser(root, { channels });
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    const firstWindow = mountedRowIds(root);
     for (let step = 1; step <= 100; step++) {
-      handle.scrollByRows(13);
-      expect(handle.getMountedRowCount()).toBeLessThanOrEqual(bound);
-      expect(handle.getMountedRowCount()).toBeGreaterThan(0);
+      list.scrollTop = step * 13 * BROWSER_ROW_HEIGHT;
+      list.dispatchEvent(new Event("scroll"));
+      await nextFrames();
+      expect(mountedRowIds(root).length).toBeLessThanOrEqual(40);
+      expect(mountedRowIds(root).length).toBeGreaterThan(0);
     }
     // The window actually moved: later rows are mounted, not the first ones.
-    expect(handle.getMountedKeys()).not.toEqual(firstWindow);
-    expect(handle.getMountedKeys()[0]).not.toBe(firstWindow[0]);
+    expect(mountedRowIds(root)).not.toEqual(firstWindow);
+    expect(mountedRowIds(root)[0]).not.toBe(firstWindow[0]);
     handle.destroy();
   });
 
-  it("STUB harness: the bound holds at 200 / 2,000 / 5,000 items too", () => {
+  it("REAL browser: the bound holds at 200 / 2,000 / 5,000 items too", () => {
     for (const total of [200, 2000, 5000]) {
-      const handle = mountVirtualList(root, {
-        items: buildFixtureChannels(total),
-        keyOf: (c) => String(c.id),
-        labelOf: (c) => c.displayName,
-        rowHeight: 76,
-        viewportHeight: 600,
-        overscanRows: 3,
-      });
-      expect(handle.getMountedRowCount()).toBeLessThanOrEqual(virtualRowBound(600, 76, 3));
+      const handle = mountChannelBrowser(root, { channels: buildFixtureChannels(total) });
+      expect(mountedRowIds(root).length).toBeLessThanOrEqual(40);
+      expect(mountedRowIds(root).length).toBeGreaterThan(0);
       handle.destroy();
     }
   });
 });
 
 describe("test 5 — fast controller movement maintains focus", () => {
-  it("STUB harness: 1,000 rapid moves land focus exactly, row always mounted", { timeout: 60_000 }, () => {
+  it("REAL browser: 1,000 rapid moves land the highlight exactly, row always mounted", { timeout: 60_000 }, () => {
     const channels = fixture2000();
-    const focusLog: string[] = [];
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
-      onFocusChange: (c) => focusLog.push(String(c.id)),
+    const handle = mountChannelBrowser(root, {
+      channels,
+      initialFocusId: channels[0]!.id,
     });
-    expect(handle.getFocusedKey()).toBe(String(channels[0]!.id));
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    expect(handle.getHighlightedId()).toBe(channels[0]!.id);
     for (let step = 1; step <= 1000; step++) {
-      const focused = handle.moveFocus(1);
-      expect(focused).toBe(String(channels[step]!.id));
-      expect(focused).not.toBeNull();
-      // Mounted-containment + DOM focus are sampled (every 25th
-      // step) rather than re-queried on all 1,000: the exactness
-      // assertion above runs on every step, and the sampled
-      // checks still prove the focused row stays mounted and
-      // DOM-focused across the whole walk.
+      keyOn(list, "ArrowDown");
+      expect(handle.getHighlightedId()).toBe(channels[step]!.id);
+      // Mounted-containment is sampled (every 25th step) rather
+      // than re-queried on all 1,000: the exactness assertion
+      // above runs on every step, and the sampled checks still
+      // prove the highlighted row stays mounted across the walk.
       if (step % 25 === 0) {
-        expect(handle.getMountedKeys()).toContain(focused);
-        const active = document.activeElement as HTMLElement | null;
-        expect(active?.getAttribute("data-key")).toBe(focused);
+        expect(mountedRowIds(root)).toContain(String(channels[step]!.id));
       }
     }
-    expect(focusLog).toHaveLength(1000);
-    // Moving back up is exact too, and clamps at the top.
+    // Moving back up is exact too.
     for (let step = 999; step >= 0; step--) {
-      expect(handle.moveFocus(-1)).toBe(String(channels[step]!.id));
+      keyOn(list, "ArrowUp");
+      expect(handle.getHighlightedId()).toBe(channels[step]!.id);
     }
-    expect(handle.moveFocus(-1)).toBe(String(channels[0]!.id));
+    // The list wraps (pre-existing browser behaviour): one more
+    // Up from the top lands on the last channel, never nowhere.
+    keyOn(list, "ArrowUp");
+    expect(handle.getHighlightedId()).toBe(channels[channels.length - 1]!.id);
     handle.destroy();
   });
 
@@ -185,7 +169,7 @@ describe("test 5 — fast controller movement maintains focus", () => {
 });
 
 describe("test 6 — category changes do not trigger accidental playback", () => {
-  it("REAL browser: cycling categories, arrows and row clicks never tune", { timeout: 60_000 }, () => {
+  it("REAL browser: cycling categories, arrows, drawer picks and row clicks never tune", { timeout: 60_000 }, () => {
     const channels = fixture2000();
     const tuneEvents: Array<string | number> = [];
     const onTune = (event: Event): void => {
@@ -205,10 +189,21 @@ describe("test 6 — category changes do not trigger accidental playback", () =>
     // Arrow through the list.
     for (let i = 0; i < 50; i++) keyOn(list, "ArrowDown");
     for (let i = 0; i < 50; i++) keyOn(list, "ArrowUp");
-    // Click category pills.
-    const pills = root.querySelectorAll<HTMLElement>("[data-browser-category]");
-    expect(pills.length).toBeGreaterThan(3);
-    for (const pill of pills) pill.click();
+    // Pick every top-level drawer entry (drill or select).
+    handle.openCategories();
+    const drawerItems = () => [...root.querySelectorAll<HTMLElement>("[data-category-drawer-item]")];
+    expect(drawerItems().length).toBeGreaterThan(3);
+    for (const item of drawerItems()) {
+      if (!handle.isDrawerOpen()) handle.openCategories();
+      const fresh = drawerItems().find(
+        (el) => el.getAttribute("data-drawer-item-key") === item.getAttribute("data-drawer-item-key"),
+      )!;
+      fresh.click();
+      // A drill leaves the drawer open on subcategories: pick the
+      // first row ("All <Group>") to apply the selection.
+      if (handle.isDrawerOpen()) drawerItems()[0]!.click();
+      expect(handle.isDrawerOpen()).toBe(false);
+    }
     // Click rows (highlight only).
     const rows = root.querySelectorAll<HTMLElement>("[data-browser-row]");
     expect(rows.length).toBeGreaterThan(0);
@@ -227,7 +222,7 @@ describe("test 6 — category changes do not trigger accidental playback", () =>
     handle.destroy();
   });
 
-  it("STUB index: switching derived categories dispatches no tune event", () => {
+  it("REAL index: switching derived categories dispatches no tune event", () => {
     const channels = fixture2000();
     const tuneEvents: unknown[] = [];
     const onTune = (event: Event): void => {
@@ -237,8 +232,8 @@ describe("test 6 — category changes do not trigger accidental playback", () =>
     const index = buildCategoryIndex(channels, 1);
     for (const group of index.groups) {
       getDerivedChannels(index, { groupId: group.id });
-      for (const subId of group.subcategoryIds) {
-        getDerivedChannels(index, { subcategoryId: subId });
+      for (const sub of group.subcategories) {
+        getDerivedChannels(index, { subcategoryId: sub.id });
       }
     }
     expect(tuneEvents).toEqual([]);
@@ -247,17 +242,13 @@ describe("test 6 — category changes do not trigger accidental playback", () =>
 });
 
 describe("test 9 — search is correctly scoped and cleared", () => {
-  it("REAL browser: search filters within the selected category only", () => {
-    vi.useFakeTimers();
+  it("REAL browser: search-submit filters within the selected category only", () => {
     const channels = fixture2000();
     const handle = mountChannelBrowser(root, {
       channels,
       initialCategoryId: "sports",
     });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "f1";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(200);
+    dispatchLivetvSearchSubmit(window, { query: "f1", scope: "category", categoryId: "sports" });
     const visible = handle.getVisibleChannels();
     expect(visible.length).toBeGreaterThan(0);
     // Scoped: every visible channel is a Sports channel matching "f1".
@@ -271,55 +262,49 @@ describe("test 9 — search is correctly scoped and cleared", () => {
   });
 
   it("REAL browser: clearing search restores the full category list", () => {
-    vi.useFakeTimers();
     const channels = fixture2000();
     const handle = mountChannelBrowser(root, {
       channels,
       initialCategoryId: "sports",
     });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
     const fullCount = handle.getVisibleChannels().length;
     expect(fullCount).toBe(1200);
-    handle.openSearch();
-    input.value = "rugby";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(200);
+    dispatchLivetvSearchSubmit(window, { query: "rugby", scope: "category", categoryId: "sports" });
     expect(handle.getVisibleChannels().length).toBeLessThan(fullCount);
+    expect(handle.isSearchOpen()).toBe(true);
     expect(handle.closeSearch()).toBe(true);
-    expect(input.value).toBe("");
     expect(handle.isSearchOpen()).toBe(false);
     expect(handle.getVisibleChannels()).toHaveLength(fullCount);
     handle.destroy();
   });
 
-  it("REAL browser: search does not leak across a category change", () => {
-    vi.useFakeTimers();
+  it("REAL browser: a category change clears a category-scoped search (no leak)", () => {
     const channels = fixture2000();
     const handle = mountChannelBrowser(root, {
       channels,
       initialCategoryId: "sports",
     });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "sky";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(200);
+    dispatchLivetvSearchSubmit(window, { query: "sky", scope: "category", categoryId: "sports" });
+    expect(handle.getVisibleChannels().length).toBeLessThan(1200);
     handle.cycleCategory(1);
-    // Whatever category is now selected, visible rows belong to it
-    // and still match the query — no Sports rows leak through.
+    // The category-scoped search is cleared by the category
+    // change (W4 rule): the new category shows in full, with no
+    // stale query and no Sports rows leaking through.
+    expect(handle.isSearchOpen()).toBe(false);
     const categoryId = handle.getCategoryId();
-    const expected = searchBrowserChannels(
-      applyBrowserFilter(channels, { categoryId }),
-      "sky",
-    );
+    const expected = applyBrowserFilter(channels, { categoryId });
     expect(handle.getVisibleChannels().map((c) => c.id)).toEqual(
       expected.map((c) => c.id),
     );
     handle.destroy();
   });
 
-  it("STUB events + index: search-submit scopes, close-overlay clears", () => {
+  it("REAL events + index: search-submit scopes, sort-submit sorts, close-overlay clears", () => {
     const channels = fixture2000();
     const index = buildCategoryIndex(channels, 1);
+    const footballSub = index.groups
+      .flatMap((g) => g.subcategories)
+      .find((s) => s.rawName === "UK | Sports | Football")!;
     let query = "";
     let sort: "source" | "az" | "za" = "source";
     const onSubmit = (event: Event): void => {
@@ -335,22 +320,25 @@ describe("test 9 — search is correctly scoped and cleared", () => {
     window.addEventListener("livetv:sort-submit", onSort);
     window.addEventListener("livetv:close-overlay", onClose);
 
+    // The browser sorts locally with `source`; the index spells
+    // catalogue order `provider` — the harness maps, as any
+    // index-routed consumer must.
     const inSubcategory = (): ReturnType<typeof getDerivedChannels> =>
       getDerivedChannels(index, {
-        subcategoryId: "UK | Sports | Football",
-        query,
-        sort,
+        subcategoryId: footballSub.id,
+        search: query,
+        sort: sort === "source" ? "provider" : sort,
       });
     expect(inSubcategory()).toHaveLength(40);
 
-    dispatchLivetvSearchSubmit("sky");
+    dispatchLivetvSearchSubmit(window, { query: "sky", scope: "category", categoryId: "sports" });
     const scoped = inSubcategory();
     expect(scoped.length).toBeGreaterThan(0);
     expect(scoped.length).toBeLessThan(40);
     expect(scoped.every((c) => c.categoryId === "UK | Sports | Football")).toBe(true);
     expect(scoped.every((c) => c.norm.includes("sky"))).toBe(true);
 
-    dispatchLivetvSortSubmit("az");
+    dispatchLivetvSortSubmit(window, { sort: "az" });
     const sorted = inSubcategory();
     expect(sorted.map((c) => String(c.id)).sort()).toEqual(
       scoped.map((c) => String(c.id)).sort(),
@@ -358,7 +346,7 @@ describe("test 9 — search is correctly scoped and cleared", () => {
     const names = sorted.map((c) => c.displayName);
     expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
 
-    dispatchLivetvCloseOverlay();
+    dispatchLivetvCloseOverlay(window, { overlay: "search", reason: "cancel" });
     expect(inSubcategory()).toHaveLength(40);
     expect(query).toBe("");
 

@@ -8,26 +8,32 @@
  *      grouping/filtering (work-count assertions).
  *   8. A category with no subcategories remains fully navigable.
  *
- * The index under test is the STUB-FOR-INTEGRATION in
- * ./stubs/category-index.stub.ts (W1's real module does not exist
- * yet). Membership assertions key on VERBATIM raw categoryId
- * strings via the parser-free oracles in ./fixtures.ts, so they
- * hold however W1 parses labels. Work-count assertions read the
- * contracted buildCount / recomputeCount counters.
- * Synthetic data only; nothing here plays a stream.
+ * The index under test is W1's real module
+ * (src/scripts/lib/livetv-category-index.ts): groups hold nested
+ * subcategories keyed by `sub:<slug-of-raw-name>` with the verbatim
+ * provider string in `rawName`; counters are the module counters
+ * `categoryIndexBuildCount()` / `derivedListRecomputeCount()`.
+ * Membership assertions key on VERBATIM raw categoryId strings via
+ * the parser-free oracles in ./fixtures.ts, so they hold however
+ * W1 parses labels. Group slices are in subcategory first-seen
+ * order with provider order inside each subcategory (W1's
+ * contract) — membership is asserted exactly, order per
+ * subcategory. Synthetic data only; nothing here plays a stream.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   buildCategoryIndex,
+  categoryIndexBuildCount,
+  derivedListRecomputeCount,
   getCategoryIndex,
-  getCategoryIndexBuildCount,
   getDerivedChannels,
-  sliceDerivedWindow,
-  __resetCategoryIndexCacheForTests,
-} from "./stubs/category-index.stub";
+  resetCategoryIndexCache,
+  resetCategoryIndexCounters,
+  type CategoryIndex,
+  type ProviderSubcategory,
+} from "@/scripts/lib/livetv-category-index";
 import {
   buildEnormousCategoryFixture,
-  buildFixtureChannels,
   buildFlatCategoryFixture,
   channelsInRawCategory,
   distinctRawCategories,
@@ -40,8 +46,19 @@ import {
 } from "./fixtures";
 
 beforeEach(() => {
-  __resetCategoryIndexCacheForTests();
+  resetCategoryIndexCache();
+  resetCategoryIndexCounters();
 });
+
+/** All subcategories across all groups, in index order. */
+function allSubcategories(index: CategoryIndex): ProviderSubcategory[] {
+  return index.groups.flatMap((g) => g.subcategories);
+}
+
+/** Slice helper: the window a scroll render reads (plain slice). */
+function sliceDerivedWindow<T>(list: readonly T[], start: number, size: number): T[] {
+  return list.slice(start, start + size);
+}
 
 describe("test 1 — Sports preserves its provider subcategories", () => {
   it("exposes every distinct Sports provider category as a subcategory", () => {
@@ -50,26 +67,27 @@ describe("test 1 — Sports preserves its provider subcategories", () => {
     const sports = index.groups.find((g) => g.id === "sports");
     expect(sports).toBeDefined();
     const expectedRaws = distinctRawCategories(sportsChannelsOracle(channels));
-    expect(sports!.subcategoryIds).toHaveLength(expectedRaws.length);
-    expect([...sports!.subcategoryIds].sort()).toEqual([...expectedRaws].sort());
+    expect(sports!.subcategories.map((s) => s.rawName).sort()).toEqual([...expectedRaws].sort());
     // 30 distinct provider categories (3 regions × 10 subcategories).
-    expect(sports!.subcategoryIds).toHaveLength(30);
+    expect(sports!.subcategories).toHaveLength(30);
+    // Ids are stable `sub:<slug>` spellings, one per raw category.
+    expect(new Set(sports!.subcategories.map((s) => s.id)).size).toBe(30);
   });
 
   it("keeps same-label subcategories distinct (Football × 3 regions)", () => {
     const channels = fixture2000();
     const index = buildCategoryIndex(channels, 1);
-    const football = index.subcategories.filter((s) => s.label === "Football");
-    expect(football.map((s) => s.id).sort()).toEqual([
+    const football = allSubcategories(index).filter((s) => s.label === "Sports Football");
+    expect(football.map((s) => s.rawName).sort()).toEqual([
       "IE | Sports | Football",
       "UK | Sports | Football",
       "US | Sports | Football",
     ]);
     // No merging: each holds only its own raw category's channels.
     for (const sub of football) {
-      const expected = channelsInRawCategory(channels, sub.id).map((c) => String(c.id)).sort();
+      const expected = channelsInRawCategory(channels, sub.rawName).map((c) => String(c.id)).sort();
       expect(sub.channelIds.map(String).sort()).toEqual(expected);
-      expect(sub.count).toBe(40);
+      expect(sub.channelCount).toBe(40);
     }
   });
 
@@ -77,7 +95,8 @@ describe("test 1 — Sports preserves its provider subcategories", () => {
     const channels = fixture2000();
     const index = buildCategoryIndex(channels, 1);
     for (const raw of ["UK | Sports | F1", "US | Sports | NFL", "IE | Sports | Rugby"]) {
-      const derived = getDerivedChannels(index, { subcategoryId: raw });
+      const sub = allSubcategories(index).find((s) => s.rawName === raw)!;
+      const derived = getDerivedChannels(index, { subcategoryId: sub.id });
       const expected = channelsInRawCategory(channels, raw);
       expect(derived.map((c) => c.id)).toEqual(expected.map((c) => c.id));
     }
@@ -99,9 +118,10 @@ describe("test 1 — Sports preserves its provider subcategories", () => {
     const channels = fixture10000();
     const index = buildCategoryIndex(channels, 1);
     const sports = index.groups.find((g) => g.id === "sports");
-    expect(sports!.subcategoryIds).toHaveLength(30);
-    expect(sports!.count).toBe(6000);
-    const f1 = getDerivedChannels(index, { subcategoryId: "UK | Sports | F1" });
+    expect(sports!.subcategories).toHaveLength(30);
+    expect(sports!.channelCount).toBe(6000);
+    const f1Sub = allSubcategories(index).find((s) => s.rawName === "UK | Sports | F1")!;
+    const f1 = getDerivedChannels(index, { subcategoryId: f1Sub.id });
     expect(f1).toHaveLength(200);
   });
 });
@@ -110,34 +130,28 @@ describe("test 2 — category counts and membership are correct", () => {
   it("counts match the raw-category oracle at every fixture size", () => {
     for (const channels of [fixture200(), fixture2000(), fixture5000(), fixture10000()]) {
       const index = buildCategoryIndex(channels, 1);
-      expect(index.totalChannels).toBe(channels.length);
+      expect([...index.byId.values()]).toHaveLength(channels.length);
       const oracle = rawCategoryCounts(channels);
-      // Every raw category is either a subcategory or a flat group.
+      // Every raw category is exactly one subcategory, keyed by
+      // its verbatim rawName, holding exactly its channels.
       const accounted = new Map<string, number>();
-      for (const sub of index.subcategories) accounted.set(sub.id, sub.count);
-      const byId = new Map(channels.map((c) => [String(c.id), c]));
-      for (const group of index.groups) {
-        for (const id of group.directChannelIds) {
-          const channel = byId.get(String(id))!;
-          accounted.set(
-            channel.categoryId,
-            (accounted.get(channel.categoryId) ?? 0) + 1,
-          );
-        }
+      for (const sub of allSubcategories(index)) {
+        expect(accounted.has(sub.rawName)).toBe(false);
+        accounted.set(sub.rawName, sub.channelCount);
       }
       expect(accounted).toEqual(oracle);
       // Group counts sum to the catalogue (each channel in exactly one group).
-      expect(index.groups.reduce((sum, g) => sum + g.count, 0)).toBe(channels.length);
+      expect(index.groups.reduce((sum, g) => sum + g.channelCount, 0)).toBe(channels.length);
     }
   });
 
   it("subcategory membership is exactly raw-category equality", () => {
     const channels = fixture2000();
     const index = buildCategoryIndex(channels, 1);
-    for (const sub of index.subcategories) {
+    for (const sub of allSubcategories(index)) {
       const derived = getDerivedChannels(index, { subcategoryId: sub.id });
-      expect(derived.every((c) => c.categoryId === sub.id)).toBe(true);
-      expect(derived).toHaveLength(channelsInRawCategory(channels, sub.id).length);
+      expect(derived.every((c) => c.categoryId === sub.rawName)).toBe(true);
+      expect(derived).toHaveLength(channelsInRawCategory(channels, sub.rawName).length);
     }
   });
 
@@ -147,7 +161,7 @@ describe("test 2 — category counts and membership are correct", () => {
     const seen = new Map<string, string>();
     for (const group of index.groups) {
       const derived = getDerivedChannels(index, { groupId: group.id });
-      expect(derived).toHaveLength(group.count);
+      expect(derived).toHaveLength(group.channelCount);
       for (const channel of derived) {
         const key = String(channel.id);
         expect(seen.has(key)).toBe(false);
@@ -160,19 +174,26 @@ describe("test 2 — category counts and membership are correct", () => {
   it("unknown groups / subcategories yield empty lists, never the whole catalogue", () => {
     const index = buildCategoryIndex(fixture200(), 1);
     expect(getDerivedChannels(index, { groupId: "no-such-group" })).toEqual([]);
-    expect(getDerivedChannels(index, { subcategoryId: "XX | Nope" })).toEqual([]);
+    expect(getDerivedChannels(index, { subcategoryId: "sub:nope" })).toEqual([]);
   });
 
-  it("derived lists preserve source order by default", () => {
+  it("derived lists preserve provider order: whole catalogue, and within each subcategory", () => {
     const channels = fixture2000();
     const index = buildCategoryIndex(channels, 1);
     const all = getDerivedChannels(index, {});
     expect(all.map((c) => c.id)).toEqual(channels.map((c) => c.id));
-    const sports = getDerivedChannels(index, { groupId: "sports" });
-    const expectedOrder = channels
-      .filter((c) => sportsChannelsOracle([c]).length === 1)
-      .map((c) => c.id);
-    expect(sports.map((c) => c.id)).toEqual(expectedOrder);
+    // Group slice: subcategories in first-seen order, channels in
+    // provider (catalogue) order inside each subcategory.
+    const sports = index.groups.find((g) => g.id === "sports")!;
+    const expectedOrder = sports.subcategories.flatMap((sub) =>
+      channelsInRawCategory(channels, sub.rawName).map((c) => c.id),
+    );
+    const derived = getDerivedChannels(index, { groupId: "sports" });
+    expect(derived.map((c) => c.id)).toEqual(expectedOrder);
+    // Membership is still exactly the Sports oracle.
+    expect(derived.map((c) => String(c.id)).sort()).toEqual(
+      sportsChannelsOracle(channels).map((c) => String(c.id)).sort(),
+    );
   });
 
   it("A-Z / Z-A sorts order the derived list without changing membership", () => {
@@ -193,12 +214,12 @@ describe("test 3 — scroll does not rerun grouping/filtering", () => {
   it("repeated getCategoryIndex calls reuse the cached index (same revision)", () => {
     const channels = fixture2000();
     const first = getCategoryIndex(channels, 1);
-    const buildsAfterFirst = getCategoryIndexBuildCount();
+    const buildsAfterFirst = categoryIndexBuildCount();
     expect(buildsAfterFirst).toBe(1);
     for (let i = 0; i < 50; i++) {
       expect(getCategoryIndex(channels, 1)).toBe(first);
     }
-    expect(getCategoryIndexBuildCount()).toBe(buildsAfterFirst);
+    expect(categoryIndexBuildCount()).toBe(buildsAfterFirst);
     expect(first.buildCount).toBe(1);
   });
 
@@ -207,17 +228,17 @@ describe("test 3 — scroll does not rerun grouping/filtering", () => {
     const first = getCategoryIndex(channels, 1);
     const second = getCategoryIndex(channels, 2);
     expect(second).not.toBe(first);
-    expect(getCategoryIndexBuildCount()).toBe(2);
+    expect(categoryIndexBuildCount()).toBe(2);
     expect(second.buildCount).toBe(2);
     expect(getCategoryIndex(channels, 2)).toBe(second);
-    expect(getCategoryIndexBuildCount()).toBe(2);
+    expect(categoryIndexBuildCount()).toBe(2);
   });
 
   it("scrolling a derived list never recomputes it", () => {
     const channels = fixture10000();
     const index = getCategoryIndex(channels, 1);
     const derived = getDerivedChannels(index, { groupId: "sports" });
-    const recomputes = index.recomputeCount;
+    const recomputes = derivedListRecomputeCount();
     expect(recomputes).toBe(1);
     // Simulate 200 scroll steps: re-request the same derived list
     // and slice a new window each time, as a scroll render does.
@@ -227,23 +248,23 @@ describe("test 3 — scroll does not rerun grouping/filtering", () => {
       const window = sliceDerivedWindow(again, step * 7, 14);
       expect(window.length).toBeLessThanOrEqual(14);
     }
-    expect(index.recomputeCount).toBe(recomputes);
-    expect(getCategoryIndexBuildCount()).toBe(1);
+    expect(derivedListRecomputeCount()).toBe(recomputes);
+    expect(categoryIndexBuildCount()).toBe(1);
   });
 
   it("only a genuinely new option set recomputes", () => {
     const index = buildCategoryIndex(fixture2000(), 1);
     getDerivedChannels(index, { groupId: "sports" });
-    expect(index.recomputeCount).toBe(1);
+    expect(derivedListRecomputeCount()).toBe(1);
     getDerivedChannels(index, { groupId: "sports" });
     getDerivedChannels(index, { groupId: "sports" });
-    expect(index.recomputeCount).toBe(1);
+    expect(derivedListRecomputeCount()).toBe(1);
     getDerivedChannels(index, { groupId: "news" });
-    expect(index.recomputeCount).toBe(2);
+    expect(derivedListRecomputeCount()).toBe(2);
     getDerivedChannels(index, { groupId: "sports", sort: "az" });
-    expect(index.recomputeCount).toBe(3);
+    expect(derivedListRecomputeCount()).toBe(3);
     getDerivedChannels(index, { groupId: "sports", sort: "az" });
-    expect(index.recomputeCount).toBe(3);
+    expect(derivedListRecomputeCount()).toBe(3);
   });
 
   it("category switching recomputes once per new category, not per scroll", () => {
@@ -255,29 +276,31 @@ describe("test 3 — scroll does not rerun grouping/filtering", () => {
       { groupId: "movies" },
     ];
     for (const opts of categories) {
-      const before = index.recomputeCount;
+      const before = derivedListRecomputeCount();
       getDerivedChannels(index, opts);
-      expect(index.recomputeCount).toBe(before + 1);
+      expect(derivedListRecomputeCount()).toBe(before + 1);
       // 50 scroll steps inside the new category: no recompute.
       for (let step = 0; step < 50; step++) {
         getDerivedChannels(index, opts);
       }
-      expect(index.recomputeCount).toBe(before + 1);
+      expect(derivedListRecomputeCount()).toBe(before + 1);
     }
-    expect(getCategoryIndexBuildCount()).toBe(1);
+    expect(categoryIndexBuildCount()).toBe(1);
   });
 });
 
 describe("test 8 — a category with no subcategories stays navigable", () => {
-  it("the enormous single category is one flat group with all channels", () => {
+  it("the enormous single category is one group holding all channels", () => {
     const channels = buildEnormousCategoryFixture(3000);
     const index = buildCategoryIndex(channels, 1);
     expect(index.groups).toHaveLength(1);
     const group = index.groups[0]!;
-    expect(group.subcategoryIds).toEqual([]);
-    expect(group.count).toBe(3000);
-    expect(group.directChannelIds).toHaveLength(3000);
-    expect(index.subcategories).toEqual([]);
+    // One raw provider category → one subcategory carrying the
+    // verbatim raw name; the group itself is the flat list.
+    expect(group.subcategories).toHaveLength(1);
+    expect(group.subcategories[0]!.rawName).toBe("UK | International");
+    expect(group.channelCount).toBe(3000);
+    expect(group.subcategories[0]!.channelCount).toBe(3000);
   });
 
   it("the enormous category's derived list is complete and ordered", () => {
@@ -300,7 +323,10 @@ describe("test 8 — a category with no subcategories stays navigable", () => {
     const channels = buildFlatCategoryFixture();
     const index = buildCategoryIndex(channels, 1);
     expect(index.groups.map((g) => g.id).sort()).toEqual(["movies", "news", "sports"]);
-    expect(index.subcategories).toEqual([]);
+    // Each bare category is one group with one subcategory.
+    for (const group of index.groups) {
+      expect(group.subcategories).toHaveLength(1);
+    }
     for (const raw of ["Sports", "News", "Movies"]) {
       const group = index.groups.find((g) => g.label === raw)!;
       const derived = getDerivedChannels(index, { groupId: group.id });
@@ -313,7 +339,7 @@ describe("test 8 — a category with no subcategories stays navigable", () => {
     const channels = buildEnormousCategoryFixture(3000);
     const index = buildCategoryIndex(channels, 1);
     const group = index.groups[0]!;
-    const searched = getDerivedChannels(index, { groupId: group.id, query: "World TV" });
+    const searched = getDerivedChannels(index, { groupId: group.id, search: "World TV" });
     expect(searched.length).toBeGreaterThan(0);
     expect(searched.every((c) => c.displayName.includes("World TV"))).toBe(true);
     const sorted = getDerivedChannels(index, { groupId: group.id, sort: "az" });

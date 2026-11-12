@@ -15,23 +15,29 @@
  * only measures and reports, plus asserts the measured operations
  * actually ran (counters moved exactly as expected, focus landed).
  *
- * NEVER claim physical-PC performance is verified: these numbers
- * are sandbox/CI measurements on fixture data against stub
- * harnesses (and the real index/grouping path where noted). The
- * user's PC is the only performance verdict that counts.
+ * All measurements run against the REAL merged modules (W1 index,
+ * W2 browser, W3 virtual list, real nowNextRows). NEVER claim
+ * physical-PC performance is verified: these numbers are
+ * sandbox/CI measurements on fixture data. The user's PC is the
+ * only performance verdict that counts.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { nowNextRows } from "@/scripts/lib/livetv-guide";
+import { BROWSER_ROW_HEIGHT, mountChannelBrowser } from "@/scripts/lib/livetv-browser";
 import {
   buildCategoryIndex,
+  categoryIndexBuildCount,
+  derivedListRecomputeCount,
   getCategoryIndex,
-  getCategoryIndexBuildCount,
   getDerivedChannels,
-  sliceDerivedWindow,
-  __resetCategoryIndexCacheForTests,
-} from "./stubs/category-index.stub";
-import { mountGuideList } from "./stubs/guide.stub";
-import { mountVirtualList } from "./stubs/virtual-list.stub";
+  resetCategoryIndexCache,
+  resetCategoryIndexCounters,
+} from "@/scripts/lib/livetv-category-index";
+import { nowNextRows } from "@/scripts/lib/livetv-guide";
+import {
+  createVirtualList,
+  virtualListWindow,
+} from "@/scripts/lib/livetv-guide-virtual";
+import { guideProgrammeKey } from "@/scripts/lib/livetv-state";
 import {
   FIXTURE_NOW_MS,
   buildFixtureChannels,
@@ -61,18 +67,42 @@ function bench(
   return totalMs;
 }
 
+async function benchAsync(
+  operation: string,
+  size: number,
+  iterations: number,
+  fn: () => Promise<void>,
+): Promise<number> {
+  const start = performance.now();
+  for (let i = 0; i < iterations; i++) await fn();
+  const totalMs = performance.now() - start;
+  rows.push({ operation, size, iterations, totalMs, meanMs: totalMs / iterations });
+  return totalMs;
+}
+
+async function nextFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
+function keyOn(el: HTMLElement, key: string): void {
+  el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
 let root: HTMLElement;
 beforeEach(() => {
   root = document.createElement("div");
   document.body.appendChild(root);
-  __resetCategoryIndexCacheForTests();
+  resetCategoryIndexCache();
+  resetCategoryIndexCounters();
 });
 afterEach(() => {
   root.remove();
 });
 
 describe("livetv0117 benchmark (reported numbers, no thresholds)", () => {
-  it("measures index build, cache hit, category switch, scroll and focus", { timeout: 60_000 }, () => {
+  it("measures index build, cache hit, category switch, scroll and focus", { timeout: 120_000 }, async () => {
     // 1. Index build (fresh build per iteration) at each size.
     for (const size of [200, 2000, 5000, 10000]) {
       const channels = buildFixtureChannels(size);
@@ -84,11 +114,11 @@ describe("livetv0117 benchmark (reported numbers, no thresholds)", () => {
     // 2. Cache hit: same array + revision must not rebuild.
     const channels10k = buildFixtureChannels(10000);
     const cached = getCategoryIndex(channels10k, 1);
-    const buildsBefore = getCategoryIndexBuildCount();
+    const buildsBefore = categoryIndexBuildCount();
     bench("getCategoryIndex (cache hit)", 10000, 1000, () => {
       expect(getCategoryIndex(channels10k, 1)).toBe(cached);
     });
-    expect(getCategoryIndexBuildCount()).toBe(buildsBefore);
+    expect(categoryIndexBuildCount()).toBe(buildsBefore);
 
     // 3. Category switch: first derivation per category (recompute),
     //    then repeated access (cache hit).
@@ -97,6 +127,7 @@ describe("livetv0117 benchmark (reported numbers, no thresholds)", () => {
     // One fresh index, one derivation per group.
     {
       const fresh = buildCategoryIndex(channels10k, 9);
+      const recomputesBefore = derivedListRecomputeCount();
       const start = performance.now();
       for (const groupId of groupIds) getDerivedChannels(fresh, { groupId });
       const totalMs = performance.now() - start;
@@ -107,76 +138,114 @@ describe("livetv0117 benchmark (reported numbers, no thresholds)", () => {
         totalMs,
         meanMs: totalMs / groupIds.length,
       });
-      expect(fresh.recomputeCount).toBe(groupIds.length);
+      expect(derivedListRecomputeCount() - recomputesBefore).toBe(groupIds.length);
     }
-    bench("category re-access (derived cache hit)", 10000, 1000, () => {
-      getDerivedChannels(index, { groupId: "sports" });
-    });
-    expect(index.recomputeCount).toBe(1);
+    {
+      const recomputesBefore = derivedListRecomputeCount();
+      bench("category re-access (derived cache hit)", 10000, 1000, () => {
+        getDerivedChannels(index, { groupId: "sports" });
+      });
+      // Exactly one miss (the first access), then 999 cache hits.
+      expect(derivedListRecomputeCount() - recomputesBefore).toBe(1);
+    }
 
     // 4. Scroll rendering: window slices over a 10k derived list.
     const sports = getDerivedChannels(index, { groupId: "sports" });
     let sliceOffset = 0;
     bench("scroll window slice (14 rows)", 6000, 2000, () => {
-      sliceDerivedWindow(sports, sliceOffset, 14);
+      sports.slice(sliceOffset, sliceOffset + 14);
       sliceOffset = (sliceOffset + 7) % 5900;
     });
     // Deterministic scroll walk (no Math.random in assertions):
     let walked = 0;
     bench("scroll walk (200 sequential windows)", 6000, 200, () => {
-      const win = sliceDerivedWindow(sports, walked * 7, 14);
+      const win = sports.slice(walked * 7, walked * 7 + 14);
       walked = (walked + 1) % 800;
       expect(win.length).toBeGreaterThan(0);
     });
 
-    // 5. Virtual list: mount + scroll + controller-to-focus moves.
-    const list = mountVirtualList(root, {
-      items: buildFixtureChannels(2000),
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      programmeOf: (c) => `Now: ${c.displayName}`,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
-    });
-    bench("virtual list scroll step (re-render window)", 2000, 200, () => {
-      list.scrollByRows(7);
+    // 5. Real browser: scroll paints + controller-to-highlight moves.
+    const browserChannels = buildFixtureChannels(2000);
+    const browser = mountChannelBrowser(root, { channels: browserChannels });
+    const listEl = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    let scrollTop = 0;
+    await benchAsync("browser scroll step (rAF paint)", 2000, 100, async () => {
+      scrollTop += 7 * BROWSER_ROW_HEIGHT;
+      listEl.scrollTop = scrollTop;
+      listEl.dispatchEvent(new Event("scroll"));
+      await nextFrames();
     });
     const focusStart = performance.now();
-    for (let i = 0; i < 500; i++) list.moveFocus(1);
+    for (let i = 0; i < 500; i++) keyOn(listEl, "ArrowDown");
     const focusTotal = performance.now() - focusStart;
     rows.push({
-      operation: "controller move → focus (500 moves, incl. DOM focus)",
+      operation: "controller move → highlight (500 moves, sync paint)",
       size: 2000,
       iterations: 500,
       totalMs: focusTotal,
       meanMs: focusTotal / 500,
     });
-    expect(list.getFocusedKey()).not.toBeNull();
-    list.destroy();
+    // No initial highlight: the first move lands on index 0, so
+    // 500 moves land on index 499.
+    expect(browser.getHighlightedId()).toBe(browserChannels[499]!.id);
+    browser.destroy();
 
-    // 6. Guide: On Now row build + virtualised mount at 2,500 rows.
+    // 6. Guide: On Now row build + real virtual-list mount at 2,500 rows.
     const { programmes } = buildGuideFixture(2500);
     let guideRows = nowNextRows(programmes, FIXTURE_NOW_MS);
     bench("nowNextRows (2,500 channels)", 2500, 20, () => {
       guideRows = nowNextRows(programmes, FIXTURE_NOW_MS);
     });
     expect(guideRows).toHaveLength(2500);
-    const guide = mountGuideList(root, {
-      mode: "now",
-      rows: guideRows,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
+    const container = document.createElement("div");
+    root.appendChild(container);
+    let guideScrollTop = 0;
+    Object.defineProperty(container, "scrollTop", {
+      get: () => guideScrollTop,
+      set: (value: number) => {
+        guideScrollTop = value;
+      },
+      configurable: true,
     });
-    bench("guide scroll step", 2500, 200, () => {
-      guide.scrollByRows(11);
+    Object.defineProperty(container, "clientHeight", { get: () => 600, configurable: true });
+    const guide = createVirtualList({
+      container,
+      mode: "spacer",
+      rowHeightPx: 112,
+      overscanRows: 4,
+      keyOf: (row) => guideProgrammeKey(row.channelId, row.current.startMs),
+      renderRow: (row, _index, existing) => {
+        if (existing) {
+          existing.textContent = row.current.title;
+          return existing;
+        }
+        const node = document.createElement("button");
+        node.setAttribute("data-focus-key", guideProgrammeKey(row.channelId, row.current.startMs));
+        node.textContent = row.current.title;
+        return node;
+      },
     });
-    expect(guide.getMountedRowCount()).toBeLessThanOrEqual(20);
+    guide.setItems(guideRows);
+    guide.renderNow();
+    await benchAsync("guide scroll step", 2500, 100, async () => {
+      guideScrollTop += 11 * 112;
+      container.dispatchEvent(new Event("scroll"));
+      await nextFrames();
+      guide.renderNow();
+    });
+    const guideWin = virtualListWindow({
+      total: 2500,
+      rowHeightPx: 112,
+      scrollTopPx: 112 * 100,
+      viewportHeightPx: 600,
+      overscanRows: 4,
+    });
+    expect(guide.mountedCount()).toBeLessThanOrEqual(guideWin.endIndex - guideWin.startIndex + 1);
     guide.destroy();
+    container.remove();
 
     // Report. Vitest prints console output with the run; the
-    // numbers are recorded in the W5 report, not asserted.
+    // numbers are recorded in the integration report, not asserted.
     const table = rows
       .map(
         (r) =>

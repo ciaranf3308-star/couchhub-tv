@@ -1,11 +1,11 @@
 # Live TV 2.0 (0.11.7) — W5 tests: integration notes
 
-Branch: `livetv-0117-w5-tests` (from `origin/main @ c905982`, 0.11.5).
-This directory holds the fourteen mandatory tests (user brief §9),
-the deterministic fixtures, the performance instrumentation, and
-MINIMAL stubs for the W1–W4 modules that did not exist yet when
-these tests were written. **All stubs live under `tests/` only —
-no production code was modified and no version file was bumped.**
+Branch: `livetv-0117-w5-tests` (from `origin/main @ c905982`, 0.11.5),
+integrated onto `livetv-0117-integration` against the REAL merged
+modules. **All stubs are deleted** (`stubs/` + `stubs/broken/` +
+`livetv0117-red-verification.test.ts` are gone); every test below
+runs against production code. No production code was modified by
+W5; integration adaptations are listed at the bottom.
 
 ## Running
 
@@ -34,7 +34,6 @@ pnpm vitest run tests/livetv0117/livetv0117-benchmark.test.ts       # benchmark 
 | 14 | EPG updates don't reset channel focus unnecessarily | `livetv0117-nav-events.test.ts` |
 
 Supporting files: `livetv0117-fixtures.test.ts` (fixture self-checks),
-`livetv0117-red-verification.test.ts` (red-verification, see below),
 `livetv0117-benchmark.test.ts` (instrumentation, reported numbers,
 no ms thresholds).
 
@@ -59,70 +58,76 @@ Channels use the REAL `LivetvChannel` shape and the REAL
 categoryId strings with no grouping logic, so membership assertions
 do not trust the index's parser.
 
-## Stubs — DELETE ON INTEGRATION
+## Real modules under test
 
-Every stub file is headed `STUB-FOR-INTEGRATION`. Integration
-deletes the whole `stubs/` directory and re-points the test imports
-at the real merged modules, adapting ONLY names/wiring — never
-weakening an assertion. If a real module's semantics differ from a
-stub's in any way a test asserts, that is an integration defect to
-resolve with W1–W4, not a reason to edit the test.
+| Area | Real module |
+|------|-------------|
+| Category index | `src/scripts/lib/livetv-category-index.ts` (W1): `buildCategoryIndex(channels, revision)`, `getCategoryIndex(channels, revision)`, `getDerivedChannels(index, opts)`; counters `categoryIndexBuildCount()` / `derivedListRecomputeCount()`, resets `resetCategoryIndexCache()` / `resetCategoryIndexCounters()`. Subcategory ids are `sub:<slug-of-raw-name>`; `rawName` is the verbatim provider string. |
+| Browser list | `src/scripts/lib/livetv-browser.ts` (W2): `mountChannelBrowser`, keyed row pool (`[data-browser-row]`), rAF-coalesced scroll paints, drawer, `livetv:search-submit` / `livetv:sort-submit` event contract. |
+| Guide lists | `src/scripts/lib/livetv-guide-virtual.ts` (W3): `createVirtualList` (spacer mode), `virtualListWindow`, `nowNextRows` (kept from `livetv-guide.ts`). |
+| Nav / events | `src/scripts/lib/livetv-nav.ts` (W4): `LivetvNavController`, `installTopLayerBackGuard`, singleton `livetvNav`; `src/scripts/lib/livetv-search-sort.ts` (W4): dispatch helpers + literal event names (the contract). |
+| Input dedupe | `src/scripts/lib/gamepad.ts`: the poll loop's rising-edge detection + native-path stand-down, driven with a mocked Gamepad API; `livetvGamepadActionForButton` (`livetv-keys.ts`) for the mapping. The native XInput path sends edges only (Rust) — cross-source dedupe is the loop standing down while native input is live. |
 
-| Stub | Real module | Contract / adaptation |
-|------|-------------|-----------------------|
-| `stubs/category-index.stub.ts` | `src/scripts/lib/livetv-category-index.ts` (W1) | `buildCategoryIndex(channels, revision)`, `getCategoryIndex(channels, revision)`, `getDerivedChannels(index, opts)`. Identity = verbatim raw category string; subcategories are raw categories, never merged across regions. `CategoryIndex.buildCount` = module-wide build sequence number (see stub header); `recomputeCount` = per-index derived-cache misses. If W1 names the counters differently, adapt the accessor, not the assertion. `splitProviderCategory` is stub-only: W1's parser is authoritative; fixture raw categories use only ` \| ` separators so both must agree. `DerivedChannelsOptions` = `{ groupId?, subcategoryId?, query?, sort?, favouritesOnly? }`; group ids are slugs of group labels (`sports`, `news`, …). `sliceDerivedWindow` is a test helper, not part of the contract — drop it if W1/W2 expose their own windowing. `__resetCategoryIndexCacheForTests` / `getCategoryIndexBuildCount` are test-only accessors; W1 must expose an equivalent way to observe the counters (or integration wires the tests to W1's counters directly). |
-| `stubs/virtual-list.stub.ts` | W2's virtualised browser list | `mountVirtualList` / `VirtualListHandle`. Window math reuses the REAL `computeVisibleWindow`. Adaptation: mount W2's real list in the harness, map `getMountedRowCount` → mounted `[data-browser-row]` (or W2's row selector) count, `moveFocus` → W2's focus movement, `applyEpgUpdate` → W2's EPG-refresh path, `captureContext`/`restoreContext` → the real browser-context snapshot. Keep the bounds: mounted ≤ `ceil(viewport/rowHeight) + 2*overscan + 1`. |
-| `stubs/guide.stub.ts` | W3's virtualised Guide lists | `mountGuideList` with modes `now` / `channel`. Rows come from the REAL `nowNextRows` — keep that. Adaptation: mount W3's real On Now / By Channel lists, map the handle methods to W3's selectors/movement. |
-| `stubs/nav.stub.ts` | `src/scripts/lib/livetv-nav.ts` (W4) | `LivetvNavStack` (push/pop/back/top/depth/snapshot), `LivetvInputGate` (active mode + overlay gating, `deliverInput`), `attachNavEventWiring` (`livetv:close-overlay` → pop one overlay layer). Adaptation: import W4's real stack/gate; if W4 splits the gate differently, wire the same assertions to W4's visibility API. `back()` MUST pop exactly one layer and never pop the root. |
-| `stubs/input-dedupe.stub.ts` | `gamepad.ts` edge handling + `livetv-keys` mapping | `ButtonEdgeTracker.feed(sample)` → action on rising edge only, across `xinput` + `gamepad` sources; full release required before a second action. Action resolution delegates to the REAL `livetvGamepadActionForButton`. Adaptation: drive the real gamepad edge path with the same sample sequences (or keep the tracker semantics in the real layer and assert through it). Do NOT delete the cross-source duplicate assertion. |
-| `stubs/events.stub.ts` | W2/W4 overlay event surface | Literal event names `livetv:open-search`, `livetv:search-submit`, `livetv:open-sort`, `livetv:sort-submit`, `livetv:close-overlay`; detail shapes `{ query: string }` / `{ sort: string }`. Adaptation: import the real constants from W2/W4 (or keep asserting the literal names — they ARE the contract) and dispatch through the real overlays. |
-| `stubs/broken/*.stub.ts` | — (red-verification only) | Deliberately broken variants. Delete with the stubs. The red-verification file is deleted too once the green tests run against real modules — UNLESS integration keeps broken-variant checks against the real modules' failure modes, in which case rewrite them against real fault injection, never against these files. |
+## Integration adaptations (names/wiring only — no weakened assertions)
 
-## Red verification (mandatory, done)
-
-`livetv0117-red-verification.test.ts` runs each guarded invariant
-against a deliberately broken variant and asserts it FAILS there:
-
-- R1 (guards test 3): broken index rebuilds/recomputes on every access.
-- R2 (guards test 4): broken list mounts all 2,000 rows.
-- R3 (guards test 11): broken nav pops two layers per B, through the root.
-- R4 (guards test 10): broken tracker emits once per poll sample (30×).
-- R5 (guards test 14): broken list resets focus/scroll on EPG update.
-
-All red tests pass (i.e. the broken variants are correctly detected
-as broken). If integration changes a green test, re-check that its
-red counterpart still fails against the broken variant first.
-
-## Real seams already exercised (no stubs)
-
-These assertions run against production code on the 0.11.5 base and
-must keep passing unchanged after integration:
-
-- `mountChannelBrowser` virtualisation, highlight walk, no-tune on
-  category change / row click, search scoping/clearing, B one-level,
-  hidden-root gating, refresh focus/scroll survival
-  (`livetv-browser.ts`).
-- `livetvGamepadActionForButton` LB/RB/LT/RT mapping (`livetv-keys.ts`).
-- `createLivetvState` / `enterBrowser` / `tuneTo` / `enterPlayback` /
-  `exitPlaybackToLanding` (`livetv-state.ts`).
-- `stableGuideSelection`, `nowNextRows` (`livetv-guide.ts`).
-- `computeVisibleWindow` (`couch-grid.ts`, via the virtual-list stub).
-- `dispatchLivetvTune` / `livetv:tune` (`livetv-data.ts`).
+- **Index shapes**: stub `index.subcategories` / `group.subcategoryIds`
+  / `group.directChannelIds` / `group.count` / `index.totalChannels`
+  / per-index `recomputeCount` → W1 nested `group.subcategories`
+  (`id` / `rawName` / `channelCount` / `channelIds`),
+  `group.channelCount`, `index.byId`, module counters. Subcategory
+  ids resolve from the index by `rawName` lookup in-test.
+- **Group-slice order**: W1 returns group slices in subcategory
+  first-seen order with provider order inside each subcategory
+  (the stub preserved global catalogue order). Test 2 asserts
+  membership exactly plus per-subcategory provider order — the
+  W1 contract — instead of global order.
+- **Derived search option** is `search` (not the stub's `query`);
+  **sort vocabulary**: the index spells catalogue order `provider`
+  (the browser/W4 spell it `source`); the events harness maps.
+- **Flat categories (test 8)**: W1 represents one raw category as
+  one group with ONE subcategory (the verbatim raw name); the
+  stub's "no subcategories" shape does not exist in W1. The
+  navigability assertions (complete ordered list, windowed
+  reachability, search/sort) are unchanged.
+- **Browser UI**: pills and the inline search box are gone (drawer
+  + overlay search). Test 6 drives drawer picks; test 9 drives
+  the real `livetv:search-submit` event. A category-scoped search
+  is CLEARED on any category change (W4 rule) — the old
+  "query persists across a category change" expectation was
+  replaced by the clearing assertion.
+- **List wrap**: the real browser wraps highlight movement
+  (pre-existing behaviour); the 1,000-move walk asserts the wrap
+  explicitly instead of the stub's top clamp.
+- **Nav/events**: the stub stack/gate/tracker are replaced by the
+  real controller, guards, and poll loop (see table). The
+  `livetv:close-overlay` direction is notification-only in W4
+  (overlays dispatch it when closing; nothing pops on receipt) —
+  the guard test asserts the real guard wiring instead.
+- **Row bound**: `ceil(viewport/rowHeight) + 2·overscan + 1`
+  (the +1 covers the Guide engine's one pinned focused node),
+  computed through the real `virtualListWindow` math at a
+  mid-list scroll position.
+- **Red verification**: deleted with the stubs (brief default).
+  The green tests' power is carried by the counter, bound, and
+  exactness assertions against real modules.
 
 ## Instrumentation
 
 `livetv0117-benchmark.test.ts` measures (performance.now):
 index build at 4 sizes, cache hit, category switch (first derivation
-per group), derived cache hit, scroll window slices, virtual-list
-scroll re-render, controller-move→focus latency (incl. DOM focus),
-`nowNextRows` at 2,500, Guide scroll steps. It asserts NO millisecond
-thresholds. Numbers are sandbox measurements on fixtures/stubs and
-are NEVER a claim about the user's PC. Re-run after integration
-against the real modules and record the new numbers.
+per group), derived cache hit, scroll window slices, real-browser
+scroll paints + controller moves, `nowNextRows` at 2,500, Guide
+scroll steps. It asserts NO millisecond thresholds. Numbers are
+sandbox measurements on fixtures and are NEVER a claim about the
+user's PC. Scroll-step means include awaiting rAF frames in jsdom
+(frame-wait, not paint cost); the controller-move mean is the
+synchronous-paint number. Re-run after integration against the real
+modules and record the new numbers.
 
 ## What was NOT touched
 
-No production code (`src/`, `src-tauri/`), no version files
+No production code (`src/`, `src-tauri/`) by W5, no version files
 (`package.json`, `tauri.conf.json`, `Cargo.toml`), no Discover AI /
 Movies / Series / launcher files, no merges, no PR. Only
-`tests/livetv0117/` was added.
+`tests/livetv0117/` was added (integration later rewired the
+production seams on the integration branch).

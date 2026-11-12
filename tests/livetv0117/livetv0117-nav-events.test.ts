@@ -10,19 +10,30 @@
  *  13. Returning from playback restores relevant browser context.
  *  14. EPG updates don't reset channel focus unnecessarily.
  *
- * Real seams: livetv-keys mapping, livetv-state transitions,
- * stableGuideSelection, mountChannelBrowser back/hidden gating.
- * Stubs (marked STUB): the nav stack / input gate (W4 contract)
- * and the button-edge tracker (cross-source dedupe harness).
+ * All seams are REAL: the gamepad poll loop's rising-edge +
+ * native-path stand-down (gamepad.ts), the W4 nav controller and
+ * top-layer back guards (livetv-nav.ts), livetv-keys mapping,
+ * livetv-state transitions, stableGuideSelection, and
+ * mountChannelBrowser back/hidden gating. The poll-loop tests
+ * drive mountGamepad with a mocked Gamepad API; the native path
+ * sends edges only (Rust), so cross-source dedupe is the loop
+ * standing down while the native path is live.
  * Synthetic data only; nothing here plays a stream.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mountChannelBrowser } from "@/scripts/lib/livetv-browser";
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
+import { browserCategories, mountChannelBrowser } from "@/scripts/lib/livetv-browser";
+import { mountGamepad, noteNativeInputActive } from "@/scripts/lib/gamepad";
 import { stableGuideSelection } from "@/scripts/lib/livetv-guide";
 import {
   LIVETV_GAMEPAD_BUTTONS,
   livetvGamepadActionForButton,
 } from "@/scripts/lib/livetv-keys";
+import {
+  LivetvNavController,
+  installTopLayerBackGuard,
+  livetvNav,
+} from "@/scripts/lib/livetv-nav";
+import { dispatchLivetvSearchSubmit } from "@/scripts/lib/livetv-search-sort";
 import {
   createLivetvState,
   enterBrowser,
@@ -31,21 +42,6 @@ import {
   guideProgrammeKey,
   tuneTo,
 } from "@/scripts/lib/livetv-state";
-import {
-  buildCategoryIndex,
-  getDerivedChannels,
-} from "./stubs/category-index.stub";
-import { dispatchLivetvCloseOverlay } from "./stubs/events.stub";
-import {
-  createButtonEdgeTracker,
-  type ButtonSample,
-} from "./stubs/input-dedupe.stub";
-import {
-  attachNavEventWiring,
-  createLivetvInputGate,
-  createLivetvNavStack,
-} from "./stubs/nav.stub";
-import { mountVirtualList } from "./stubs/virtual-list.stub";
 import { FIXTURE_NOW_MS, buildFixtureProgrammes, fixture2000 } from "./fixtures";
 
 let root: HTMLElement;
@@ -55,27 +51,18 @@ beforeEach(() => {
 });
 afterEach(() => {
   root.remove();
+  livetvNav.reset();
+  delete document.documentElement.dataset.livetvMode;
 });
 
-function holdSamples(
-  button: number,
-  samples: number,
-  sources: Array<"xinput" | "gamepad"> = ["xinput", "gamepad"],
-): ButtonSample[] {
-  // Both sources report the same held press, interleaved, as a
-  // poll loop would see them.
-  const out: ButtonSample[] = [];
-  for (let i = 0; i < samples; i++) {
-    out.push({ source: sources[i % sources.length]!, button, pressed: true, atMs: 1000 + i * 16 });
-  }
-  return out;
+function keyOn(el: HTMLElement, key: string): void {
+  el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
 }
 
-function releaseSamples(button: number, atMs: number): ButtonSample[] {
-  return [
-    { source: "xinput", button, pressed: false, atMs },
-    { source: "gamepad", button, pressed: false, atMs },
-  ];
+async function nextFrames(count = 2): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
 }
 
 describe("test 10 — LB/RB and LT/RT work without duplicate events", () => {
@@ -86,122 +73,210 @@ describe("test 10 — LB/RB and LT/RT work without duplicate events", () => {
     expect(livetvGamepadActionForButton("browser", LIVETV_GAMEPAD_BUTTONS.rt)).toBe("page-next");
   });
 
-  it("STUB tracker: one held LB press from both sources emits exactly once", () => {
-    const tracker = createButtonEdgeTracker({ context: "browser" });
-    const emitted = holdSamples(LIVETV_GAMEPAD_BUTTONS.lb, 60).map((s) => tracker.feed(s));
-    expect(emitted.filter(Boolean)).toHaveLength(1);
-    expect(emitted.find(Boolean)).toMatchObject({
-      button: LIVETV_GAMEPAD_BUTTONS.lb,
-      action: "category-prev",
+  describe("REAL poll loop (mocked Gamepad API)", () => {
+    const BUTTON_COUNT = 17;
+    let pressed: boolean[];
+    let keys: string[];
+    let keyListener: (event: Event) => void;
+    let originalGetGamepads: typeof navigator.getGamepads | undefined;
+
+    function fakePad(): Gamepad {
+      return {
+        index: 0,
+        connected: true,
+        buttons: pressed.map((p) => ({ pressed: p, value: p ? 1 : 0 })) as GamepadButton[],
+        axes: [0, 0, 0, 0],
+      } as Gamepad;
+    }
+
+    beforeAll(() => {
+      document.documentElement.dataset.livetvMode = "browser";
+      pressed = new Array(BUTTON_COUNT).fill(false);
+      keys = [];
+      originalGetGamepads = navigator.getGamepads;
+      Object.defineProperty(navigator, "getGamepads", {
+        value: () => [fakePad()],
+        configurable: true,
+      });
+      keyListener = (event: Event) => {
+        keys.push((event as KeyboardEvent).key);
+      };
+      window.addEventListener("keydown", keyListener, true);
+      mountGamepad();
+      window.dispatchEvent(new Event("gamepadconnected"));
+    });
+
+    afterAll(() => {
+      window.removeEventListener("keydown", keyListener, true);
+      Object.defineProperty(navigator, "getGamepads", {
+        value: originalGetGamepads,
+        configurable: true,
+      });
+      delete document.documentElement.dataset.livetvMode;
+    });
+
+    beforeEach(async () => {
+      // The outer afterEach clears the mode mirror; restore the
+      // browser context the poll loop's button mapping reads.
+      document.documentElement.dataset.livetvMode = "browser";
+      // Settle the loop with everything released before each case.
+      pressed.fill(false);
+      await nextFrames(3);
+      keys.length = 0;
+    });
+
+    function setPressed(button: number, value: boolean): void {
+      pressed[button] = value;
+    }
+
+    it("one held LB press emits exactly once across 60 poll frames", { timeout: 60_000 }, async () => {
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, true);
+      await nextFrames(60);
+      expect(keys.filter((k) => k === "[")).toHaveLength(1);
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, false);
+      await nextFrames(3);
+    });
+
+    it("RB / LT / RT holds emit exactly once each", { timeout: 60_000 }, async () => {
+      const cases = [
+        [LIVETV_GAMEPAD_BUTTONS.rb, "]"],
+        [LIVETV_GAMEPAD_BUTTONS.lt, "PageUp"],
+        [LIVETV_GAMEPAD_BUTTONS.rt, "PageDown"],
+      ] as const;
+      for (const [button, key] of cases) {
+        keys.length = 0;
+        setPressed(button, true);
+        await nextFrames(30);
+        expect(keys.filter((k) => k === key)).toHaveLength(1);
+        setPressed(button, false);
+        await nextFrames(3);
+      }
+    });
+
+    it("a second action requires a full release first", { timeout: 60_000 }, async () => {
+      const button = LIVETV_GAMEPAD_BUTTONS.rb;
+      setPressed(button, true);
+      await nextFrames(10);
+      expect(keys.filter((k) => k === "]")).toHaveLength(1);
+      // Still held across more frames: no new edge.
+      await nextFrames(20);
+      expect(keys.filter((k) => k === "]")).toHaveLength(1);
+      // Full release, then a fresh press: a second action.
+      setPressed(button, false);
+      await nextFrames(3);
+      setPressed(button, true);
+      await nextFrames(10);
+      expect(keys.filter((k) => k === "]")).toHaveLength(2);
+      setPressed(button, false);
+      await nextFrames(3);
+    });
+
+    it("distinct buttons are independent", { timeout: 60_000 }, async () => {
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, true);
+      setPressed(LIVETV_GAMEPAD_BUTTONS.rb, true);
+      await nextFrames(10);
+      expect(keys.filter((k) => k === "[")).toHaveLength(1);
+      expect(keys.filter((k) => k === "]")).toHaveLength(1);
+      await nextFrames(20);
+      expect(keys.filter((k) => k === "[")).toHaveLength(1);
+      expect(keys.filter((k) => k === "]")).toHaveLength(1);
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, false);
+      setPressed(LIVETV_GAMEPAD_BUTTONS.rb, false);
+      await nextFrames(3);
+    });
+
+    it("while the native XInput path is live, the browser loop stands down (no cross-source duplicates)", { timeout: 60_000 }, async () => {
+      // The same physical pad is visible to BOTH XInput and the
+      // Gamepad API: while native input is live, the poll loop
+      // must process nothing, so no press can fire twice.
+      noteNativeInputActive();
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, true);
+      await nextFrames(30);
+      expect(keys.filter((k) => k === "[")).toHaveLength(0);
+      setPressed(LIVETV_GAMEPAD_BUTTONS.lb, false);
+      await nextFrames(3);
     });
   });
 
-  it("STUB tracker: RB / LT / RT holds emit exactly once each", () => {
-    const tracker = createButtonEdgeTracker({ context: "browser" });
-    for (const [button, action] of [
-      [LIVETV_GAMEPAD_BUTTONS.rb, "category-next"],
-      [LIVETV_GAMEPAD_BUTTONS.lt, "page-prev"],
-      [LIVETV_GAMEPAD_BUTTONS.rt, "page-next"],
-    ] as const) {
-      const emitted = holdSamples(button, 30).map((s) => tracker.feed(s));
-      expect(emitted.filter(Boolean)).toHaveLength(1);
-      expect(emitted.find(Boolean)?.action).toBe(action);
-      for (const sample of releaseSamples(button, 5000)) tracker.feed(sample);
-    }
-  });
-
-  it("STUB tracker: a second action requires a full release first", () => {
-    const tracker = createButtonEdgeTracker({ context: "browser" });
-    const button = LIVETV_GAMEPAD_BUTTONS.rb;
-    expect(tracker.feed({ source: "xinput", button, pressed: true, atMs: 100 })).not.toBeNull();
-    // The second source reports the same held press: still one press.
-    expect(tracker.feed({ source: "gamepad", button, pressed: true, atMs: 108 })).toBeNull();
-    // Only one source releases: still held, no new edge.
-    expect(tracker.feed({ source: "xinput", button, pressed: false, atMs: 116 })).toBeNull();
-    expect(tracker.feed({ source: "xinput", button, pressed: true, atMs: 132 })).toBeNull();
-    // Full release, then a fresh press: a second action.
-    for (const sample of releaseSamples(button, 200)) tracker.feed(sample);
-    expect(tracker.feed({ source: "gamepad", button, pressed: true, atMs: 216 })).not.toBeNull();
-  });
-
-  it("STUB tracker: distinct buttons are independent", () => {
-    const tracker = createButtonEdgeTracker({ context: "browser" });
-    expect(
-      tracker.feed({ source: "xinput", button: LIVETV_GAMEPAD_BUTTONS.lb, pressed: true, atMs: 100 }),
-    ).not.toBeNull();
-    expect(
-      tracker.feed({ source: "xinput", button: LIVETV_GAMEPAD_BUTTONS.rb, pressed: true, atMs: 100 }),
-    ).not.toBeNull();
-    expect(
-      tracker.feed({ source: "gamepad", button: LIVETV_GAMEPAD_BUTTONS.lb, pressed: true, atMs: 116 }),
-    ).toBeNull();
-  });
-
-  it("deduped LB/RB steps through every category exactly once", () => {
+  it("LB/RB key steps through every category exactly once (real browser)", () => {
     const channels = fixture2000();
-    const index = buildCategoryIndex(channels, 1);
-    const groupIds = index.groups.map((g) => g.id);
-    const tracker = createButtonEdgeTracker({ context: "browser" });
-    let current = 0;
-    const visited: string[] = [groupIds[0]!];
-    // Press RB (held, both sources) once per step around the ring.
-    for (let step = 0; step < groupIds.length; step++) {
-      for (const sample of holdSamples(LIVETV_GAMEPAD_BUTTONS.rb, 10)) {
-        const emitted = tracker.feed(sample);
-        if (emitted) current = (current + 1) % groupIds.length;
-      }
-      for (const sample of releaseSamples(LIVETV_GAMEPAD_BUTTONS.rb, 9000 + step)) {
-        tracker.feed(sample);
-      }
-      visited.push(groupIds[current]!);
-      // Each step lands on a real, non-empty derived list.
-      expect(getDerivedChannels(index, { groupId: groupIds[current]! }).length).toBeGreaterThan(0);
+    const handle = mountChannelBrowser(root, {
+      channels,
+      recentIds: [channels[0]!.id],
+    });
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    const expectedCount = browserCategories(channels, [channels[0]!.id]).length;
+    const start = handle.getCategoryId();
+    const visited: string[] = [start];
+    for (let step = 0; step < expectedCount; step++) {
+      keyOn(list, "]");
+      visited.push(handle.getCategoryId());
+      // Each step lands on a real, non-empty list.
+      expect(handle.getVisibleChannels().length).toBeGreaterThan(0);
     }
-    expect(visited).toHaveLength(groupIds.length + 1);
-    expect(new Set(visited.slice(0, -1)).size).toBe(groupIds.length);
-    expect(visited[visited.length - 1]).toBe(groupIds[0]);
+    expect(visited).toHaveLength(expectedCount + 1);
+    expect(new Set(visited.slice(0, -1)).size).toBe(expectedCount);
+    expect(visited[visited.length - 1]).toBe(start);
+    handle.destroy();
   });
 });
 
 describe("test 11 — B closes precisely one navigation level", () => {
-  it("STUB stack: back() pops exactly one layer per press", () => {
-    const stack = createLivetvNavStack("landing");
-    stack.push("browser");
-    stack.push("search");
-    stack.push("sort");
-    expect(stack.snapshot()).toEqual(["landing", "browser", "search", "sort"]);
-    expect(stack.back()).toBe(true);
-    expect(stack.snapshot()).toEqual(["landing", "browser", "search"]);
-    expect(stack.back()).toBe(true);
-    expect(stack.snapshot()).toEqual(["landing", "browser"]);
-    expect(stack.back()).toBe(true);
-    expect(stack.snapshot()).toEqual(["landing"]);
+  function freshController(): LivetvNavController {
+    // Null deps: pure stack behaviour, no document mirror.
+    return new LivetvNavController(undefined, { document: null, eventTarget: null });
+  }
+
+  it("REAL stack: back() pops exactly one layer per press", () => {
+    const controller = freshController();
+    controller.push({ id: "browser" });
+    controller.push({ id: "search" });
+    controller.push({ id: "sort" });
+    expect(controller.layerIds()).toEqual(["landing", "browser", "search", "sort"]);
+    expect(controller.back()).toBe(true);
+    expect(controller.layerIds()).toEqual(["landing", "browser", "search"]);
+    expect(controller.back()).toBe(true);
+    expect(controller.layerIds()).toEqual(["landing", "browser"]);
+    expect(controller.back()).toBe(true);
+    expect(controller.layerIds()).toEqual(["landing"]);
   });
 
-  it("STUB stack: back() at the root closes nothing", () => {
-    const stack = createLivetvNavStack("landing");
-    expect(stack.back()).toBe(false);
-    expect(stack.snapshot()).toEqual(["landing"]);
-    expect(stack.back()).toBe(false);
-    expect(stack.depth()).toBe(1);
+  it("REAL stack: back() at the root closes nothing", () => {
+    const controller = freshController();
+    expect(controller.back()).toBe(false);
+    expect(controller.layerIds()).toEqual(["landing"]);
+    expect(controller.back()).toBe(false);
+    expect(controller.stack).toHaveLength(1);
   });
 
-  it("STUB events: one livetv:close-overlay closes exactly one overlay layer", () => {
-    const stack = createLivetvNavStack("landing");
-    stack.push("browser");
-    stack.push("search");
-    stack.push("options");
-    const detach = attachNavEventWiring(stack);
-    dispatchLivetvCloseOverlay();
-    expect(stack.snapshot()).toEqual(["landing", "browser", "search"]);
-    dispatchLivetvCloseOverlay();
-    expect(stack.snapshot()).toEqual(["landing", "browser"]);
-    // Top is a mode, not an overlay: the event closes nothing.
-    dispatchLivetvCloseOverlay();
-    expect(stack.snapshot()).toEqual(["landing", "browser"]);
-    detach();
-    dispatchLivetvCloseOverlay();
-    expect(stack.snapshot()).toEqual(["landing", "browser"]);
+  it("REAL stack: an onBack veto consumes B without popping", () => {
+    const controller = freshController();
+    controller.push({ id: "browser" });
+    controller.push({ id: "drawer", onBack: () => false });
+    expect(controller.back()).toBe(true);
+    expect(controller.layerIds()).toEqual(["landing", "browser", "drawer"]);
+  });
+
+  it("REAL guards: one livetv:back pops exactly one guarded overlay layer", () => {
+    const target = new EventTarget();
+    const controller = freshController();
+    controller.push({ id: "browser" });
+    controller.push({ id: "search" });
+    controller.push({ id: "sort" });
+    const uninstallSort = installTopLayerBackGuard(controller, "sort", target);
+    const uninstallSearch = installTopLayerBackGuard(controller, "search", target);
+    const back = () => target.dispatchEvent(new CustomEvent("livetv:back"));
+    back();
+    expect(controller.layerIds()).toEqual(["landing", "browser", "search"]);
+    back();
+    expect(controller.layerIds()).toEqual(["landing", "browser"]);
+    // Top is a mode, not a guarded overlay: the event pops nothing.
+    back();
+    expect(controller.layerIds()).toEqual(["landing", "browser"]);
+    uninstallSort();
+    uninstallSearch();
+    back();
+    expect(controller.layerIds()).toEqual(["landing", "browser"]);
   });
 
   it("REAL browser: B closes search first, then exits — one level per press", () => {
@@ -212,7 +287,8 @@ describe("test 11 — B closes precisely one navigation level", () => {
       onClose,
       acceptModeEntry: true,
     });
-    handle.openSearch();
+    dispatchLivetvSearchSubmit(window, { query: "sports", scope: "all", categoryId: null });
+    expect(handle.isSearchOpen()).toBe(true);
     window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
     expect(handle.isSearchOpen()).toBe(false);
     expect(onClose).not.toHaveBeenCalled();
@@ -225,43 +301,46 @@ describe("test 11 — B closes precisely one navigation level", () => {
 });
 
 describe("test 12 — hidden Live TV modes cannot steal input", () => {
-  it("STUB gate: only the active mode accepts input", () => {
-    const gate = createLivetvInputGate("browser");
-    const seen: string[] = [];
-    expect(gate.deliverInput("guide", () => seen.push("guide"))).toBe(false);
-    expect(gate.deliverInput("playback", () => seen.push("playback"))).toBe(false);
-    expect(gate.deliverInput("landing", () => seen.push("landing"))).toBe(false);
-    expect(gate.deliverInput("browser", () => seen.push("browser"))).toBe(true);
-    expect(seen).toEqual(["browser"]);
-    gate.setActiveMode("guide");
-    expect(gate.deliverInput("browser", () => seen.push("browser"))).toBe(false);
-    expect(gate.deliverInput("guide", () => seen.push("guide"))).toBe(true);
-    expect(seen).toEqual(["browser", "guide"]);
+  function freshController(): LivetvNavController {
+    return new LivetvNavController(undefined, { document: null, eventTarget: null });
+  }
+
+  it("REAL stack: only the top layer accepts input (isTop gate)", () => {
+    const controller = freshController();
+    controller.push({ id: "browser" });
+    expect(controller.isTop("browser")).toBe(true);
+    expect(controller.isTop("guide")).toBe(false);
+    expect(controller.isTop("playback")).toBe(false);
+    expect(controller.isTop("landing")).toBe(false);
+    controller.pop();
+    controller.push({ id: "guide" });
+    expect(controller.isTop("browser")).toBe(false);
+    expect(controller.isTop("guide")).toBe(true);
   });
 
-  it("STUB gate: an open overlay gates the mode underneath it", () => {
-    const gate = createLivetvInputGate("browser");
-    gate.openOverlay("search");
-    expect(gate.canAcceptInput("browser")).toBe(false);
-    expect(gate.canAcceptInput("search")).toBe(true);
-    expect(gate.canAcceptInput("sort")).toBe(false);
-    gate.closeOverlay();
-    expect(gate.canAcceptInput("browser")).toBe(true);
-    expect(gate.canAcceptInput("search")).toBe(false);
+  it("REAL stack: an open overlay gates the mode underneath it", () => {
+    const controller = freshController();
+    controller.push({ id: "browser" });
+    controller.push({ id: "search" });
+    expect(controller.isTop("browser")).toBe(false);
+    expect(controller.isTop("search")).toBe(true);
+    expect(controller.isTop("sort")).toBe(false);
+    controller.pop();
+    expect(controller.isTop("browser")).toBe(true);
+    expect(controller.isTop("search")).toBe(false);
   });
 
-  it("STUB gate: switching modes re-gates without leaking handlers", () => {
-    const gate = createLivetvInputGate("landing");
-    const counts = { landing: 0, browser: 0, guide: 0, playback: 0 };
+  it("REAL stack: switching modes re-gates (shell marker discipline)", () => {
+    const controller = freshController();
+    const seen: Record<string, number> = { landing: 0, browser: 0, guide: 0, playback: 0 };
     for (const mode of ["browser", "guide", "playback", "landing"] as const) {
-      gate.setActiveMode(mode);
+      controller.popTo("landing");
+      if (mode !== "landing") controller.push({ id: mode, key: `shell:${mode}` });
       for (const target of ["landing", "browser", "guide", "playback"] as const) {
-        gate.deliverInput(target, () => {
-          counts[target] += 1;
-        });
+        if (controller.isTop(target)) seen[target] += 1;
       }
     }
-    expect(counts).toEqual({ landing: 1, browser: 1, guide: 1, playback: 1 });
+    expect(seen).toEqual({ landing: 1, browser: 1, guide: 1, playback: 1 });
   });
 
   it("REAL browser: a hidden browser ignores livetv:back; visible, it answers", () => {
@@ -274,6 +353,21 @@ describe("test 12 — hidden Live TV modes cannot steal input", () => {
     window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
     expect(onClose).not.toHaveBeenCalled();
     root.removeAttribute("hidden");
+    window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    handle.destroy();
+  });
+
+  it("REAL browser: B is blocked while another surface's drawer layer is on top", () => {
+    const onClose = vi.fn();
+    const handle = mountChannelBrowser(root, {
+      channels: fixture2000().slice(0, 20),
+      onClose,
+    });
+    livetvNav.push({ id: "drawer", key: "other-drawer" });
+    window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
+    expect(onClose).not.toHaveBeenCalled();
+    livetvNav.pop();
     window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
     expect(onClose).toHaveBeenCalledTimes(1);
     handle.destroy();
@@ -298,81 +392,81 @@ describe("test 13 — returning from playback restores browser context", () => {
     expect(state.highlightedChannelId).toBe("87");
   });
 
-  it("STUB list: capture/restore returns focus and scroll to the same place", () => {
+  it("REAL browser: highlight and scroll survive hide/show + refresh (playback round-trip)", () => {
     const channels = fixture2000();
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
-    });
-    for (let i = 0; i < 137; i++) handle.moveFocus(1);
-    const context = handle.captureContext();
-    expect(context.focusedKey).toBe(String(channels[137]!.id));
-    expect(context.scrollTop).toBeGreaterThan(0);
-    // Simulate playback: focus/scroll move elsewhere, then return.
-    handle.setFocusedKey(String(channels[0]!.id));
-    handle.setScrollTop(0);
-    expect(handle.getFocusedKey()).toBe(String(channels[0]!.id));
-    handle.restoreContext(context);
-    expect(handle.getFocusedKey()).toBe(context.focusedKey);
-    expect(handle.getScrollTop()).toBe(context.scrollTop);
-    expect(handle.getMountedKeys()).toContain(context.focusedKey);
-    const active = document.activeElement as HTMLElement | null;
-    expect(active?.getAttribute("data-key")).toBe(context.focusedKey);
+    const handle = mountChannelBrowser(root, { channels });
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    handle.highlightChannel(channels[137]!.id, { focus: true });
+    const scrollTop = list.scrollTop;
+    expect(scrollTop).toBeGreaterThan(0);
+    expect(handle.getHighlightedId()).toBe(channels[137]!.id);
+    // Simulate playback: the browser hides, a refresh lands, return.
+    root.setAttribute("hidden", "");
+    handle.setChannels([...channels]);
+    root.removeAttribute("hidden");
+    expect(handle.getHighlightedId()).toBe(channels[137]!.id);
+    expect(list.scrollTop).toBe(scrollTop);
+    const row = root.querySelector<HTMLElement>(
+      `[data-browser-row][data-channel-id="${channels[137]!.id}"]`,
+    );
+    expect(row).not.toBeNull();
+    handle.highlightChannel(channels[137]!.id, { focus: true });
+    expect(document.activeElement).toBe(row);
     handle.destroy();
   });
 
-  it("STUB list: restore survives the focused channel leaving the catalogue", () => {
+  it("REAL browser: restore survives the highlighted channel leaving the catalogue", () => {
     const channels = fixture2000();
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-    });
-    for (let i = 0; i < 50; i++) handle.moveFocus(1);
-    const context = handle.captureContext();
-    const removed = channels.filter((c) => String(c.id) !== context.focusedKey);
-    handle.setItems(removed);
-    handle.restoreContext(context);
+    // Screen mode: the highlight always names a visible channel.
+    const handle = mountChannelBrowser(root, { channels, autoHighlightFirst: true });
+    handle.highlightChannel(channels[50]!.id);
+    const removed = channels.filter((c) => c.id !== channels[50]!.id);
+    handle.setChannels(removed);
     // Focus falls back to a live row instead of crashing or
     // pointing at a removed channel.
-    expect(handle.getFocusedKey()).not.toBe(context.focusedKey);
-    expect(handle.getFocusedKey()).not.toBeNull();
+    expect(handle.getHighlightedId()).not.toBe(channels[50]!.id);
+    expect(handle.getHighlightedId()).not.toBeNull();
+    expect(
+      removed.some((c) => String(c.id) === String(handle.getHighlightedId())),
+    ).toBe(true);
     handle.destroy();
   });
 });
 
 describe("test 14 — EPG updates don't reset channel focus unnecessarily", () => {
-  it("STUB list: an EPG-only update keeps focus, scroll and row identity", () => {
+  it("REAL browser: an EPG-only refresh keeps highlight, scroll and row identity", () => {
     const channels = fixture2000();
-    const handle = mountVirtualList(root, {
-      items: channels,
-      keyOf: (c) => String(c.id),
-      labelOf: (c) => c.displayName,
-      programmeOf: (c) => `Old programme for ${c.displayName}`,
-      rowHeight: 76,
-      viewportHeight: 600,
-      overscanRows: 3,
-    });
-    for (let i = 0; i < 80; i++) handle.moveFocus(1);
-    const focusedKey = handle.getFocusedKey()!;
-    const scrollTop = handle.getScrollTop();
-    const rowBefore = root.querySelector(`[data-virtual-row][data-key="${focusedKey}"]`)!;
-    const patch = new Map<string, string>();
-    for (const key of handle.getMountedKeys()) {
-      patch.set(key, `New programme for ${key}`);
+    const titles = new Map<string, string>();
+    for (const channel of channels) {
+      titles.set(String(channel.id), `Old programme for ${channel.displayName}`);
     }
-    handle.applyEpgUpdate(patch);
-    expect(handle.getFocusedKey()).toBe(focusedKey);
-    expect(handle.getScrollTop()).toBe(scrollTop);
-    const rowAfter = root.querySelector(`[data-virtual-row][data-key="${focusedKey}"]`)!;
+    const handle = mountChannelBrowser(root, {
+      channels,
+      nowNextFor: (channel) => ({
+        current: { title: titles.get(String(channel.id)) ?? "", start: 0, stop: 1, desc: "" },
+        next: null,
+      }),
+    });
+    const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
+    handle.highlightChannel(channels[80]!.id, { focus: true });
+    const highlightedId = handle.getHighlightedId();
+    const scrollTop = list.scrollTop;
+    const rowBefore = root.querySelector<HTMLElement>(
+      `[data-browser-row][data-channel-id="${channels[80]!.id}"]`,
+    )!;
+    expect(rowBefore.textContent).toContain(`Old programme for ${channels[80]!.displayName}`);
+    // EPG refresh: same channels, new programme titles.
+    for (const channel of channels) {
+      titles.set(String(channel.id), `New programme for ${channel.displayName}`);
+    }
+    handle.setChannels([...channels]);
+    expect(handle.getHighlightedId()).toBe(highlightedId);
+    expect(list.scrollTop).toBe(scrollTop);
+    const rowAfter = root.querySelector<HTMLElement>(
+      `[data-browser-row][data-channel-id="${channels[80]!.id}"]`,
+    )!;
     expect(rowAfter).toBe(rowBefore);
-    expect(rowAfter.querySelector("[data-virtual-programme]")?.textContent).toBe(
-      `New programme for ${focusedKey}`,
-    );
+    expect(rowAfter.textContent).toContain(`New programme for ${channels[80]!.displayName}`);
     handle.destroy();
   });
 
