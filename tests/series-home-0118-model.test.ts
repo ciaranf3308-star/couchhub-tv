@@ -8,6 +8,7 @@ import {
   mapSeriesRow,
   type SeriesRow,
 } from "@/scripts/series/couch-series.ts";
+import { getCatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import type {
   FollowedNotificationGroup,
   FollowedSubscription,
@@ -462,8 +463,14 @@ describe("buildFollowedShelfItems — compact fallback shelf", () => {
 });
 
 describe("buildSeriesGenreTiles — television families, real counts", () => {
+  function tilesFor(rows: SeriesRow[]) {
+    return buildSeriesGenreTiles(
+      getCatalogIndex("series", rows, "series-home-model-test", {}),
+    );
+  }
+
   it("counts real members per family and omits empty families", () => {
-    const tiles = buildSeriesGenreTiles([
+    const tiles = tilesFor([
       row(1, "Drama One", { category: "Drama" }),
       row(2, "Drama Two", { category: "Drama" }),
       row(3, "Funny", { category: "Comedy" }),
@@ -475,15 +482,20 @@ describe("buildSeriesGenreTiles — television families, real counts", () => {
     expect(tiles.length).toBe(2);
   });
 
-  it("keeps documentary series out of fictional families (C1)", () => {
-    const tiles = buildSeriesGenreTiles([
+  it("counts multi-genre membership non-exclusively: a Documentary Crime series counts in both families", () => {
+    // D22: the W4 C1 documentary-kind rule is dropped — tile counts
+    // come from the same W1 genre buckets Browse uses, so a tile
+    // count always equals the Browse result count for that family.
+    const tiles = tilesFor([
       row(1, "Crime Doc", { category: "Documentary Crime" }),
     ]);
-    expect(tiles.map((t) => t.family.id)).toEqual(["documentary"]);
+    const byId = new Map(tiles.map((t) => [t.family.id, t]));
+    expect(byId.get("documentary")?.count).toBe(1);
+    expect(byId.get("crime")?.count).toBe(1);
   });
 
   it("matches Reality on the provider category, not the title", () => {
-    const tiles = buildSeriesGenreTiles([
+    const tiles = tilesFor([
       row(1, "Reality Bites", { category: "Comedy" }),
       row(2, "Bake Off", { category: "Reality TV" }),
     ]);
@@ -492,17 +504,17 @@ describe("buildSeriesGenreTiles — television families, real counts", () => {
   });
 
   it("uses real catalogue artwork or none — never placeholder art", () => {
-    const tiles = buildSeriesGenreTiles([
+    const tiles = tilesFor([
       row(1, "Top Drama", { category: "Drama", rating: "9.0", tmdb: 5, logo: "https://example.test/top.jpg" }),
       row(2, "Lesser Drama", { category: "Drama", rating: "6.0", logo: "https://example.test/lesser.jpg" }),
-      row(3, "No Art Horror", { category: "Horror", logo: null }),
+      row(3, "No Art Comedy", { category: "Comedy", logo: null }),
     ]);
     const drama = tiles.find((t) => t.family.id === "drama");
     expect(drama?.artworkUrl).toBe("https://example.test/top.jpg");
     expect(drama?.artworkTitle).toBe("Top Drama");
-    const horror = tiles.find((t) => t.family.id === "horror");
-    expect(horror?.artworkUrl).toBeNull();
-    expect(horror?.artworkTitle).toBeNull();
+    const comedy = tiles.find((t) => t.family.id === "comedy");
+    expect(comedy?.artworkUrl).toBeNull();
+    expect(comedy?.artworkTitle).toBeNull();
   });
 });
 
@@ -515,12 +527,13 @@ describe("assembleSeriesHomeSections — order and omission", () => {
 
   function assemble(overrides: Record<string, unknown> = {}) {
     return assembleSeriesHomeSections({
-      rows: baseRows,
+      index: getCatalogIndex("series", baseRows, "series-home-model-test", {}),
       rowsById: byId,
       continueInputs: [],
       notificationGroups: [],
       subscriptions: [],
-      hasProgress: () => false,
+      taste: null,
+      startedIds: [],
       ...overrides,
     } as never);
   }
@@ -565,12 +578,13 @@ describe("assembleSeriesHomeSections — order and omission", () => {
   it("yields no sections for an empty catalogue", () => {
     expect(
       assembleSeriesHomeSections({
-        rows: [],
+        index: getCatalogIndex("series", [], "series-home-model-empty", {}),
         rowsById: new Map(),
         continueInputs: [],
         notificationGroups: [],
         subscriptions: [],
-        hasProgress: () => false,
+        taste: null,
+        startedIds: [],
       }),
     ).toEqual([]);
   });
@@ -585,7 +599,7 @@ describe("assembleSeriesHomeSections — order and omission", () => {
   });
 
   it("Worth Starting entries are series-level and exclude in-progress series", () => {
-    const sections = assemble({ hasProgress: (r: SeriesRow) => r.id === 1 });
+    const sections = assemble({ startedIds: ["1"] });
     const worth = sections.find((s) => s.kind === "worth-starting");
     expect(worth && "items" in worth ? worth.items.map((r) => r.id) : []).toEqual([2]);
   });
@@ -597,7 +611,8 @@ describe("seriesDetailHref / seriesHomeCardMeta", () => {
   });
 
   it("shows the rating only when it has evidence, and no completeness claim", () => {
-    const rated = row(1, "Rated", { rating: "8.4", category: "Drama", year: "2024" });
+    // TMDb-linked: the rating carries corroboration (D35).
+    const rated = row(1, "Rated", { rating: "8.4", category: "Drama", year: "2024", tmdb: 7 });
     expect(seriesHomeCardMeta(rated, 3)).toContain("★ 8.4");
     expect(seriesHomeCardMeta(rated, 3)).toContain("3 seasons");
     const unrated = row(2, "Unrated", { rating: "", category: "Drama" });

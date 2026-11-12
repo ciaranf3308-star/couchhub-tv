@@ -541,6 +541,10 @@ function cacheable(
     selector,
     index.kind,
     index.revision,
+    // D36: the build sequence identifies THIS index object. The
+    // revision string + group count alone collide across different
+    // catalogues (same playlist, same count, different titles).
+    String(index.seq),
     String(index.totalGroups),
     view.fingerprint,
     String(limit),

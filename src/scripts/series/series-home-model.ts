@@ -26,7 +26,7 @@
 //    counts appear only when cached provider data supplies them (the
 //    render layer reads the cache; this module claims nothing).
 // 5. HONEST LABELLING. Shelf subtitles describe what the shelf IS
-//    ("Highly rated series you haven't started yet"). Nothing here
+//    ("Recommended series you haven't started yet"). Nothing here
 //    claims AI, personalisation, or curation it does not have.
 
 import { buildSeriesDetailUrl } from "@/scripts/lib/followed.ts";
@@ -34,15 +34,21 @@ import type {
   FollowedNotificationGroup,
   FollowedSubscription,
 } from "@/scripts/lib/followed.ts";
-import { ratingSortValue } from "@/scripts/lib/format.ts";
 import {
   CANONICAL_SERIES_GENRES,
+  type CanonicalSeriesFamily,
+} from "@/scripts/lib/genres.ts";
+import type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
+import {
+  compareByRatingEvidence,
+  hasCredibleRating,
   normaliseRating,
-  rowInSeriesGenreFamily,
+} from "@/scripts/lib/rating-evidence.ts";
+import {
   selectRecentlyAdded,
   selectSeriesWorthStarting,
-  type SeriesGenreFamily,
-} from "@/scripts/series/series-home-shims.ts";
+} from "@/scripts/lib/collection-selectors.ts";
+import type { TasteModel } from "@/scripts/lib/taste.ts";
 import {
   episodeDisplayTitle,
   groupEpisodesBySeason,
@@ -479,7 +485,7 @@ export function buildFollowedShelfItems(
 // ---------------------------------------------------------------------------
 
 export interface SeriesGenreTile {
-  family: SeriesGenreFamily;
+  family: CanonicalSeriesFamily;
   /** Real count of catalogue series in this family. */
   count: number;
   /**
@@ -496,20 +502,27 @@ export interface SeriesGenreTile {
 
 /**
  * Genre tiles for the 15 television families. Only non-empty families
- * are returned, in canonical family order. Counts are real catalogue
- * counts; artwork is real catalogue art or absent.
+ * are returned, in canonical family order. Counts come from the W1
+ * index's display-level genre buckets, so a tile count ALWAYS equals
+ * the Browse result count for that family; artwork is the
+ * highest-evidence member's real catalogue art, or absent.
  */
-export function buildSeriesGenreTiles(rows: SeriesRow[]): SeriesGenreTile[] {
+export function buildSeriesGenreTiles(index: CatalogIndex): SeriesGenreTile[] {
   const tiles: SeriesGenreTile[] = [];
   for (const family of CANONICAL_SERIES_GENRES) {
-    const members = rows.filter((row) => rowInSeriesGenreFamily(row, family));
-    if (members.length === 0) continue;
-    const withArt = [...members]
+    const primaryIds = index.idsByGenre.get(family.id) ?? [];
+    if (primaryIds.length === 0) continue;
+    const members: SeriesRow[] = [];
+    for (const id of primaryIds) {
+      const row = index.byId.get(id) as SeriesRow | undefined;
+      if (row) members.push(row);
+    }
+    const withArt = members
       .filter((row) => row.logo)
       .sort(
         (a, b) =>
-          ratingSortValue(b.rating) - ratingSortValue(a.rating) ||
-          a.name.localeCompare(b.name, "en", { sensitivity: "base" }),
+          compareByRatingEvidence(normaliseRating(a), normaliseRating(b)) ||
+          (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
       );
     const art = withArt[0];
     tiles.push({
@@ -574,18 +587,21 @@ export type SeriesHomeSection =
     };
 
 export const NEW_EPISODES_SUBTITLE = "New episodes detected from the series you follow";
-export const WORTH_STARTING_SUBTITLE = "Highly rated series you haven't started yet";
+export const WORTH_STARTING_SUBTITLE = "Recommended series you haven't started yet";
 
 export interface SeriesHomeAssemblyInput {
-  rows: SeriesRow[];
+  /** W1 catalog index (series kind) — the single source for shelves, tiles, and counts. */
+  index: CatalogIndex;
   rowsById: Map<number, SeriesRow>;
   continueInputs: ContinueWatchingInput[];
   /** Notification groups for the ACTIVE playlist only (caller filters). */
   notificationGroups: FollowedNotificationGroup[];
   /** Subscriptions for the ACTIVE playlist only (caller filters). */
   subscriptions: FollowedSubscription[];
-  /** True when the viewer has any recorded progress for the series. */
-  hasProgress: (row: SeriesRow) => boolean;
+  /** Local taste model for Worth Starting (null = no taste signal). */
+  taste: TasteModel | null | undefined;
+  /** String ids of series with any recorded progress (excluded from Worth Starting). */
+  startedIds: Iterable<string | number>;
   isEpisodeWatched?: NewEpisodesOptions["isWatched"];
 }
 
@@ -601,7 +617,7 @@ export interface SeriesHomeAssemblyInput {
 export function assembleSeriesHomeSections(
   input: SeriesHomeAssemblyInput,
 ): SeriesHomeSection[] {
-  if (input.rows.length === 0) return [];
+  if (input.index.totalGroups === 0) return [];
   const sections: SeriesHomeSection[] = [];
 
   const continuing = buildContinueWatching(input.continueInputs);
@@ -637,9 +653,25 @@ export function assembleSeriesHomeSections(
     }
   }
 
-  const worthStarting = selectSeriesWorthStarting(input.rows, {
-    hasProgress: input.hasProgress,
-  });
+  // D26: the selector cache does not fingerprint the started-set
+  // contents, so the cache key carries them explicitly.
+  const startedList = [...input.startedIds].map(String).sort();
+  const cacheKeyBase = [
+    "series-home",
+    input.index.revision,
+    `started:${startedList.join(",")}`,
+  ].join("|");
+  const worthStarting = selectSeriesWorthStarting(
+    input.index,
+    input.taste,
+    SERIES_HOME_SHELF_LIMIT,
+    {
+      watchedIds: startedList,
+      cacheKey: `${cacheKeyBase}|worth`,
+    },
+  )
+    .map((result) => input.index.byId.get(result.id) as SeriesRow | undefined)
+    .filter((row): row is SeriesRow => row != null);
   if (worthStarting.length > 0) {
     sections.push({
       kind: "worth-starting",
@@ -650,7 +682,14 @@ export function assembleSeriesHomeSections(
     });
   }
 
-  const recent = selectRecentlyAdded(input.rows);
+  const recent = selectRecentlyAdded(
+    input.index,
+    SERIES_HOME_SHELF_LIMIT,
+    null,
+    { cacheKey: `${cacheKeyBase}|recent` },
+  )
+    .map((result) => input.index.byId.get(result.id) as SeriesRow | undefined)
+    .filter((row): row is SeriesRow => row != null);
   if (recent.length > 0) {
     sections.push({
       kind: "recently-added",
@@ -660,7 +699,7 @@ export function assembleSeriesHomeSections(
     });
   }
 
-  const genres = buildSeriesGenreTiles(input.rows);
+  const genres = buildSeriesGenreTiles(input.index);
   if (genres.length > 0) {
     sections.push({
       kind: "genres",
@@ -674,7 +713,7 @@ export function assembleSeriesHomeSections(
     kind: "browse-entry",
     id: "series-home-browse-entry",
     title: "Browse Everything",
-    totalCount: input.rows.length,
+    totalCount: input.index.totalGroups,
   });
   return sections;
 }
@@ -694,7 +733,9 @@ export function seriesHomeCardMeta(
   const parts: string[] = [];
   const base = seriesMetaLine(row, cachedSeasonCount);
   if (base) parts.push(base);
-  const rating = normaliseRating(row.rating);
-  if (rating.label) parts.push(rating.label);
+  const rating = normaliseRating(row);
+  if (hasCredibleRating(rating)) {
+    parts.push(`★ ${rating!.score10.toFixed(1)}`);
+  }
   return parts.join(" · ");
 }

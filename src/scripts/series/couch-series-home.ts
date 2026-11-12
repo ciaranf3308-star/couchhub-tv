@@ -1,32 +1,34 @@
-// Couch Series Home controller (0.11.8, W4) — mount entry for the
+// Couch Series Home controller (0.11.8) — mount entry for the
 // standalone /series page.
 //
 // TWO MODES, ONE NAV ITEM (brief §1.1, §2): Series Home (shelves,
-// this module) and Series → Browse Everything (W2's mount contract,
-// via the catalog shim on this branch). The mode lives in the URL
-// (parseModeFromUrl / setModeInUrl), so a return from a detail page
-// restores mode + category + page through browser history, and the
-// selected poster restores through the existing focus memory
+// this module) and Series → Browse Everything (W2's mount). The mode
+// lives in the URL (W2's mode contract), so a return from a detail
+// page restores mode + category + page through browser history, and
+// the selected poster restores through the existing focus memory
 // (couch-focus.ts, by stable data-couch-key). Series Home NEVER
 // mounts the full catalogue grid: the browse controller mounts only
-// when browse mode is entered.
+// when browse mode is entered, and stays mounted-but-suspended (keys
+// gated, root hidden) while Home shows, so a return to Browse is
+// instant and the catalogue index is built once.
 //
 // LIVE UPDATES WITHOUT RESTART: Followed changes
 // (FOLLOWED_CHANGED_EVENT / FOLLOWED_NOTIFICATIONS_EVENT) and
 // progress changes (PROGRESS_CHANGED_EVENT) coalesce into one
 // re-render from cached data — unfollowing a series updates the
 // New Episodes / Followed shelves in place, with no polling and no
-// full restart. Async loads are generation-guarded so a stale
-// response can never paint over newer state.
+// full restart. In Browse mode, followed changes refresh the
+// followed/new-episode browse sets before the controller refreshes.
+// Async loads are generation-guarded so a stale response can never
+// paint over newer state.
 //
 // CONTROLLER: no input handling lives here. Shelves use the
 // data-nylah-rail / data-nylah-item contract, so the shared XInput
 // action pipeline (gamepad.ts + couch-focus.ts) drives everything.
-// LB/RB shelf jumping needs a gamepad.ts seam (read-only for W4) and
-// is flagged for integration — D-pad U/D between shelves is the
-// shelf navigation on this branch.
+// LB/RB shelf jumping on Home comes from the shared
+// installHomeShelfJump (movies-home-mount.ts) via the gamepad seam,
+// which routes LB/RB to PageUp/PageDown on Home.
 
-import { getCached } from "@/scripts/lib/cache.js";
 import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
 import {
   FOLLOWED_CHANGED_EVENT,
@@ -44,18 +46,29 @@ import {
   isCompleted,
   PROGRESS_CHANGED_EVENT,
 } from "@/scripts/lib/preferences.js";
+import { getActiveProfileId, SHARED_PROFILE_ID } from "@/scripts/lib/profiles.ts";
+import { emptyTasteModel, loadTaste, type TasteModel } from "@/scripts/lib/taste.ts";
+import { getCachedSeasonCount, getCachedSeriesInfoPayload } from "@/scripts/lib/series-seasons.ts";
+import { getCatalogIndex, type CatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import {
-  getCatalogIndex,
   mountBrowseEverything,
-  type BrowseEverythingHandle,
-  type SeriesCatalogIndex,
-} from "@/scripts/series/series-home-catalog-shim.ts";
+  type BrowseController,
+} from "@/scripts/lib/browse-everything.ts";
 import {
+  browseStateFromMode,
+  isBrowseSortId,
   parseModeFromUrl,
   setModeInUrl,
-  type BrowseModeParams,
   type HomeBrowseMode,
-} from "@/scripts/series/series-home-shims.ts";
+} from "@/scripts/lib/home-browse-modes.ts";
+import {
+  createSeriesBrowseSource,
+  refreshFollowedBrowseSets,
+  resolveBrowseCategoryLabel,
+} from "@/scripts/lib/browse-sources.ts";
+import { loadCouchCatalog } from "@/scripts/movies/couch-catalog.ts";
+import { seriesAdapter } from "@/scripts/series/couch-series-adapter.ts";
+import { installHomeShelfJump } from "@/scripts/movies/movies-home-mount.ts";
 import {
   assembleSeriesHomeSections,
   cachedSeasonGroup,
@@ -72,7 +85,7 @@ import type { EpisodeProgress, SeriesRow } from "@/scripts/series/couch-series.t
 // getContinueWatching's JSDoc union does not surface the episode
 // extras Series Home needs (seriesId/season/episodeNum) to the
 // checker; read them through this structural view instead of
-// widening shared types W4 does not own.
+// widening shared types this module does not own.
 interface ContinueEntryView {
   kind: string;
   id: string | number;
@@ -99,6 +112,15 @@ interface ProgressSummaryView {
   lastEpisodeId?: string | number | null;
 }
 
+interface SeriesHomeCatalog {
+  rows: SeriesRow[];
+  byId: Map<number, SeriesRow>;
+  playlistId: string;
+  playlistTitle: string;
+  loadError: boolean;
+  index: CatalogIndex;
+}
+
 const CONTINUE_HISTORY_LIMIT = 200;
 
 const homeRoot = document.getElementById("series-home-root");
@@ -109,29 +131,21 @@ const actionsHomeEl = document.getElementById("series-home-actions-home");
 const actionsBrowseEl = document.getElementById("series-home-actions-browse");
 
 let generation = 0;
-let currentMode: HomeBrowseMode = "home";
-let catalog: SeriesCatalogIndex | null = null;
-let browseHandle: BrowseEverythingHandle | null = null;
+let currentMode: "home" | "browse" = "home";
+let catalog: SeriesHomeCatalog | null = null;
+let browseController: BrowseController | null = null;
 let refreshQueued = false;
 let booted = false;
+
+function resolveLabel(
+  selection: Parameters<typeof resolveBrowseCategoryLabel>[1],
+): string {
+  return resolveBrowseCategoryLabel("series", selection);
+}
 
 function toFiniteNumber(value: unknown): number | null {
   const n = typeof value === "string" ? Number(value.trim()) : Number(value);
   return Number.isFinite(n) ? n : null;
-}
-
-/** Cached-only series-info payload: memory hit, not stale, no fetch, no hydrate. */
-function cachedSeriesInfoPayload(playlistId: string, seriesId: number): unknown {
-  try {
-    const hit = getCached(playlistId, `series_info_${seriesId}`) as {
-      data: unknown;
-      stale: boolean;
-    } | null;
-    if (!hit || hit.stale) return null;
-    return hit.data;
-  } catch {
-    return null;
-  }
 }
 
 function buildContinueInputs(
@@ -200,7 +214,9 @@ function buildContinueInputs(
       lastProgress,
       hasIncompleteEpisode: episodeProgress.hasIncompleteEpisode,
       completedIds: episodeProgress.completedIds.map(Number),
-      cachedGroup: cachedSeasonGroup(cachedSeriesInfoPayload(playlistId, row.id)),
+      cachedGroup: cachedSeasonGroup(
+        getCachedSeriesInfoPayload(playlistId, row.id),
+      ),
       progressByEpisodeId,
     });
   }
@@ -243,18 +259,28 @@ function isEpisodeWatched(
   };
 }
 
+function loadTasteFor(playlistId: string): TasteModel {
+  try {
+    const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
+    return loadTaste(profileId, playlistId);
+  } catch {
+    return emptyTasteModel(SHARED_PROFILE_ID, playlistId);
+  }
+}
+
 async function renderHome(gen: number): Promise<void> {
   if (!homeRoot || !catalog) return;
   const { groups, subs } = await loadFollowedData(catalog.playlistId);
   if (gen !== generation) return;
   const { inputs, hasProgressIds } = buildContinueInputs(catalog.rows, catalog.playlistId);
   const sections: SeriesHomeSection[] = assembleSeriesHomeSections({
-    rows: catalog.rows,
+    index: catalog.index,
     rowsById: catalog.byId,
     continueInputs: inputs,
     notificationGroups: groups,
     subscriptions: subs,
-    hasProgress: (row) => hasProgressIds.has(row.id),
+    taste: loadTasteFor(catalog.playlistId),
+    startedIds: [...hasProgressIds].map(String),
     isEpisodeWatched: isEpisodeWatched(catalog.playlistId),
   });
   if (gen !== generation) return;
@@ -277,16 +303,25 @@ function scheduleHomeRefresh(): void {
   });
 }
 
-function setHeaderForCatalog(index: SeriesCatalogIndex | null, status: string): void {
+/** Followed changes while browsing: refresh the followed browse sets first, then the grid. */
+function scheduleBrowseFollowedRefresh(): void {
+  if (currentMode !== "browse" || !browseController || !catalog) return;
+  const playlistId = catalog.playlistId;
+  void refreshFollowedBrowseSets(playlistId).then(() => {
+    browseController?.refresh();
+  });
+}
+
+function setHeaderForCatalog(index: SeriesHomeCatalog | null, status: string): void {
   if (countEl) {
     countEl.textContent = index
-      ? `${index.rows.length.toLocaleString()} ${index.rows.length === 1 ? "series" : "series"}`
+      ? `${index.index.totalGroups.toLocaleString()} ${index.index.totalGroups === 1 ? "series" : "series"}`
       : "—";
   }
   if (statusEl) statusEl.textContent = status;
 }
 
-function showMode(mode: HomeBrowseMode): void {
+function showMode(mode: "home" | "browse"): void {
   currentMode = mode;
   if (homeRoot) homeRoot.hidden = mode !== "home";
   if (browseRoot) browseRoot.hidden = mode !== "browse";
@@ -295,45 +330,61 @@ function showMode(mode: HomeBrowseMode): void {
   document.documentElement.setAttribute("data-series-mode", mode);
 }
 
-function focusFirstBrowseTab(): void {
-  const focusIt = (): boolean => {
-    const tab = browseRoot?.querySelector<HTMLButtonElement>(
-      "#couch-browse-tabs button:not([disabled])",
-    );
-    if (tab) {
-      tab.focus({ preventScroll: true });
+/**
+ * Focus the first Browse card when entering Browse with nothing
+ * focused (fresh entry, no focus memory, no selected poster). The
+ * mount's focus pin / focus memory wins whenever it applies: the
+ * check runs after the grid paints (mutation-observed), and only
+ * focuses when the body still holds focus.
+ */
+function focusFirstBrowseCard(): void {
+  const tryFocus = (): boolean => {
+    const active = document.activeElement;
+    if (active && active !== document.body) return true;
+    const card = browseRoot?.querySelector<HTMLElement>("[data-browse-key]");
+    if (card) {
+      card.focus({ preventScroll: true });
       return true;
     }
     return false;
   };
-  if (focusIt()) return;
-  // The legacy controller renders its tabs during boot (after a
-  // dynamic import); watch once for the first tab instead of polling.
+  if (tryFocus()) return;
   if (!browseRoot) return;
   const observer = new MutationObserver(() => {
-    if (focusIt()) observer.disconnect();
+    if (tryFocus()) observer.disconnect();
   });
   observer.observe(browseRoot, { childList: true, subtree: true });
   window.setTimeout(() => observer.disconnect(), 3000);
 }
 
-function switchToBrowse(params: BrowseModeParams, opts: { focusSearch?: boolean } = {}): void {
+function switchToBrowse(mode: HomeBrowseMode, opts: { focusSearch?: boolean } = {}): void {
+  if (!browseRoot) return;
   showMode("browse");
-  if (!browseHandle) {
-    browseHandle = mountBrowseEverything({ initialParams: params });
+  const state = browseStateFromMode(mode, resolveLabel);
+  if (!browseController) {
+    browseController = mountBrowseEverything(browseRoot, {
+      kind: "series",
+      initialState: state,
+      source: createSeriesBrowseSource(),
+      autoOpenSearch: opts.focusSearch ?? false,
+      onOpenDetail: (id) => {
+        window.location.href = `/series/detail?id=${encodeURIComponent(id)}`;
+      },
+      onExit: () => {
+        setModeInUrl({ view: "home", kind: "series" });
+        switchToHome();
+      },
+    });
   } else {
-    browseHandle.setParams(params);
+    browseController.setSuspended(false);
+    browseController.setState(state);
+    if (opts.focusSearch) browseController.openSearch();
   }
-  if (opts.focusSearch) {
-    // The search input is server-rendered, so focusing is immediate
-    // even while the legacy controller is still booting.
-    browseHandle.focusSearch();
-  } else {
-    focusFirstBrowseTab();
-  }
+  if (!opts.focusSearch) focusFirstBrowseCard();
 }
 
 function switchToHome(): void {
+  browseController?.setSuspended(true);
   showMode("home");
   const gen = generation;
   void renderHome(gen).then(() => {
@@ -342,48 +393,61 @@ function switchToHome(): void {
 }
 
 function applyModeFromUrl(): void {
-  const parsed = parseModeFromUrl();
-  if (parsed.mode === "browse") switchToBrowse(parsed.params);
+  const mode = parseModeFromUrl("series", resolveLabel);
+  if (mode.view === "browse") switchToBrowse(mode);
   else switchToHome();
 }
 
-async function boot(forceReload = false): Promise<void> {
+async function boot(): Promise<void> {
   const gen = ++generation;
   if (!homeRoot) return;
-  const parsed = parseModeFromUrl();
-  showMode(parsed.mode);
+  const mode = parseModeFromUrl("series", resolveLabel);
+  showMode(mode.view);
   setHeaderForCatalog(null, "Loading…");
-  if (parsed.mode === "home") renderSeriesHomeState(homeRoot, "loading");
+  if (mode.view === "home") renderSeriesHomeState(homeRoot, "loading");
 
   try {
     await ensurePrefsLoaded().catch(() => {});
-    const index = await getCatalogIndex({ forceReload });
+    const result = await loadCouchCatalog<SeriesRow>(seriesAdapter.spec);
     if (gen !== generation) return;
-    if (!index) {
+    if (!result) {
       catalog = null;
       setHeaderForCatalog(null, "No playlist selected.");
-      if (parsed.mode === "home") renderSeriesHomeState(homeRoot, "no-playlist");
-      else switchToBrowse(parsed.params);
+      if (mode.view === "home") renderSeriesHomeState(homeRoot, "no-playlist");
+      else switchToBrowse(mode);
       return;
     }
-    catalog = index;
-    if (index.loadError) {
-      setHeaderForCatalog(index, "Could not reach the provider.");
-      if (parsed.mode === "home") {
+    const byId = new Map<number, SeriesRow>();
+    for (const row of result.rows) byId.set(row.id, row);
+    const index = getCatalogIndex("series", result.rows, `${result.playlistId}:${result.rows.length}`, {
+      playlistId: result.playlistId,
+      seasonCountReader: (id) => getCachedSeasonCount(result.playlistId, id),
+    });
+    catalog = {
+      rows: result.rows,
+      byId,
+      playlistId: result.playlistId,
+      playlistTitle: result.playlistTitle,
+      loadError: result.loadError,
+      index,
+    };
+    if (result.loadError) {
+      setHeaderForCatalog(catalog, "Could not reach the provider.");
+      if (mode.view === "home") {
         renderSeriesHomeState(homeRoot, "error", {
-          message: `Could not reach ${index.playlistTitle || "the provider"}. Your library may be fine — this is a connection problem, not an empty catalogue.`,
+          message: `Could not reach ${result.playlistTitle || "the provider"}. Your library may be fine — this is a connection problem, not an empty catalogue.`,
         });
       } else {
-        switchToBrowse(parsed.params);
+        switchToBrowse(mode);
       }
       return;
     }
     setHeaderForCatalog(
-      index,
-      index.rows.length === 0 ? "This library is empty." : `${index.playlistTitle || "Your library"}`,
+      catalog,
+      index.totalGroups === 0 ? "This library is empty." : `${result.playlistTitle || "Your library"}`,
     );
-    if (parsed.mode === "browse") {
-      switchToBrowse(parsed.params);
+    if (mode.view === "browse") {
+      switchToBrowse(mode);
       return;
     }
     await renderHome(gen);
@@ -391,8 +455,8 @@ async function boot(forceReload = false): Promise<void> {
     if (gen !== generation) return;
     catalog = null;
     setHeaderForCatalog(null, "Could not load the catalogue.");
-    if (parsed.mode === "home") renderSeriesHomeState(homeRoot, "error");
-    else switchToBrowse(parsed.params);
+    if (mode.view === "home") renderSeriesHomeState(homeRoot, "error");
+    else switchToBrowse(mode);
   }
 }
 
@@ -405,34 +469,39 @@ async function boot(forceReload = false): Promise<void> {
 document.addEventListener("click", (event) => {
   const target = (event.target as Element | null)?.closest?.("[data-series-home-mode]");
   if (!(target instanceof HTMLElement)) return;
-  const mode = target.getAttribute("data-series-home-mode") as HomeBrowseMode | null;
-  if (mode !== "home" && mode !== "browse") return;
+  const modeAttr = target.getAttribute("data-series-home-mode");
+  if (modeAttr !== "home" && modeAttr !== "browse") return;
   event.preventDefault();
-  if (mode === "browse") {
-    const params: BrowseModeParams = {};
+  if (modeAttr === "browse") {
     const genre = target.getAttribute("data-series-home-genre");
-    if (genre) params.genre = genre;
     const sort = target.getAttribute("data-series-home-sort");
-    if (sort) params.sort = sort;
-    setModeInUrl("browse", params);
-    switchToBrowse(params);
+    const mode: HomeBrowseMode = {
+      view: "browse",
+      kind: "series",
+      category: genre ? `genre:${genre}` : undefined,
+      sort: sort && isBrowseSortId(sort) ? sort : undefined,
+    };
+    // Home→browse ENTER pushes a history entry, so Back returns to Home.
+    setModeInUrl(mode, { replace: false });
+    switchToBrowse(mode);
   } else {
-    setModeInUrl("home");
+    setModeInUrl({ view: "home", kind: "series" });
     switchToHome();
   }
 });
 
-// Search Series: browse mode with the search control focused.
+// Search Series: browse mode with the search layer opened.
 document.getElementById("series-home-search")?.addEventListener("click", () => {
-  setModeInUrl("browse");
-  switchToBrowse({}, { focusSearch: true });
+  const mode: HomeBrowseMode = { view: "browse", kind: "series" };
+  setModeInUrl(mode, { replace: false });
+  switchToBrowse(mode, { focusSearch: true });
 });
 
 // Error-state retry.
 document.addEventListener("click", (event) => {
   const retry = (event.target as Element | null)?.closest?.("[data-series-home-retry]");
   if (!retry) return;
-  void boot(true);
+  void boot();
 });
 
 // B / Back through history restores the mode the viewer came from.
@@ -444,13 +513,21 @@ window.addEventListener("popstate", () => {
 document.addEventListener(FOLLOWED_CHANGED_EVENT, scheduleHomeRefresh);
 document.addEventListener(FOLLOWED_NOTIFICATIONS_EVENT, scheduleHomeRefresh);
 document.addEventListener(PROGRESS_CHANGED_EVENT, scheduleHomeRefresh);
+// Followed changes while browsing refresh the followed browse sets.
+document.addEventListener(FOLLOWED_CHANGED_EVENT, scheduleBrowseFollowedRefresh);
+document.addEventListener(FOLLOWED_NOTIFICATIONS_EVENT, scheduleBrowseFollowedRefresh);
 
-// Playlist switch: drop the catalog and reboot.
+// Playlist switch: destroy the browse controller, drop the catalog, reboot.
 document.addEventListener("xt:active-changed", () => {
+  browseController?.destroy();
+  browseController = null;
   catalog = null;
-  browseHandle = null;
-  void boot(true);
+  void boot();
 });
+
+// LB/RB shelf jumping on Home (shared helper; the gamepad seam
+// routes LB/RB to PageUp/PageDown when Home is active).
+if (homeRoot) installHomeShelfJump(homeRoot);
 
 if (!booted) {
   booted = true;

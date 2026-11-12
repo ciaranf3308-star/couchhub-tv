@@ -306,6 +306,26 @@ describe("selector caching", () => {
     expect(exposed).not.toEqual(plain)
     expect(selectorIds(selectWorthWatching(index, null, 4))).toEqual(selectorIds(plain))
   })
+
+  it("never serves one index's cached selections to a different index with the same revision (D36)", () => {
+    const first = buildCatalogIndex("vod", movieRows(), "same-rev")
+    const renamed = movieRows().map((row) => ({ ...row, name: `${row.name} Remake` }))
+    const second = buildCatalogIndex("vod", renamed, "same-rev")
+    expect(second.totalGroups).toBe(first.totalGroups)
+    const firstRecent = selectRecentlyAdded(first, 12, null, {})
+    const secondRecent = selectRecentlyAdded(second, 12, null, {})
+    // Same ids, same revision, same count — but the selections were
+    // computed from different indexes, so the second call must not
+    // return the first call's cached array instance.
+    expect(secondRecent).not.toBe(firstRecent)
+    expect(selectorIds(secondRecent)).toEqual(selectorIds(firstRecent))
+    // And a content change that reorders recency is honoured.
+    const reordered = movieRows().map((row, i) => ({ ...row, added: ADDED + (3 - i) * 100 }))
+    const third = buildCatalogIndex("vod", reordered, "same-rev")
+    expect(selectorIds(selectRecentlyAdded(third, 12, null, {}))).not.toEqual(
+      selectorIds(firstRecent),
+    )
+  })
 })
 
 describe("reduceRepeatedExposure", () => {

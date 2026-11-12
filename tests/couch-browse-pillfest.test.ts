@@ -406,29 +406,29 @@ describe("no pill-cluster markup remains in the catalogue views", () => {
     expect(moviesAstro).not.toContain("Astro.redirect");
   });
 
-  it("the genre mount point lives inside the filter row on the Series page", () => {
-    // The Series page still carries the legacy scaffold until the
-    // 0.11.8 W4 rewire lands; it is rescoped to the Home + Browse
-    // structure in the same commit as the series page rewrite.
-    // 0.10.0 split: /movies and /series are real pages again — the
-    // genre mount lives in each page's own filter row, not in
-    // browse.astro (which is only a client-side redirect now).
-    const src = seriesAstro;
-    const name = "series/index.astro";
-    // The Genre select mount sits after the Rating select and before
-    // the list tabs — i.e. inside the one filter row.
-    const ratingIdx = src.indexOf('id="couch-browse-rating"');
-    const genreIdx = src.indexOf('id="couch-browse-genres"');
-    const tabsIdx = src.indexOf('id="couch-browse-tabs"');
-    expect(ratingIdx, `${name} rating`).toBeGreaterThan(-1);
-    expect(genreIdx, `${name} genre mount`).toBeGreaterThan(-1);
-    expect(tabsIdx, `${name} tabs`).toBeGreaterThan(-1);
-    expect(genreIdx, `${name} genre after rating`).toBeGreaterThan(ratingIdx);
-    expect(genreIdx, `${name} genre before tabs`).toBeLessThan(tabsIdx);
-    expect(src, name).toContain("rs-browse-segmented");
-    expect(src, name).toContain("rs-browse-genre-filter");
-    expect(src, name).not.toContain('class="rs-browse-genres"');
-    expect(src, name).not.toContain("Astro.redirect");
+  it("the Series page carries no pill-cluster scaffold — Home root + Browse mount only", () => {
+    // 0.11.8 split: /series is Home + Browse Everything. Filter
+    // controls live inside the Browse engine (category/filter
+    // drawers, sort overlay, search layer), never as selects, tabs,
+    // or pill rows in the page markup.
+    expect(seriesAstro).toContain('id="series-home-root"');
+    expect(seriesAstro).toContain('id="series-browse-root"');
+    for (const scaffoldId of [
+      "couch-browse-rating",
+      "couch-browse-genres",
+      "couch-browse-tabs",
+      "couch-browse-sort",
+      "couch-browse-year",
+      "couch-browse-grid",
+      "couch-browse-rails",
+    ]) {
+      expect(seriesAstro, `series has no ${scaffoldId}`).not.toContain(scaffoldId);
+    }
+    expect(seriesAstro).not.toContain("rs-browse-segmented");
+    expect(seriesAstro).not.toContain("rs-browse-genre-filter");
+    expect(seriesAstro).not.toContain('class="rs-browse-genres"');
+    expect(seriesAstro).not.toContain("<select");
+    expect(seriesAstro).not.toContain("Astro.redirect");
   });
 
   it("the Discover landing has large mood cards and no pill chips", () => {

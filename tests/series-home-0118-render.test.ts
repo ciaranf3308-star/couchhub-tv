@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mapSeriesRow, type SeriesRow } from "@/scripts/series/couch-series.ts";
+import { getCatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import {
   assembleSeriesHomeSections,
   type ContinueWatchingInput,
@@ -74,12 +75,13 @@ afterEach(() => {
 
 function sectionsFor(rows: SeriesRow[], continueInputs: ContinueWatchingInput[] = []) {
   return assembleSeriesHomeSections({
-    rows,
+    index: getCatalogIndex("series", rows, "series-home-render-test", {}),
     rowsById: new Map(rows.map((r) => [r.id, r])),
     continueInputs,
     notificationGroups: [],
     subscriptions: [],
-    hasProgress: () => false,
+    taste: null,
+    startedIds: [],
   });
 }
 
@@ -180,7 +182,7 @@ describe("renderSeriesHome — shelves and the rail/focus contract", () => {
   it("renders New Episodes with detection labels and no premiere wording", () => {
     const rows = [row(1, "Drama Hit", { rating: "8.6", tmdb: 11, added: 100 })];
     const sections = assembleSeriesHomeSections({
-      rows,
+      index: getCatalogIndex("series", rows, "series-home-render-test", {}),
       rowsById: new Map(rows.map((r) => [r.id, r])),
       continueInputs: [],
       notificationGroups: [
@@ -208,7 +210,8 @@ describe("renderSeriesHome — shelves and the rail/focus contract", () => {
         },
       ],
       subscriptions: [],
-      hasProgress: () => false,
+      taste: null,
+      startedIds: [],
     });
     renderSeriesHome(root, sections, { playlistId: "pl1" });
     const shelf = root.querySelector('[data-series-home-section="new-episodes"]');
@@ -240,7 +243,7 @@ describe("renderSeriesHome — shelves and the rail/focus contract", () => {
     expect(tiles.length).toBe(2);
     const drama = tiles.find((t) => t.textContent?.includes("Drama"));
     expect(drama?.textContent).toContain("2 series");
-    expect(drama?.getAttribute("href")).toBe("/series?mode=browse&genre=drama");
+    expect(drama?.getAttribute("href")).toBe("/series?view=browse&category=genre%3Adrama");
     expect(drama?.getAttribute("data-series-home-genre")).toBe("drama");
     expect(drama?.getAttribute("data-couch-key")).toBe("genre-drama");
   });
@@ -251,7 +254,7 @@ describe("renderSeriesHome — shelves and the rail/focus contract", () => {
     expect(entry).not.toBeNull();
     expect(entry!.textContent).toContain("Browse Everything");
     expect(entry!.textContent).toContain("1 series");
-    expect(entry!.getAttribute("href")).toBe("/series?mode=browse");
+    expect(entry!.getAttribute("href")).toBe("/series?view=browse");
   });
 
   it("omits empty shelves: no Continue, no New Episodes, no Followed without data", () => {

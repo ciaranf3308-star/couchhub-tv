@@ -25,10 +25,8 @@
 import { buildCouchCard } from "@/scripts/movies/couch-cards.ts";
 import { armTvImageFallbacks, fallbackMarkFor } from "@/scripts/lib/couch-image.ts";
 import { getCachedSeasonCount } from "@/scripts/lib/series-seasons.ts";
-import {
-  browseModeUrl,
-  type BrowseModeParams,
-} from "@/scripts/series/series-home-shims.ts";
+import { modeToSearchParams } from "@/scripts/lib/home-browse-modes.ts";
+import type { BrowseSortId } from "@/scripts/lib/browse-state.ts";
 import {
   seriesDetailHref,
   seriesHomeCardMeta,
@@ -42,6 +40,23 @@ import { seriesMetaLine, type SeriesRow } from "@/scripts/series/couch-series.ts
 
 export interface SeriesHomeRenderContext {
   playlistId: string;
+}
+
+/** Mode-switch params the controller reads from data attributes (genre family id / sort id). */
+export interface SeriesHomeModeParams {
+  genre?: string;
+  sort?: string;
+}
+
+/** Browse Everything URL for one mode (W2 URL contract). */
+function seriesBrowseUrl(opts: { genre?: string; sort?: BrowseSortId }): string {
+  const params = modeToSearchParams({
+    view: "browse",
+    kind: "series",
+    category: opts.genre ? `genre:${opts.genre}` : undefined,
+    sort: opts.sort,
+  });
+  return `/series?${params.toString()}`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -177,7 +192,7 @@ function viewAllTile(
   label: string,
   href: string,
   itemKey: string,
-  modeParams?: BrowseModeParams,
+  modeParams?: SeriesHomeModeParams,
 ): HTMLElement {
   const tile = el("a", "rs-series-home-viewall");
   tile.setAttribute("data-nylah-item", "");
@@ -203,7 +218,7 @@ function genreTile(tile: SeriesGenreTile): HTMLElement {
   const link = el("a", "rs-series-home-genre");
   link.setAttribute("data-nylah-item", "");
   link.setAttribute("data-couch-key", `genre-${tile.family.id}`);
-  (link as HTMLAnchorElement).href = browseModeUrl("browse", { genre: tile.browseGenreParam });
+  (link as HTMLAnchorElement).href = seriesBrowseUrl({ genre: tile.browseGenreParam });
   link.setAttribute("data-series-home-mode", "browse");
   link.setAttribute("data-series-home-genre", tile.browseGenreParam);
   link.setAttribute(
@@ -254,7 +269,7 @@ function browseEntrySection(section: Extract<SeriesHomeSection, { kind: "browse-
   const link = el("a", "rs-series-home-browse-entry");
   link.setAttribute("data-nylah-item", "");
   link.setAttribute("data-couch-key", "browse-everything");
-  (link as HTMLAnchorElement).href = browseModeUrl("browse");
+  (link as HTMLAnchorElement).href = seriesBrowseUrl({});
   link.setAttribute("data-series-home-mode", "browse");
   const title = el("span", "rs-series-home-browse-entry__title");
   title.textContent = "Browse Everything";
@@ -324,7 +339,7 @@ export function renderSeriesHome(
     rowEl.appendChild(
       viewAllTile(
         "View all",
-        browseModeUrl("browse", { sort: "added" }),
+        seriesBrowseUrl({ sort: "added" }),
         "viewall-recently-added",
         { sort: "added" },
       ),

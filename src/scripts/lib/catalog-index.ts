@@ -202,6 +202,14 @@ export interface CatalogIndex {
   /** Duplicate ids skipped (first occurrence wins). */
   duplicateIdsSkipped: number
   builtAt: number
+  /**
+   * Monotonic build sequence, unique per buildCatalogIndex call.
+   * The revision STRING alone cannot identify an index: two
+   * different catalogues can share a playlist + row count. Selector
+   * caching keys on this sequence so a rebuilt index never serves
+   * another index's cached selections (D36).
+   */
+  seq: number
 }
 
 export type CatalogRevision =
@@ -685,6 +693,7 @@ export function buildCatalogIndex(
     skippedRows,
     duplicateIdsSkipped,
     builtAt: Date.now(),
+    seq: ++catalogIndexBuildSeq,
   }
 }
 
@@ -694,6 +703,9 @@ export function buildCatalogIndex(
 // revision + metadata revision + playlist + cache buster. Same
 // revision + same playlist + same array returns the cached index
 // without rebuilding; any revision bump rebuilds.
+
+/** Monotonic build sequence for CatalogIndex.seq (D36). */
+let catalogIndexBuildSeq = 0
 
 const indexCacheByCatalogue = new WeakMap<object, Map<string, CatalogIndex>>()
 const cacheRecords = new Set<{ kind: CatalogKind; catalogue: WeakRef<object>; key: string }>()

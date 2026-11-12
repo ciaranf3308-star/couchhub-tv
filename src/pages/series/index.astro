@@ -1,13 +1,13 @@
 ---
- // Couch Series Home + Browse Everything (0.11.8, W4).
+ // Couch Series Home + Browse Everything (0.11.8).
  //
  // TWO MODES, ONE NAV ITEM (brief §1.1, §2): Series Home (shelves)
  // and Series → Browse Everything (the complete catalogue). The mode
- // lives in the URL (?mode=browse); the mount controller
- // (src/scripts/series/couch-series-home.ts) switches between the
- // #series-home-root shelves and the #series-browse-root browser
- // without a reload, and browser history restores mode + filters on
- // a return from a detail page.
+ // lives in the URL (?view=browse, W2's mode contract); the mount
+ // controller (src/scripts/series/couch-series-home.ts) switches
+ // between the #series-home-root shelves and the #series-browse-root
+ // browser without a reload, and browser history restores mode +
+ // category + page on a return from a detail page.
  //
  // Series Home NEVER mounts the full catalogue grid: the shelves
  // (Continue Watching, New Episodes from followed series, Series
@@ -15,18 +15,11 @@
  // from the catalog index, and the Browse Everything entry opens the
  // complete browser. No giant automatic series grid underneath.
  //
- // The browse root keeps the legacy couch-browse DOM contract (ids
- // below) so the W2 browse engine mounts into it; on this branch the
- // catalog shim delegates to the legacy shared controller. The old
- // Header → Search/Filters → List tabs → rails → grid stack is gone
- // from Home — it lives only inside browse mode.
+ // The shared header stays visible in both modes (page identity +
+ // mode actions); the Browse engine renders its own header, grid,
+ // pagination, drawers, sort overlay, and search layer into the
+ // empty #series-browse-root mount div.
 import CouchLayout from "@/layouts/CouchLayout.astro";
-import TvDialog from "@/components/couch/TvDialog.astro";
-import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
-import TvSkeleton from "@/components/couch/TvSkeleton.astro";
-import TvEmpty from "@/components/couch/TvEmpty.astro";
-import { SERIES_SORT_MODES } from "@/scripts/series/couch-series.ts";
-import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
 
 <CouchLayout pageTitle="Series" activeNav="series" view="series">
@@ -50,7 +43,7 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       <a
         id="series-home-browse"
         class="rs-hero__action"
-        href="/series?mode=browse"
+        href="/series?view=browse"
         data-series-home-mode="browse"
       >
         Browse Everything
@@ -70,225 +63,13 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 
   <div id="series-home-root"></div>
 
-  <div id="series-browse-root" hidden>
-    <p class="rs-meta rs-browse-status-line">
-      <span id="couch-browse-hero-count">—</span>
-      <span aria-hidden="true"> · </span>
-      <span id="couch-browse-status">Loading…</span>
-    </p>
-
-    <section class="rs-browse-toolbar" aria-label="Browse controls">
-      <div class="rs-browse-search">
-        <label class="rs-browse-label" for="couch-browse-search">Search series</label>
-        <input
-          id="couch-browse-search"
-          type="search"
-          placeholder="Search series…"
-          autocomplete="off"
-        />
-        <button
-          id="couch-search-open"
-          type="button"
-          class="rs-hero__action rs-hero__action--secondary"
-          data-couch-dialog-open="couch-search-dialog"
-        >
-          ⌨ On-screen keyboard
-        </button>
-      </div>
-
-      <div class="rs-browse-selects">
-        <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
-        <select id="couch-browse-sort">
-          {
-            SERIES_SORT_MODES.map((mode) => (
-              <option value={mode.value}>{mode.label}</option>
-            ))
-          }
-        </select>
-        <label class="rs-browse-label" for="couch-browse-year">Decade</label>
-        <select id="couch-browse-year">
-          <option value="">Any decade</option>
-          {
-            YEAR_ORDER.map((year) => (
-              <option value={year}>{year}</option>
-            ))
-          }
-        </select>
-        <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
-        <select id="couch-browse-rating">
-          {
-            RATING_OPTIONS.map((min) => (
-              <option value={min}>
-                {min === 0 ? "Any rating" : `${min}+`}
-              </option>
-            ))
-          }
-        </select>
-        <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
-        <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
-        <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
-      </div>
-    </section>
-
-    <div
-      id="couch-browse-tabs"
-      class="rs-browse-tabs rs-browse-segmented"
-      role="group"
-      aria-label="Series lists"
-    >
-    </div>
-
-    <div id="couch-browse-rails"></div>
-
-    <div id="couch-browse-skeleton">
-      <TvSkeleton kind="poster" count={12} />
-    </div>
-
-    <div id="couch-browse-empty" hidden>
-      <TvEmpty
-        title="No series yet"
-        message="This playlist has no series."
-        art="library"
-        actionLabel="Open Settings"
-        actionHref="/settings"
-      />
-    </div>
-
-    <div id="couch-browse-error" hidden role="alert">
-      <p class="rs-body-text" data-role="error-message"></p>
-      <p>
-        <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
-          Check Settings
-        </a>
-      </p>
-    </div>
-
-    <div
-      id="couch-browse-grid"
-      class="rs-grid"
-      data-couch-grid
-      aria-label="All series"
-      hidden
-    >
-    </div>
-  </div>
-
-  <TvDialog id="couch-search-dialog" title="Search series">
-    <TvKeyboard client:load placeholder="Type a series title…" />
-    <p class="rs-meta">Type to filter the grid. The keyboard closes with B / Escape.</p>
-  </TvDialog>
+  {/*
+    Browse Everything mount point. The W2 engine renders into this
+    empty div; the controller owns its `hidden`.
+  */}
+  <div id="series-browse-root" hidden></div>
 
   <script>
     import "@/scripts/series/couch-series-home.ts";
   </script>
-
-  <style>
-    /* Browse-mode chrome only. Series Home styles live in the
-       delimited 0.11.8 W4 section of src/styles/couch.css. */
-    .rs-browse-status-line {
-      margin-bottom: 1rem;
-    }
-    .rs-browse-toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.5rem;
-      align-items: end;
-    }
-    .rs-browse-search {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: end;
-      flex: 1 1 32rem;
-    }
-    .rs-browse-search input {
-      flex: 1 1 16rem;
-      min-height: 3rem;
-      padding: 0.5rem 1rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.25rem;
-    }
-    .rs-browse-selects {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: center;
-    }
-    .rs-browse-selects select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-label {
-      font-size: 1.125rem;
-      color: var(--rs-text-2);
-    }
-    .rs-browse-genre-filter {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .rs-browse-genre-filter select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-runtime-filter {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .rs-browse-runtime-filter select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-reset-filter {
-      display: flex;
-      align-items: center;
-    }
-    .rs-browse-segmented {
-      display: inline-flex;
-      flex-wrap: wrap;
-      align-self: flex-start;
-      max-width: 100%;
-      border: 1px solid var(--rs-line);
-      border-radius: 0.75rem;
-      overflow: hidden;
-      background: var(--rs-surface);
-      margin-bottom: 1.5rem;
-    }
-    .rs-browse-segmented .rs-browse-segment {
-      border: none;
-      border-radius: 0;
-      background: transparent;
-      transform: none;
-    }
-    .rs-browse-segmented .rs-browse-segment:hover {
-      transform: none;
-    }
-    .rs-browse-segmented .rs-browse-segment + .rs-browse-segment {
-      border-left: 1px solid var(--rs-line);
-    }
-    .rs-browse-segmented .rs-browse-segment[aria-pressed="true"] {
-      background: var(--rs-accent);
-      border-color: var(--rs-focus);
-      color: #fff;
-    }
-  </style>
 </CouchLayout>
