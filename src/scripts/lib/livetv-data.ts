@@ -57,6 +57,11 @@ import { programmeProgress } from "./couch-livetv-epg";
 import type { Programme } from "./now-next";
 import type { GuideMode, LivetvBrowserFilter } from "./livetv-state.js";
 import { normalize } from "./text";
+import {
+  buildCategoryIndex,
+  isLocalChannel,
+  normaliseCategoryLabel,
+} from "./livetv-category-index";
 import { channelSupportsCatchup, type CatchupCapableChannel } from "./catchup";
 
 // ── Events (shared contract) ────────────────────────────────────
@@ -256,49 +261,11 @@ export interface LivetvRecentEntry {
 }
 
 // ── Category labels ─────────────────────────────────────────────
-
-/**
- * Display label for a raw provider category. Strips what is noise
- * for a human label — a leading country/region prefix ("UK | ",
- * "IE - ", "Sports (UK)"), resolution / quality tags (FHD, HD, 4K,
- * 1080p) and redundant punctuation — and collapses whitespace.
- * The raw value stays the identity (categoryId); only the label is
- * cleaned. "" / missing → "Uncategorized".
- *
- * NOTE for integration: W3's livetv-guide.ts carries a local copy
- * with a narrower rule (trim + collapse only, "ALL" reads as "All
- * categories"). This canonical version is the fuller rule; the
- * Guide's copy should be deleted and re-exported from here.
- */
-export function normaliseCategoryLabel(raw: unknown): string {
-  if (typeof raw !== "string") return "Uncategorized";
-  let label = raw.trim();
-  // Leading region prefix: "UK | Sports", "IE - News", "Ireland: Movies".
-  label = label.replace(
-    /^(?:UK|GB|IE|IRL|USA|US|Ireland|United Kingdom|Great Britain|England|Scotland|Wales|Northern Ireland)\s*[-–—|:]\s*/i,
-    "",
-  );
-  // Trailing region in parens: "Sports (UK)".
-  label = label.replace(
-    /\s*\((?:UK|GB|IE|IRL|USA|US|Ireland|United Kingdom|England|Scotland|Wales)\)\s*$/i,
-    "",
-  );
-  // Resolution / quality tags.
-  label = label.replace(/\b(?:FHD|UHD|4K|HD|SD|HEVC|H\.?265|1080p|720p|2160p)\b/gi, "");
-  // Redundant separators / punctuation, then whitespace.
-  label = label.replace(/[-–—_|:/]+/g, " ");
-  label = label.replace(/\s{2,}/g, " ").trim();
-  label = label.replace(/^[.,\s]+|[.,\s]+$/g, "");
-  return label || "Uncategorized";
-}
-
-/** True when the channel's provider category names Ireland / the UK. */
-const LOCAL_REGION_RE =
-  /\b(?:UK|GB|IE|IRL|Ireland|United Kingdom|Great Britain|England|Scotland|Wales|Northern Ireland|British|Irish|RT[EÉ]|TG4)\b/i;
-
-export function isLocalChannel(channel: LivetvChannel): boolean {
-  return LOCAL_REGION_RE.test(channel.categoryId || "");
-}
+//
+// normaliseCategoryLabel / isLocalChannel are the category rule
+// and live in livetv-category-index.ts (0.11.7 W1); re-exported
+// here so every existing importer keeps working.
+export { isLocalChannel, normaliseCategoryLabel };
 
 // ── Dedupe (W7) ────────────────────────────────────────────────
 
@@ -673,87 +640,49 @@ export interface LivetvGroup {
   channels: LivetvChannel[];
 }
 
-interface LocalGroupDef {
-  id: string;
-  label: string;
-  /** Regexes over the NORMALISED label (lowercased). First match wins. */
-  match: RegExp;
-}
-
-const LOCAL_GROUP_DEFS: LocalGroupDef[] = [
-  { id: "entertainment", label: "Entertainment", match: /entertainment|general|variety|lifestyle|reality|comedy|talk|shows?/ },
-  { id: "sports", label: "Sports", match: /sport/ },
-  { id: "news", label: "News", match: /news/ },
-  { id: "movies", label: "Movies", match: /movi|film|cinema/ },
-  { id: "documentaries", label: "Documentaries", match: /documentar|docu|nature|history|science|wildlife/ },
-  { id: "kids", label: "Kids", match: /kid|children|cartoon|animation|family|junior/ },
-  { id: "music", label: "Music", match: /music/ },
-];
-
 export const LIVETV_ALL_GROUP_ID = "all";
 
-function slugifyLabel(label: string): string {
-  const slug = label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return slug || "group";
-}
-
 /**
- * Local groups with aliases, then provider groups as fallback.
- *
- * A channel lands in exactly one local/provider group (+ All
- * Channels): the genre match on its normalised label wins first, so
- * "UK | Sports" is Sports (it is still local for whatsOnNow
- * ordering); a channel with no genre keyword whose raw category
- * names Ireland / the UK is "Irish & UK" (pure region buckets such
- * as "UK", "Ireland", "UK Channels"); anything else keeps its
- * provider group, labelled by its normalised category, first-seen
- * order. Order: Irish & UK, Entertainment, Sports, News, Movies,
- * Documentaries, Kids, Music, provider groups, All Channels.
+ * Legacy flat grouping, now backed by the shared category index
+ * (livetv-category-index.ts, 0.11.7 W1). Group-level membership
+ * and order are unchanged from the pre-0.11.7 rule (Irish & UK,
+ * genre groups, provider groups, All Channels last), and channels
+ * keep catalogue order inside each group — but the grouping
+ * itself comes from the index, whose subcategories preserve the
+ * provider structure this flat shape cannot express. New code
+ * should use getCategoryIndex / getDerivedChannels directly
+ * instead of this shim: this function rebuilds the index on every
+ * call (it receives no revision), so calling it per render
+ * reintroduces the defect the index exists to fix.
  */
 export function groupChannels(channels: readonly LivetvChannel[]): LivetvGroup[] {
-  const byId = new Map<string, LivetvGroup>();
-  const order: LivetvGroup[] = [];
-  const ensure = (id: string, label: string): LivetvGroup => {
-    let group = byId.get(id);
-    if (!group) {
-      group = { id, label, channels: [] };
-      byId.set(id, group);
-      order.push(group);
+  const index = buildCategoryIndex(channels, "livetv-data:groupChannels");
+  // Channel id → group id, then a single input-order pass so each
+  // group's channels keep catalogue order (the old behaviour).
+  const groupOf = new Map<string, string>();
+  for (const group of index.groups) {
+    for (const sub of group.subcategories) {
+      for (const id of sub.channelIds) {
+        if (!groupOf.has(id)) groupOf.set(id, group.id);
+      }
     }
-    return group;
-  };
-  // Irish & UK first so it can be placed first in the collections row.
-  const irishUk = ensure("irish-uk", "Irish & UK");
-  for (const channel of channels) {
-    const labelLower = (channel.categoryLabel || "").toLowerCase();
-    const def = LOCAL_GROUP_DEFS.find((d) => d.match.test(labelLower));
-    if (def) {
-      ensure(def.id, def.label).channels.push(channel);
-      continue;
-    }
-    if (isLocalChannel(channel)) {
-      irishUk.channels.push(channel);
-      continue;
-    }
-    const label = channel.categoryLabel || "Uncategorized";
-    ensure(`provider:${slugifyLabel(label)}`, label).channels.push(channel);
   }
-  const groups = order.filter((g) => g.channels.length > 0);
-  // Directive order for the local groups, provider groups keep
-  // first-seen order after them, All Channels last.
-  const localOrder = ["irish-uk", ...LOCAL_GROUP_DEFS.map((d) => d.id)];
-  groups.sort((a, b) => {
-    const ai = localOrder.indexOf(a.id);
-    const bi = localOrder.indexOf(b.id);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return 0;
+  const buckets = new Map<string, LivetvChannel[]>();
+  for (const group of index.groups) buckets.set(group.id, []);
+  for (const channel of channels) {
+    const bucket = buckets.get(groupOf.get(String(channel.id)) ?? "");
+    if (bucket) bucket.push(channel);
+  }
+  const groups = index.groups.map((group) => ({
+    id: group.id,
+    label: group.label,
+    channels: buckets.get(group.id) ?? [],
+  }));
+  groups.push({
+    id: LIVETV_ALL_GROUP_ID,
+    label: "All Channels",
+    channels: [...channels],
   });
-  groups.push({ id: LIVETV_ALL_GROUP_ID, label: "All Channels", channels: [...channels] });
   return groups;
 }
 
