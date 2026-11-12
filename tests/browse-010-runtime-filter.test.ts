@@ -207,12 +207,30 @@ describe("B09 — controller + page wiring (source level)", () => {
     expect(src).toContain("couch-browse-runtime-select");
   });
 
-  it("both catalogue pages carry the runtime mount point", () => {
-    for (const rel of ["src/pages/movies/index.astro", "src/pages/series/index.astro"]) {
-      const src = read(rel);
-      expect(src).toContain('id="couch-browse-runtime"');
-      expect(src).toContain("rs-browse-runtime-filter");
-    }
+  it("both catalogue pages mount the browse framework that carries the runtime filter", () => {
+    // 0.11.8: the runtime filter moved out of the page markup into
+    // the shared filter drawer (a "Length" family, movies only, gated
+    // on verified runtime availability). The pages mount the browse
+    // framework that renders that drawer — pin the drawer definition
+    // AND both mounts, so the filter cannot silently vanish again.
+    const drawer = read("src/scripts/lib/browse-filter-drawer.ts");
+    expect(drawer).toContain('kind === "movie" && availability.runtime');
+    expect(drawer).toContain('id: "runtime"');
+    expect(drawer).toContain('label: "Length"');
+    expect(drawer).toContain("BROWSE_RUNTIME_BUCKETS");
+    expect(drawer).toContain("Verified runtime only");
+    const moviesPage = read("src/pages/movies/index.astro");
+    expect(moviesPage).toContain('id="movies-browse-mount"');
+    expect(moviesPage).toContain("@/scripts/movies/couch-index.ts");
+    expect(read("src/scripts/movies/couch-index.ts")).toContain(
+      "mountBrowseEverything"
+    );
+    const seriesPage = read("src/pages/series/index.astro");
+    expect(seriesPage).toContain('id="series-browse-root"');
+    expect(seriesPage).toContain("@/scripts/series/couch-series-home.ts");
+    expect(read("src/scripts/series/couch-series-home.ts")).toContain(
+      "mountBrowseEverything"
+    );
   });
 
   it("both adapters pass maxRuntime into their filter functions", () => {

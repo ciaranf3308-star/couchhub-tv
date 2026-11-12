@@ -141,6 +141,9 @@ const vodCalls = vi.hoisted(() => ({
 }));
 
 vi.mock("@/scripts/lib/player-runtime.ts", () => ({
+  // jsdom harness: not a Tauri desktop, so the container plan is direct.
+  desktopPlatform: false,
+  isWindows: false,
   mountPlayer: vi.fn(async () => ({
     kind: "embedded",
     backend: "videojs",

@@ -399,9 +399,28 @@ describe("W4 — Movies/Series controller wiring (source level, repo convention)
     expect(src).toContain("couch-browse-reset");
   });
 
-  it("both Movies and Series pages host the Reset mount in the filter row", () => {
-    expect(read("src/pages/movies/index.astro")).toContain("couch-browse-reset");
-    expect(read("src/pages/series/index.astro")).toContain("couch-browse-reset");
+  it("both Movies and Series pages reach Reset All through the shared browse framework", () => {
+    // 0.11.8: Reset moved out of the page markup into the shared
+    // browse-everything actions row ("Reset All"), wired to
+    // resetAllFilters, which clears category, filters, search, sort,
+    // page and selection. Both pages mount that framework — pin the
+    // action, the wiring, the clearing, AND both mounts.
+    const everything = read("src/scripts/lib/browse-everything.ts");
+    expect(everything).toContain('mkAction("reset", "Reset All", "✕")');
+    expect(everything).toContain('resetBtn.addEventListener("click", () => resetAll())');
+    expect(everything).toContain("state = resetAllFilters(state);");
+    const state = read("src/scripts/lib/browse-state.ts");
+    expect(state).toContain("export function resetAllFilters");
+    expect(state).toContain("filters: createBrowseFilters()");
+    expect(state).toContain('search: ""');
+    expect(state).toContain('sort: "recommended"');
+    expect(state).toContain("page: 1");
+    expect(read("src/pages/movies/index.astro")).toContain(
+      'id="movies-browse-mount"'
+    );
+    expect(read("src/pages/series/index.astro")).toContain(
+      'id="series-browse-root"'
+    );
   });
 
   it("DiscoverView uses the one W4 state module, not a second filter system", () => {

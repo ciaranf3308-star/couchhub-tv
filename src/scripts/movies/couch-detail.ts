@@ -22,7 +22,11 @@ import {
   setProgress,
   markCompleted,
 } from "@/scripts/lib/preferences.js";
-import { buildMovieStreamUrl } from "@/scripts/lib/stream-urls.ts";
+import { resolveVodPlaySrc } from "@/scripts/lib/stream-urls.ts";
+import {
+  couchVariantOptions,
+  renderCouchVariantPicker,
+} from "@/scripts/lib/couch-variants.ts";
 import { pickLocalSimilar, parseProviderPeople } from "@/scripts/lib/similar-local.ts";
 import { initI18n } from "@/scripts/lib/i18n.js";
 import { log } from "@/scripts/lib/log.js";
@@ -35,6 +39,7 @@ import {
   resumePosition,
   playButtonLabel,
   type MovieRow,
+  type MovieDetail,
 } from "@/scripts/movies/couch-movies.ts";
 import {
   detailArtwork,
@@ -78,6 +83,8 @@ const similarSection = $("movie-detail-similar");
 const similarListEl = $("movie-detail-similar-list");
 const playerWrap = $("movie-detail-player-wrap");
 const statusEl = $("movie-detail-status");
+const variantsSection = $("movie-detail-variants");
+const variantsListEl = $("movie-detail-variants-list");
 const trailerFrame = $("movie-detail-trailer-frame") as HTMLIFrameElement | null;
 
 let activePlaylistId = "";
@@ -206,6 +213,22 @@ function renderSimilar() {
   );
 }
 
+async function loadVodInfo(id: number): Promise<unknown> {
+  const cachedInfo = getCached(activePlaylistId, `vod_info_${id}`)?.data;
+  if (cachedInfo) return cachedInfo;
+  try {
+    const r = await xtreamApiFetch("get_vod_info", { vod_id: String(id) });
+    if (r.ok) {
+      const info = await r.json();
+      setCached(activePlaylistId, `vod_info_${id}`, info, VOD_INFO_TTL_MS);
+      return info;
+    }
+  } catch (err) {
+    log.warn("[xt:couch-movie-detail] get_vod_info failed:", err);
+  }
+  return null;
+}
+
 async function loadDetail() {
   const active = await getActiveEntry();
   if (!active) {
@@ -226,28 +249,45 @@ async function loadDetail() {
   allRows = catalog?.rows ?? [];
   row = allRows.find((candidate) => candidate.id === movieId) ?? null;
 
-  const cachedInfo = getCached(activePlaylistId, `vod_info_${movieId}`)?.data;
-  let info: unknown = cachedInfo ?? null;
-  if (!info) {
-    try {
-      const r = await xtreamApiFetch("get_vod_info", { vod_id: String(movieId) });
-      if (r.ok) {
-        info = await r.json();
-        setCached(activePlaylistId, `vod_info_${movieId}`, info, VOD_INFO_TTL_MS);
-      }
-    } catch (err) {
-      log.warn("[xt:couch-movie-detail] get_vod_info failed:", err);
-    }
-  }
+  const info = await loadVodInfo(movieId);
   detail = movieDetailViewModel(info, row);
   paintHero();
   syncPlayButton();
   syncActionButtons();
   renderCast();
   renderSimilar();
+  renderVariants();
+}
+
+function renderVariants() {
+  const options = couchVariantOptions(allRows, "vod", movieId);
+  if (!options || !variantsSection || !variantsListEl) {
+    if (variantsSection) variantsSection.hidden = true;
+    return;
+  }
+  const rendered = renderCouchVariantPicker(
+    variantsListEl,
+    options,
+    (variantId) => {
+      void playVariant(Number(variantId));
+    }
+  );
+  variantsSection.hidden = !rendered;
+}
+
+async function playVariant(variantId: number) {
+  if (playerOpen || variantId === movieId) return;
+  const variantRow = allRows.find((candidate) => candidate.id === variantId) ?? null;
+  const info = await loadVodInfo(variantId);
+  const variantDetail = movieDetailViewModel(info, variantRow);
+  await startPlayback(variantId, variantDetail);
 }
 
 function hidePlayer() {
+  // Bumping the request id retires any mount still awaiting its
+  // pipeline (probe / tee-proxy) so it can never load a source after
+  // the user has already left the player.
+  playRequestId += 1;
   playerOpen = false;
   player?.dispose();
   player = null;
@@ -256,19 +296,28 @@ function hidePlayer() {
   playBtn?.focus();
 }
 
-async function startPlayback() {
-  if (!row && !detail.title) return;
+async function startPlayback(variantId: number = movieId, variantDetail: MovieDetail = detail) {
+  if (variantId === movieId && !row && !detail.title) return;
   if (playerOpen) return;
   const requestId = ++playRequestId;
   if (!creds.host || !creds.user || !creds.pass) {
     if (statusEl) statusEl.textContent = "No provider credentials — sign in to play.";
     return;
   }
-  const src = buildMovieStreamUrl(creds, movieId, detail.containerExt);
+  // Provider stream_url override wins; a missing container extension
+  // is probed from the first bytes instead of trusting the .mp4 default.
+  const { src } = await resolveVodPlaySrc({
+    creds,
+    kind: "movie",
+    id: variantId,
+    containerExt: variantDetail.containerExt,
+    streamUrl: variantDetail.streamUrl,
+  });
+  if (requestId !== playRequestId) return;
   if (activePlaylistId) {
-    pushRecent(activePlaylistId, "vod", movieId, detail.title, detail.poster);
+    pushRecent(activePlaylistId, "vod", variantId, variantDetail.title, variantDetail.poster);
   }
-  const saved = activePlaylistId ? getProgress(activePlaylistId, "vod", movieId) : null;
+  const saved = activePlaylistId ? getProgress(activePlaylistId, "vod", variantId) : null;
   const resumeAt = resumePosition(saved);
   if (playerWrap) playerWrap.hidden = false;
   playerOpen = true;
@@ -276,9 +325,24 @@ async function startPlayback() {
     logTag: "[xt:couch-movie-detail]",
     videoElementId: "movie-player",
     src,
-    durationSeconds: detail.runtimeSeconds,
+    durationSeconds: variantDetail.runtimeSeconds,
     resumeSeconds: resumeAt,
     autoplay: true,
+    remux: {
+      playlistId: activePlaylistId || null,
+      contentKind: "movie",
+      contentId: variantId,
+      nameHintSource: variantDetail.title,
+      onRemuxRetry: () => {
+        // The player disposed itself after pinning this content to
+        // remux; re-run the same tune — the pin makes the next plan
+        // choose the ffmpeg remux path.
+        player = null;
+        playerOpen = false;
+        void startPlayback(variantId, variantDetail);
+      },
+    },
+    isStale: () => requestId !== playRequestId,
     ids: {
       playPause: "movie-osd-play-pause",
       back10: "movie-osd-back10",
@@ -294,13 +358,13 @@ async function startPlayback() {
     },
     onProgress: (position, duration) => {
       if (!activePlaylistId) return;
-      setProgress(activePlaylistId, "vod", movieId, position, duration, {
-        name: detail.title,
-        logo: detail.poster,
+      setProgress(activePlaylistId, "vod", variantId, position, duration, {
+        name: variantDetail.title,
+        logo: variantDetail.poster,
       });
     },
     onEnded: () => {
-      if (activePlaylistId) markCompleted(activePlaylistId, "vod", movieId, { name: detail.title, logo: detail.poster });
+      if (activePlaylistId) markCompleted(activePlaylistId, "vod", variantId, { name: variantDetail.title, logo: variantDetail.poster });
       hidePlayer();
     },
     onExit: () => hidePlayer(),

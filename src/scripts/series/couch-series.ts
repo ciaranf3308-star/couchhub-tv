@@ -86,6 +86,8 @@ export interface Episode {
   thumb: string | null;
   containerExt: string | null;
   rating: string;
+  /** Provider direct-source override (direct_source / stream_url) when the episode payload carries one; honoured by playback. Absent for most providers. */
+  directUrl?: string | null;
 }
 
 export interface SeasonGroup {
@@ -398,6 +400,7 @@ export function mapEpisode(raw: any): Episode | null {
     thumb: info.movie_image || info.cover || null,
     containerExt: raw.container_extension || null,
     rating: info.rating != null ? String(info.rating) : "",
+    directUrl: raw.direct_source || raw.stream_url || null,
   };
 }
 

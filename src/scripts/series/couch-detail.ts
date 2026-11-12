@@ -30,7 +30,11 @@ import {
   markCompleted,
   clearProgress,
 } from "@/scripts/lib/preferences.js";
-import { buildSeriesStreamUrl } from "@/scripts/lib/stream-urls.ts";
+import { resolveVodPlaySrc } from "@/scripts/lib/stream-urls.ts";
+import {
+  couchVariantOptions,
+  renderCouchVariantPicker,
+} from "@/scripts/lib/couch-variants.ts";
 import { requestSeriesInfo } from "@/scripts/lib/series-seasons.ts";
 import { followSeries, unfollowSeries, isFollowing } from "@/scripts/lib/followed.ts";
 import { pickLocalSimilar, parseProviderPeople } from "@/scripts/lib/similar-local.ts";
@@ -105,6 +109,8 @@ const similarListEl = $("series-detail-similar-list");
 const playerWrap = $("series-detail-player-wrap");
 const detailBody = $("series-detail-body");
 const statusEl = $("series-detail-status");
+const variantsSection = $("series-detail-variants");
+const variantsListEl = $("series-detail-variants-list");
 
 let activePlaylistId = "";
 let creds: { host: string; port?: string; user: string; pass: string } = {
@@ -420,7 +426,29 @@ function progressExtrasFor(ep: Episode) {
   };
 }
 
+function renderVariants() {
+  const options = couchVariantOptions(allRows, "series", seriesId);
+  if (!options || !variantsSection || !variantsListEl) {
+    if (variantsSection) variantsSection.hidden = true;
+    return;
+  }
+  // Episodes belong to a series entry, so a variant series opens its
+  // own detail page — its episodes are that variant's streams.
+  const rendered = renderCouchVariantPicker(
+    variantsListEl,
+    options,
+    (variantId) => {
+      location.assign(`/series/detail?id=${encodeURIComponent(variantId)}`);
+    }
+  );
+  variantsSection.hidden = !rendered;
+}
+
 function hidePlayer(focusEpisodeId?: number) {
+  // Bumping the request id retires any mount still awaiting its
+  // pipeline (probe / tee-proxy) so it can never load a source after
+  // the user has already left the player.
+  playRequestId += 1;
   playerOpen = false;
   player?.dispose();
   player = null;
@@ -453,7 +481,17 @@ async function playEpisode(ep: Episode) {
   player = null;
   currentEpisode = ep;
   currentSeason = ep.season;
-  const src = buildSeriesStreamUrl(creds, ep.id, ep.containerExt);
+  // Provider direct-source override wins; a missing container
+  // extension is probed from the first bytes instead of trusting the
+  // .mp4 default.
+  const { src } = await resolveVodPlaySrc({
+    creds,
+    kind: "episode",
+    id: ep.id,
+    containerExt: ep.containerExt,
+    streamUrl: ep.directUrl ?? null,
+  });
+  if (requestId !== playRequestId) return;
   const saved = activePlaylistId ? getProgress(activePlaylistId, "episode", ep.id) : null;
   const resumeAt = episodeResumePosition(saved);
   if (playerWrap) playerWrap.hidden = false;
@@ -469,6 +507,21 @@ async function playEpisode(ep: Episode) {
     resumeSeconds: resumeAt,
     autoplay: true,
     autoplayNext,
+    remux: {
+      playlistId: activePlaylistId || null,
+      contentKind: "episode",
+      contentId: ep.id,
+      nameHintSource: episodeDisplayTitle(ep, detail.title),
+      onRemuxRetry: () => {
+        // The player disposed itself after pinning this episode to
+        // remux; re-run the same tune — the pin makes the next plan
+        // choose the ffmpeg remux path.
+        player = null;
+        playerOpen = false;
+        void playEpisode(ep);
+      },
+    },
+    isStale: () => requestId !== playRequestId,
     ids: {
       playPause: "series-osd-play-pause",
       back10: "series-osd-back10",
@@ -633,6 +686,7 @@ async function loadDetail() {
   renderSimilar();
   renderSeasonPicker();
   renderEpisodes();
+  renderVariants();
 
   // Autoplay handoff (?episode=<id>&autoplay=1, e.g. from /downloads):
   // switch to the episode's season, then play it.
