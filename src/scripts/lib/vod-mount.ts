@@ -92,8 +92,42 @@ export interface VodMountOptions {
 }
 
 /** Container plan, player mount, resume-seek, remux/audio-switcher setup, stall watchdog, and progress/ended listeners. */
+
+// ── Exit-time resume flush (0.11.4 W3) ──────────────────────────
+// `vod:flush-progress` (dispatched by app-exit.ts on app exit) writes
+// the CURRENT position through the normal writeProgress path instead
+// of waiting for the 5 s timeupdate throttle, so quitting mid-film
+// never loses up to 5 s of resume position. Same event name as
+// `VOD_FLUSH_PROGRESS_EVENT` in app-exit.ts — keep them in sync.
+export const VOD_FLUSH_PROGRESS_EVENT = "vod:flush-progress"
+
+/** Options of the most recent VOD mount; the flush listener reads live. */
+let latestVodFlushOptions: VodMountOptions | null = null
+let vodFlushListenerInstalled = false
+
+function installVodFlushListener(): void {
+  if (vodFlushListenerInstalled || typeof window === "undefined") return
+  vodFlushListenerInstalled = true
+  window.addEventListener(VOD_FLUSH_PROGRESS_EVENT, () => {
+    const options = latestVodFlushOptions
+    if (!options || options.isStale() || !options.hasActiveContent()) return
+    try {
+      const video = document.getElementById(options.videoElementId) as HTMLVideoElement | null
+      const pos = video?.currentTime || 0
+      const dur = video?.duration || 0
+      if (pos < 1) return
+      options.writeProgress(pos, dur)
+      log.info("[xt:vod-mount] flushed resume progress on exit", { pos, dur })
+    } catch (err) {
+      log.warn("[xt:vod-mount] exit resume flush failed:", err)
+    }
+  })
+}
+
 export async function mountVodPlayback(options: VodMountOptions): Promise<void> {
   const mountStartedAt = Date.now()
+  latestVodFlushOptions = options
+  installVodFlushListener()
   const remuxAvailable = await vodAudioRemuxAvailable()
   const remuxContentKey = buildRemuxContentKey(options.remuxContentKind, options.contentId)
   const forceRemux = options.playlistId ? isRemuxPinnedContent(options.playlistId, remuxContentKey) : false

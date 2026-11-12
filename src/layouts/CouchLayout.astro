@@ -126,6 +126,21 @@ const documentTitle = pageTitle
           >
             ⚙ {COUCH_NAV_SETTINGS.label}
           </a>
+          <!-- 0.11.4 W3: in-app Exit at the far end of the nav, after
+               Settings. Two-step arm (click once to arm, again to
+               exit) so a stray press can never quit; never on any
+               playback OSD. Reachable by controller (D-pad + A) and
+               mouse; Ctrl+Q is the keyboard path. -->
+          <button
+            type="button"
+            id="couch-exit-btn"
+            data-nylah-item
+            class="rs-nav__settings rs-nav__exit"
+            aria-label="Exit app"
+            data-i18n-attr="aria-label:app.exit.navLabel"
+          >
+            ⏻ Exit
+          </button>
         </div>
       </nav>
     </header>
@@ -145,9 +160,48 @@ const documentTitle = pageTitle
       import { mountGamepad } from "@/scripts/lib/gamepad";
       import { mountReturnHome } from "@/scripts/lib/return-home";
       import { initCouchFocus } from "@/scripts/lib/couch-focus";
+      import { initTrayHandler } from "@/scripts/lib/tray-handler";
+      import { mountExitShortcuts, requestAppExit } from "@/scripts/lib/app-exit";
       mountGamepad();
       mountReturnHome();
       initCouchFocus();
+      // 0.11.4 W3: tray hide-release + Ctrl+Q must boot on Couch
+      // pages too — previously initTrayHandler only ran in the
+      // classic Layout, so Home/Settings never synced close-to-tray
+      // nor released the stream on hide.
+      initTrayHandler();
+      mountExitShortcuts();
+      // Top-nav Exit button: two-step arm, same as the Settings card.
+      (function () {
+        var exitBtn = document.getElementById("couch-exit-btn");
+        if (!exitBtn) return;
+        var armed = false;
+        var armTimer = null;
+        exitBtn.addEventListener("click", function () {
+          if (exitBtn.hasAttribute("disabled")) return;
+          if (!armed) {
+            armed = true;
+            exitBtn.classList.add("is-armed");
+            exitBtn.textContent = "Exit?";
+            armTimer = setTimeout(function () {
+              armed = false;
+              exitBtn.classList.remove("is-armed");
+              exitBtn.textContent = "⏻ Exit";
+            }, 4000);
+            return;
+          }
+          if (armTimer) clearTimeout(armTimer);
+          armed = false;
+          exitBtn.classList.remove("is-armed");
+          exitBtn.setAttribute("disabled", "");
+          exitBtn.textContent = "Exiting…";
+          requestAppExit().finally(function () {
+            // Web preview: quit is a no-op, re-enable the button.
+            exitBtn.removeAttribute("disabled");
+            exitBtn.textContent = "⏻ Exit";
+          });
+        });
+      })();
       // Spatial navigation is the arrow-key focus engine every Couch
       // screen moves through. It was never initialised on this
       // layout — only the legacy Layout.astro and the TvLayout shell

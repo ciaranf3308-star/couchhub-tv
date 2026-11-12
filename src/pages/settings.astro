@@ -55,6 +55,7 @@ import HubStripsEditor from "@/components/HubStripsEditor.svelte"
 import PlayerPicker from "@/components/PlayerPicker.svelte"
 import TvOverscanCard from "@/components/TvOverscanCard.svelte"
 import CloseToTrayCard from "@/components/CloseToTrayCard.svelte"
+import ExitAppCard from "@/components/ExitAppCard.svelte"
 import ConnectionLimitBanner from "@/components/ConnectionLimitBanner.svelte"
 import AndroidNativePlayerCard from "@/components/AndroidNativePlayerCard.svelte"
 import RememberedAndroidPlayerCard from "@/components/RememberedAndroidPlayerCard.svelte"
@@ -523,6 +524,9 @@ const navStructure: NavSection[] = [
             </div>
 
             <CloseToTrayCard client:load />
+
+            <!-- 0.11.4 W3: in-app Exit, directly under the Close button behavior card. -->
+            <ExitAppCard client:load />
 
             <!-- Rendering: Linux WebKitGTK DMA-BUF safe mode -->
             <details id="card-rendering" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">

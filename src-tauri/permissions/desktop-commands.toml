@@ -23,6 +23,7 @@ commands.allow = [
     "is_store_build",
     "resolve_explorer_path",
     "set_close_to_tray",
+    "quit_app",
     "updater_check_from",
     "updater_install",
     "sniff_page",

@@ -304,6 +304,8 @@ const navItems = [
       import { bootTvShell } from "@/scripts/tv/shell"
       import { mountGamepad } from "@/scripts/lib/gamepad"
       import { mountReturnHome } from "@/scripts/lib/return-home"
+      import { initTrayHandler } from "@/scripts/lib/tray-handler"
+      import { mountExitShortcuts } from "@/scripts/lib/app-exit"
 
       if (!(window as any).__xtTvShellBooted) {
         ;(window as any).__xtTvShellBooted = true
@@ -312,6 +314,10 @@ const navItems = [
       // Nylah Studios: Xbox controller (Gamepad API) + return home to CouchHub.
       mountGamepad()
       mountReturnHome()
+      // 0.11.4 W3: tray hide-release + Ctrl+Q must boot on /tv/* pages
+      // too — this is where the Live TV stream actually plays.
+      initTrayHandler()
+      mountExitShortcuts()
     </script>
   </body>
 </html>

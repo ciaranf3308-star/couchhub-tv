@@ -417,6 +417,20 @@ html[data-couch] .rs-nav__settings.is-active {
   background: var(--rs-surface);
 }
 
+/* Exit (0.11.4 W3): far end of the nav, after Settings. Armed state
+   is lit wine; the global :focus-visible ring applies. */
+html[data-couch] .rs-nav__exit {
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+}
+html[data-couch] .rs-nav__exit.is-armed {
+  color: var(--rs-text);
+  background: var(--rs-accent);
+  border-color: var(--rs-accent);
+}
+
 /* ── Images (TvImage) ──────────────────────────────────────────── */
 
 html[data-couch] .rs-image {

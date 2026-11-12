@@ -325,6 +325,7 @@ pub fn run() {
             sniffer::sniff_report_drm,
             store_paths::resolve_explorer_path,
             tray::set_close_to_tray,
+            tray::quit_app,
             updater::updater_check_from,
             updater::updater_install,
             vod_audio_proxy::vod_audio_remux_available,

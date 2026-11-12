@@ -446,18 +446,28 @@ export function setLivetvResumeLastChannel(on) {
   }
 }
 
-// Close-button behavior on desktop. When true (default), the X button hides
-// the window to the system tray (Skype/Discord/Slack style); when false, X
-// fully quits. Desktop-only - on web and Android the X is provided by the
-// OS/browser and Tauri's close-to-tray plumbing doesn't run.
+// Close-button behavior on desktop. When true, the X button hides
+// the window to the system tray (Skype/Discord/Slack style); when false
+// (the DEFAULT since 0.11.4), X fully quits like any other window.
+// Desktop-only - on web and Android the X is owned by the OS/browser
+// and Tauri's close-to-tray plumbing doesn't run.
 //
-// Stored as "0" for opt-out so the default ("" / missing) keeps the
-// historical behavior on existing installs. The Rust side defaults to true
-// on launch and is corrected by `syncCloseToTrayToBackend()` once the
-// frontend boots - they only diverge for the few hundred milliseconds
-// before the layout script runs.
+// Stored as "1" for opt-in tray. Default ("" / "0" / missing) is quit:
+// a fresh install quits on close, and an existing user who explicitly
+// opted into tray keeps it (their stored "1" still means tray). The
+// Rust side defaults to false on launch and is corrected by
+// `syncCloseToTrayToBackend()` once the frontend boots - they only
+// diverge for the few hundred milliseconds before the layout script
+// runs.
+//
+// NOTE (0.11.4): the pre-0.11.4 encoding was inverted — "" meant tray
+// (the old default) and "0" meant quit. Any pre-0.11.4 install that
+// never touched the setting stored "" and now gets the new quit
+// default, which is the intended behavior change; only an explicit
+// stored "1" (written by 0.11.4+ opt-in, or a restored backup) opts
+// back into tray.
 export function getCloseToTray() {
-  return readLS(KEY_CLOSE_TO_TRAY, "") !== "0"
+  return readLS(KEY_CLOSE_TO_TRAY, "") === "1"
 }
 
 async function pushCloseToTrayToBackend(enabled) {
@@ -474,7 +484,7 @@ async function pushCloseToTrayToBackend(enabled) {
 }
 
 export function setCloseToTray(on) {
-  writeLS(KEY_CLOSE_TO_TRAY, on ? "" : "0")
+  writeLS(KEY_CLOSE_TO_TRAY, on ? "1" : "0")
   document.dispatchEvent(
     new CustomEvent(CLOSE_TO_TRAY_EVENT, { detail: { value: !!on } })
   )
