@@ -465,6 +465,8 @@ export interface MovieDetail {
   backdrop: string | null;
   trailerYoutubeId: string | null;
   containerExt: string | null;
+  /** Provider `stream_url` override (movie_data) when the provider sets one; honoured by playback exactly like the legacy detail page. */
+  streamUrl: string | null;
   /** Provider backdrop (movie_data.backdrop_path) when present. */
   providerBackdrop: string | null;
 }
@@ -501,6 +503,16 @@ export function movieDetailViewModel(rawInfo: unknown, row?: MovieRow | null): M
   const poster = info.cover_big || info.movie_image || info.cover || row?.logo || null;
   const backdrop = info.backdrop_path?.[0] || info.backdrop || null;
   const trailer = info.youtube_trailer || info.trailer || null;
+  // stream_url lives on movie_data in the get_vod_info payload; pickInfo
+  // returns info when present, so read every shape the payload may use.
+  const rawStreamUrl =
+    (rawInfo as any)?.movie_data?.stream_url ??
+    (rawInfo as any)?.info?.stream_url ??
+    (rawInfo as any)?.stream_url ??
+    (row as { stream_url?: unknown } | null)?.stream_url ??
+    null;
+  const streamUrl =
+    typeof rawStreamUrl === "string" && rawStreamUrl.trim() ? rawStreamUrl.trim() : null;
   return {
     id,
     title,
@@ -518,6 +530,7 @@ export function movieDetailViewModel(rawInfo: unknown, row?: MovieRow | null): M
     backdrop: backdrop || null,
     trailerYoutubeId: trailer ? String(trailer) : null,
     containerExt: (row?.containerExt ?? info.container_extension ?? null) as string | null,
+    streamUrl,
     providerBackdrop: Array.isArray(info.backdrop_path) && info.backdrop_path[0]
       ? String(info.backdrop_path[0])
       : null,

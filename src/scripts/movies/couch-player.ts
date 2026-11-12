@@ -13,6 +13,18 @@
 // the D-pad can reach, and the OSD never hides while focus is inside
 // it (TvVodOsd shell behaviour).
 //
+// 0.11.9 — the source is NO LONGER fed raw to the engine. Before
+// handle.src(), playback runs the SAME pipeline the legacy detail
+// pages use, composed from the same primitives (vod-mount.ts is a
+// legacy-page orchestrator whose 30 callbacks assume legacy page
+// state, so the Couch player composes the primitives directly rather
+// than calling it with stubs): container plan, AVI alternative probe,
+// tee-proxy prepare, one error listener delegating to the shared
+// remux-recovery classifier (code 4 on MKV pins the content and
+// retries through ffmpeg; code 3 gets the same treatment), stall
+// watchdog, and the audio switcher for remux mode. Engine errors are
+// always surfaced — never silent black again.
+//
 // Subtitle / audio controls only appear when the mounted media element
 // actually exposes tracks — nothing is invented for a stream that has
 // none. Seeking is VOD-only: this module is never used for live.
@@ -20,10 +32,39 @@
 import {
   mountPlayer,
   playWhenReady,
+  desktopPlatform,
+  isWindows,
   type VjsLikeHandle,
   type PlayerBackend,
 } from "@/scripts/lib/player-runtime.ts";
 import { getPlayerBackend } from "@/scripts/lib/app-settings.js";
+import { chooseMime } from "@/scripts/lib/morph-detail.js";
+import {
+  planVodContainerPlayback,
+  detectVodContainer,
+  type VodContainerPlan,
+} from "@/scripts/lib/vod-container-plan.ts";
+import { probeVodContainerAlternative, swapUrlExtension } from "@/scripts/lib/vod-container-probe.ts";
+import { prepareVodPlayback, type VodProxySession } from "@/scripts/lib/vod-proxy.ts";
+import { vodAudioRemuxAvailable } from "@/scripts/lib/vod-audio-proxy.ts";
+import {
+  createVodAudioSwitcher,
+  discoverVodAudioTracks,
+  type VodAudioSwitcher,
+  type VodAudioTrackOption,
+} from "@/scripts/lib/vod-audio-switch.ts";
+import {
+  buildRemuxContentKey,
+  isRemuxPinnedContent,
+  type RemuxContentKind,
+} from "@/scripts/lib/vod-remux-memory.ts";
+import {
+  createRemuxFailureHandler,
+  handlePlayerStartError,
+  attachVodStallWatchdog,
+} from "@/scripts/lib/vod-remux-recovery.ts";
+import { createVodPlaybackToasts } from "@/scripts/lib/vod-playback-toasts.ts";
+import type { StallWatchdogHandle } from "@/scripts/lib/stall-watchdog.ts";
 import { formatClock } from "@/scripts/movies/couch-movies.ts";
 import { log } from "@/scripts/lib/log.js";
 
@@ -58,6 +99,21 @@ export interface CouchVodPlayerOptions {
   resumeSeconds?: number;
   autoplay?: boolean;
   ids: CouchVodPlayerIds;
+  /**
+   * Remux context (0.11.9). When present, the container plan can pin
+   * this exact content to the ffmpeg remux path after a direct-playback
+   * demux failure, and a code-4 MKV error retries through onRemuxRetry
+   * (the detail page disposes this player and re-runs the tune). When
+   * absent, playback still runs the container plan and surfaces errors,
+   * but no pin/retry is possible.
+   */
+  remux?: CouchVodRemuxContext;
+  /**
+   * True once this mount has been superseded (a newer tune started).
+   * Checked after every pipeline await so a stale mount never loads a
+   * source. Defaults to the player's own disposed flag.
+   */
+  isStale?: () => boolean;
   /** Throttled progress writes are the caller's job (preferences). */
   onProgress: (positionSeconds: number, durationSeconds: number) => void;
   /** Playback reached the end (and was not a premature-ended blip the caller filtered). */
@@ -72,6 +128,21 @@ export interface CouchVodPlayerOptions {
   autoplayNext?: boolean;
   /** Called with a human error string when the mount or source fails. */
   onError?: (message: string) => void;
+}
+
+export interface CouchVodRemuxContext {
+  playlistId: string | null;
+  contentKind: RemuxContentKind;
+  contentId: number | string;
+  /** Name searched for an HEVC hint when no codec is reported (movie name / episode title). */
+  nameHintSource: string;
+  /**
+   * Re-run the tune after this content was pinned to remux: dispose
+   * this player and start playback again (the pin makes the next
+   * container plan choose remux). At most one retry per tune — a
+   * remux-mode failure is terminal.
+   */
+  onRemuxRetry: () => void;
 }
 
 export interface CouchVodPlayerHandle {
@@ -93,14 +164,13 @@ function byId(id: string | undefined): HTMLElement | null {
   return document.getElementById(id);
 }
 
-function mimeForUrl(url: string): string {
-  const path = (url.split("?")[0] ?? "").toLowerCase();
-  if (path.endsWith(".m3u8")) return "application/x-mpegURL";
-  if (path.endsWith(".mpd")) return "application/dash+xml";
-  if (path.endsWith(".ts")) return "video/mp2t";
-  if (path.endsWith(".mkv")) return "video/x-matroska";
-  if (path.endsWith(".webm")) return "video/webm";
-  return "video/mp4";
+/** Human error string carrying the real engine code/message — never a bare "failed". */
+function describePlayerError(handle: VjsLikeHandle): string {
+  const err = handle.error?.() as { code?: number; message?: string } | null | undefined;
+  const message = typeof err?.message === "string" ? err.message.trim() : "";
+  if (message) return `Playback error: ${message}`;
+  if (typeof err?.code === "number") return `Playback failed (media error ${err.code}).`;
+  return "Playback failed.";
 }
 
 export async function createCouchVodPlayer(
@@ -138,6 +208,16 @@ export async function createCouchVodPlayer(
   const media = (): HTMLVideoElement | null => handle.getMediaElement?.() ?? videoEl;
 
   let disposed = false;
+  const isStaleNow = () => disposed || opts.isStale?.() === true;
+  // Pipeline-owned state (0.11.9): the tee-proxy session, the audio
+  // switcher, the stall watchdog and the discovery controller all die
+  // with the player — disposePlayer tears them down in pipeline order.
+  let ownAudioSwitcher: VodAudioSwitcher | null = null;
+  let preparedPlayback: VodProxySession | null = null;
+  let activeMkvSession: { stop(): void } | null | undefined = null;
+  let stallWatchdogDetach: StallWatchdogHandle | null = null;
+  let audioDiscoveryController: AbortController | null = null;
+  let onPlayerErrorRef: ((...args: unknown[]) => void) | null = null;
   let duration = opts.durationSeconds && opts.durationSeconds > 0 ? opts.durationSeconds : 0;
   let lastReportAt = 0;
   let autoplayNext = opts.autoplayNext ?? false;
@@ -381,69 +461,392 @@ export async function createCouchVodPlayer(
     m?.addEventListener("loadedmetadata", onLoadedMetadata);
   }
 
-  // --- Load the source, resume, and play. ---
-  try {
-    handle.src({
-      src: opts.src,
-      type: mimeForUrl(opts.src),
-      isLive: false,
-      durationSeconds: duration > 0 ? duration : undefined,
+  // --- Teardown (0.11.9: one path shared by dispose() and pipeline
+  // aborts, so a mount that fails mid-pipeline releases the engine
+  // exactly like a mount the user exits). ---
+  const disposePlayer = () => {
+    if (disposed) return;
+    disposed = true;
+    try {
+      stallWatchdogDetach?.();
+    } catch {}
+    stallWatchdogDetach = null;
+    try {
+      audioDiscoveryController?.abort();
+    } catch {}
+    audioDiscoveryController = null;
+    try {
+      ownAudioSwitcher?.dispose();
+    } catch {}
+    ownAudioSwitcher = null;
+    try {
+      activeMkvSession?.stop();
+    } catch {}
+    activeMkvSession = null;
+    preparedPlayback = null;
+    disposers.forEach((fn) => {
+      try {
+        fn();
+      } catch {}
     });
-  } catch (err) {
-    log.warn(`${opts.logTag} handle.src failed:`, err);
-    opts.onError?.("Could not load this stream.");
+    try {
+      handle.off?.("timeupdate", onTimeUpdate);
+      handle.off?.("play", onPlay);
+      handle.off?.("pause", onPause);
+      handle.off?.("ended", onEnded);
+      handle.off?.("loadedmetadata", onLoadedMetadata);
+      if (onPlayerErrorRef) handle.off?.("error", onPlayerErrorRef);
+    } catch {}
+    try {
+      handle.pause();
+    } catch {}
+    // 0.11.2 W3 — pause alone leaves the engine attached with its
+    // source loaded, so the provider connection stays held after
+    // exit and the next play (live or VOD) can be refused as
+    // connection-limit ("already open"). reset() destroys the
+    // hls / shaka / mpegts engines and unloads the source while
+    // keeping the <video> element for the next mount — dispose()
+    // would remove the element the detail page reuses.
+    try {
+      handle.reset?.();
+    } catch {}
+  };
+
+  // --- VOD pipeline (0.11.9). ---
+  // Same primitives, same order, same decisions as mountVodPlayback
+  // (vod-mount.ts) — composed here because that orchestrator's 30
+  // callbacks assume legacy page state. Mount determines the embedded
+  // backend first (above); the plan runs from here on.
+  const toasts = createVodPlaybackToasts(() => {});
+  const remux = opts.remux;
+  const contentKey = remux
+    ? buildRemuxContentKey(remux.contentKind, remux.contentId)
+    : "";
+  const nameHintSource = remux?.nameHintSource ?? "";
+  const remuxAvailable = await vodAudioRemuxAvailable().catch(() => false);
+  if (isStaleNow()) {
+    disposePlayer();
     return null;
   }
-  const resumeAt = Math.max(0, opts.resumeSeconds || 0);
-  if (resumeAt > 0) {
-    const applyResume = () => {
-      try {
-        const m = media();
-        if (m) m.currentTime = resumeAt;
-        else handle.currentTime?.(resumeAt);
-      } catch {}
-    };
-    try {
-      handle.one?.("loadedmetadata", applyResume);
-    } catch {}
-    const m = media();
-    if (m && m.readyState >= 1) applyResume();
-    else m?.addEventListener("loadedmetadata", applyResume, { once: true });
+  const forceRemux =
+    remux?.playlistId != null
+      ? isRemuxPinnedContent(remux.playlistId, contentKey)
+      : false;
+  const containerPlanEnv = {
+    isTauriDesktop: desktopPlatform,
+    isWindows,
+    remuxAvailable,
+    forceRemux,
+  };
+  let playSrc = opts.src;
+  let containerPlan: VodContainerPlan = planVodContainerPlayback(
+    playSrc,
+    containerPlanEnv
+  );
+  let resolvedContainer: "mkv" | "mp4" | null = null;
+
+  if (containerPlan.mode === "unsupported" && containerPlan.container === "avi") {
+    const alternative = await probeVodContainerAlternative(playSrc).catch(
+      () => null
+    );
+    if (isStaleNow()) {
+      disposePlayer();
+      return null;
+    }
+    if (alternative) {
+      log.info(`${opts.logTag} avi source has a playable alternative container`, {
+        container: alternative.container,
+      });
+      playSrc = alternative.url;
+      resolvedContainer = alternative.container;
+      const planningUrl =
+        swapUrlExtension(alternative.url, alternative.container) ||
+        alternative.url;
+      containerPlan = planVodContainerPlayback(planningUrl, containerPlanEnv);
+    }
   }
-  if (opts.autoplay !== false) playWhenReady(handle);
+
+  const detectedContainer =
+    containerPlan.mode === "unsupported"
+      ? containerPlan.container
+      : resolvedContainer || detectVodContainer(playSrc);
+  log.info(`${opts.logTag} plan decided`, {
+    mode: containerPlan.mode,
+    container: detectedContainer,
+    isTauriDesktop: desktopPlatform,
+    isWindows,
+    remuxAvailable,
+    forceRemux,
+  });
+  if (containerPlan.mode === "unsupported") {
+    toasts.showContainerUnsupportedToast(containerPlan.container);
+    opts.onError?.("This title's format isn't supported on this device.");
+    disposePlayer();
+    return null;
+  }
+  // In remux mode the audio switcher owns the mount; touching src/playhead here would re-register the remux.
+  const remuxOwnsInitialMount = containerPlan.mode === "remux";
+  const mime =
+    resolvedContainer === "mkv"
+      ? "video/x-matroska"
+      : resolvedContainer === "mp4"
+        ? "video/mp4"
+        : chooseMime(playSrc);
+
+  // Error plumbing: one persistent "error" listener. The shared
+  // classifier decides (pin + remux retry on code 4 MKV, remux-failure
+  // toast on code 3 / remux mode); the wrapper guarantees an error is
+  // ALWAYS surfaced to the detail page unless a remux retry is in
+  // flight — handlePlayerStartError stays silent for other codes, and
+  // silent black is the defect this fix removes.
+  let startErrorSurfaced = false;
+  let remuxRetryTriggered = false;
+  const surfaceStartError = () => {
+    if (startErrorSurfaced) return;
+    startErrorSurfaced = true;
+    opts.onError?.(describePlayerError(handle));
+  };
+  const handleRemuxFailure = createRemuxFailureHandler({
+    player: handle,
+    posterEl: null,
+    playerWrap: null,
+    getOwnAudioSwitcher: () => ownAudioSwitcher,
+    clearAudioSwitcherIfOwn: (own) => {
+      if (own === ownAudioSwitcher) ownAudioSwitcher = null;
+    },
+    getPipelineMkvSession: () => activeMkvSession,
+    clearActiveMkvSessionIfMatches: (session) => {
+      if (session === activeMkvSession) activeMkvSession = null;
+    },
+    nameHintSource,
+    contentKey,
+    recordGiveUp: (kind) => {
+      log.info(`${opts.logTag} vod give-up`, { kind, contentKey });
+    },
+    endGiveUpSession: () => {},
+    resolvedContainer,
+    playSrc,
+    toasts,
+  });
+  const wrappedRemuxFailure = (detail: string) => {
+    handleRemuxFailure(detail);
+    // The toast carries the specific reason; the status line must not
+    // sit black, so the detail page hides the player too.
+    surfaceStartError();
+  };
+  const handleStartError = () => {
+    if (isStaleNow()) return;
+    handlePlayerStartError({
+      logTag: opts.logTag,
+      player: handle,
+      isStale: isStaleNow,
+      containerPlanMode: containerPlan.mode,
+      desktopPlatform,
+      localDownloadPath: null,
+      resolvedContainer,
+      playSrc,
+      remuxAvailable,
+      activePlaylistId: remux?.playlistId ?? null,
+      contentKey,
+      posterEl: null,
+      playerWrap: null,
+      handleRemuxFailure: wrappedRemuxFailure,
+      retirePreviousPlaybackAndRetryRemux: () => {
+        remuxRetryTriggered = true;
+        // Dispose this mount (releases the engine) before the detail
+        // page re-runs the tune; the pin makes the next plan remux.
+        disposePlayer();
+        remux?.onRemuxRetry();
+      },
+      toasts,
+    });
+    if (!remuxRetryTriggered) surfaceStartError();
+  };
+  let pipelineReady = false;
+  let bufferedStartError = false;
+  const onPlayerError = () => {
+    if (isStaleNow()) return;
+    // A reused engine can emit a stale "error" while the tee-proxy
+    // registration is in flight — buffer it and classify once the
+    // pipeline is ready, exactly like the legacy mount.
+    if (!pipelineReady) {
+      bufferedStartError = true;
+      return;
+    }
+    handleStartError();
+  };
+  onPlayerErrorRef = onPlayerError;
+  let errorListenerAttached = false;
+  try {
+    handle.on("error", onPlayerError);
+    errorListenerAttached = true;
+  } catch (err) {
+    log.warn(
+      `${opts.logTag} handle error listener unavailable, using media element:`,
+      err
+    );
+  }
+  if (!errorListenerAttached) {
+    const m = media();
+    if (m) {
+      const onMediaError = () => {
+        if (isStaleNow()) return;
+        // Degraded path: the handle never exposed errors, so no remux
+        // retry is possible — surface the element's real error.
+        const mediaError = m.error as { code?: number; message?: string } | null;
+        opts.onError?.(
+          mediaError?.message
+            ? `Playback error: ${mediaError.message}`
+            : typeof mediaError?.code === "number"
+              ? `Playback failed (media error ${mediaError.code}).`
+              : "Playback failed."
+        );
+      };
+      m.addEventListener("error", onMediaError);
+      disposers.push(() => m.removeEventListener("error", onMediaError));
+    }
+  }
+
+  // Tee-proxy prepare: MKV/WebM sources get a local demux session
+  // (subtitle cues + audio tracks); everything else passes through.
+  preparedPlayback = await prepareVodPlayback(playSrc).catch((err) => {
+    log.warn(
+      `${opts.logTag} prepareVodPlayback failed, falling back to direct source:`,
+      err
+    );
+    return null;
+  });
+  if (isStaleNow()) {
+    disposePlayer();
+    return null;
+  }
+  const playbackUrl = preparedPlayback?.playbackUrl ?? playSrc;
+  activeMkvSession = preparedPlayback?.mkvSession ?? null;
+
+  const resumeAt = Math.max(0, opts.resumeSeconds || 0);
+  const buildAudioSwitcher = (
+    tracks: VodAudioTrackOption[]
+  ): VodAudioSwitcher =>
+    createVodAudioSwitcher({
+      handle,
+      originalSrc: playbackUrl,
+      originalMime: mime,
+      originalSubtitles: {
+        sourceUrl: playSrc,
+        mkvSession: preparedPlayback?.mkvSession ?? null,
+      },
+      sourceUrl: playSrc,
+      remuxInputUrl: preparedPlayback?.mkvSession ? playbackUrl : null,
+      getKnownDurationSeconds: () => duration || handle.duration?.() || 0,
+      tracks,
+      mountRemuxImmediately: remuxOwnsInitialMount,
+      initialStartSeconds: resumeAt,
+      onRemuxUnrecoverable: (detail) => {
+        log.warn(
+          `${opts.logTag} remux playback unavailable for this source:`,
+          detail
+        );
+        wrappedRemuxFailure(detail);
+      },
+    });
+  let initialAudioSource: VodAudioSwitcher["source"] | null = null;
+  if (remuxOwnsInitialMount) {
+    ownAudioSwitcher = buildAudioSwitcher([]);
+    initialAudioSource = ownAudioSwitcher.source;
+  }
+
+  pipelineReady = true;
+  if (bufferedStartError) {
+    handleStartError();
+    disposePlayer();
+    return null;
+  }
+  if (isStaleNow()) {
+    disposePlayer();
+    return null;
+  }
+
+  const mountEmbeddedSrc = () => {
+    handle.src({
+      src: playbackUrl,
+      type: mime,
+      isLive: false,
+      durationSeconds: duration > 0 ? duration : undefined,
+      subtitles: {
+        sourceUrl: playSrc,
+        mkvSession: preparedPlayback?.mkvSession ?? null,
+      },
+      audio: initialAudioSource,
+    });
+  };
+  const video = media();
+  if (video) {
+    stallWatchdogDetach = attachVodStallWatchdog(video, {
+      logTag: opts.logTag,
+      player: handle,
+      remuxOwnsInitialMount,
+      isAudioSwitcherRecovering: () => ownAudioSwitcher?.isRecovering() ?? false,
+      recoverRemuxStall: () => {
+        ownAudioSwitcher?.recoverRemuxStall();
+      },
+      mountEmbeddedSrc,
+    });
+  }
+
+  if (!remuxOwnsInitialMount) {
+    try {
+      mountEmbeddedSrc();
+    } catch (err) {
+      log.warn(`${opts.logTag} handle.src failed:`, err);
+      opts.onError?.("Could not load this stream.");
+      disposePlayer();
+      return null;
+    }
+    if (resumeAt > 0) {
+      const applyResume = () => {
+        try {
+          const m = media();
+          if (m) m.currentTime = resumeAt;
+          else handle.currentTime?.(resumeAt);
+        } catch {}
+      };
+      try {
+        handle.one?.("loadedmetadata", applyResume);
+      } catch {}
+      const m = media();
+      if (m && m.readyState >= 1) applyResume();
+      else m?.addEventListener("loadedmetadata", applyResume, { once: true });
+    }
+    if (opts.autoplay !== false) playWhenReady(handle);
+  }
+
+  // Fire-and-forget network probe that must never sit ahead of the mount above.
+  if (remuxAvailable) {
+    audioDiscoveryController = new AbortController();
+    void discoverVodAudioTracks(
+      preparedPlayback?.mkvSession ?? null,
+      playSrc,
+      audioDiscoveryController.signal
+    )
+      .then((audioTracks) => {
+        if (isStaleNow()) return;
+        if (remuxOwnsInitialMount) {
+          if (audioTracks.length > 0) ownAudioSwitcher?.setTracks(audioTracks);
+          return;
+        }
+        if (audioTracks.length < 2) return;
+        ownAudioSwitcher = buildAudioSwitcher(audioTracks);
+        handle.setAudioSource?.(ownAudioSwitcher.source);
+      })
+      .catch(() => {});
+  }
+
   refreshTrackMenus();
   paint();
   window.dispatchEvent(new CustomEvent("couch-osd:show"));
 
   return {
-    dispose: () => {
-      disposed = true;
-      disposers.forEach((fn) => {
-        try {
-          fn();
-        } catch {}
-      });
-      try {
-        handle.off?.("timeupdate", onTimeUpdate);
-        handle.off?.("play", onPlay);
-        handle.off?.("pause", onPause);
-        handle.off?.("ended", onEnded);
-        handle.off?.("loadedmetadata", onLoadedMetadata);
-      } catch {}
-      try {
-        handle.pause();
-      } catch {}
-      // 0.11.2 W3 — pause alone leaves the engine attached with its
-      // source loaded, so the provider connection stays held after
-      // exit and the next play (live or VOD) can be refused as
-      // connection-limit ("already open"). reset() destroys the
-      // hls / shaka / mpegts engines and unloads the source while
-      // keeping the <video> element for the next mount — dispose()
-      // would remove the element the detail page reuses.
-      try {
-        handle.reset?.();
-      } catch {}
-    },
+    dispose: disposePlayer,
     play: () => playWhenReady(handle),
     pause: () => {
       try {

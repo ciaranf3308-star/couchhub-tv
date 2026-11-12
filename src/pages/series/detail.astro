@@ -110,6 +110,11 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 
     <p id="series-detail-status" class="rs-meta" role="status"></p>
 
+    <section id="series-detail-variants" class="rs-detail-section" hidden aria-label="Versions of this series">
+      <h2 class="rs-section-title">Versions</h2>
+      <div id="series-detail-variants-list" class="rs-detail-variants" data-nylah-rail="detail-variants"></div>
+    </section>
+
     <section id="series-episodes-section" class="rs-detail-section" aria-label="Seasons and episodes" hidden>
       <div class="rs-detail-section__head">
         <h2 class="rs-section-title">Episodes</h2>
@@ -465,6 +470,18 @@ import TvSkeleton from "@/components/couch/TvSkeleton.astro";
       display: flex;
       flex-direction: column;
       gap: 1rem;
+    }
+    .rs-detail-section[hidden] {
+      display: none;
+    }
+    .rs-detail-variants {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .rs-detail-variants button:disabled {
+      opacity: 0.55;
+      cursor: default;
     }
     .rs-detail-section__head {
       display: flex;

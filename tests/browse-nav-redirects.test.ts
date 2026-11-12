@@ -25,8 +25,10 @@ describe("Browse split: /movies, /series, /discover are real pages", () => {
     const src = read("src/pages/movies/index.astro");
     expect(src).not.toContain("Astro.redirect");
     expect(src).toContain('activeNav="movies"');
-    expect(src).toContain('id="couch-browse-rails"');
-    expect(src).toContain('id="couch-browse-grid"');
+    // 0.11.8 Home/Browse split: the page renders the Home shelves and
+    // the Browse Everything mount (the pre-0.11.8 rails/grid ids are gone).
+    expect(src).toContain('id="movies-home-root"');
+    expect(src).toContain('id="movies-browse-mount"');
   });
 
   it("/series renders the catalogue (no redirect)", () => {
@@ -34,8 +36,10 @@ describe("Browse split: /movies, /series, /discover are real pages", () => {
     const src = read("src/pages/series/index.astro");
     expect(src).not.toContain("Astro.redirect");
     expect(src).toContain('activeNav="series"');
-    expect(src).toContain('id="couch-browse-rails"');
-    expect(src).toContain('id="couch-browse-grid"');
+    // 0.11.8 Home/Browse split: the page renders the Home shelves and
+    // the Browse Everything mount (the pre-0.11.8 rails/grid ids are gone).
+    expect(src).toContain('id="series-home-root"');
+    expect(src).toContain('id="series-browse-root"');
   });
 
   it("/discover renders the Discover page (no redirect)", () => {
