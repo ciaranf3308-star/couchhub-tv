@@ -1,4 +1,21 @@
-// Nylah Studios — Xbox controller input via the Gamepad API.
+// Nylah Studios — Xbox controller input: NATIVE XInput (primary) +
+// browser Gamepad API (fallback).
+//
+// 0.11.4 (W6): the browser Gamepad API is NO LONGER the primary
+// path. It failed on the user's PC twice — the controller works in
+// games but the app never saw it (0.11.0, then the 0.11.1 four-break
+// fix). The browser layer is where the input keeps getting lost:
+// WebView2 hides an already-connected pad behind an
+// anti-fingerprinting gesture gate until its first button press, and a
+// `gamepadconnected` fired before this page's listener exists is lost
+// forever. The primary path is now native: Rust polls XInput (the API
+// games use — src-tauri/src/xinput.rs, 8 ms, from cold launch) and
+// forwards button edges + directions as Tauri events; this module's
+// exported `dispatchNativeButton` / `dispatchNativeDirection` feed
+// them into the SAME action pipeline below (one focus engine, not
+// two). The browser loop below stays only as the fallback for
+// non-XInput pads — and it stands down while native input is live, so
+// one physical press can never fire twice (see noteNativeInputActive).
 //
 // Upstream Extreme InfiniTV already navigates by keyboard / D-pad through
 // spatial-navigation.js, but it has no Gamepad API support at all (no
@@ -8,12 +25,6 @@
 // understands (arrows, Enter, Escape), so every existing view — Live TV,
 // Movies, Series, EPG, search, settings, dialogs — gains controller
 // navigation for free.
-//
-// Why the Gamepad API and not XInput: this app is Tauri + web (Astro /
-// Svelte), not a native Win32/WPF app, so there is no C# layer to P/Invoke
-// XInput from. The Gamepad API is the standard way an Xbox controller
-// reaches a Tauri/WebView2 app on Windows, and it needs no driver, no
-// native module and no extra permission.
 //
 // Mapping (standard mapping, Xbox controller):
 //   D-pad / left stick .... move focus (spatial navigation; on the home
@@ -78,7 +89,7 @@ const BTN_DPAD_DOWN = 13;
 const BTN_DPAD_LEFT = 14;
 const BTN_DPAD_RIGHT = 15;
 
-type Direction = "up" | "down" | "left" | "right";
+export type Direction = "up" | "down" | "left" | "right";
 
 const ARROW_KEY: Record<Direction, string> = {
   up: "ArrowUp",
@@ -86,6 +97,362 @@ const ARROW_KEY: Record<Direction, string> = {
   left: "ArrowLeft",
   right: "ArrowRight",
 };
+
+// ──────────────────────────────────────────────────────────────────────
+// SHARED ACTION PIPELINE (0.11.4 W6) — one focus engine, two sources.
+//
+// The browser poll loop in mountGamepad() and the native XInput path
+// (native-gamepad.ts, fed by Rust xinput.rs events) BOTH drive the
+// functions in this section. A button press from either source runs
+// the same code: same modal rules, same Live TV contexts, same
+// editing-field gate. Do not add a second action implementation for
+// the native path — extend these functions and both paths gain it.
+// ──────────────────────────────────────────────────────────────────────
+
+// Native (XInput) button names -> standard-mapping indices, so the
+// Rust event payload ("a", "menu", ...) lands on the same branch the
+// browser loop uses. D-pad buttons are directions, not actions: Rust
+// sends them as xinput-direction events, never here.
+export const NATIVE_BUTTON_INDEX: Record<string, number> = {
+  a: BTN_A,
+  b: BTN_B,
+  x: BTN_X,
+  y: BTN_Y,
+  lb: BTN_LB,
+  rb: BTN_RB,
+  lt: BTN_LT,
+  rt: BTN_RT,
+  view: BTN_VIEW,
+  menu: BTN_MENU,
+  left_stick: 10,
+  right_stick: 11,
+};
+
+export type NativeButtonName = keyof typeof NATIVE_BUTTON_INDEX;
+
+interface HeldDirection {
+  dir: Direction;
+  since: number;
+  lastRepeat: number;
+}
+
+// Action state shared by both input paths. It used to live inside
+// mountGamepad's closure; it is module-level now so the native path
+// (which never enters the browser poll loop) sees the same held
+// direction / View+Menu hold as the browser path. One mount per page
+// either way — the mount guard below still applies.
+const actionState: {
+  held: HeldDirection | null;
+  viewMenuHoldStart: number | null;
+  menuPressedWithView: boolean;
+} = { held: null, viewMenuHoldStart: null, menuPressedWithView: false };
+
+function markGamepadActive(): void {
+  document.documentElement.classList.add("gamepad-active");
+}
+
+/** The return-home escape hatch, shared by both paths. */
+export function dispatchReturnHome(): void {
+  markGamepadActive();
+  window.dispatchEvent(new CustomEvent("couchhubtv:return-home"));
+}
+
+// Native-path liveness: the browser fallback stands down while the
+// native path is provably delivering input, so one physical press on
+// an Xbox pad (visible to BOTH XInput and the Gamepad API once its
+// gesture gate opens) can never fire twice. A native event refreshes
+// the window; a held native direction holds it open; 1500 ms of
+// native silence hands input back to the browser fallback.
+let nativeLiveUntil = 0;
+let nativeDirectionHeld = false;
+const NATIVE_LIVE_WINDOW_MS = 1500;
+
+export function noteNativeInputActive(): void {
+  nativeLiveUntil = performance.now() + NATIVE_LIVE_WINDOW_MS;
+}
+
+export function setNativeDirectionActive(active: boolean): void {
+  nativeDirectionHeld = active;
+  if (active) noteNativeInputActive();
+}
+
+function isNativePathLive(now: number): boolean {
+  return nativeDirectionHeld || now < nativeLiveUntil;
+}
+
+// View + Menu held together for 2 s -> return home. Runs before the
+// button branches in both paths, so Menu never opens Settings when it
+// arrived as half of the return-home chord.
+function noteViewMenuHeld(viewHeld: boolean, menuHeld: boolean, now: number): void {
+  if (viewHeld && menuHeld) {
+    actionState.menuPressedWithView = true;
+    if (actionState.viewMenuHoldStart === null) actionState.viewMenuHoldStart = now;
+    if (now - actionState.viewMenuHoldStart >= RETURN_HOME_HOLD_MS) {
+      actionState.viewMenuHoldStart = null;
+      dispatchReturnHome();
+    }
+  } else {
+    actionState.viewMenuHoldStart = null;
+    if (!menuHeld) actionState.menuPressedWithView = false;
+  }
+}
+
+/**
+ * Called by the native path after ITS hold timer fires return-home
+ * (native-gamepad.ts): the shared hold clock must restart, or the
+ * next button press while View+Menu are still held would re-fire
+ * return-home immediately. menuPressedWithView stays true — Menu
+ * still must not open Settings while the chord is held.
+ */
+export function clearViewMenuHoldTimer(): void {
+  actionState.viewMenuHoldStart = null;
+}
+
+function move(dir: Direction): void {
+  markGamepadActive();
+  // A modal dialog owns all navigation while it is open (v0.2.1):
+  // never run the rail model — it would carry focus into the page
+  // behind the dialog. If focus never landed in the dialog (or
+  // escaped it), pull it onto the dialog's first item and consume
+  // the press; otherwise the arrow goes to spatial navigation,
+  // which is restricted to the dialog's own section.
+  if (findOpenModal()) {
+    const pull = modalFocusTarget();
+    if (pull) {
+      pull.focus({ preventScroll: true });
+      return;
+    }
+    dispatchKey(ARROW_KEY[dir]);
+    return;
+  }
+  // Home rails get the rail-aware model; everything else falls
+  // through to plain arrow keys into spatial navigation.
+  if (handleRailDirection(dir)) return;
+  dispatchKey(ARROW_KEY[dir]);
+}
+
+function handleDirection(dir: Direction | null, now: number): void {
+  if (dir === null) {
+    actionState.held = null;
+    return;
+  }
+  if (actionState.held === null || actionState.held.dir !== dir) {
+    actionState.held = { dir, since: now, lastRepeat: now };
+    move(dir);
+    return;
+  }
+  if (
+    now - actionState.held.since >= REPEAT_INITIAL_DELAY_MS &&
+    now - actionState.held.lastRepeat >= REPEAT_INTERVAL_MS
+  ) {
+    actionState.held.lastRepeat = now;
+    move(dir);
+  }
+}
+
+/**
+ * One pressed button, from either input path. `index` is a
+ * standard-mapping button index (see BTN_* above). Edge-triggered by
+ * the caller: call only on the press edge, never while held. The
+ * text-field gate lives here so both paths honour it: in a field only
+ * B works (blur + back), every other button is swallowed.
+ */
+export function handleGamepadButtonPress(index: number, _now: number): void {
+  if (isEditingTarget(document.activeElement)) {
+    if (index === BTN_B) {
+      markGamepadActive();
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      dispatchKey("Escape");
+    }
+    return;
+  }
+  if (index === BTN_A) {
+    markGamepadActive();
+    activateFocused();
+    return;
+  }
+  if (index === BTN_B) {
+    markGamepadActive();
+    // W5 (0.9.0): B resolves to "back" in every Live TV context
+    // (livetv-keys.ts). The gamepad dispatches `livetv:back`
+    // {context} and the mode component listening for it
+    // implements its own back step — landing backs out of the
+    // landing, the browser returns to the landing, playback
+    // closes its overlay first and then returns, the Guide
+    // returns to the mode it was entered from. The gamepad does
+    // NOT also dispatch a synthetic Escape here: a mode's back
+    // step must run exactly once, and keyboard Escape keeps its
+    // own keydown path (the mode components' existing handlers).
+    // While a modal dialog is open the dialog still owns B, so
+    // Escape goes to it as before.
+    const liveContext = livetvContext();
+    if (liveContext && findOpenModal() === null) {
+      dispatchLivetvBack(window, liveContext);
+    } else {
+      dispatchKey("Escape");
+    }
+    return;
+  }
+  if (index === BTN_X && findOpenModal() === null) {
+    markGamepadActive();
+    // W3: X is unmapped in the Guide — swallow it.
+    if (livetvGuideActive()) {
+      // No-op by design.
+    } else if (livetvPlaybackActive()) {
+      dispatchKey("x");
+    } else if (livetvLandingActive() || livetvBrowserActive()) {
+      // W5 (0.9.0): landing X = contextual, browser X =
+      // toggle-favourite — both as keys for the mode's own
+      // keydown handler (livetv-keys.ts keyboard table).
+      dispatchKey("x");
+    } else if (inPlayerContext()) togglePlayPause();
+    else openDetailsOfFocused();
+    return;
+  }
+  if (index === BTN_Y && findOpenModal() === null) {
+    markGamepadActive();
+    // W3: in the Guide Y is guide actions (Guide key "y").
+    if (livetvGuideActive()) {
+      dispatchKey("y");
+    } else if (livetvPlaybackActive()) {
+      dispatchKey("y");
+    } else if (livetvLandingActive() || livetvBrowserActive()) {
+      // W5 (0.9.0): landing Y = open Guide, browser Y = open
+      // search — both as keys for the mode's own keydown handler.
+      dispatchKey("y");
+    } else if (inPlayerContext()) toggleFullscreen();
+    else goSearch();
+    return;
+  }
+  if (index === BTN_LB) {
+    markGamepadActive();
+    // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
+    // W5: in the Browser LB steps to the previous category ("[").
+    if (livetvGuideActive()) dispatchKey("PageUp");
+    else if (livetvBrowserActive()) dispatchKey("[");
+    else seekBy(-10);
+    return;
+  }
+  if (index === BTN_RB) {
+    markGamepadActive();
+    // W3: in the Guide RB shifts time later (Guide key "PageDown").
+    // W5: in the Browser RB steps to the next category ("]").
+    if (livetvGuideActive()) dispatchKey("PageDown");
+    else if (livetvBrowserActive()) dispatchKey("]");
+    else seekBy(10);
+    return;
+  }
+  if (index === BTN_LT) {
+    markGamepadActive();
+    // W5 (0.9.0): triggers ARE plumbed (buttons 6/7, analog value
+    // > 0.5 counts as pressed). In the Browser LT steps to the
+    // previous page (PageUp); elsewhere it stays volume down.
+    if (livetvBrowserActive()) dispatchKey("PageUp");
+    else adjustVolume(-0.1);
+    return;
+  }
+  if (index === BTN_RT) {
+    markGamepadActive();
+    // W5 (0.9.0): in the Browser RT steps to the next page
+    // (PageDown); elsewhere it stays volume up.
+    if (livetvBrowserActive()) dispatchKey("PageDown");
+    else adjustVolume(0.1);
+    return;
+  }
+  if (
+    index === BTN_MENU &&
+    !actionState.menuPressedWithView &&
+    findOpenModal() === null
+  ) {
+    markGamepadActive();
+    // W3: in the Guide Menu is guide actions (Guide key "ContextMenu").
+    if (livetvGuideActive()) {
+      dispatchKey("ContextMenu");
+    } else if (livetvPlaybackActive()) {
+      // W2: in RedSilk Live TV playback Menu opens the playback
+      // options overlay instead of navigating to Settings (which
+      // would leave the stream).
+      window.dispatchEvent(
+        new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
+      );
+    } else if (livetvLandingActive() || livetvBrowserActive()) {
+      // W5 (0.9.0): landing / browser Menu = open options, as
+      // the "m" key for the mode's own keydown handler.
+      dispatchKey("m");
+    } else {
+      openSettings();
+    }
+    return;
+  }
+  // BTN_VIEW alone does nothing; View+Menu is the return-home chord
+  // (noteViewMenuHeld, above). Unknown indices are ignored.
+}
+
+// Buttons the native path is currently holding, by XInput name.
+// The browser loop gets its held state from the per-frame snapshot;
+// the native path gets edges only, so it tracks holds here — the
+// View+Menu chord needs to know both buttons are down at once.
+const nativeHeldButtons = new Set<string>();
+
+/**
+ * Native XInput button edge, from native-gamepad.ts. `pressed` is
+ * the edge (true = just pressed, false = just released). Presses run
+ * the shared handleGamepadButtonPress above; releases only update the
+ * View+Menu chord state. Unknown button names are ignored.
+ */
+export function dispatchNativeButton(
+  button: NativeButtonName,
+  pressed: boolean,
+  now: number = performance.now(),
+): void {
+  noteNativeInputActive();
+  if (pressed) nativeHeldButtons.add(button);
+  else nativeHeldButtons.delete(button);
+  noteViewMenuHeld(
+    nativeHeldButtons.has("view"),
+    nativeHeldButtons.has("menu"),
+    now,
+  );
+  if (!pressed) return;
+  const index = NATIVE_BUTTON_INDEX[button];
+  if (index === undefined || index === BTN_VIEW) return;
+  handleGamepadButtonPress(index, now);
+}
+
+let nativeRafId = 0;
+let nativeDirection: Direction | null = null;
+
+/**
+ * Native XInput direction edge, from native-gamepad.ts. `dir` is the
+ * direction that just started, or null when the pad returned to
+ * centre. The first move fires immediately; repeats run on a
+ * requestAnimationFrame ticker with the same 350 ms / 140 ms timing
+ * the browser loop uses, so a held native D-pad repeats exactly like
+ * a held browser one.
+ */
+export function dispatchNativeDirection(
+  dir: Direction | null,
+  now: number = performance.now(),
+): void {
+  noteNativeInputActive();
+  if (dir === null) {
+    nativeDirection = null;
+    cancelAnimationFrame(nativeRafId);
+    actionState.held = null;
+    return;
+  }
+  if (nativeDirection !== dir) {
+    nativeDirection = dir;
+    handleDirection(dir, now);
+  }
+  cancelAnimationFrame(nativeRafId);
+  const tick = (t: number): void => {
+    if (nativeDirection === null) return;
+    handleDirection(nativeDirection, t);
+    nativeRafId = requestAnimationFrame(tick);
+  };
+  nativeRafId = requestAnimationFrame(tick);
+}
 
 // Synthetic KeyboardEvent.keyCode values. Chromium's KeyboardEvent
 // constructor has no keyCode slot, so a synthetic event reads
@@ -489,12 +856,6 @@ function openSettings(): void {
   window.location.assign(path.startsWith("/tv") ? "/tv/settings" : "/settings");
 }
 
-interface HeldDirection {
-  dir: Direction;
-  since: number;
-  lastRepeat: number;
-}
-
 export function mountGamepad(): void {
   if (typeof window === "undefined" || typeof navigator === "undefined") return;
   const flag = "__couchhubTvGamepadMounted" as const;
@@ -504,17 +865,15 @@ export function mountGamepad(): void {
   let rafId = 0;
   let running = false;
   let prevSnapshot: boolean[] = [];
-  let held: HeldDirection | null = null;
-  let viewMenuHoldStart: number | null = null;
-  let menuPressedWithView = false;
   // Index of the pad the loop is currently reading. The pad can move
   // (reconnect at a new index, a different pad taking over); edge
   // state from the previous pad must never fire on the new one.
   let activePadIndex: number | null = null;
 
-  const markGamepadActive = () => {
-    document.documentElement.classList.add("gamepad-active");
-  };
+  // Held direction / View+Menu hold live in module-level actionState
+  // now (shared with the native XInput path); markGamepadActive,
+  // move() and handleDirection() are module-level too. This loop only
+  // owns its own frame state (rafId / running / prevSnapshot).
   // Rail auto-scroll + focus memory live here so keyboard (spatial
   // nav) focus moves get them too, not only gamepad moves.
   mountRailAutoScroll();
@@ -524,48 +883,6 @@ export function mountGamepad(): void {
   window.addEventListener("keydown", () => {
     document.documentElement.classList.remove("gamepad-active");
   });
-
-  function move(dir: Direction): void {
-    markGamepadActive();
-    // A modal dialog owns all navigation while it is open (v0.2.1):
-    // never run the rail model — it would carry focus into the page
-    // behind the dialog. If focus never landed in the dialog (or
-    // escaped it), pull it onto the dialog's first item and consume
-    // the press; otherwise the arrow goes to spatial navigation,
-    // which is restricted to the dialog's own section.
-    if (findOpenModal()) {
-      const pull = modalFocusTarget();
-      if (pull) {
-        pull.focus({ preventScroll: true });
-        return;
-      }
-      dispatchKey(ARROW_KEY[dir]);
-      return;
-    }
-    // Home rails get the rail-aware model; everything else falls
-    // through to plain arrow keys into spatial navigation.
-    if (handleRailDirection(dir)) return;
-    dispatchKey(ARROW_KEY[dir]);
-  }
-
-  function handleDirection(dir: Direction | null, now: number): void {
-    if (dir === null) {
-      held = null;
-      return;
-    }
-    if (held === null || held.dir !== dir) {
-      held = { dir, since: now, lastRepeat: now };
-      move(dir);
-      return;
-    }
-    if (
-      now - held.since >= REPEAT_INITIAL_DELAY_MS &&
-      now - held.lastRepeat >= REPEAT_INTERVAL_MS
-    ) {
-      held.lastRepeat = now;
-      move(dir);
-    }
-  }
 
   function stickDirection(gp: Gamepad): Direction | null {
     const x = gp.axes[0] ?? 0;
@@ -591,16 +908,16 @@ export function mountGamepad(): void {
     const gp = firstConnectedPad(pads);
     if (!gp) {
       prevSnapshot = [];
-      held = null;
-      viewMenuHoldStart = null;
+      actionState.held = null;
+      actionState.viewMenuHoldStart = null;
       activePadIndex = null;
       return;
     }
     if (activePadIndex !== gp.index) {
       activePadIndex = gp.index;
       prevSnapshot = [];
-      held = null;
-      viewMenuHoldStart = null;
+      actionState.held = null;
+      actionState.viewMenuHoldStart = null;
     }
 
     const snapshot = gp.buttons.map((b) => b.pressed || b.value > 0.5);
@@ -615,31 +932,26 @@ export function mountGamepad(): void {
     const justPressed = (index: number): boolean =>
       snapshot[index] === true && prev[index] !== true;
 
+    // Native XInput path is live: stand down. The same physical pad
+    // is visible to BOTH XInput and the Gamepad API, so processing
+    // this snapshot too would double every press. prevSnapshot was
+    // already updated above, so the fallback resumes cleanly (no
+    // stale edges) when the native path goes quiet.
+    if (isNativePathLive(now)) return;
+
     const editing = isEditingTarget(document.activeElement);
 
-    // View + Menu held together for 2 s -> return home.
-    if (snapshot[BTN_VIEW] && snapshot[BTN_MENU]) {
-      menuPressedWithView = true;
-      if (viewMenuHoldStart === null) viewMenuHoldStart = now;
-      if (now - viewMenuHoldStart >= RETURN_HOME_HOLD_MS) {
-        viewMenuHoldStart = null;
-        markGamepadActive();
-        window.dispatchEvent(new CustomEvent("couchhubtv:return-home"));
-      }
-    } else {
-      viewMenuHoldStart = null;
-      if (!snapshot[BTN_MENU]) menuPressedWithView = false;
-    }
+    // View + Menu held together for 2 s -> return home (shared with
+    // the native path — see noteViewMenuHeld).
+    noteViewMenuHeld(snapshot[BTN_VIEW], snapshot[BTN_MENU], now);
 
     if (editing) {
       // In a text field the controller only gets B (blur/back) and the
       // View+Menu return-home hold — arrows and A belong to the field.
-      if (justPressed(BTN_B)) {
-        markGamepadActive();
-        (document.activeElement as HTMLElement | null)?.blur?.();
-        dispatchKey("Escape");
-      }
-      held = null;
+      // The gate lives in handleGamepadButtonPress; calling it for B
+      // is enough here.
+      if (justPressed(BTN_B)) handleGamepadButtonPress(BTN_B, now);
+      actionState.held = null;
       return;
     }
 
@@ -652,114 +964,20 @@ export function mountGamepad(): void {
     else dir = stickDirection(gp);
     handleDirection(dir, now);
 
-    if (justPressed(BTN_A)) {
-      markGamepadActive();
-      activateFocused();
-    }
-    if (justPressed(BTN_B)) {
-      markGamepadActive();
-      // W5 (0.9.0): B resolves to "back" in every Live TV context
-      // (livetv-keys.ts). The gamepad dispatches `livetv:back`
-      // {context} and the mode component listening for it
-      // implements its own back step — landing backs out of the
-      // landing, the browser returns to the landing, playback
-      // closes its overlay first and then returns, the Guide
-      // returns to the mode it was entered from. The gamepad does
-      // NOT also dispatch a synthetic Escape here: a mode's back
-      // step must run exactly once, and keyboard Escape keeps its
-      // own keydown path (the mode components' existing handlers).
-      // While a modal dialog is open the dialog still owns B, so
-      // Escape goes to it as before.
-      const liveContext = livetvContext();
-      if (liveContext && findOpenModal() === null) {
-        dispatchLivetvBack(window, liveContext);
-      } else {
-        dispatchKey("Escape");
-      }
-    }
-    if (justPressed(BTN_X) && findOpenModal() === null) {
-      markGamepadActive();
-      // W3: X is unmapped in the Guide — swallow it.
-      if (livetvGuideActive()) {
-        // No-op by design.
-      } else if (livetvPlaybackActive()) {
-        dispatchKey("x");
-      } else if (livetvLandingActive() || livetvBrowserActive()) {
-        // W5 (0.9.0): landing X = contextual, browser X =
-        // toggle-favourite — both as keys for the mode's own
-        // keydown handler (livetv-keys.ts keyboard table).
-        dispatchKey("x");
-      } else if (inPlayerContext()) togglePlayPause();
-      else openDetailsOfFocused();
-    }
-    if (justPressed(BTN_Y) && findOpenModal() === null) {
-      markGamepadActive();
-      // W3: in the Guide Y is guide actions (Guide key "y").
-      if (livetvGuideActive()) {
-        dispatchKey("y");
-      } else if (livetvPlaybackActive()) {
-        dispatchKey("y");
-      } else if (livetvLandingActive() || livetvBrowserActive()) {
-        // W5 (0.9.0): landing Y = open Guide, browser Y = open
-        // search — both as keys for the mode's own keydown handler.
-        dispatchKey("y");
-      } else if (inPlayerContext()) toggleFullscreen();
-      else goSearch();
-    }
-    if (justPressed(BTN_LB)) {
-      markGamepadActive();
-      // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
-      // W5: in the Browser LB steps to the previous category ("[").
-      if (livetvGuideActive()) dispatchKey("PageUp");
-      else if (livetvBrowserActive()) dispatchKey("[");
-      else seekBy(-10);
-    }
-    if (justPressed(BTN_RB)) {
-      markGamepadActive();
-      // W3: in the Guide RB shifts time later (Guide key "PageDown").
-      // W5: in the Browser RB steps to the next category ("]").
-      if (livetvGuideActive()) dispatchKey("PageDown");
-      else if (livetvBrowserActive()) dispatchKey("]");
-      else seekBy(10);
-    }
-    if (justPressed(BTN_LT)) {
-      markGamepadActive();
-      // W5 (0.9.0): triggers ARE plumbed (buttons 6/7, analog value
-      // > 0.5 counts as pressed). In the Browser LT steps to the
-      // previous page (PageUp); elsewhere it stays volume down.
-      if (livetvBrowserActive()) dispatchKey("PageUp");
-      else adjustVolume(-0.1);
-    }
-    if (justPressed(BTN_RT)) {
-      markGamepadActive();
-      // W5 (0.9.0): in the Browser RT steps to the next page
-      // (PageDown); elsewhere it stays volume up.
-      if (livetvBrowserActive()) dispatchKey("PageDown");
-      else adjustVolume(0.1);
-    }
-    if (
-      justPressed(BTN_MENU) &&
-      !menuPressedWithView &&
-      findOpenModal() === null
-    ) {
-      markGamepadActive();
-      // W3: in the Guide Menu is guide actions (Guide key "ContextMenu").
-      if (livetvGuideActive()) {
-        dispatchKey("ContextMenu");
-      } else if (livetvPlaybackActive()) {
-        // W2: in RedSilk Live TV playback Menu opens the playback
-        // options overlay instead of navigating to Settings (which
-        // would leave the stream).
-        window.dispatchEvent(
-          new CustomEvent("livetv:overlay", { detail: { overlay: "options" } }),
-        );
-      } else if (livetvLandingActive() || livetvBrowserActive()) {
-        // W5 (0.9.0): landing / browser Menu = open options, as
-        // the "m" key for the mode's own keydown handler.
-        dispatchKey("m");
-      } else {
-        openSettings();
-      }
+    // Every button runs the shared pipeline (same code the native
+    // XInput path calls) — see handleGamepadButtonPress.
+    for (const index of [
+      BTN_A,
+      BTN_B,
+      BTN_X,
+      BTN_Y,
+      BTN_LB,
+      BTN_RB,
+      BTN_LT,
+      BTN_RT,
+      BTN_MENU,
+    ]) {
+      if (justPressed(index)) handleGamepadButtonPress(index, now);
     }
   }
 
@@ -772,8 +990,8 @@ export function mountGamepad(): void {
   function stop(): void {
     running = false;
     cancelAnimationFrame(rafId);
-    held = null;
-    viewMenuHoldStart = null;
+    actionState.held = null;
+    actionState.viewMenuHoldStart = null;
   }
 
   document.addEventListener("visibilitychange", () => {
@@ -787,8 +1005,8 @@ export function mountGamepad(): void {
     // without depending on the connect event arriving. Only the
     // edge state is reset, so a held button cannot fire stale.
     prevSnapshot = [];
-    held = null;
-    viewMenuHoldStart = null;
+    actionState.held = null;
+    actionState.viewMenuHoldStart = null;
     activePadIndex = null;
   });
 

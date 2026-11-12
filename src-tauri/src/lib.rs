@@ -51,6 +51,9 @@ mod vod_audio_proxy;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod vod_proxy;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod xinput;
+
 mod warmup;
 
 #[cfg(not(target_os = "ios"))]
@@ -338,6 +341,7 @@ pub fn run() {
             warmup::warmup_cancel,
             warmup::warmup_ack,
             warmup::warmup_read_staged,
+            xinput::xinput_status,
         ]);
 
     #[cfg(target_os = "android")]
@@ -431,6 +435,14 @@ pub fn run() {
             }
             // Synchronous: runs before any IPC, so it can't race a warmup_start's staging_dir.
             warmup::sweep_stale_staging(app.handle());
+            // 0.11.4 W6 (native XInput): the poll thread starts here,
+            // at cold launch, with no wait for a connect event or a
+            // first button press — a pad already connected when the
+            // app starts is reported on the first poll. Without this
+            // the native path would have the same cold-launch hole the
+            // browser Gamepad API path had.
+            #[cfg(target_os = "windows")]
+            xinput::start_xinput_poll(app.handle());
             Ok(())
         })
         .build(context)

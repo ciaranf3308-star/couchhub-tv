@@ -856,6 +856,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   import { mountBackHandler } from "@/scripts/lib/back-handler"
   import { mountTvInputGuard } from "@/scripts/lib/tv-input-guard"
   import { mountGamepad } from "@/scripts/lib/gamepad"
+  import { mountNativeGamepad } from "@/scripts/lib/native-gamepad"
   import { mountReturnHome } from "@/scripts/lib/return-home"
   import { isTvDevice } from "@/scripts/lib/tv-detect"
   initI18n()
@@ -870,8 +871,10 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   }
   mountBackHandler()
   mountTvInputGuard()
-  // Nylah Studios: Xbox controller (Gamepad API) + return home to CouchHub.
+  // Nylah Studios: native XInput controller (primary) + Gamepad API
+  // fallback + return home to CouchHub.
   mountGamepad()
+  mountNativeGamepad()
   mountReturnHome()
 
   // Waits for idle rather than competing with first paint; short timeout plus the pagehide

@@ -68,6 +68,7 @@
     "allow-safe-fetch-commands",
     "allow-receiver-commands",
     "allow-ai-key-commands",
+    "allow-xinput-commands",
     "allow-followed-commands"
   ]
 }
