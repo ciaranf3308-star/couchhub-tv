@@ -1,55 +1,123 @@
-// Movies & Series 2.0 (0.11.8, W5) acceptance tests 21–30:
+// Movies & Series 2.0 (0.11.8) acceptance tests 21–30:
 // CATEGORIES / FILTERS. Pure state + derivation tests (node env).
-// Hermetic: seeded fixtures + contract stubs only.
+// Adapted at integration from the W5 stub contract to the REAL W1/W2
+// modules (see tests/movies-series-2.0-contract-map.md + the
+// integration adaptations recorded in docs/validation-0118.md).
+// Hermetic: seeded fixtures only.
+//
+// Key contract resolutions in this file:
+// - The index exposes idsByGenre / idsByProviderCategory /
+//   allEntryIdsByProviderCategory + providerCategoryInfo — never a
+//   `categories` list. Provider keys are `id:<rawId>` (D6) or
+//   `label:<normalised>`; labels come from the registry, verbatim.
+// - Uncategorised has DUAL semantics (D11): the CATEGORY is groups
+//   with no provider-category key on any member; the genre-filter
+//   value is "no genre evidence". This file pins the category.
+// - Pagination is 1-based in W2 (page 1, not 0); sort ids are
+//   `recommended` (not `default`) + `rating`/`added`/etc. Runtime
+//   sorts do not exist (D14) and their checks were dropped.
+// - The filter summary is a STRING ("Horror · 2010s · Under 2h"),
+//   with label resolvers supplied by the caller (as the mount does).
+// - W1 search scope is genre-only ({genreId}); category-scoped
+//   search lives in derive (intersect with the base set).
+// - Index caching is asserted by object identity, not build
+//   counters (the stub's counters were stub instrumentation;
+//   identity IS the contract; D1 counters cover builds elsewhere).
 
 import { describe, it, expect } from "vitest"
 import {
-  ALL_CATEGORIES_ID,
   CANONICAL_MOVIE_GENRES,
   UNCATEGORISED_ID,
+  genreLabelForId,
+  genresForEntry,
+  providerCategoryInfo,
+} from "@/scripts/lib/genres.ts"
+import {
+  getCatalogIndex,
+  invalidateCatalogIndex,
+  searchCatalogIndex,
+  type CatalogIndex,
+} from "@/scripts/lib/catalog-index.ts"
+import { normaliseRating } from "@/scripts/lib/rating-evidence.ts"
+import {
   activeFilterSummary,
   applyFilters,
-  catalogIndexBuildCount,
+  browseTotalPages,
   createBrowseState,
-  deriveBrowsePage,
-  genresForEntry,
-  getCatalogIndex,
-  isDefaultBrowseState,
-  normaliseRating,
+  hasActiveBrowseConstraints,
   resetAllFilters,
-  resetCatalogIndexCache,
-  runtimeMinutesOf,
-  searchCatalogIndex,
   selectCategory,
   setPage,
   setSearch,
   setSort,
+  type BrowseCategorySelection,
   type BrowseState,
-  type CatalogEntry,
-  type CatalogIndex,
-} from "./movies-series-2.0-stubs.ts"
+} from "@/scripts/lib/browse-state.ts"
+import {
+  deriveBrowseGroups,
+  type BrowseDeriveContext,
+  type BrowseGroup,
+} from "@/scripts/lib/browse-everything.ts"
 import {
   adversarialFixture,
   generateCatalogue,
   reviseCatalogue,
+  type CatalogEntry,
 } from "./fixtures-0118-catalogue.ts"
 
 let revisionCounter = 3000
 function freshIndex(kind: "vod" | "series", entries: CatalogEntry[]): CatalogIndex {
   revisionCounter += 1
-  return getCatalogIndex(kind, entries, revisionCounter)
+  return getCatalogIndex(kind, [...entries], `acceptance:${revisionCounter}`, {
+    playlistId: "acceptance-playlist",
+  })
+}
+
+function emptyCtx(): BrowseDeriveContext {
+  return {
+    collection: {
+      favouriteIds: new Set(),
+      watchLaterIds: new Set(),
+      inProgressIds: new Set(),
+      watchedIds: new Set(),
+      followedIds: new Set(),
+      newEpisodeIds: new Set(),
+    },
+    seasonCounts: new Map(),
+  }
 }
 
 const ADV = adversarialFixture()
 
-function matchedIds(index: CatalogIndex, state: BrowseState): number[] {
-  return deriveBrowsePage(index, state).matchedGroups.flatMap((g) =>
-    g.variants.map((v) => v.id)
-  )
+function derive(index: CatalogIndex, state: BrowseState): BrowseGroup[] {
+  return deriveBrowseGroups(index, state, emptyCtx()).groups
 }
 
-function flattenedEntries(index: CatalogIndex, state: BrowseState): CatalogEntry[] {
-  return deriveBrowsePage(index, state).matchedGroups.flatMap((g) => g.variants)
+/** Display-level primary ids. */
+function matchedIds(index: CatalogIndex, state: BrowseState): string[] {
+  return derive(index, state).map((g) => g.primaryId)
+}
+
+/** Entry-level ids (every variant of every matched group). */
+function flattenedIds(index: CatalogIndex, state: BrowseState): string[] {
+  return derive(index, state).flatMap((g) => g.group.variantIds)
+}
+
+function allSelection(): BrowseCategorySelection {
+  return { kind: "all", id: "all", label: "All Movies" }
+}
+
+function uncategorisedSelection(): BrowseCategorySelection {
+  return { kind: "uncategorised", id: UNCATEGORISED_ID, label: "Uncategorised" }
+}
+
+function providerSelection(index: CatalogIndex, rawLabel: string): BrowseCategorySelection {
+  for (const key of index.idsByProviderCategory.keys()) {
+    if (providerCategoryInfo(key).rawLabel === rawLabel) {
+      return { kind: "provider", id: key, label: rawLabel }
+    }
+  }
+  throw new Error(`no provider category with label ${JSON.stringify(rawLabel)}`)
 }
 
 describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 120000 }, () => {
@@ -57,110 +125,139 @@ describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 1200
     const catalogue = generateCatalogue({ seed: 0x1021, movieCount: 2000, seriesCount: 0 })
     const index = freshIndex("vod", catalogue.movies)
     // Every populated canonical genre: selectable, non-empty, and
-    // every matched entry genuinely carries the genre.
+    // every matched GROUP genuinely carries the genre (aggregate
+    // union — the same source idsByGenre is built from, so the
+    // drawer count and the Browse count agree by construction).
     for (const genre of CANONICAL_MOVIE_GENRES) {
-      const count = index.genreMembers.get(genre)?.length ?? 0
+      const count = index.idsByGenre.get(genre.id)?.length ?? 0
       if (count === 0) continue
-      const state = applyFilters(createBrowseState("vod"), { genre })
-      const derived = deriveBrowsePage(index, state)
-      expect(derived.totalEntries).toBe(count)
+      const state = applyFilters(createBrowseState("movie"), { genre: genre.id })
+      const derived = deriveBrowseGroups(index, state, emptyCtx())
+      expect(derived.totalGroups).toBe(count)
       expect(derived.totalGroups).toBeGreaterThan(0)
-      for (const entry of flattenedEntries(index, state)) {
-        expect(genresForEntry(entry, index)).toContain(genre)
+      for (const group of derived.groups) {
+        expect(group.aggregate.genreIds).toContain(genre.id)
       }
     }
-    // Every provider category: selectable, with exact member counts.
+    // Every provider category: selectable, with exact member counts
+    // (entry-level: every variant of every matched group).
     let categoryTotal = 0
-    for (const category of index.categories) {
-      const state = selectCategory(createBrowseState("vod"), category.id)
-      const derived = deriveBrowsePage(index, state)
-      expect(derived.totalEntries).toBe(category.count)
-      categoryTotal += category.count
+    for (const [key, members] of index.allEntryIdsByProviderCategory) {
+      const label = providerCategoryInfo(key).rawLabel || key
+      const state = selectCategory(createBrowseState("movie"), {
+        kind: "provider",
+        id: key,
+        label,
+      })
+      const derived = deriveBrowseGroups(index, state, emptyCtx())
+      expect(derived.totalEntries).toBe(members.length)
+      categoryTotal += members.length
     }
-    expect(categoryTotal).toBe(index.entries.length)
-    // Index caching: same revision → same object; new revision → rebuild.
-    resetCatalogIndexCache()
-    const before = catalogIndexBuildCount()
-    const first = getCatalogIndex("vod", catalogue.movies, 4242)
-    const second = getCatalogIndex("vod", catalogue.movies, 4242)
+    // Plus the entries with no provider category at all: together
+    // they partition the whole catalogue (no entry lost, none double-counted).
+    const uncategorisedEntries = catalogue.movies.filter(
+      (e) => (index.meta.get(String(e.id))?.providerCategoryKey ?? "") === ""
+    ).length
+    expect(categoryTotal + uncategorisedEntries).toBe(index.totalEntries)
+    // Index caching: same array + revision → same object; a new
+    // revision → a rebuild. (Identity IS the contract.)
+    invalidateCatalogIndex()
+    const first = getCatalogIndex("vod", catalogue.movies, "cache:4242", {
+      playlistId: "acceptance-playlist",
+    })
+    const second = getCatalogIndex("vod", catalogue.movies, "cache:4242", {
+      playlistId: "acceptance-playlist",
+    })
     expect(second).toBe(first)
-    expect(catalogIndexBuildCount()).toBe(before + 1)
-    const rebuilt = getCatalogIndex("vod", catalogue.movies, 4243)
+    const rebuilt = getCatalogIndex("vod", catalogue.movies, "cache:4243", {
+      playlistId: "acceptance-playlist",
+    })
     expect(rebuilt).not.toBe(first)
-    expect(catalogIndexBuildCount()).toBe(before + 2)
     // A provider revision that renames a category: the new name is
     // reachable, the old name is gone (no stale phantom category).
     const revised = reviseCatalogue(catalogue)
-    const revisedIndex = getCatalogIndex("vod", revised.movies, 4244)
-    expect(
-      revisedIndex.categories.some((c) => c.rawName === "Movies | Action & Adventure")
-    ).toBe(true)
-    expect(
-      revisedIndex.categories.some((c) => c.rawName === "Movies | Action")
-    ).toBe(false)
+    const revisedIndex = getCatalogIndex("vod", revised.movies, "cache:4244", {
+      playlistId: "acceptance-playlist",
+    })
+    const revisedLabels = [...revisedIndex.idsByProviderCategory.keys()].map(
+      (key) => providerCategoryInfo(key).rawLabel
+    )
+    expect(revisedLabels).toContain("Movies | Action & Adventure")
+    expect(revisedLabels).not.toContain("Movies | Action")
   })
 
   it("22. Provider categories are accessible", () => {
     const index = freshIndex("vod", ADV.movies)
     // Duplicate display labels stay DISTINCT categories.
-    const actionCats = index.categories.filter((c) =>
-      c.rawName.toLowerCase().replace(/[^a-z]/g, "") === "moviesaction"
+    const actionKeys = [...index.idsByProviderCategory.keys()].filter(
+      (key) =>
+        providerCategoryInfo(key).rawLabel.toLowerCase().replace(/[^a-z]/g, "") ===
+        "moviesaction"
     )
-    expect(actionCats.length).toBeGreaterThanOrEqual(2)
-    const ids = new Set(actionCats.map((c) => c.id))
-    expect(ids.size).toBe(actionCats.length)
+    expect(actionKeys.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(actionKeys).size).toBe(actionKeys.length)
     // Each duplicate-label category has its own members; selecting one
     // never leaks the other's titles.
-    const seen = new Map<string, number[]>()
-    for (const category of actionCats) {
-      const idsForCat = matchedIds(index, selectCategory(createBrowseState("vod"), category.id))
-      expect(idsForCat.length).toBe(category.count)
-      seen.set(category.id, idsForCat)
+    const seen = new Map<string, string[]>()
+    for (const key of actionKeys) {
+      const label = providerCategoryInfo(key).rawLabel
+      const idsForCat = flattenedIds(
+        index,
+        selectCategory(createBrowseState("movie"), { kind: "provider", id: key, label })
+      )
+      expect(idsForCat.length).toBe(
+        index.allEntryIdsByProviderCategory.get(key)?.length
+      )
+      seen.set(key, idsForCat)
     }
     const allMembers = [...seen.values()].flat()
     expect(new Set(allMembers).size).toBe(allMembers.length)
     // The "Movies|Action" member (7081) is reachable only via its own category.
-    const pipeCat = index.categories.find((c) => c.rawName === "Movies|Action")
-    expect(pipeCat).toBeDefined()
-    expect(matchedIds(index, selectCategory(createBrowseState("vod"), pipeCat?.id as string))).toContain(7081)
-    const spacedCat = index.categories.find((c) => c.rawName === "Movies | Action")
+    const pipe = providerSelection(index, "Movies|Action")
     expect(
-      matchedIds(index, selectCategory(createBrowseState("vod"), spacedCat?.id as string))
-    ).not.toContain(7081)
+      flattenedIds(index, selectCategory(createBrowseState("movie"), pipe))
+    ).toContain("7081")
+    const spaced = providerSelection(index, "Movies | Action")
+    expect(
+      flattenedIds(index, selectCategory(createBrowseState("movie"), spaced))
+    ).not.toContain("7081")
     // "All" reaches everything, including uncategorised titles.
-    const all = matchedIds(index, createBrowseState("vod"))
+    const all = flattenedIds(index, createBrowseState("movie"))
     expect(all.length).toBe(ADV.movies.length)
-    expect(all).toContain(7080)
+    expect(all).toContain("7080")
   })
 
   it("23. Uncategorised titles are reachable", () => {
     const index = freshIndex("vod", ADV.movies)
-    const unc = index.categories.find((c) => c.id === UNCATEGORISED_ID)
-    expect(unc).toBeDefined()
-    expect(unc?.label).toBe("Uncategorised")
-    const state = selectCategory(createBrowseState("vod"), UNCATEGORISED_ID)
-    const derived = deriveBrowsePage(index, state)
+    const state = selectCategory(createBrowseState("movie"), uncategorisedSelection())
+    const derived = deriveBrowseGroups(index, state, emptyCtx())
     expect(derived.totalEntries).toBeGreaterThan(0)
-    for (const entry of flattenedEntries(index, state)) {
-      expect(entry.categoryName).toBe("")
+    for (const group of derived.groups) {
+      for (const row of group.rows) {
+        expect(row.category ?? "").toBe("")
+      }
     }
-    expect(matchedIds(index, state)).toContain(7080)
-    // Search scoped to Uncategorised works too.
-    expect(
-      searchCatalogIndex(index, "nowhere", { categoryId: UNCATEGORISED_ID }).map((e) => e.id)
-    ).toEqual([7080])
-    // With no uncategorised entries, no phantom category appears.
+    expect(flattenedIds(index, state)).toContain("7080")
+    // Search scoped to Uncategorised works too (derive-level: W1
+    // search scope is genre-only, category scoping is derive's job).
+    const scoped = setSearch(state, "nowhere", "category")
+    expect(matchedIds(index, scoped)).toEqual(["7080"])
+    // With no uncategorised entries, the category matches nothing —
+    // no phantom populated category.
     const categorisedOnly = ADV.movies.filter((e) => e.categoryName !== "")
     const clean = freshIndex("vod", categorisedOnly)
-    expect(clean.categories.some((c) => c.id === UNCATEGORISED_ID)).toBe(false)
     expect(
-      deriveBrowsePage(clean, selectCategory(createBrowseState("vod"), UNCATEGORISED_ID)).totalEntries
+      deriveBrowseGroups(
+        clean,
+        selectCategory(createBrowseState("movie"), uncategorisedSelection()),
+        emptyCtx()
+      ).totalEntries
     ).toBe(0)
   })
 
   it("24. Genre replace semantics", () => {
     const index = freshIndex("vod", ADV.movies)
-    const base = createBrowseState("vod")
+    const base = createBrowseState("movie")
     // History independence: A→B→C equals a fresh state with C.
     const viaHistory = applyFilters(
       applyFilters(applyFilters(base, { genre: "comedy" }), { genre: "horror" }),
@@ -168,16 +265,19 @@ describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 1200
     )
     const direct = applyFilters(base, { genre: "drama" })
     expect(viaHistory).toEqual(direct)
-    expect(viaHistory.genre).toBe("drama")
+    expect(viaHistory.filters.genre).toBe("drama")
     // Exactly one genre constraint is ever visible.
-    expect(activeFilterSummary(viaHistory).filter((s) => s.key === "genre")).toHaveLength(1)
+    const summary = activeFilterSummary(viaHistory, {
+      genreLabel: (id) => genreLabelForId(id, "vod"),
+    })
+    expect(summary).toBe("Drama")
     // Derivation equality: history leaves no residue.
     expect(matchedIds(index, viaHistory)).toEqual(matchedIds(index, direct))
     // Clearing with "" removes the constraint entirely.
     const cleared = applyFilters(viaHistory, { genre: "" })
-    expect(cleared.genre).toBe("")
-    expect(activeFilterSummary(cleared).some((s) => s.key === "genre")).toBe(false)
-    expect(matchedIds(index, cleared).length).toBe(ADV.movies.length)
+    expect(cleared.filters.genre).toBe("")
+    expect(activeFilterSummary(cleared)).toBe("")
+    expect(flattenedIds(index, cleared).length).toBe(ADV.movies.length)
     // Re-applying the same genre is idempotent.
     const twice = applyFilters(applyFilters(base, { genre: "horror" }), { genre: "horror" })
     expect(twice).toEqual(applyFilters(base, { genre: "horror" }))
@@ -185,198 +285,200 @@ describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 1200
 
   it("25. Multi-filter intersections are visible and intentional", () => {
     const index = freshIndex("vod", ADV.movies)
-    const comedyCat = index.categories.find((c) => c.rawName === "Movies | Comedy")
-    expect(comedyCat).toBeDefined()
-    let state = selectCategory(createBrowseState("vod"), comedyCat?.id as string)
+    const comedyCat = providerSelection(index, "Movies | Comedy")
+    let state = selectCategory(createBrowseState("movie"), comedyCat)
     state = applyFilters(state, {
       genre: "comedy",
       minRating: 7,
-      maxRuntime: 120,
-      decade: "2020s",
+      runtime: "under-120",
+      year: "2020s",
     })
-    const summary = activeFilterSummary(state)
-    expect(summary.map((s) => s.key).sort()).toEqual([
-      "category",
-      "decade",
-      "genre",
-      "maxRuntime",
-      "minRating",
-    ])
-    const entries = flattenedEntries(index, state)
-    expect(entries.length).toBeGreaterThan(0)
-    for (const entry of entries) {
-      expect(entry.categoryName).toBe("Movies | Comedy")
-      expect(genresForEntry(entry, index)).toContain("comedy")
-      expect(normaliseRating(entry).value as number).toBeGreaterThanOrEqual(7)
-      expect(runtimeMinutesOf(entry) as number).toBeLessThanOrEqual(120)
-      expect(entry.yearNum as number).toBeGreaterThanOrEqual(2020)
+    // EVERY constraint is visible in the one summary string.
+    const summary = activeFilterSummary(state, {
+      genreLabel: (id) => genreLabelForId(id, "vod"),
+    })
+    expect(summary).toContain("Movies | Comedy")
+    expect(summary).toContain("Comedy")
+    expect(summary).toContain("7+ rated")
+    expect(summary).toContain("Under 2 hours")
+    expect(summary).toContain("2020s")
+    const groups = derive(index, state)
+    expect(groups.length).toBeGreaterThan(0)
+    for (const group of groups) {
+      expect(group.row.category).toBe("Movies | Comedy")
+      expect(group.aggregate.genreIds).toContain("comedy")
+      expect(group.aggregate.rating?.score10 as number).toBeGreaterThanOrEqual(7)
+      expect(group.aggregate.runtimeMinutes as number).toBeLessThan(120)
+      expect(group.aggregate.year as number).toBeGreaterThanOrEqual(2020)
+      expect(group.aggregate.year as number).toBeLessThanOrEqual(2029)
     }
-    expect(matchedIds(index, state)).toContain(7040)
-    expect(matchedIds(index, state)).toContain(7090)
-    expect(matchedIds(index, state)).not.toContain(7042) // 121 min
+    expect(matchedIds(index, state)).toContain("7040")
+    expect(matchedIds(index, state)).toContain("7090")
+    expect(matchedIds(index, state)).not.toContain("7042") // 121 min
     // Removing ONE constraint widens exactly along that axis.
-    const withoutRuntime = applyFilters(state, { maxRuntime: 0 })
-    expect(matchedIds(index, withoutRuntime)).toContain(7042)
-    expect(activeFilterSummary(withoutRuntime).some((s) => s.key === "maxRuntime")).toBe(false)
-    expect(activeFilterSummary(withoutRuntime).some((s) => s.key === "minRating")).toBe(true)
+    const withoutRuntime = applyFilters(state, { runtime: "" })
+    expect(matchedIds(index, withoutRuntime)).toContain("7042")
+    expect(activeFilterSummary(withoutRuntime)).not.toContain("Under 2 hours")
+    expect(activeFilterSummary(withoutRuntime)).toContain("7+ rated")
   })
 
   it("26. Reset All removes hidden constraints", () => {
     const index = freshIndex("vod", ADV.movies)
-    let state = selectCategory(createBrowseState("vod"), UNCATEGORISED_ID)
+    let state = selectCategory(createBrowseState("movie"), uncategorisedSelection())
     state = applyFilters(state, {
       genre: "horror",
       minRating: 8,
-      maxRuntime: 90,
-      decade: "2010s",
-      hideWatched: true,
-      sort: "rating",
-      query: "zzz",
-      searchScope: "category",
+      runtime: "under-90",
+      year: "2010s",
+      watchStatus: "unwatched",
     })
-    state = setPage(state, 3, 1000)
-    expect(isDefaultBrowseState(state)).toBe(false)
+    state = setSort(state, "rating")
+    state = setSearch(state, "zzz", "category")
+    const totalPages = browseTotalPages(index.totalGroups, state.pageSize)
+    state = setPage(state, 3, totalPages)
+    expect(hasActiveBrowseConstraints(state)).toBe(true)
     expect(activeFilterSummary(state).length).toBeGreaterThan(0)
     const reset = resetAllFilters(state)
-    expect(isDefaultBrowseState(reset)).toBe(true)
-    expect(reset.page).toBe(0)
-    expect(activeFilterSummary(reset)).toEqual([])
-    expect(reset.categoryId).toBe(ALL_CATEGORIES_ID)
-    expect(reset.query).toBe("")
+    expect(hasActiveBrowseConstraints(reset)).toBe(false)
+    expect(reset.page).toBe(1)
+    expect(activeFilterSummary(reset)).toBe("")
+    expect(reset.category).toEqual(allSelection())
+    expect(reset.search).toBe("")
     expect(reset.searchScope).toBe("all")
-    expect(reset.sort).toBe("default")
-    const derived = deriveBrowsePage(index, reset)
+    expect(reset.sort).toBe("recommended")
+    const derived = deriveBrowseGroups(index, reset, emptyCtx())
     expect(derived.totalEntries).toBe(ADV.movies.length)
-    expect(derived.page).toBe(0)
+    expect(derived.totalGroups).toBe(index.totalGroups)
     // The pre-reset state object is untouched (pure transition).
-    expect(state.genre).toBe("horror")
-    expect(state.query).toBe("zzz")
+    expect(state.filters.genre).toBe("horror")
+    expect(state.search).toBe("zzz")
   })
 
   it("27. Category change resets pagination", () => {
     const index = freshIndex("vod", ADV.movies)
-    const total = deriveBrowsePage(index, createBrowseState("vod")).totalGroups
-    const onPage3 = setPage(createBrowseState("vod", { pageSize: 5 }), 3, total)
+    const total = deriveBrowseGroups(index, createBrowseState("movie"), emptyCtx()).totalGroups
+    const onPage3 = setPage(
+      createBrowseState("movie", { pageSize: 5 }),
+      3,
+      browseTotalPages(total, 5)
+    )
     expect(onPage3.page).toBe(3)
-    const switched = selectCategory(onPage3, UNCATEGORISED_ID)
-    expect(switched.page).toBe(0)
+    const switched = selectCategory(onPage3, uncategorisedSelection())
+    expect(switched.page).toBe(1)
     // Filter/search/sort changes reset pagination too.
-    expect(applyFilters(onPage3, { genre: "drama" }).page).toBe(0)
-    expect(setSearch(onPage3, "harbour").page).toBe(0)
-    expect(setSort(onPage3, "rating").page).toBe(0)
+    expect(applyFilters(onPage3, { genre: "drama" }).page).toBe(1)
+    expect(setSearch(onPage3, "harbour").page).toBe(1)
+    expect(setSort(onPage3, "rating").page).toBe(1)
     // But a category change preserves the OTHER visible filters.
     const filtered = applyFilters(onPage3, { genre: "comedy", minRating: 7 })
-    const reswitched = selectCategory(filtered, UNCATEGORISED_ID)
-    expect(reswitched.genre).toBe("comedy")
-    expect(reswitched.minRating).toBe(7)
-    expect(reswitched.page).toBe(0)
+    const reswitched = selectCategory(filtered, uncategorisedSelection())
+    expect(reswitched.filters.genre).toBe("comedy")
+    expect(reswitched.filters.minRating).toBe(7)
+    expect(reswitched.page).toBe(1)
   })
 
   it("28. Search All vs Search Current Category is explicit", () => {
     const index = freshIndex("vod", ADV.movies)
-    const comedyCat = index.categories.find((c) => c.rawName === "Movies | Comedy")
-    const base = selectCategory(createBrowseState("vod"), comedyCat?.id as string)
+    const comedyCat = providerSelection(index, "Movies | Comedy")
+    const base = selectCategory(createBrowseState("movie"), comedyCat)
     // "harbour" titles live in Action, not Comedy.
     const scoped = setSearch(base, "harbour", "category")
-    expect(deriveBrowsePage(index, scoped).totalEntries).toBe(0)
+    expect(deriveBrowseGroups(index, scoped, emptyCtx()).totalEntries).toBe(0)
     const all = setSearch(base, "harbour", "all")
     const allIds = matchedIds(index, all)
     expect(allIds.length).toBeGreaterThan(0)
-    expect(allIds).toContain(7010)
+    expect(allIds).toContain("7010")
     // The summary names the scope: the user can SEE which search ran.
-    expect(activeFilterSummary(scoped).find((s) => s.key === "query")?.label).toBe(
-      'Search in current category: "harbour"'
-    )
-    expect(activeFilterSummary(all).find((s) => s.key === "query")?.label).toBe(
-      'Search all: "harbour"'
-    )
-    // The index-level search honours scope identically.
-    expect(
-      searchCatalogIndex(index, "harbour", { categoryId: comedyCat?.id as string })
-    ).toEqual([])
-    expect(searchCatalogIndex(index, "harbour", "all").length).toBeGreaterThan(0)
+    expect(activeFilterSummary(scoped)).toContain("“harbour” in this category")
+    expect(activeFilterSummary(all)).toContain("“harbour”")
+    expect(activeFilterSummary(all)).not.toContain("in this category")
+    // The index-level search honours GENRE scope identically (W1
+    // scope is genre-only; category scoping is derive's job, above).
+    expect(searchCatalogIndex(index, "harbour", { genreId: "comedy" })).toEqual([])
+    expect(searchCatalogIndex(index, "harbour", null).length).toBeGreaterThan(0)
     // A query inside the current category still finds its own titles.
     const own = setSearch(base, "comedy vehicle", "category")
-    expect(matchedIds(index, own)).toContain(7090)
+    expect(matchedIds(index, own)).toContain("7090")
   })
 
   it("29. Sort order is correct", () => {
     const catalogue = generateCatalogue({ seed: 0x1029, movieCount: 1500, seriesCount: 0 })
     const index = freshIndex("vod", catalogue.movies)
-    const base = createBrowseState("vod")
+    const base = createBrowseState("movie")
     // Browse pages over GROUPS, so sort order is asserted over group
-    // order: the first variant of each group is the group's
-    // highest-ranked member in the sort, and the first-variant
-    // sequence must satisfy the sort invariant. (Flattened variants
-    // need not: variants of one title legitimately carry different
-    // added timestamps, and grouping pulls them together.)
-    const check = (sort: BrowseState["sort"], invariant: (firsts: CatalogEntry[]) => void) => {
-      const derived = deriveBrowsePage(index, setSort(base, sort))
+    // order via the group aggregates (the sort keys themselves).
+    const check = (
+      sort: BrowseState["sort"],
+      invariant: (groups: BrowseGroup[]) => void
+    ) => {
+      const derived = deriveBrowseGroups(index, setSort(base, sort), emptyCtx())
       expect(derived.totalEntries).toBe(catalogue.movies.length)
-      const firsts = derived.matchedGroups.map((g) => g.variants[0])
-      invariant(firsts)
+      invariant(derived.groups)
       // Deterministic: deriving twice yields the identical group order.
-      const again = deriveBrowsePage(index, setSort(base, sort))
-      expect(again.matchedGroups.map((g) => g.key)).toEqual(
-        derived.matchedGroups.map((g) => g.key)
-      )
+      const again = deriveBrowseGroups(index, setSort(base, sort), emptyCtx())
+      expect(again.groups.map((g) => g.id)).toEqual(derived.groups.map((g) => g.id))
     }
-    check("added", (entries) => {
-      const known = entries.filter((e) => e.added > 0)
-      const added = known.map((e) => e.added)
-      expect([...added].sort((a, b) => b - a)).toEqual(added)
-      const firstUnknown = entries.findIndex((e) => e.added <= 0)
+    check("added", (groups) => {
+      const added = groups.map((g) => g.aggregate.addedMs)
+      const known = added.filter((v): v is number => v != null)
+      expect([...known].sort((a, b) => b - a)).toEqual(known)
+      const firstUnknown = added.findIndex((v) => v == null)
       if (firstUnknown >= 0) {
-        expect(entries.slice(firstUnknown).every((e) => e.added <= 0)).toBe(true)
+        expect(added.slice(firstUnknown).every((v) => v == null)).toBe(true)
       }
     })
-    check("rating", (entries) => {
-      const rated = entries.filter((e) => normaliseRating(e).hasEvidence)
-      const values = rated.map((e) => normaliseRating(e).value as number)
-      expect([...values].sort((a, b) => b - a)).toEqual(values)
-      const firstUnrated = entries.findIndex((e) => !normaliseRating(e).hasEvidence)
+    check("rating", (groups) => {
+      // Documented rating order: unrated last; Bayesian desc; votes
+      // desc; raw score desc. With no vote counts in fixtures, the
+      // Bayesian ties collapse and raw score decides — assert the
+      // (bayesian, score10) lexicographic order + nulls last.
+      const rated = groups.filter((g) => g.aggregate.rating != null)
+      const keys = rated.map(
+        (g) => [g.aggregate.bayesian, g.aggregate.rating?.score10 ?? 0] as const
+      )
+      const sorted = [...keys].sort(
+        (a, b) => b[0] - a[0] || b[1] - a[1]
+      )
+      expect(keys).toEqual(sorted)
+      const firstUnrated = groups.findIndex((g) => g.aggregate.rating == null)
       if (firstUnrated >= 0) {
-        expect(entries.slice(firstUnrated).every((e) => !normaliseRating(e).hasEvidence)).toBe(true)
+        expect(groups.slice(firstUnrated).every((g) => g.aggregate.rating == null)).toBe(true)
       }
     })
-    check("year-desc", (entries) => {
-      const known = entries.filter((e) => e.yearNum != null)
-      const years = known.map((e) => e.yearNum as number)
-      expect([...years].sort((a, b) => b - a)).toEqual(years)
-      const firstUnknown = entries.findIndex((e) => e.yearNum == null)
+    check("year-desc", (groups) => {
+      const years = groups.map((g) => g.aggregate.year)
+      const known = years.filter((y): y is number => y != null)
+      expect([...known].sort((a, b) => b - a)).toEqual(known)
+      const firstUnknown = years.findIndex((y) => y == null)
       if (firstUnknown >= 0) {
-        expect(entries.slice(firstUnknown).every((e) => e.yearNum == null)).toBe(true)
+        expect(years.slice(firstUnknown).every((y) => y == null)).toBe(true)
       }
     })
-    check("year-asc", (entries) => {
-      const known = entries.filter((e) => e.yearNum != null)
-      const years = known.map((e) => e.yearNum as number)
-      expect([...years].sort((a, b) => a - b)).toEqual(years)
+    check("year-asc", (groups) => {
+      const years = groups.map((g) => g.aggregate.year)
+      const known = years.filter((y): y is number => y != null)
+      expect([...known].sort((a, b) => a - b)).toEqual(known)
     })
-    check("az", (entries) => {
-      const titles = entries.map((e) => e.displayTitle)
-      const sorted = [...titles].sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }))
+    check("az", (groups) => {
+      // D13: code-point order on normalised titles (not localeCompare).
+      const titles = groups.map((g) => g.aggregate.normalisedTitle)
+      const sorted = [...titles].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
       expect(titles).toEqual(sorted)
     })
-    check("runtime-asc", (entries) => {
-      const known = entries.filter((e) => runtimeMinutesOf(e) != null)
-      const runtimes = known.map((e) => runtimeMinutesOf(e) as number)
-      expect([...runtimes].sort((a, b) => a - b)).toEqual(runtimes)
-      const firstUnknown = entries.findIndex((e) => runtimeMinutesOf(e) == null)
-      if (firstUnknown >= 0) {
-        expect(entries.slice(firstUnknown).every((e) => runtimeMinutesOf(e) == null)).toBe(true)
-      }
+    check("za", (groups) => {
+      const titles = groups.map((g) => g.aggregate.normalisedTitle)
+      const sorted = [...titles].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+      expect(titles).toEqual(sorted)
     })
-    check("runtime-desc", (entries) => {
-      const known = entries.filter((e) => runtimeMinutesOf(e) != null)
-      const runtimes = known.map((e) => runtimeMinutesOf(e) as number)
-      expect([...runtimes].sort((a, b) => b - a)).toEqual(runtimes)
-    })
-    check("default", (entries) => {
-      // Catalogue order preserved: first variants appear in catalogue
-      // position order.
-      const positions = entries.map((e) =>
-        catalogue.movies.findIndex((m) => m.id === e.id)
+    // Runtime sorts do not exist in W2's BrowseSortId and are not in
+    // brief §11 — the stub's runtime-asc/runtime-desc checks were
+    // dropped deliberately (D14). W1's runtime indexes remain.
+    check("recommended", (groups) => {
+      // Catalogue order preserved: groups appear in first-appearance
+      // order of their members in the input array.
+      const position = new Map(catalogue.movies.map((m, i) => [String(m.id), i]))
+      const positions = groups.map((g) =>
+        Math.min(...g.group.variantIds.map((id) => position.get(id) ?? Infinity))
       )
       const sorted = [...positions].sort((a, b) => a - b)
       expect(positions).toEqual(sorted)
@@ -384,7 +486,10 @@ describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 1200
   })
 
   it("30. Missing metadata produces no fictional filter results", () => {
-    // A genre-less entry: no TMDb ids, no genre string, no category.
+    // A genre-less entry: no TMDb ids, no genre string, no category,
+    // no year, no rating, no runtime, no added date. EVERY W1-visible
+    // field is cleared — the template (7080) carries genre + rating
+    // evidence that must not leak through.
     const template = ADV.movies.find((e) => e.id === 7080) as CatalogEntry
     const genreLess: CatalogEntry = {
       ...template,
@@ -392,44 +497,59 @@ describe("0.11.8 categories/filters acceptance (tests 21–30)", { timeout: 1200
       name: "Genreless Drifter",
       displayTitle: "Genreless Drifter",
       baseTitle: "genreless drifter",
+      category: "",
+      category_id: null,
       categoryId: null,
       categoryName: "",
       tmdbGenreIds: [],
+      genre: undefined,
       genreString: "",
       year: "",
       yearNum: null,
+      rating: "",
       ratingRaw: "",
+      rating_5based: null,
+      duration: "",
       durationRaw: "",
       added: 0,
     }
-    expect(genresForEntry(genreLess)).toEqual([])
+    expect(genresForEntry(genreLess, "vod")).toEqual([])
+    expect(normaliseRating(genreLess)).toBeNull()
     const index = freshIndex("vod", [...ADV.movies, genreLess])
     // No genre filter may claim it.
     for (const genre of CANONICAL_MOVIE_GENRES) {
-      const state = applyFilters(createBrowseState("vod"), { genre })
-      expect(matchedIds(index, state)).not.toContain(7999)
+      const state = applyFilters(createBrowseState("movie"), { genre: genre.id })
+      expect(matchedIds(index, state)).not.toContain("7999")
     }
     // No rating/runtime/decade filter may claim it.
     expect(
-      matchedIds(index, applyFilters(createBrowseState("vod"), { minRating: 6 }))
-    ).not.toContain(7999)
+      matchedIds(index, applyFilters(createBrowseState("movie"), { minRating: 6 }))
+    ).not.toContain("7999")
     expect(
-      matchedIds(index, applyFilters(createBrowseState("vod"), { maxRuntime: 180 }))
-    ).not.toContain(7999)
+      matchedIds(index, applyFilters(createBrowseState("movie"), { runtime: "under-180" }))
+    ).not.toContain("7999")
     expect(
-      matchedIds(index, applyFilters(createBrowseState("vod"), { decade: "2020s" }))
-    ).not.toContain(7999)
+      matchedIds(index, applyFilters(createBrowseState("movie"), { year: "2020s" }))
+    ).not.toContain("7999")
     // But it is NOT hidden from browsing: All + Uncategorised reach it.
-    expect(matchedIds(index, createBrowseState("vod"))).toContain(7999)
+    expect(matchedIds(index, createBrowseState("movie"))).toContain("7999")
     expect(
-      matchedIds(index, selectCategory(createBrowseState("vod"), UNCATEGORISED_ID))
-    ).toContain(7999)
+      matchedIds(index, selectCategory(createBrowseState("movie"), uncategorisedSelection()))
+    ).toContain("7999")
     // An unknown category id matches nothing — never a silent fallback to All.
     expect(
-      deriveBrowsePage(index, selectCategory(createBrowseState("vod"), "cat:no-such-category")).totalEntries
+      deriveBrowseGroups(
+        index,
+        selectCategory(createBrowseState("movie"), {
+          kind: "provider",
+          id: "cat:no-such-category",
+          label: "No such category",
+        }),
+        emptyCtx()
+      ).totalEntries
     ).toBe(0)
     // An empty query restricts nothing.
-    expect(matchedIds(index, setSearch(createBrowseState("vod"), "")).length).toBe(
+    expect(flattenedIds(index, setSearch(createBrowseState("movie"), "")).length).toBe(
       ADV.movies.length + 1
     )
   })
