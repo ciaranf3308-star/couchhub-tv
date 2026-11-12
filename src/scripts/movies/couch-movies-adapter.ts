@@ -20,6 +20,11 @@ import {
 } from "@/scripts/lib/preferences.js";
 import type { CouchBrowseAdapter } from "@/scripts/movies/couch-browse.ts";
 import { preferEvidence } from "@/scripts/lib/recommendations.ts";
+import { catalogRowToCandidate } from "@/scripts/lib/discover.ts";
+import {
+  isRelevanceQuery,
+  relevanceSearchRows,
+} from "@/scripts/lib/browse-recommendations.ts";
 import {
   mapMovieRow,
   filterMovies,
@@ -131,6 +136,37 @@ export const moviesAdapter: CouchBrowseAdapter<MovieRow> = {
         : null;
     // "recent" is a sort, not a filter: the grid shows the whole
     // catalogue newest-first.
+    // 0.11.5 (W4): natural-language questions ("something intense
+    // for tonight") run through the shared relevance engine instead
+    // of the substring matcher — no title contains "something", so
+    // the substring matcher answers those queries with nothing.
+    // The remaining filters (genre / year / rating / list) still
+    // apply on top, with an empty query so the plain matcher does
+    // not re-filter the text; the relevance order is preserved by
+    // applySort below. Plain title/genre queries are untouched.
+    // No taste is available in this synchronous adapter, so the
+    // search ranks cold-start (mood + text + recency/novelty) and
+    // never claims personalisation. Local only — no AI request.
+    if (isRelevanceQuery(filter.query)) {
+      const matched = relevanceSearchRows(
+        rows,
+        filter.query,
+        "movie",
+        (row) => catalogRowToCandidate("movie", row),
+        undefined,
+        playlistId,
+      );
+      return filterMovies(matched, {
+        query: "",
+        genre: filter.genre,
+        year: filter.year,
+        minRating: filter.minRating,
+        maxRuntime: filter.maxRuntime,
+        favoriteIds,
+        watchlistIds,
+        inProgressIds,
+      });
+    }
     return filterMovies(rows, {
       query: filter.query,
       genre: filter.genre,
@@ -143,6 +179,9 @@ export const moviesAdapter: CouchBrowseAdapter<MovieRow> = {
     });
   },
   applySort: (rows, filter) => {
+    // A relevance query's order IS the answer: re-sorting it
+    // (e.g. A–Z "default") would throw the ranking away.
+    if (isRelevanceQuery(filter.query)) return rows;
     const mode =
       filter.list === "recent"
         ? "added"
