@@ -242,6 +242,14 @@ describe("gamepad loop with a mocked navigator.getGamepads()", () => {
   });
 
   it("B dispatches Escape with a real keyCode (not 0)", () => {
+    // 0.11.10 (Controller 2.0): B resolves through the Back
+    // coordinator; with nothing registered, the migration bridge
+    // dispatches the synthetic Escape — but only off Home root
+    // (at "/" B is a no-op). This fixture renders the Home DOM at
+    // jsdom's default "/" URL, so the bridge only fires once the
+    // path is a non-Home route. The keyCode stamp itself is the
+    // behaviour under test (break #3 in the header).
+    window.history.replaceState(null, "", "/movies");
     const { pad, press, releaseAll } = makePad(1);
     pads = [null, pad, null, null];
     seenKeys.length = 0;
@@ -252,6 +260,18 @@ describe("gamepad loop with a mocked navigator.getGamepads()", () => {
     expect(
       seenKeys.some((k) => k.key === "Escape" && k.keyCode === 27),
     ).toBe(true);
+  });
+
+  it("B at Home root dispatches nothing (0.11.10: root Home is a no-op)", () => {
+    window.history.replaceState(null, "", "/");
+    const { pad, press, releaseAll } = makePad(1);
+    pads = [null, pad, null, null];
+    seenKeys.length = 0;
+    press(BTN_B);
+    runFrames(1);
+    releaseAll();
+    runFrames(1);
+    expect(seenKeys).toEqual([]);
   });
 
   it("pad disconnects and reconnects at index 0: navigation resumes", () => {

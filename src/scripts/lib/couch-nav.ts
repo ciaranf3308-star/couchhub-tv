@@ -3,6 +3,11 @@
 // The Couch UI lives at the PRIMARY routes. The legacy upstream /tv/*
 // routes are out of scope and are intentionally absent here.
 
+import {
+  BACK_PRIORITY,
+  registerBackLayer,
+} from "@/scripts/lib/back-handler.ts";
+
 export interface CouchNavItem {
   /** Stable id, also used as CouchLayout's `activeNav` value. */
   id: string;
@@ -94,4 +99,103 @@ export function goCouch(href: string): void {
   const current = normalizeCouchPath(window.location.pathname);
   if (current === normalizeCouchPath(href)) return;
   window.location.assign(href);
+}
+
+// ── Top-nav Exit button: two-press safety (§5) ──────────────────────
+//
+// A arms, A again confirms while armed, B while armed cancels the
+// armed state without leaving or exiting, and the arm lapses after
+// `armMs` — a stray press can never quit. The B-cancel runs through
+// the Back coordinator as a PAGE_STATE layer, so a modal or drawer
+// above the nav still owns B first (higher priorities win) and the
+// disarm consumes exactly one Back press. The layer is inert while
+// disarmed. Mounted once per button (dataset guard); returns an
+// unmount function (mainly for tests).
+
+const EXIT_ARMED_LABEL = "Exit?";
+const EXIT_IDLE_LABEL = "⏻ Exit";
+const EXIT_BUSY_LABEL = "Exiting…";
+
+export function mountCouchExitButton(
+  btn: HTMLButtonElement | null,
+  requestExit: () => Promise<unknown> | void,
+  armMs = 4000,
+): () => void {
+  if (!btn) return () => {};
+  if (btn.dataset.exitMounted) return () => {};
+  btn.dataset.exitMounted = "1";
+
+  let armed = false;
+  let armTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const disarm = (): void => {
+    if (!armed) return;
+    armed = false;
+    if (armTimer !== null) {
+      clearTimeout(armTimer);
+      armTimer = null;
+    }
+    btn.classList.remove("is-armed");
+    btn.textContent = EXIT_IDLE_LABEL;
+  };
+
+  const unregisterBackLayer = registerBackLayer({
+    id: "couch-exit-armed",
+    priority: BACK_PRIORITY.PAGE_STATE,
+    isActive: () => armed,
+    handle: () => {
+      disarm();
+      return true;
+    },
+  });
+
+  const onClick = (): void => {
+    if (btn.hasAttribute("disabled")) return;
+    if (!armed) {
+      armed = true;
+      btn.classList.add("is-armed");
+      btn.textContent = EXIT_ARMED_LABEL;
+      if (armTimer !== null) clearTimeout(armTimer);
+      armTimer = setTimeout(disarm, armMs);
+      return;
+    }
+    if (armTimer !== null) {
+      clearTimeout(armTimer);
+      armTimer = null;
+    }
+    armed = false;
+    btn.classList.remove("is-armed");
+    btn.setAttribute("disabled", "");
+    btn.textContent = EXIT_BUSY_LABEL;
+    // Synchronous request, like the pre-0.11.10 inline handler: the
+    // exit is asked for in the click itself, not deferred a tick.
+    // Only the re-enable waits on the promise.
+    let result: Promise<unknown> | void;
+    try {
+      result = requestExit();
+    } catch {
+      result = undefined;
+    }
+    Promise.resolve(result)
+      .catch(() => {
+        // Exit failed: the button still re-enables below.
+      })
+      .finally(() => {
+        // Web preview: quit is a no-op, re-enable the button.
+        btn.removeAttribute("disabled");
+        btn.textContent = EXIT_IDLE_LABEL;
+      });
+  };
+
+  btn.addEventListener("click", onClick);
+
+  return () => {
+    btn.removeEventListener("click", onClick);
+    unregisterBackLayer();
+    if (armTimer !== null) {
+      clearTimeout(armTimer);
+      armTimer = null;
+    }
+    delete btn.dataset.exitMounted;
+  };
 }
