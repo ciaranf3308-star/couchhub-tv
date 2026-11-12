@@ -845,6 +845,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   import { initI18n } from "@/scripts/lib/i18n.js"
   import { initConnectivity } from "@/scripts/lib/connectivity.js"
   import { initTrayHandler } from "@/scripts/lib/tray-handler"
+  import { mountExitShortcuts } from "@/scripts/lib/app-exit"
   import { initFollowedStartup } from "@/scripts/lib/followed-startup"
   import { initTvCastPill } from "@/scripts/lib/tv-cast-pill"
   import { initWhatsNew } from "@/scripts/lib/whats-new"
@@ -990,6 +991,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   initFocusGlide()
   initKeyboardHelp()
   initTrayHandler()
+  mountExitShortcuts() // 0.11.4 W3: Ctrl+Q genuinely quits from the app window.
   initFollowedStartup()
   initTvCastPill()
   initWhatsNew()

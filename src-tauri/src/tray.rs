@@ -6,11 +6,22 @@
 // window, which is the prerequisite for programme-start reminders,
 // global media keys, and other background-while-minimized features.
 //
-// Close-to-tray: clicking the window's X (or sending it `WM_CLOSE`,
-// or `Cmd+W`-equivalent) hides the window rather than exiting. Quit is
-// reached only via the tray's `Quit` item or its `Ctrl+Q` / `Cmd+Q`
-// accelerator. This is Skype-classic / Discord / Slack behaviour and
-// is the only sensible default once the tray is on the screen.
+// Close-to-tray (OPT-IN since 0.11.4 — the default is OFF): only when
+// the user explicitly opts in (Settings -> Close button behavior ->
+// "Minimize to tray", stored as xt_close_to_tray="1") does clicking
+// the window's X (or sending it `WM_CLOSE`, or `Cmd+W`-equivalent)
+// hide the window rather than exiting. By default X quits like any
+// other window. Quit is reached via the tray's `Quit` item, its
+// `Ctrl+Q` / `Cmd+Q` accelerator label (the chord itself is handled
+// by the frontend keydown handler in src/scripts/lib/app-exit.ts
+// whenever the app window is focused), or the in-app Exit button,
+// which all funnel through the `quit_app` command below.
+//
+// Hiding NEVER means "keeps playing invisibly": every hide path
+// emits `xt:tray:hidden-to-tray`, the frontend releases the Live TV
+// stream on it (src/scripts/lib/tray-handler.ts), and the tray
+// tooltip is updated to say the stream was stopped, so the tray
+// itself is the persistent every-hide indicator.
 //
 // Menu actions that route the webview emit a Tauri event
 // (`xt:tray:navigate` with a route string) so the frontend handler in
@@ -35,8 +46,21 @@ pub fn set_close_to_tray(enabled: bool, state: tauri::State<'_, CloseToTrayState
     state.0.store(enabled, Ordering::Relaxed);
 }
 
+/// Full process quit, invoked by the frontend after it has released
+/// the Live TV stream, paused VOD + flushed resume, and paused
+/// in-flight downloads (see src/scripts/lib/app-exit.ts). The tray
+/// menu's Quit item calls `app.exit(0)` directly — the process dying
+/// closes the provider connection either way.
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let close_to_tray_flag = Arc::new(AtomicBool::new(true));
+    // Close-to-tray defaults OFF (0.11.4): a fresh install quits on
+    // close. The frontend corrects this via `set_close_to_tray` on
+    // boot from the stored opt-in (xt_close_to_tray="1").
+    let close_to_tray_flag = Arc::new(AtomicBool::new(false));
     app.manage(CloseToTrayState(close_to_tray_flag.clone()));
 
     let show_hide = MenuItem::with_id(app, "show_hide", "Show / Hide window", true, None::<&str>)?;
@@ -124,6 +148,16 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     api.prevent_close();
                     let _ = window_for_hide.hide();
+                    // Persistent every-hide indicator: the tray tooltip
+                    // itself says the stream was stopped, so the signal
+                    // survives the hidden window (a toast in a hidden
+                    // webview would never be seen). The frontend also
+                    // releases the Live TV stream on this event.
+                    if let Some(tray) = window_for_hide.app_handle().tray_by_id("main") {
+                        let _ = tray.set_tooltip(
+                            "NylahBox Studios — running in tray, Live TV stopped",
+                        );
+                    }
                     let _ = window_for_hide.emit("xt:tray:hidden-to-tray", ());
                 }
             });
@@ -141,9 +175,18 @@ fn toggle_main_window(app: &AppHandle) {
     let minimized = window.is_minimized().unwrap_or(false);
     if visible && !minimized {
         let _ = window.hide();
+        // Same hide contract as X / CloseRequested: release the
+        // stream on the frontend and leave a persistent tray signal.
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_tooltip("NylahBox Studios — running in tray, Live TV stopped");
+        }
+        let _ = window.emit("xt:tray:hidden-to-tray", ());
     } else {
         let _ = window.unminimize();
         let _ = window.show();
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_tooltip("NylahBox Studios");
+        }
         // 0.11.1 W1 (white bar): a hide/show cycle must never leave
         // the window windowed — re-assert fullscreen on every show,
         // same as the launch path in lib.rs.
@@ -156,6 +199,9 @@ fn navigate(app: &AppHandle, route: &str) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_tooltip("NylahBox Studios");
+        }
         // 0.11.1 W1 (white bar): see toggle_main_window above.
         let _ = window.set_fullscreen(true);
         let _ = window.set_focus();

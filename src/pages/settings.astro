@@ -11,6 +11,7 @@
 // only provides the row and its placement.
 import SettingsShell from "@/components/settings/SettingsShell.astro"
 import { SETTINGS_SECTIONS } from "@/scripts/settings/settings-index.ts"
+import ExitAppCard from "@/components/ExitAppCard.svelte"
 ---
 
 <SettingsShell
@@ -40,17 +41,13 @@ import { SETTINGS_SECTIONS } from "@/scripts/settings/settings-index.ts"
       ))
     }
 
-    <!-- Exit row (W3 owns the button — placement only). -->
+    <!-- Exit row (W3): full-width, controller-focusable Exit button. -->
     <div
       class="settings-home-row settings-home-row--exit"
       id="settings-exit-row"
       data-search-text="exit quit the app completely."
       data-w3-slot="exit-button">
-      <span class="settings-home-row__text">
-        <span class="settings-home-row__title">Exit</span>
-        <span class="settings-home-row__desc">Quit the app completely.</span>
-        <span class="settings-home-row__note">Exit button lands here (W3).</span>
-      </span>
+      <ExitAppCard client:load />
     </div>
   </div>
 </SettingsShell>

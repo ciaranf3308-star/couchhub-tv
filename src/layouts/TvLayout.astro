@@ -307,6 +307,8 @@ const navItems = [
       import { mountGamepad } from "@/scripts/lib/gamepad"
       import { mountNativeGamepad } from "@/scripts/lib/native-gamepad"
       import { mountReturnHome } from "@/scripts/lib/return-home"
+      import { initTrayHandler } from "@/scripts/lib/tray-handler"
+      import { mountExitShortcuts } from "@/scripts/lib/app-exit"
 
       if (!(window as any).__xtTvShellBooted) {
         ;(window as any).__xtTvShellBooted = true
@@ -317,6 +319,10 @@ const navItems = [
       mountGamepad()
       mountNativeGamepad()
       mountReturnHome()
+      // 0.11.4 W3: tray hide-release + Ctrl+Q must boot on /tv/* pages
+      // too — this is where the Live TV stream actually plays.
+      initTrayHandler()
+      mountExitShortcuts()
     </script>
   </body>
 </html>
