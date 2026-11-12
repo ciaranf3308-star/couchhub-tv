@@ -27,12 +27,12 @@
        Unverified titles stay visibly unverified: no artwork, no
        detail link, no invented metadata.
      Logic: the catalogue loads once at mount. The AI path calls the
-     discovery orchestrator (ai/discovery-orchestrator.ts — a SHIM in
-     the W3 branch, replaced by W1's real implementation at
-     integration); the local engine (searchDiscover) stays for typing,
-     quick picks, and the explicitly-labelled "similar titles
-     available locally" option. The old rankDiscover/AI-ranker path is
-     retired: one orchestration layer only. -->
+     discovery orchestrator (ai/discovery-orchestrator.ts: LLM
+     generation -> TMDB verification -> catalogue matching); the
+     local engine (searchDiscover) stays for typing, quick picks,
+     and the explicitly-labelled "similar titles available locally"
+     option. The old rankDiscover/AI-ranker path is retired: one
+     orchestration layer only. -->
 <script>
   import { onMount, tick } from "svelte"
   import { getActiveEntry } from "@/scripts/lib/creds.js"
@@ -50,13 +50,14 @@
     isNaturalLanguageQuery,
     detectMoodPresets,
   } from "@/scripts/lib/discover.ts"
-  // AI-first discovery (0.11.6): the orchestrator + conversation
-  // contracts are FROZEN; in this branch both modules are SHIMs that
-  // integration replaces with W1's real implementations. The state
-  // transitions are likewise a SHIM (W4 owns the real module). The
-  // presentation helpers are real, pure, tested code.
+  // AI-first discovery (0.11.6): the orchestrator (W1) + verification
+  // (W2) + state transitions (W4) are the real modules; in-flight
+  // progress arrives via subscribeAiDiscoveryPhase (the orchestrator
+  // has no onPhase dep). The presentation helpers are pure, tested
+  // code.
   import {
     runAiDiscovery,
+    subscribeAiDiscoveryPhase,
   } from "@/scripts/lib/ai/discovery-orchestrator.ts"
   import {
     newConversation,
@@ -90,7 +91,6 @@
     aiSearchRailTitle,
     aiSearchStateNote,
   } from "@/scripts/lib/ai/status.ts"
-  import { getAiModel } from "@/scripts/lib/app-settings.js"
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
@@ -174,7 +174,6 @@
   let searchingAi = $state(false)
   /** @type {"ai" | "local" | null} */
   let resultsSource = $state(null)
-  let fallbackNotice = $state("")
   /** Per-search engine receipt (0.11.5): the ONLY source for the rail
       title and the "AI answered" note — see ai/status.ts. A rail is
       labelled by the engine that actually produced it, and "AI answered
@@ -195,13 +194,14 @@
       AI rail is on screen. An empty array means the run returned
       nothing (honest empty state, never filler). */
   let aiResults = $state(
-    /** @type {Array<import("@/scripts/lib/ai/discovery-orchestrator.ts").VerifiedRecommendation> | null} */ (null)
+    /** @type {Array<import("@/scripts/lib/ai/verification.ts").VerifiedRecommendation> | null} */ (null)
   )
-  /** In-flight orchestrator phase, when the orchestrator reports one.
-      Null when idle or when the run reports no progress (the UI then
+  /** In-flight orchestrator phase, when the orchestrator reports one
+      via subscribeAiDiscoveryPhase. Only the three in-flight phases
+      are shown; terminal phases clear it. Null when idle (the UI then
       shows a single "Asking AI…" state — never invented stages). */
   let aiPhase = $state(
-    /** @type {import("@/scripts/lib/ai/discovery-orchestrator.ts").DiscoveryProgressPhase | null} */ (null)
+    /** @type {import("@/scripts/lib/ai/status.ts").AiSearchPhase | null} */ (null)
   )
   /** Provider failure for the last AI attempt, or null. */
   let aiUnavailable = $state(
@@ -217,8 +217,6 @@
       New Search, Clear, or leaving Discover cancels it. */
   let aiAbort = /** @type {AbortController | null} */ (null)
   let diagnosticsOpen = $state(false)
-  /** @type {string} */
-  let aiModel = $state("")
   /** @type {boolean} */
   let canAskAi = $state(false)
   /** @type {boolean} */
@@ -418,7 +416,6 @@
       searching = false
       searchingAi = false
       resultsSource = null
-      fallbackNotice = ""
       receipt = null
       aiResults = null
       aiUnavailable = null
@@ -427,7 +424,6 @@
     }
     searching = true
     searchingAi = false
-    fallbackNotice = ""
     aiResults = null
     aiUnavailable = null
     localSimilar = null
@@ -494,15 +490,30 @@
   }
 
   let queryTimer = null
+  /**
+   * Cancel the pending debounced local search, if any. EVERY
+   * transition that replaces the typed query's meaning must call
+   * this FIRST: without it, typing then tapping a quick pick (or
+   * submitting, or clearing) within the 250ms window lets the stale
+   * timer fire afterwards, restoring the typed query, wiping the
+   * mood and running a stale local search (0.11.6 debounce hole).
+   */
+  function cancelQueryTimer() {
+    if (queryTimer) {
+      clearTimeout(queryTimer)
+      queryTimer = null
+    }
+  }
   function onQueryInput(value) {
     query = value
-    if (queryTimer) clearTimeout(queryTimer)
+    cancelQueryTimer()
     // Typing a refinement must not clobber the AI results on screen:
     // while an AI rail is showing, typing only edits the box — the
     // refinement runs on submit. Otherwise typing searches locally
     // only — it never sends an AI request.
     if (aiResults !== null) return
     queryTimer = setTimeout(() => {
+      queryTimer = null
       queryDebounced = value
       activeMood = null
       void runSearch()
@@ -522,11 +533,18 @@
    * - availableOnly is ALWAYS false at request time: the toggle is a
    *   client-side filter over the full verified set (see
    *   visibleAiResults), so toggling both ways never needs a new
-   *   model call. The field is still passed, for cache identity.
+   *   model call. The orchestrator never filters on the flag and it
+   *   is not a cache dimension; the field is passed for API
+   *   stability only.
    * - Taste is sent ONLY when the user opted in to sharing it
    *   (default OFF, AI05), as a single formatted string.
    * - The loaded catalogue is passed for playability matching; the
-   *   orchestrator decides the match, the UI only displays it.
+   *   orchestrator decides the match, the UI only displays it. The
+   *   active profile id scopes the orchestrator's cache per profile.
+   * - In-flight progress arrives via subscribeAiDiscoveryPhase
+   *   (scoped to this run, unsubscribed in the finally below); the
+   *   orchestrator exposes no onPhase dep, and the model is resolved
+   *   from Settings inside the orchestrator, never passed by the UI.
    * - Cancellation: a new submit, New Search, Clear, or leaving
    *   Discover aborts the in-flight run; an aborted run updates no
    *   state. The receipt comes from the orchestrator, verbatim.
@@ -551,16 +569,31 @@
     activeMood = null
     searching = true
     searchingAi = true
-    aiPhase = "asking"
+    aiPhase = "asking-ai"
     aiUnavailable = null
     localSimilar = null
-    fallbackNotice = ""
     searchResults = null
     resultsSource = null
     const runStartedAt = performance.now()
     const tasteSummary = getAiShareTaste()
       ? formatTasteSummaryForAi(summarizeTaste(data.taste))
       : null
+    // In-flight phases for THIS run only. Terminal phases
+    // (ready/unavailable/cached) are ignored here — the completion
+    // paths below clear aiPhase. The subscription replays the last
+    // phase on subscribe; the in-flight filter keeps a stale
+    // terminal phase out, and the run's own "asking-ai" emission
+    // lands in the same task.
+    const unsubscribePhase = subscribeAiDiscoveryPhase((phase) => {
+      if (token !== searchToken) return
+      if (
+        phase === "asking-ai" ||
+        phase === "verifying-tmdb" ||
+        phase === "checking-library"
+      ) {
+        aiPhase = phase
+      }
+    })
     try {
       const result = await runAiDiscovery(
         {
@@ -572,11 +605,8 @@
           signal: controller.signal,
         },
         {
-          model: aiModel || undefined,
           catalogue: data.candidates,
-          onPhase: (phase) => {
-            if (token === searchToken) aiPhase = phase
-          },
+          profileId,
         }
       )
       if (token !== searchToken) return
@@ -636,6 +666,7 @@
         },
       }
     } finally {
+      unsubscribePhase()
       if (token === searchToken) {
         searching = false
         searchingAi = false
@@ -673,19 +704,21 @@
 
   /** New Search: clear EVERYTHING, including the conversation. */
   function newSearch() {
+    cancelQueryTimer()
     if (aiAbort) aiAbort.abort()
     searchToken++
     const fresh = applyNewSearch()
     query = fresh.query
     queryDebounced = ""
-    conversation = fresh.conversation
-    availableOnly = fresh.availableOnly
+    // Conversation + toggle are NOT part of DiscoverySearchState
+    // (W4): the view clears them alongside, explicitly.
+    conversation = newConversation()
+    availableOnly = false
     activeMood = fresh.activeMood
     searchResults = null
     aiResults = null
     resultsSource = null
     receipt = null
-    fallbackNotice = ""
     aiUnavailable = null
     localSimilar = null
     aiPhase = null
@@ -694,19 +727,6 @@
     diagnosticsOpen = false
     window.scrollTo(0, 0)
     inputEl?.focus()
-  }
-
-  /** Snapshot the current state for a frozen state transition. */
-  function snapshotState() {
-    return { query, conversation, availableOnly, activeMood }
-  }
-
-  /** Apply a frozen state transition back onto the component state. */
-  function applyDiscoveryState(next) {
-    query = next.query
-    conversation = next.conversation
-    availableOnly = next.availableOnly
-    activeMood = next.activeMood
   }
 
   function focusFirstResult() {
@@ -761,6 +781,7 @@
    *   search, with Ask AI offered at the results.
    */
   function submitSearch() {
+    cancelQueryTimer()
     const q = query.trim()
     if (isRefinementSubmit(conversation, hasAiResults, q)) {
       queryDebounced = q
@@ -781,6 +802,7 @@
 
   /** Explicit "Ask AI" — one paid request, on the user's tap. */
   function askAi() {
+    cancelQueryTimer()
     // A quick pick is a preset, not a question: ask AI about the pick
     // itself (its label is the question — "Easy Watching", "Hidden
     // Gems") and clear the mood so the AI run asks it. For a typed
@@ -798,6 +820,7 @@
   }
 
   function pickExample(prompt) {
+    cancelQueryTimer()
     // An example prompt is a NEW question: fresh conversation, no
     // carried context — even when refining. When AI cannot run, it
     // searches locally instead of firing a doomed request.
@@ -817,8 +840,15 @@
     // A quick pick starts a NEW discovery request (applyQuickPick):
     // no carried query, conversation or filters. Tapping the active
     // pick again clears everything back to the landing state.
+    // Cancelling the debounce timer FIRST is what keeps a pick made
+    // within 250ms of typing from being undone by the stale timer.
+    cancelQueryTimer()
     if (activeMood === presetId) {
-      applyDiscoveryState(applyNewSearch())
+      const fresh = applyNewSearch()
+      query = fresh.query
+      activeMood = fresh.activeMood
+      conversation = newConversation()
+      availableOnly = false
       queryDebounced = ""
       searchResults = null
       aiResults = null
@@ -828,7 +858,15 @@
       localSimilar = null
       return
     }
-    applyDiscoveryState(applyQuickPick(snapshotState(), presetId))
+    // Discover holds no genre state of its own (no genre control on
+    // this screen), so the transition input carries genre: null;
+    // applyQuickPick returns a fresh state with only the new mood.
+    // Conversation + toggle are cleared alongside (see newSearch).
+    const next = applyQuickPick({ query, activeMood, genre: null }, presetId)
+    query = next.query
+    activeMood = next.activeMood
+    conversation = newConversation()
+    availableOnly = false
     queryDebounced = ""
     void runSearch()
   }
@@ -853,6 +891,7 @@
   }
 
   function clearSearch() {
+    cancelQueryTimer()
     if (aiAbort) aiAbort.abort()
     searchToken++
     query = ""
@@ -861,7 +900,6 @@
     searchResults = null
     aiResults = null
     resultsSource = null
-    fallbackNotice = ""
     receipt = null
     conversation = newConversation()
     availableOnly = false
@@ -904,11 +942,6 @@
   }
 
   async function refreshAiStatus() {
-    try {
-      aiModel = getAiModel()
-    } catch {
-      aiModel = ""
-    }
     try {
       const status = await getAiStatus()
       aiMode = status.mode
@@ -1191,9 +1224,6 @@
              Search action lives with the same line under the input. -->
         <p class="rs-meta" data-refine-context-rail>{refineLabel}</p>
       {/if}
-      {#if fallbackNotice}
-        <p class="rs-discover-fallback" role="status">{fallbackNotice}</p>
-      {/if}
 
       {#if hasAiResults}
         <!-- AI rail (0.11.6): verified recommendations, each with its
@@ -1305,7 +1335,7 @@
         <!-- Local rail: typing, quick picks, Manual submit. A local
              rail says why it is local, next to the action that fixes
              it — or why there is no action. -->
-        {#if resultsSource === "local" && !searching && !fallbackNotice}
+        {#if resultsSource === "local" && !searching}
           <p class="rs-meta" data-local-note>
             {canAskAi
               ? activeMood
@@ -1887,15 +1917,6 @@
   }
   .rs-discover-mood.is-active .rs-discover-mood__sub {
     color: rgb(255 255 255 / 0.85);
-  }
-  .rs-discover-fallback {
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    padding: 0.875rem 1.25rem;
-    font-size: 1.25rem;
-    color: var(--rs-text-2);
-    margin: 0;
   }
   .rs-discover-ask-ai {
     align-self: flex-start;

@@ -1,10 +1,24 @@
-// AI Discovery 3.0 — W3 UI behaviour tests (0.11.6).
+// AI Discovery 3.0 — W3 UI behaviour tests (0.11.6), integrated.
 //
-// These tests exercise the frozen contracts the Discover UI builds
-// against (via the W3 shims, which integration deletes) plus the real
-// presentation helpers. No network, no keys, no browser globals: the
-// orchestrator shim's `handler` override stands in for the model, so
-// every "model call" is exactly countable.
+// These tests exercise the real modules the Discover UI builds
+// against: runAiDiscovery (W1 orchestrator), verifyRecommendations
+// (W2 verifier), the W4 state transitions, and the real presentation
+// helpers — with injected fake model + TMDB transports. No network,
+// no keys, no browser globals. The W3 branch ran this file against
+// shims; integration rewired every shim-dependent assertion to the
+// real behaviour (same intent, real semantics):
+// - The orchestrator has no `handler`/`model`/`onPhase` deps: tests
+//   inject `chat` + `searchTmdb` + `fetchDetails`, and progress is
+//   observed via subscribeAiDiscoveryPhase with the real phase names
+//   (asking-ai / verifying-tmdb / checking-library / ready).
+// - DiscoverySearchState is W4's {query, activeMood, genre} shape;
+//   conversation + toggle are view-owned companions, not state.
+// - selectGenreFilter lives in browse-filters.ts (W4), not in
+//   discover-state.ts.
+// - VerifiedRecommendation.generated is a GeneratedRecommendation
+//   object, never a bare title string.
+// - An empty query resolves to an "unavailable" result with zero
+//   model calls; it does not throw.
 //
 // Covered:
 // - Available-only toggle filters client-side with NO new model call,
@@ -19,28 +33,45 @@
 //   without a match, no invented metadata.
 // - No model call happens for pure state transitions (filtering,
 //   clearing, genre selection) — only an explicit runAiDiscovery call
-//   invokes the handler.
+//   invokes the transport.
 // - Abort cancels an in-flight run; a repeat identical request is a
 //   cache hit with a cached-ai receipt.
+// - Debounce-timer regression (0.11.6 P0): every transition that
+//   replaces the typed query's meaning cancels the pending timer
+//   first, so a quick pick within 250ms of typing survives.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { readFileSync } from "node:fs"
+import { describe, it, expect, beforeEach } from "vitest"
 import {
   runAiDiscovery,
-  resetDiscoveryShimCache,
-  type DiscoveryResult,
-  type VerifiedRecommendation,
+  clearAiDiscoveryCache,
+  subscribeAiDiscoveryPhase,
+  type DiscoveryRunResult,
 } from "@/scripts/lib/ai/discovery-orchestrator.ts"
 import {
   newConversation,
   conversationContextFor,
+  type AiChatTransport,
+  type GeneratedRecommendation,
 } from "@/scripts/lib/ai/generation.ts"
+import type { AiChatOptions } from "@/scripts/lib/ai/client.ts"
+import {
+  clearVerificationCache,
+  type TmdbDetailsFn,
+  type TmdbSearchFn,
+  type VerifiedRecommendation,
+} from "@/scripts/lib/ai/verification.ts"
+import type { TmdbSearchResult } from "@/scripts/lib/tmdb.ts"
 import {
   freshDiscoveryState,
   applyQuickPick,
   applyNewSearch,
-  selectGenreFilter,
 } from "@/scripts/lib/discover-state.ts"
-import { DEFAULT_BROWSE_FILTERS } from "@/scripts/lib/browse-filters.ts"
+import {
+  DEFAULT_BROWSE_FILTERS,
+  selectGenreFilter,
+} from "@/scripts/lib/browse-filters.ts"
+import type { DiscoverCandidate } from "@/scripts/lib/discover.ts"
 import {
   visibleRecommendations,
   countMatched,
@@ -52,11 +83,16 @@ import {
   providerErrorCodeFor,
   aiDiscoveryProgressText,
 } from "@/scripts/lib/ai/discovery-presentation.ts"
-import type { AiSearchReceipt } from "@/scripts/lib/ai/status.ts"
 
 function fakeRec(overrides: Partial<VerifiedRecommendation> = {}): VerifiedRecommendation {
   return {
-    generated: "Fake Title",
+    generated: {
+      title: "Fake Title",
+      year: 2020,
+      kind: "movie",
+      reason: "A specific reason for this title.",
+      tone: "Warm",
+    },
     verified: true,
     tmdbId: 1,
     title: "Fake Title",
@@ -75,61 +111,90 @@ function fakeRec(overrides: Partial<VerifiedRecommendation> = {}): VerifiedRecom
 
 function matchedRec(title: string, key: string): VerifiedRecommendation {
   return fakeRec({
-    generated: title,
+    generated: {
+      title,
+      year: 2020,
+      kind: "movie",
+      reason: "A specific reason for this title.",
+      tone: "Warm",
+    },
     title,
     match: { compositeId: key, kind: "movie", title, year: 2020, catalogueKey: key },
   })
 }
 
-function fakeReceipt(overrides: Partial<AiSearchReceipt> = {}): AiSearchReceipt {
-  return {
-    phase: "validated",
-    engine: "ai",
-    query: "something funny",
-    model: "gpt-4o-mini",
-    answeredAt: Date.now(),
-    durationMs: 1200,
-    cacheHit: false,
-    diagnostics: {
-      queryType: "natural-language",
-      generatedCount: 3,
-      verifiedCount: 3,
-      matchedCount: 2,
-      verificationFailures: 0,
-    },
-    ...overrides,
+function gen(
+  title: string,
+  kind: "movie" | "series" = "movie",
+  year: number | null = 2020
+): GeneratedRecommendation {
+  return { title, year, kind, reason: `A specific reason for ${title}.`, tone: "Warm" }
+}
+
+/** A counting fake chat transport returning canned generated titles. */
+function fakeChat(
+  replies: GeneratedRecommendation[][],
+  model = "mock-model-1"
+): { transport: AiChatTransport; calls: AiChatOptions[]; callCount: () => number } {
+  const calls: AiChatOptions[] = []
+  const transport: AiChatTransport = async (options) => {
+    const reply = replies[Math.min(calls.length, replies.length - 1)]
+    calls.push(options)
+    return { text: JSON.stringify({ recommendations: reply }), model }
+  }
+  return { transport, calls, callCount: () => calls.length }
+}
+
+/** A fake TMDB search that verifies exactly the titles it knows. */
+function fakeTmdbSearch(known: GeneratedRecommendation[]): TmdbSearchFn {
+  return async (query) => {
+    const found = known.find(
+      (rec) => rec.title.toLowerCase() === query.title.toLowerCase() && rec.kind === query.kind
+    )
+    if (!found) return []
+    const id = 1000 + known.indexOf(found)
+    const year = found.year ?? 2020
+    const base: TmdbSearchResult = {
+      id,
+      vote_count: 100,
+      popularity: 10,
+      poster_path: `/mock-${id}.jpg`,
+      backdrop_path: null,
+      overview: `Overview for ${found.title}.`,
+    }
+    return [
+      found.kind === "movie"
+        ? { ...base, title: found.title, original_title: found.title, release_date: `${year}-01-01` }
+        : { ...base, name: found.title, original_name: found.title, first_air_date: `${year}-01-01` },
+    ]
   }
 }
 
-/** A counting handler that returns a fixed mixed-availability result. */
-function countingHandler(counter: { calls: number }, results: VerifiedRecommendation[]) {
-  return vi.fn(async (request: Parameters<typeof runAiDiscovery>[0]) => {
-    counter.calls++
-    const receipt = fakeReceipt({ query: request.query })
-    const conversation = {
-      turns: [
-        ...request.conversation.turns,
-        { query: request.query, generatedTitles: results.map((r) => r.generated) },
-      ],
-    }
-    const out: DiscoveryResult = {
-      results,
-      receipt,
-      diagnostics: receipt.diagnostics,
-      conversation,
-    }
-    return out
-  })
+const fakeDetails: TmdbDetailsFn = async (tmdbId) => ({
+  genres: ["Drama"],
+  synopsis: `Synopsis for ${tmdbId}.`,
+  posterUrl: `https://image.tmdb.org/t/p/w500/mock-${tmdbId}.jpg`,
+  backdropUrl: null,
+  alternativeTitles: [],
+})
+
+function candidate(overrides: Partial<DiscoverCandidate> & { id: string; title: string }): DiscoverCandidate {
+  return { kind: "movie", genres: [], cast: [], source: "catalog", ...overrides }
+}
+
+function allText(calls: AiChatOptions[], index: number): string {
+  return (calls[index]?.messages ?? []).map((message) => message.content).join("\n")
 }
 
 beforeEach(() => {
-  resetDiscoveryShimCache()
+  clearAiDiscoveryCache()
+  clearVerificationCache()
 })
 
 describe("available-only toggle (client-side filter, no new model call)", () => {
   const mixed = [
     matchedRec("In The Library", "movie:101"),
-    fakeRec({ generated: "Not In Library", title: "Not In Library" }),
+    fakeRec({ generated: gen("Not In Library"), title: "Not In Library" }),
     matchedRec("Also In Library", "movie:102"),
   ]
 
@@ -147,74 +212,109 @@ describe("available-only toggle (client-side filter, no new model call)", () => 
   })
 
   it("toggling does not call the model: one request, many filters", async () => {
-    const counter = { calls: 0 }
-    const handler = countingHandler(counter, mixed)
+    const recs = [gen("In The Library"), gen("Not In Library"), gen("Also In Library")]
+    const chat = fakeChat([recs])
     const first = await runAiDiscovery(
       { query: "something funny", conversation: newConversation(), availableOnly: false },
-      { handler }
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch(recs),
+        fetchDetails: fakeDetails,
+        catalogue: [
+          candidate({ id: "101", title: "In The Library", year: 2020 }),
+          candidate({ id: "102", title: "Also In Library", year: 2020 }),
+        ],
+        profileId: "w3-toggle-1",
+      }
     )
-    expect(counter.calls).toBe(1)
+    expect(chat.callCount()).toBe(1)
+    expect(first.results).toHaveLength(3)
     // Toggle ON, then OFF, then ON again — pure filtering, no calls.
     expect(visibleRecommendations(first.results, true)).toHaveLength(2)
     expect(visibleRecommendations(first.results, false)).toHaveLength(3)
     expect(visibleRecommendations(first.results, true)).toHaveLength(2)
-    expect(counter.calls).toBe(1)
-    expect(handler).toHaveBeenCalledTimes(1)
+    expect(chat.callCount()).toBe(1)
   })
 })
 
 describe("new search clears everything", () => {
-  it("applyNewSearch returns a fresh state with an empty conversation", () => {
+  it("applyNewSearch returns a fresh state; the conversation companion is empty", () => {
     const cleared = applyNewSearch()
     expect(cleared.query).toBe("")
-    expect(cleared.conversation.turns).toEqual([])
-    expect(cleared.availableOnly).toBe(false)
     expect(cleared.activeMood).toBeNull()
+    expect(cleared.genre).toBeNull()
+    // Conversation is NOT part of DiscoverySearchState (W4): the view
+    // clears it alongside via newConversation().
+    expect(newConversation().turns).toEqual([])
   })
 
-  it("freshDiscoveryState is independent per call (no shared conversation)", () => {
+  it("freshDiscoveryState is independent per call (no shared state)", () => {
     const a = freshDiscoveryState()
     const b = freshDiscoveryState()
-    a.conversation.turns.push({ query: "x", generatedTitles: ["Y"] })
-    expect(b.conversation.turns).toEqual([])
+    a.query = "x"
+    a.genre = "comedy"
+    expect(b.query).toBe("")
+    expect(b.genre).toBeNull()
+    expect(a).not.toBe(b)
   })
 
   it("a search after New Search starts with zero turns", async () => {
-    const counter = { calls: 0 }
-    const handler = countingHandler(counter, [matchedRec("A", "movie:1")])
+    const chat = fakeChat([[gen("Fresh Title")]])
+    const recs = [gen("Fresh Title")]
     const conversation = newConversation()
-    conversation.turns.push({ query: "old question", generatedTitles: ["Old"] })
+    conversation.turns.push({ query: "old question", generatedTitles: ["Old Title"] })
     const fresh = applyNewSearch()
-    await runAiDiscovery(
-      { query: "new question", conversation: fresh.conversation, availableOnly: false },
-      { handler }
+    expect(fresh.query).toBe("")
+    const result = await runAiDiscovery(
+      { query: "new question", conversation: newConversation(), availableOnly: false },
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch(recs),
+        fetchDetails: fakeDetails,
+        catalogue: [],
+        profileId: "w3-newsearch-1",
+      }
     )
-    const seen = handler.mock.calls[0][0]
-    expect(seen.conversation.turns).toEqual([])
+    expect(result.conversation.turns).toHaveLength(1)
+    expect(result.conversation.turns[0].query).toBe("new question")
+    // The model saw nothing of the old conversation.
+    expect(allText(chat.calls, 0)).not.toContain("old question")
+    expect(allText(chat.calls, 0)).not.toContain("Old Title")
   })
 })
 
 describe("conversational refinement preserves conversation", () => {
   it("the second call receives the first call's turn", async () => {
-    const counter = { calls: 0 }
-    const handler = countingHandler(counter, [matchedRec("A", "movie:1")])
+    const firstRecs = [gen("Dark Title One")]
+    const secondRecs = [gen("Dark Title Two")]
+    const chat = fakeChat([firstRecs, secondRecs])
+    const search = fakeTmdbSearch([...firstRecs, ...secondRecs])
+    const deps = {
+      chat: chat.transport,
+      searchTmdb: search,
+      fetchDetails: fakeDetails,
+      catalogue: [] as DiscoverCandidate[],
+      profileId: "w3-refine-1",
+    }
     const first = await runAiDiscovery(
       { query: "dark anime", conversation: newConversation(), availableOnly: false },
-      { handler }
+      deps
     )
     expect(first.conversation.turns).toHaveLength(1)
     expect(first.conversation.turns[0].query).toBe("dark anime")
 
     const second = await runAiDiscovery(
       { query: "Darker", conversation: first.conversation, availableOnly: false },
-      { handler }
+      deps
     )
     expect(second.conversation.turns).toHaveLength(2)
     expect(second.conversation.turns[1].query).toBe("Darker")
-    const seen = handler.mock.calls[1][0]
-    expect(seen.conversation.turns).toHaveLength(1)
-    expect(seen.conversation.turns[0].query).toBe("dark anime")
-    expect(counter.calls).toBe(2)
+    // The refinement prompt carries the prior turn; the first call
+    // knew nothing of the refinement.
+    expect(allText(chat.calls, 1)).toContain("dark anime")
+    expect(allText(chat.calls, 1)).toContain("Dark Title One")
+    expect(allText(chat.calls, 0)).not.toContain("Darker")
+    expect(chat.callCount()).toBe(2)
   })
 
   it("conversationContextFor renders one honest line per turn", () => {
@@ -222,7 +322,7 @@ describe("conversational refinement preserves conversation", () => {
     const state = newConversation()
     state.turns.push({ query: "dark anime", generatedTitles: ["Akira", "Ghost in the Shell"] })
     expect(conversationContextFor(state)).toEqual([
-      "dark anime (previously suggested: Akira, Ghost in the Shell)",
+      '- Earlier request: "dark anime" Already suggested: Akira, Ghost in the Shell.',
     ])
   })
 
@@ -245,15 +345,13 @@ describe("conversational refinement preserves conversation", () => {
 })
 
 describe("quick picks start fresh", () => {
-  it("applyQuickPick carries nothing: no query, no conversation, no toggle", () => {
+  it("applyQuickPick carries nothing: no query, no genre, only the new mood", () => {
     const before = freshDiscoveryState()
     before.query = "something funny"
-    before.availableOnly = true
-    before.conversation.turns.push({ query: "old", generatedTitles: ["Old"] })
+    before.genre = "comedy"
     const next = applyQuickPick(before, "easy")
     expect(next.query).toBe("")
-    expect(next.conversation.turns).toEqual([])
-    expect(next.availableOnly).toBe(false)
+    expect(next.genre).toBeNull()
     expect(next.activeMood).toBe("easy")
   })
 
@@ -325,10 +423,9 @@ describe("unavailable and unverified states", () => {
     expect(recommendationDetailHref(live)).toBeNull()
   })
 
-  it("unverified recommendations carry no artwork claim in the shim", async () => {
-    // The shim's unverified scenario is sessionStorage-driven; here we
-    // assert the shape contract directly: an unverified rec may carry a
-    // note, and the UI must not treat it as verified.
+  it("unverified recommendations carry no artwork claim", () => {
+    // Shape contract, asserted directly: an unverified rec may carry
+    // a note, and the UI must not treat it as verified.
     const rec = fakeRec({ verified: false, tmdbId: null, posterUrl: null, verificationNote: "TMDB could not verify this title — the details shown are unconfirmed." })
     expect(rec.verified).toBe(false)
     expect(rec.posterUrl).toBeNull()
@@ -351,9 +448,8 @@ describe("unavailable and unverified states", () => {
 })
 
 describe("no model call for pure transitions", () => {
-  it("filtering, clearing, genre selection and labelling never invoke the handler", async () => {
-    const counter = { calls: 0 }
-    const handler = countingHandler(counter, [matchedRec("A", "movie:1")])
+  it("filtering, clearing, genre selection and labelling never invoke the transport", async () => {
+    const chat = fakeChat([[gen("A")]])
     // Exercise every pure transition WITHOUT calling runAiDiscovery.
     const state = freshDiscoveryState()
     applyQuickPick(state, "easy")
@@ -362,37 +458,50 @@ describe("no model call for pure transitions", () => {
     visibleRecommendations([matchedRec("A", "movie:1")], true)
     refinementContextLabel(newConversation())
     formatTasteSummaryForAi({ favouriteGenres: ["comedy"], likedTitles: [], dislikedTitles: [] })
-    aiDiscoveryProgressText("asking")
-    expect(counter.calls).toBe(0)
-    expect(handler).not.toHaveBeenCalled()
+    aiDiscoveryProgressText("asking-ai")
+    expect(chat.callCount()).toBe(0)
   })
 
-  it("the shim itself only runs when runAiDiscovery is called", async () => {
-    // No handler, no call: constructing state must not touch the shim
-    // cache or produce results. The proof is the cache-hit test below:
-    // a first call is fresh, a second identical call is cached.
-    const first = await runAiDiscovery(
-      { query: "something funny for tonight", conversation: newConversation(), availableOnly: false },
-      {}
-    )
+  it("a repeat identical request is a cache hit with a cached-ai receipt", async () => {
+    const recs = [gen("Cache Title One"), gen("Cache Title Two")]
+    const chat = fakeChat([recs])
+    const deps = {
+      chat: chat.transport,
+      searchTmdb: fakeTmdbSearch(recs),
+      fetchDetails: fakeDetails,
+      catalogue: [] as DiscoverCandidate[],
+      profileId: "w3-cache-1",
+    }
+    const request = {
+      query: "something funny for tonight",
+      conversation: newConversation(),
+      availableOnly: false,
+    }
+    const first: DiscoveryRunResult = await runAiDiscovery(request, deps)
     expect(first.receipt.engine).toBe("ai")
     expect(first.receipt.cacheHit).toBe(false)
-    const second = await runAiDiscovery(
-      { query: "something funny for tonight", conversation: newConversation(), availableOnly: false },
-      {}
-    )
+    const second = await runAiDiscovery(request, deps)
     expect(second.receipt.engine).toBe("cached-ai")
     expect(second.receipt.phase).toBe("cached")
     expect(second.receipt.cacheHit).toBe(true)
     expect(second.results.map((r) => r.title)).toEqual(first.results.map((r) => r.title))
+    expect(chat.callCount()).toBe(1)
   })
 })
 
-describe("shim run semantics (frozen contract shape)", () => {
+describe("orchestrator run semantics (real modules)", () => {
   it("returns results + receipt + diagnostics + appended conversation", async () => {
+    const recs = [gen("Run Title One"), gen("Run Title Two"), gen("Run Title Three"), gen("Run Title Four")]
+    const chat = fakeChat([recs], "gpt-4o-mini")
     const result = await runAiDiscovery(
       { query: "dark anime", conversation: newConversation(), availableOnly: false, count: 4 },
-      { model: "gpt-4o-mini" }
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch(recs),
+        fetchDetails: fakeDetails,
+        catalogue: [],
+        profileId: "w3-run-1",
+      }
     )
     expect(result.results.length).toBeGreaterThan(0)
     expect(result.results.length).toBeLessThanOrEqual(4)
@@ -404,18 +513,30 @@ describe("shim run semantics (frozen contract shape)", () => {
     expect(typeof result.diagnostics.verificationFailures).toBe("number")
     expect(result.conversation.turns).toHaveLength(1)
     expect(result.conversation.turns[0].generatedTitles).toEqual(
-      result.results.map((r) => r.generated)
+      result.results.map((r) => r.title)
     )
   })
 
   it("matches against the supplied catalogue and leaves the rest unmatched", async () => {
-    const catalogue = [
-      { id: "101", kind: "movie", title: "Hot Fuzz", year: 2007, genres: [], cast: [], source: "catalog" },
-      { id: "202", kind: "series", title: "Brooklyn Nine-Nine", year: 2013, genres: [], cast: [], source: "catalog" },
-    ] as never
+    const recs = [
+      gen("Hot Fuzz", "movie", 2007),
+      gen("Brooklyn Nine-Nine", "series", 2013),
+      gen("Unmatched One"),
+      gen("Unmatched Two", "series"),
+    ]
+    const chat = fakeChat([recs])
     const result = await runAiDiscovery(
       { query: "something funny", conversation: newConversation(), availableOnly: false },
-      { catalogue }
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch(recs),
+        fetchDetails: fakeDetails,
+        catalogue: [
+          candidate({ id: "101", kind: "movie", title: "Hot Fuzz", year: 2007 }),
+          candidate({ id: "202", kind: "series", title: "Brooklyn Nine-Nine", year: 2013 }),
+        ],
+        profileId: "w3-run-2",
+      }
     )
     const matched = result.results.filter((r) => r.match)
     const unmatched = result.results.filter((r) => !r.match)
@@ -426,9 +547,16 @@ describe("shim run semantics (frozen contract shape)", () => {
   })
 
   it("with no catalogue, nothing is claimed to be in the library", async () => {
+    const recs = [gen("No Catalog Title")]
+    const chat = fakeChat([recs])
     const result = await runAiDiscovery(
       { query: "something funny", conversation: newConversation(), availableOnly: false },
-      {}
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch(recs),
+        fetchDetails: fakeDetails,
+        profileId: "w3-run-3",
+      }
     )
     expect(result.results.every((r) => r.match == null)).toBe(true)
     expect(result.diagnostics.matchedCount).toBe(0)
@@ -436,27 +564,69 @@ describe("shim run semantics (frozen contract shape)", () => {
 
   it("an aborted run rejects with AbortError and produces nothing", async () => {
     const controller = new AbortController()
+    const abortingChat: AiChatTransport = async (options) => {
+      if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError")
+      await new Promise<never>((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true }
+        )
+      })
+      throw new Error("unreachable")
+    }
     const promise = runAiDiscovery(
       { query: "dark anime please", conversation: newConversation(), availableOnly: false, signal: controller.signal },
-      {}
+      {
+        chat: abortingChat,
+        searchTmdb: fakeTmdbSearch([]),
+        fetchDetails: fakeDetails,
+        profileId: "w3-run-4",
+      }
     )
     controller.abort()
     await expect(promise).rejects.toMatchObject({ name: "AbortError" })
   })
 
-  it("an empty query is rejected, never sent", async () => {
-    await expect(
-      runAiDiscovery({ query: "   ", conversation: newConversation(), availableOnly: false }, {})
-    ).rejects.toThrow(TypeError)
+  it("an empty query resolves unavailable and never sends a request", async () => {
+    const chat = fakeChat([[gen("Never Sent")]])
+    const result = await runAiDiscovery(
+      { query: "   ", conversation: newConversation(), availableOnly: false },
+      {
+        chat: chat.transport,
+        searchTmdb: fakeTmdbSearch([]),
+        fetchDetails: fakeDetails,
+        profileId: "w3-run-5",
+      }
+    )
+    expect(result.results).toEqual([])
+    expect(result.receipt.phase).toBe("unavailable")
+    expect(result.receipt.fallbackReason).toBeTruthy()
+    expect(chat.callCount()).toBe(0)
   })
 
-  it("progress phases are emitted in order when the caller listens", async () => {
+  it("progress phases are emitted in order to subscribers", async () => {
+    const recs = [gen("Progress Title")]
+    const chat = fakeChat([recs])
     const phases: string[] = []
-    await runAiDiscovery(
-      { query: "a unique progress query xyz", conversation: newConversation(), availableOnly: false },
-      { onPhase: (phase) => phases.push(phase) }
-    )
-    expect(phases).toEqual(["asking", "verifying", "checking"])
+    const unsubscribe = subscribeAiDiscoveryPhase((phase) => phases.push(phase))
+    // Drop the replayed last phase from any earlier run in this file.
+    phases.length = 0
+    try {
+      await runAiDiscovery(
+        { query: "a unique progress query xyz", conversation: newConversation(), availableOnly: false },
+        {
+          chat: chat.transport,
+          searchTmdb: fakeTmdbSearch(recs),
+          fetchDetails: fakeDetails,
+          catalogue: [],
+          profileId: "w3-run-6",
+        }
+      )
+    } finally {
+      unsubscribe()
+    }
+    expect(phases).toEqual(["asking-ai", "verifying-tmdb", "checking-library", "ready"])
   })
 })
 
@@ -482,8 +652,66 @@ describe("taste summary formatting", () => {
 
 describe("progress copy", () => {
   it("names the three honest stages", () => {
-    expect(aiDiscoveryProgressText("asking")).toBe("Asking AI for recommendations…")
-    expect(aiDiscoveryProgressText("verifying")).toBe("Verifying titles with TMDB…")
-    expect(aiDiscoveryProgressText("checking")).toBe("Checking your library…")
+    expect(aiDiscoveryProgressText("asking-ai")).toBe("Asking AI for recommendations…")
+    expect(aiDiscoveryProgressText("verifying-tmdb")).toBe("Verifying titles with TMDB…")
+    expect(aiDiscoveryProgressText("checking-library")).toBe("Checking your library…")
+  })
+})
+
+describe("debounce timer (0.11.6 P0 regression)", () => {
+  // The timer lives in DiscoverView.svelte, which has no component
+  // mount harness in this repo (vitest runs in node; the settings
+  // tests pin DiscoverView behaviour the same way — by reading the
+  // source). These assertions pin the wiring that makes the runtime
+  // behaviour true: one helper, called first by every transition
+  // that replaces the typed query's meaning, and no other
+  // clearTimeout call site that could leave a stale timer alive.
+  const discoverView = readFileSync(
+    new URL("../src/components/DiscoverView.svelte", import.meta.url),
+    "utf8"
+  )
+
+  function handlerBody(name: string): string {
+    const start = discoverView.indexOf(`function ${name}(`)
+    expect(start).toBeGreaterThan(-1)
+    const rest = discoverView.slice(start)
+    const next = rest.indexOf("\n  function ", 1)
+    return next === -1 ? rest : rest.slice(0, next)
+  }
+
+  it("cancelQueryTimer clears the pending timer and nulls it", () => {
+    const body = handlerBody("cancelQueryTimer")
+    expect(body).toContain("clearTimeout(queryTimer)")
+    expect(body).toContain("queryTimer = null")
+  })
+
+  it.each(["newSearch", "submitSearch", "askAi", "pickExample", "pickMood", "clearSearch"])(
+    "%s cancels the debounce timer before any search or state effect",
+    (name) => {
+      const body = handlerBody(name)
+      const cancelAt = body.indexOf("cancelQueryTimer()")
+      expect(cancelAt).toBeGreaterThan(-1)
+      const effectAt = Math.min(
+        ...["void runSearch(", "void runAiSearch(", "queryDebounced =", "activeMood ="].map(
+          (marker) => {
+            const at = body.indexOf(marker)
+            return at === -1 ? Number.POSITIVE_INFINITY : at
+          }
+        )
+      )
+      expect(effectAt).toBeLessThan(Number.POSITIVE_INFINITY)
+      expect(cancelAt).toBeLessThan(effectAt)
+    }
+  )
+
+  it("onQueryInput cancels any pending timer before arming a new one", () => {
+    const body = handlerBody("onQueryInput")
+    expect(body).toContain("cancelQueryTimer()")
+    expect(body.indexOf("cancelQueryTimer()")).toBeLessThan(body.indexOf("setTimeout("))
+  })
+
+  it("no stale clearTimeout call site remains outside the helper", () => {
+    const matches = discoverView.match(/clearTimeout\(/g) ?? []
+    expect(matches).toHaveLength(1)
   })
 })

@@ -20,10 +20,8 @@
 
 import type { TasteSummaryShape } from "../taste.ts"
 import type { ConversationState } from "./generation.ts"
-import type {
-  DiscoveryProgressPhase,
-  VerifiedRecommendation,
-} from "./discovery-orchestrator.ts"
+import type { VerifiedRecommendation } from "./verification.ts"
+import { AI_SEARCH_PHASE_LABELS, type AiSearchPhase } from "./status.ts"
 
 // ---------------------------------------------------------------------------
 // Availability filtering (client-side only — never a new model call)
@@ -113,20 +111,20 @@ export function refinementContextLabel(
 // In-flight + completion status copy
 // ---------------------------------------------------------------------------
 
-export const AI_DISCOVERY_PROGRESS_LABELS: Record<
-  DiscoveryProgressPhase,
-  string
-> = {
-  asking: "Asking AI for recommendations",
-  verifying: "Verifying titles with TMDB",
-  checking: "Checking your library",
+export const AI_DISCOVERY_PROGRESS_LABELS: Partial<Record<AiSearchPhase, string>> = {
+  "asking-ai": "Asking AI for recommendations",
+  "verifying-tmdb": "Verifying titles with TMDB",
+  "checking-library": "Checking your library",
 }
 
-/** In-flight status line, with an ellipsis while work is in progress. */
-export function aiDiscoveryProgressText(
-  phase: DiscoveryProgressPhase
-): string {
-  return `${AI_DISCOVERY_PROGRESS_LABELS[phase]}…`
+/**
+ * In-flight status line, with an ellipsis while work is in progress.
+ * The three in-flight phases carry their own labels; any other phase
+ * falls back to its status.ts label so the line never shows
+ * "undefined" if the subscription delivers a terminal phase.
+ */
+export function aiDiscoveryProgressText(phase: AiSearchPhase): string {
+  return `${AI_DISCOVERY_PROGRESS_LABELS[phase] ?? AI_SEARCH_PHASE_LABELS[phase]}…`
 }
 
 // ---------------------------------------------------------------------------
