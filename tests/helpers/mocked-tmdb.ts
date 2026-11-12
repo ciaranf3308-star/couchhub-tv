@@ -64,7 +64,18 @@ export function createMockTmdb(options: MockTmdbOptions = {}): MockTmdb {
   const fetchDetails: TmdbDetailsFn = async (tmdbId) => {
     detailsCalls.push(tmdbId)
     if (options.throwDetails) throw options.throwDetails
-    return detailsTable[tmdbId] ?? null
+    const details = detailsTable[tmdbId]
+    if (!details) return null
+    // Adapt the fixture's partial shape to the real
+    // VerificationDetails: every field present, absent values null,
+    // no alternative titles in the mock tables.
+    return {
+      genres: details.genres ?? [],
+      synopsis: details.synopsis ?? null,
+      posterUrl: details.posterUrl ?? null,
+      backdropUrl: details.backdropUrl ?? null,
+      alternativeTitles: [],
+    }
   }
 
   return { search, fetchDetails, searchCalls, detailsCalls }

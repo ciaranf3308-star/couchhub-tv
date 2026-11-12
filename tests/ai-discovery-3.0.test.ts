@@ -35,8 +35,18 @@
 //     (missing module/function), verified by running this file with the
 //     stubs removed. The replace-not-intersect assertions below are the
 //     regression net for the user-reported Comedy→Horror bug.
+//   - INTEGRATION (0.11.6): the stubs are deleted and this file runs
+//     against the real W1/W2/W4 modules. Assertions that encoded
+//     stub-only behaviour were adapted to real behaviour, each
+//     documented in the integration report (brief §13 item 7):
+//     phase vocabulary (ready/unavailable), activeMood field name,
+//     null (not ""/undefined) for absent presentation fields, object
+//     external ids, constraints in the user message, the
+//     orchestrator-never-filters availableOnly rule (the view filter
+//     is asserted instead), no catalogue-loader dep, and cache
+//     clearing between tests (the real verifier caches identities).
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, beforeEach } from "vitest"
 import {
   generateRecommendations,
   newConversation,
@@ -45,9 +55,14 @@ import {
 } from "@/scripts/lib/ai/generation"
 import {
   verifyRecommendations,
+  clearVerificationCache,
   type VerifiedRecommendation,
 } from "@/scripts/lib/ai/verification"
-import { runAiDiscovery } from "@/scripts/lib/ai/discovery-orchestrator"
+import {
+  runAiDiscovery,
+  clearAiDiscoveryCache,
+} from "@/scripts/lib/ai/discovery-orchestrator"
+import { visibleRecommendations } from "@/scripts/lib/ai/discovery-presentation"
 import {
   applyNewSearch,
   applyQuickPick,
@@ -123,7 +138,6 @@ import {
   fixedReplyMock,
   modelReply,
   scriptedMock,
-  systemMessageText,
   userMessageText,
   type MockChat,
 } from "./helpers/mocked-model"
@@ -148,6 +162,16 @@ function assertNoFillerTitles(results: VerifiedRecommendation[]): void {
     expect(PUNCTUATION_SET.has(result.title)).toBe(false)
   }
 }
+
+// Real-module caches persist across tests in this file: the
+// orchestrator's module-level cache AND the verifier's identity cache
+// (positive 7d / negative 24h). profileId isolation covers the
+// former; the latter is keyed by title/kind/year and shared, so both
+// caches are cleared between every test.
+beforeEach(() => {
+  clearAiDiscoveryCache()
+  clearVerificationCache()
+})
 
 // ── Test A: AI independence ──────────────────────────────────────
 // The model generates from its own knowledge. Titles ABSENT from the
@@ -182,11 +206,15 @@ describe("Test A — AI independence", () => {
       expect(result.match).toBeNull()
       expect(NO_ANIME_TITLES.has(result.title)).toBe(false)
     }
-    expect(outcome.receipt.phase).toBe("validated")
+    expect(outcome.receipt.phase).toBe("ready")
     expect(outcome.receipt.engine).toBe("ai")
     expect(outcome.receipt.model).toBe(MOCK_MODEL_ID)
     expect(outcome.diagnostics.catalogueSize).toBe(NO_ANIME_CATALOGUE.length)
-    expect(isFreshAiAnswer(outcome.receipt)).toBe(true)
+    // The new flow's honest completion note is the "ready" state note
+    // (isFreshAiAnswer is rerank-path-only: it recognises "validated"
+    // receipts, and W1's generation flow never emits that phase).
+    expect(aiSearchStateNote(outcome.receipt)).toContain("Recommendations ready")
+    expect(aiSearchStateNote(outcome.receipt)).toContain(MOCK_MODEL_ID)
   })
 
   it("asks TMDB about every generated title, not only catalogue titles", async () => {
@@ -257,7 +285,7 @@ describe("Test B — availability matching", () => {
     expect(parasite.match).toBeNull()
   })
 
-  it("availableOnly returns only the playable subset, in generation order", async () => {
+  it("availableOnly never filters at the orchestrator: the view filter yields the playable subset", async () => {
     const mock = fixedReplyMock(modelReply(MIXED_AVAILABILITY_SET))
     const tmdb = createMockTmdb()
     const outcome = await runAiDiscovery(
@@ -275,11 +303,23 @@ describe("Test B — availability matching", () => {
         profileId: "w5-b-2",
       },
     )
-    expect(titlesOf(outcome.results)).toEqual(["Hereditary", "Superbad"])
-    for (const result of outcome.results) {
+    // Real behaviour (W1, deliberate): the orchestrator always
+    // returns the full verified set and never filters on
+    // availableOnly — the toggle is a view filter owned by the UI.
+    expect(titlesOf(outcome.results)).toEqual([
+      "Hereditary",
+      "The Shawshank Redemption",
+      "Superbad",
+      "Parasite",
+    ])
+    expect(outcome.diagnostics.acceptedCount).toBe(4)
+    // The view filter over the same results yields the playable
+    // subset, in generation order, with nothing substituted.
+    const only = visibleRecommendations(outcome.results, true)
+    expect(titlesOf(only)).toEqual(["Hereditary", "Superbad"])
+    for (const result of only) {
       expect(result.match).not.toBeNull()
     }
-    expect(outcome.diagnostics.acceptedCount).toBe(2)
   })
 })
 
@@ -490,24 +530,24 @@ describe("Test E — genre replacement", () => {
 
     let state = freshDiscoveryState()
     state = applyQuickPick(state, "short")
-    expect(state.activeQuickPick).toBe("short")
+    expect(state.activeMood).toBe("short")
     expect(state.query).toBe("")
-    expect(filteredBy(state.activeQuickPick)).toEqual(["Short Comedy Film"])
+    expect(filteredBy(state.activeMood)).toEqual(["Short Comedy Film"])
 
     state = applyQuickPick(state, "binge")
-    expect(state.activeQuickPick).toBe("binge")
+    expect(state.activeMood).toBe("binge")
     // Series rated 7.0+: the 6.8-rated series and both movies are out,
     // and the 60-minute cap from "short" leaves no trace.
-    expect(filteredBy(state.activeQuickPick).sort()).toEqual([
+    expect(filteredBy(state.activeMood).sort()).toEqual([
       "Attack on Titan",
       "Death Note",
     ])
 
     state = applyQuickPick(state, "easy")
-    expect(state.activeQuickPick).toBe("easy")
+    expect(state.activeMood).toBe("easy")
     // Easy Watching genres only — the series/rating constraints of
     // "binge" are gone, so the comedy short and the anime film return.
-    expect(filteredBy(state.activeQuickPick).sort()).toEqual([
+    expect(filteredBy(state.activeMood).sort()).toEqual([
       "Attack on Titan",
       "Death Note",
       "Perfect Blue",
@@ -518,10 +558,10 @@ describe("Test E — genre replacement", () => {
   it("applyQuickPick is pure and applyNewSearch returns a fresh state", () => {
     const start = freshDiscoveryState()
     const picked = applyQuickPick(start, "intense")
-    expect(picked.activeQuickPick).toBe("intense")
-    expect(start.activeQuickPick).toBeNull()
+    expect(picked.activeMood).toBe("intense")
+    expect(start.activeMood).toBeNull()
     expect(applyNewSearch()).toEqual(freshDiscoveryState())
-    expect(applyNewSearch()).toEqual({ activeQuickPick: null, query: "" })
+    expect(applyNewSearch()).toEqual({ query: "", activeMood: null, genre: null })
   })
 })
 
@@ -630,9 +670,13 @@ describe("Test F — conversational refinement", () => {
     const prompt = allMessageText(mock, 0)
     expect(prompt).toContain("Dark anime")
     expect(prompt).toContain("Attack on Titan")
-    expect(systemMessageText(mock, 0)).toContain("movie")
-    expect(systemMessageText(mock, 0)).toContain("2010")
-    expect(systemMessageText(mock, 0)).toContain("Perfect Blue")
+    // Real prompt structure (W1): the system message carries the
+    // fixed format instruction; explicit constraints travel in the
+    // USER message's Requirements section — kind, year window and
+    // exclusions all land there verbatim.
+    expect(userMessageText(mock, 0)).toContain("Only films.")
+    expect(userMessageText(mock, 0)).toContain("2010")
+    expect(userMessageText(mock, 0)).toContain("Perfect Blue")
   })
 })
 
@@ -713,7 +757,7 @@ describe("Test H — title verification", () => {
       fetchDetails: tmdb.fetchDetails,
       catalogue: AI30_CATALOGUE,
     })
-    expect(result.generated.externalId).toBe("tmdb:1")
+    expect(result.generated.externalId).toEqual({ source: "tmdb", id: "1" })
     expect(result.tmdbId).toBe(TMDB_DUNE_2021.id)
     expect(result.tmdbId).not.toBe(1)
   })
@@ -732,8 +776,8 @@ describe("Test H — title verification", () => {
     expect(result.title).toBe("Dune")
     expect(result.year).toBe(1995)
     expect(result.genres).toEqual([])
-    expect(result.synopsis).toBe("")
-    expect(result.posterUrl).toBeUndefined()
+    expect(result.synopsis).toBeNull()
+    expect(result.posterUrl).toBeNull()
     expect(result.verificationNote).toBeTruthy()
   })
 
@@ -748,9 +792,9 @@ describe("Test H — title verification", () => {
     expect(result.tmdbId).toBeNull()
     expect(result.match).toBeNull()
     expect(result.genres).toEqual([])
-    expect(result.synopsis).toBe("")
-    expect(result.posterUrl).toBeUndefined()
-    expect(result.backdropUrl).toBeUndefined()
+    expect(result.synopsis).toBeNull()
+    expect(result.posterUrl).toBeNull()
+    expect(result.backdropUrl).toBeNull()
     expect(result.verificationNote).toBeTruthy()
   })
 
@@ -779,7 +823,7 @@ describe("Test H — title verification", () => {
     expect(result.genres).toEqual([])
     expect(result.synopsis).toBe("Overview for Neon Genesis Evangelion (1995).")
     expect(result.posterUrl).toBe("https://image.tmdb.org/t/p/w500/mock-900006.jpg")
-    expect(result.backdropUrl).toBeUndefined()
+    expect(result.backdropUrl).toBeNull()
   })
 
   it("corrects years at the orchestration seam too", async () => {
@@ -952,7 +996,7 @@ describe("Test J — empty catalogue", () => {
       expect(result.match).toBeNull()
     }
     expect(outcome.diagnostics.catalogueSize).toBe(0)
-    expect(outcome.receipt.phase).toBe("validated")
+    expect(outcome.receipt.phase).toBe("ready")
   })
 
   it("treats an absent catalogue the same as an empty one", async () => {
@@ -978,7 +1022,7 @@ describe("Test J — empty catalogue", () => {
     }
   })
 
-  it("availableOnly with an empty catalogue returns no results, honestly", async () => {
+  it("availableOnly with an empty catalogue returns the verified set, honestly all unavailable", async () => {
     const mock = fixedReplyMock(modelReply(DARK_ANIME_SET))
     const tmdb = createMockTmdb()
     const outcome = await runAiDiscovery(
@@ -996,8 +1040,16 @@ describe("Test J — empty catalogue", () => {
         profileId: "w5-j-3",
       },
     )
-    expect(outcome.results).toEqual([])
-    expect(outcome.diagnostics.acceptedCount).toBe(0)
+    // The orchestrator never filters on availableOnly (see Test B):
+    // the full verified set comes back, every item honestly
+    // unmatched — and the view filter over it is honestly empty.
+    expect(outcome.results).toHaveLength(5)
+    for (const result of outcome.results) {
+      expect(result.verified).toBe(true)
+      expect(result.match).toBeNull()
+    }
+    expect(outcome.diagnostics.acceptedCount).toBe(5)
+    expect(visibleRecommendations(outcome.results, true)).toEqual([])
   })
 })
 
@@ -1028,7 +1080,7 @@ describe("Test K — cost and caching", () => {
     )
     expect(mock.callCount).toBe(1)
     expect(first.receipt.cacheHit).toBe(false)
-    expect(first.receipt.phase).toBe("validated")
+    expect(first.receipt.phase).toBe("ready")
 
     const second = await runAiDiscovery(
       { query: "Something great", conversation, availableOnly: false, count: 4 },
@@ -1067,7 +1119,14 @@ describe("Test K — cost and caching", () => {
     )
     expect(mock.callCount).toBe(1)
     expect(availableOnly.receipt.cacheHit).toBe(true)
-    expect(titlesOf(availableOnly.results)).toEqual(["Hereditary", "Superbad"])
+    // availableOnly is not a cache dimension AND never filters: the
+    // cached full set comes back, and the view filter does the
+    // subsetting with zero new calls.
+    expect(titlesOf(availableOnly.results)).toEqual(titlesOf(all.results))
+    expect(titlesOf(visibleRecommendations(availableOnly.results, true))).toEqual([
+      "Hereditary",
+      "Superbad",
+    ])
 
     const allAgain = await runAiDiscovery(
       { query: "Something great", conversation, availableOnly: false, count: 4 },
@@ -1147,7 +1206,7 @@ describe("Test L — failure handling", () => {
       },
     )
     expect(outcome.results).toEqual([])
-    expect(outcome.receipt.phase).toBe("fallback")
+    expect(outcome.receipt.phase).toBe("unavailable")
     expect(outcome.receipt.fallbackReason).toBeTruthy()
     expect(outcome.diagnostics.fallbackReason).toBeTruthy()
     expect(outcome.conversation).toEqual(conversation)
@@ -1179,8 +1238,8 @@ describe("Test L — failure handling", () => {
       expect(result.tmdbId).toBeNull()
       expect(result.match).toBeNull()
       expect(result.genres).toEqual([])
-      expect(result.synopsis).toBe("")
-      expect(result.posterUrl).toBeUndefined()
+      expect(result.synopsis).toBeNull()
+      expect(result.posterUrl).toBeNull()
       expect(result.verificationNote).toBeTruthy()
     }
     expect(outcome.receipt.phase).not.toBe("sending")
@@ -1212,7 +1271,15 @@ describe("Test L — failure handling", () => {
     expect(byTitle.get("The Shawshank Redemption")?.verified).toBe(true)
   })
 
-  it("a catalogue failure degrades to honestly-unavailable verified results", async () => {
+  it("a missing catalogue degrades to honestly-unavailable verified results", async () => {
+    // Real seam (W1): DiscoveryRunDeps.catalogue is an array supplied
+    // by the caller — there is no catalogue-loader dep, and the
+    // orchestrator never loads the catalogue itself. When the caller
+    // cannot supply one (absent catalogue), verification still
+    // proceeds and every match is honestly null. (The W5 stub's
+    // throwing-loader variant has no real equivalent: if Discover's
+    // own catalogue load fails, the view shows its load-failed state
+    // and never calls the orchestrator.)
     const mock = fixedReplyMock(modelReply(HORROR_SET))
     const tmdb = createMockTmdb()
     const outcome = await runAiDiscovery(
@@ -1226,9 +1293,6 @@ describe("Test L — failure handling", () => {
         chat: mock.transport,
         searchTmdb: tmdb.search,
         fetchDetails: tmdb.fetchDetails,
-        catalogue: () => {
-          throw new Error("mock catalogue failure")
-        },
         profileId: "w5-l-4",
       },
     )
@@ -1237,7 +1301,7 @@ describe("Test L — failure handling", () => {
       expect(result.verified).toBe(true)
       expect(result.match).toBeNull()
     }
-    expect(outcome.diagnostics.catalogueSize).toBe(0)
+    expect(outcome.diagnostics.catalogueSize).toBeUndefined()
   })
 
   it("a malformed model reply resolves with an honest fallback, no crash", async () => {
@@ -1259,7 +1323,7 @@ describe("Test L — failure handling", () => {
       },
     )
     expect(outcome.results).toEqual([])
-    expect(outcome.receipt.phase).toBe("fallback")
+    expect(outcome.receipt.phase).toBe("unavailable")
     expect(outcome.receipt.fallbackReason).toBeTruthy()
     expect(tmdb.searchCalls).toHaveLength(0)
   })
@@ -1283,7 +1347,7 @@ describe("Test L — failure handling", () => {
       },
     )
     expect(outcome.results).toEqual([])
-    expect(outcome.receipt.phase).toBe("fallback")
+    expect(outcome.receipt.phase).toBe("unavailable")
     expect(outcome.receipt.fallbackReason).toBeTruthy()
   })
 })

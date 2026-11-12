@@ -159,7 +159,7 @@ export const WRONG_YEAR_SET: GeneratedRecommendation[] = [
 
 /** A wrong/uncertain external id the TMDB mock must override (Test H). */
 export const WRONG_EXTERNAL_ID_SET: GeneratedRecommendation[] = [
-  rec("Dune", 2021, "movie", "Desert-planet epic.", "epic sci-fi", { externalId: "tmdb:1" }),
+  rec("Dune", 2021, "movie", "Desert-planet epic.", "epic sci-fi", { externalId: { source: "tmdb", id: "1" } }),
 ]
 
 /** A year no TMDB candidate can satisfy (Test H: unverified, not guessed). */
