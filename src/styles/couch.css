@@ -4442,3 +4442,1080 @@ html[data-couch] .rs-channel-row__art img {
   height: 100%;
   object-fit: cover;
 }
+
+/* === 0.11.8 W2: Browse Everything === */
+/* Browse Everything (Movies & Series 2.0, Phase B): one shared
+   browsing framework — header + actions, keyed page grid,
+   pagination, one hints bar, category/filter drawers, search +
+   sort overlays. Tokens only (see the hue-family rule at the top
+   of this file): no colour literals in this section. The category
+   drawer reuses the 0.11.7 rs-tv-category-drawer chrome; only the
+   browse-only additions (unavailable reasons, section marker)
+   live here. */
+html[data-couch] .rs-browse2 {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 0;
+}
+html[data-couch] .rs-browse2__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-browse2__meta {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__summary-row {
+  margin: 0;
+  min-height: 1.5rem;
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__summary:empty {
+  display: none;
+}
+html[data-couch] .rs-browse2__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+html[data-couch] .rs-browse2__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+html[data-couch] .rs-browse2__action-glyph {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-browse2__action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse2__status:empty {
+  display: none;
+}
+html[data-couch] .rs-browse2__notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border: 1px solid var(--rs-line);
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-browse2__notice--error {
+  border-color: var(--rs-accent);
+}
+html[data-couch] .rs-browse2__empty-title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse2__status-text {
+  margin: 0;
+  font-size: var(--rs-description-size);
+  line-height: 1.45;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__skeleton {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+html[data-couch] .rs-browse2__skeleton-card {
+  aspect-ratio: 2 / 3;
+  border-radius: 0.75rem;
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-browse2__grid-host {
+  min-height: 0;
+}
+html[data-couch] .rs-browse2__grid-host .rs-grid {
+  gap: 1.25rem;
+}
+html[data-couch] .rs-browse2__pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+}
+html[data-couch] .rs-browse2__pagination[hidden] {
+  display: none;
+}
+html[data-couch] .rs-browse2__page-btn {
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  color: var(--rs-text);
+  font-size: var(--rs-meta-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse2__page-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse2__page-btn.is-current {
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+}
+html[data-couch] .rs-browse2__page-btn:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse2__page-label {
+  margin-inline-start: 0.75rem;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-browse2__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__overlay-host:empty {
+  display: none;
+}
+/* Browse category drawer: shared 0.11.7 chrome + unavailable-row
+   reasons. The drawer root is absolute inset-0; the overlay host
+   is fixed so the drawer covers the viewport. */
+html[data-couch] .rs-browse2__overlay-host {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+html[data-couch] .rs-browse2__overlay-host:empty {
+  position: static;
+}
+html[data-couch] .rs-browse-drawer__item-reason {
+  flex-shrink: 0;
+  max-width: 14rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-tv-category-drawer__item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Filter drawer: right-side panel (categories live on the left),
+   same scale/chrome language as the category drawer. */
+html[data-couch] .rs-browse-filter-drawer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+}
+html[data-couch] .rs-browse-filter-drawer__scrim {
+  flex: 1;
+  min-width: 0;
+  order: 1;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-filter-drawer__panel {
+  width: 38rem;
+  max-width: 86%;
+  flex-shrink: 0;
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 2rem 1.5rem 1.5rem;
+  background: var(--rs-panel);
+  border-inline-start: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+  overflow: hidden;
+}
+html[data-couch] .rs-browse-filter-drawer__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-filter-drawer__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding-inline-end: 0.25rem;
+}
+html[data-couch] .rs-browse-filter-drawer__row {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rs-text);
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-focused,
+html[data-couch] .rs-browse-filter-drawer__row:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-apply {
+  justify-content: center;
+  margin-top: 0.75rem;
+  background: var(--rs-accent);
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-clear {
+  justify-content: center;
+  border-color: var(--rs-line);
+}
+html[data-couch] .rs-browse-filter-drawer__row-label {
+  flex: 1;
+  min-width: 0;
+}
+html[data-couch] .rs-browse-filter-drawer__row-value {
+  flex-shrink: 0;
+  color: var(--rs-focus);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-browse-filter-drawer__row-note {
+  flex-basis: 100%;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+html[data-couch] .rs-browse-filter-drawer__note {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+/* Search overlay: centred panel, large input, visible scope choice. */
+html[data-couch] .rs-browse-search-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+html[data-couch] .rs-browse-search-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-search-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: 52rem;
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-panel);
+  border: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+}
+html[data-couch] .rs-browse-search-overlay__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-search-overlay__input {
+  min-height: 3.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  color: var(--rs-text);
+  font-size: 1.5rem;
+}
+html[data-couch] .rs-browse-search-overlay__input:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow: 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-search-overlay__scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn {
+  min-height: 3rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: transparent;
+  color: var(--rs-text);
+  font-size: var(--rs-meta-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn.is-selected {
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse-search-overlay__count {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-search-overlay__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+/* Sort overlay: centred compact list. */
+html[data-couch] .rs-browse-sort-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+}
+html[data-couch] .rs-browse-sort-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-sort-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: 34rem;
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-panel);
+  border: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+}
+html[data-couch] .rs-browse-sort-overlay__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-sort-overlay__note {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-sort-overlay__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-browse-sort-overlay__option {
+  min-height: 3.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rs-text);
+  font-size: 1.375rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-sort-overlay__option.is-selected {
+  background: color-mix(in srgb, var(--rs-accent) 10%, transparent);
+}
+html[data-couch] .rs-browse-sort-overlay__option.is-focused,
+html[data-couch] .rs-browse-sort-overlay__option:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-sort-overlay__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+/* === end 0.11.8 W2: Browse Everything === */
+
+/* === 0.11.8 W4: Series Home === */
+/* Series Home (W4-owned) — header, shelves, genre grid, browse
+   entry, view-all tiles and home states. Tokens only: no colour
+   literals (the visual-identity test pins the wine hue family).
+   Card/rail/focus primitives come from the shared rules above; this
+   section only composes them for the episodic home layout. */
+
+/* Header: title + count on the left, primary actions on the right. */
+html[data-couch] .rs-series-home-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+}
+html[data-couch] .rs-series-home-head__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-series-home-head__titles .rs-meta {
+  margin: 0;
+}
+html[data-couch] .rs-series-home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+html[data-couch] .rs-series-home-actions[hidden] {
+  display: none;
+}
+
+/* Shelf stack: vertical rhythm between shelves; each shelf is a
+   shared .rs-rail, so card sizing and focus behaviour match the
+   rest of the app. */
+html[data-couch] #series-home-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+  min-width: 0;
+}
+html[data-couch] .rs-series-home-shelf {
+  min-width: 0;
+}
+html[data-couch] .rs-series-home-subtitle {
+  margin: 0;
+}
+
+/* Genre grid: the rail row becomes a grid for the genre section —
+   tiles wrap into rows at any viewport width. Linear D-pad L/R
+   still walks every tile in reading order (one rail, one row). */
+html[data-couch] .rs-series-home-genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1.25rem;
+  overflow: visible;
+  padding: 0.75rem 0.25rem 1rem;
+}
+html[data-couch] .rs-series-home-genre {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--rs-radius);
+  overflow: hidden;
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-genre__media {
+  position: absolute;
+  inset: 0;
+}
+html[data-couch] .rs-series-home-genre__media .rs-image {
+  width: 100%;
+  height: 100%;
+}
+html[data-couch] .rs-series-home-genre__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+html[data-couch] .rs-series-home-genre__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 2.5rem 1.25rem 1rem;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--rs-ink) 88%, transparent),
+    transparent
+  );
+}
+html[data-couch] .rs-series-home-genre--no-art {
+  justify-content: flex-end;
+}
+html[data-couch] .rs-series-home-genre--no-art .rs-series-home-genre__body {
+  background: none;
+  padding: 1.25rem;
+}
+html[data-couch] .rs-series-home-genre__name {
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+html[data-couch] .rs-series-home-genre__count {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-series-home-genre:focus-visible {
+  outline: none;
+  transform: scale(1.03);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+  z-index: 2;
+}
+
+/* View-all tile: same footprint as a poster card, quiet surface. */
+html[data-couch] .rs-series-home-viewall {
+  flex: 0 0 clamp(9rem, 11.5vw, 13rem);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  font-size: 1.25rem;
+  font-weight: 600;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-viewall__arrow {
+  font-size: 1.75rem;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-series-home-viewall:focus-visible {
+  outline: none;
+  transform: scale(1.05);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+  z-index: 2;
+}
+
+/* Browse Everything entry: one wide band closing the home stack. */
+html[data-couch] .rs-series-home-browse-section {
+  gap: 0;
+}
+html[data-couch] .rs-series-home-browse-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1.75rem 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-browse-entry__title {
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+html[data-couch] .rs-series-home-browse-entry__meta {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-series-home-browse-entry:focus-visible {
+  outline: none;
+  transform: scale(1.01);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+}
+
+/* Home states: loading skeleton rows (no fake titles) and the
+   centred status blocks for no-playlist / empty / error. */
+html[data-couch] .rs-series-home-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+html[data-couch] .rs-series-home-skeleton-row {
+  display: flex;
+  gap: 1.25rem;
+}
+html[data-couch] .rs-series-home-skeleton-card {
+  flex: 0 0 clamp(9rem, 11.5vw, 13rem);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-series-home-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 46rem;
+  padding: 2rem 0;
+}
+html[data-couch] .rs-series-home-state .rs-empty__title,
+html[data-couch] .rs-series-home-state .rs-empty__message {
+  margin: 0;
+}
+/* === end 0.11.8 W4: Series Home === */
+
+/* === 0.11.8 W3: Movies Home === */
+/* Movies Home (brief §3, §17): a premium, restrained console-media
+   home — spacious 16:9, strong typography, minimal chrome, generous
+   focus targets, sofa-distance legibility. Shelves reuse the shared
+   .rs-rail / .rs-card system (large density, as on Home); only the
+   header, featured film, genre tiles, view-all tiles and the Browse
+   Everything entry carry .mh-* styles. All sizes in rem/clamp so the
+   1920x1080 baseline scales to 4K. No pill bars, no HTML selects,
+   no placeholder art pretending to be real. */
+
+/* Header (§3.1): title + library count, two primary actions. */
+html[data-couch] .mh-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+}
+html[data-couch] .mh-header__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+html[data-couch] .mh-header__titles .rs-meta {
+  margin: 0;
+}
+html[data-couch] .mh-header__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+/* Loading skeleton stack. */
+html[data-couch] #movies-home-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+html[data-couch] #movies-home-skeleton[hidden] {
+  display: none;
+}
+
+/* Error actions row. */
+html[data-couch] .mh-error__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* Featured film (§3.2): one substantial cinematic hero. The link is
+   the whole hero; the Refresh Picks button sits above it. */
+html[data-couch] .mh-featured {
+  position: relative;
+}
+html[data-couch] .mh-featured__link {
+  position: relative;
+  display: block;
+  min-height: clamp(21rem, 42vh, 30rem);
+  border-radius: var(--rs-radius);
+  overflow: hidden;
+  color: var(--rs-text);
+  text-decoration: none;
+  background: var(--rs-bg-2);
+  box-shadow: var(--rs-shadow);
+  transition: box-shadow var(--rs-motion);
+}
+html[data-couch] .mh-featured__link:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+}
+html[data-couch] .mh-featured__media {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+html[data-couch] .mh-featured__media .rs-image {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+html[data-couch] .mh-featured__media .rs-image img {
+  object-position: 72% 18%;
+}
+/* Scrim: solid burgundy on the left where the text sits, opening to
+   the artwork on the right; plus a bottom fade for the actions. */
+html[data-couch] .mh-featured__scrim {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background:
+    linear-gradient(to top, rgb(23 10 12 / 0.88) 0%, rgb(23 10 12 / 0) 42%),
+    linear-gradient(to right, rgb(23 10 12 / 0.94) 0%, rgb(23 10 12 / 0.72) 34%, rgb(23 10 12 / 0.12) 68%, rgb(23 10 12 / 0) 100%);
+}
+html[data-couch] .mh-featured__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.875rem;
+  max-width: 48rem;
+  min-height: inherit;
+  justify-content: center;
+  padding: 3rem 3.25rem;
+}
+html[data-couch] .mh-featured__eyebrow {
+  font-size: var(--rs-meta-size);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--rs-focus);
+}
+html[data-couch] .mh-featured__title {
+  font-family: var(--rs-font-display);
+  font-size: clamp(2.5rem, 4.2vw, 3.75rem);
+  line-height: 1.02;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  margin: 0;
+  text-wrap: balance;
+}
+html[data-couch] .mh-featured__meta {
+  font-size: 1.25rem;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--rs-text);
+  margin: 0;
+}
+html[data-couch] .mh-featured__synopsis {
+  font-size: var(--rs-description-size);
+  line-height: 1.5;
+  color: var(--rs-text);
+  margin: 0;
+  max-width: 42rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+html[data-couch] .mh-featured__actions {
+  display: flex;
+  margin-top: 0.5rem;
+}
+html[data-couch] .mh-featured__actions .rs-hero__action {
+  pointer-events: none;
+}
+html[data-couch] .mh-featured__progress {
+  display: block;
+  width: min(24rem, 100%);
+  height: 0.375rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.22);
+  overflow: hidden;
+}
+html[data-couch] .mh-featured__progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--rs-focus);
+  border-radius: inherit;
+}
+/* Refresh Picks: a deliberate action, quiet until focused. */
+html[data-couch] .mh-featured__refresh {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 3;
+  font-size: 1.125rem;
+  padding: 0.625rem 1.25rem;
+}
+/* Compact fallback (§3.2): no artwork and no description — a small
+   elegant row, never a giant empty hero. */
+html[data-couch] .mh-featured--compact .mh-featured__link {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 1.5rem 2rem;
+}
+html[data-couch] .mh-featured--compact .mh-featured__media {
+  position: relative;
+  inset: auto;
+  flex: 0 0 8.5rem;
+}
+html[data-couch] .mh-featured--compact .mh-featured__media .rs-image {
+  aspect-ratio: 2 / 3;
+  border-radius: 0.75rem;
+}
+html[data-couch] .mh-featured--compact .mh-featured__scrim {
+  display: none;
+}
+html[data-couch] .mh-featured--compact .mh-featured__content {
+  min-height: 0;
+  padding: 0;
+  gap: 0.625rem;
+}
+html[data-couch] .mh-featured--compact .mh-featured__title {
+  font-size: clamp(1.75rem, 2.6vw, 2.375rem);
+}
+html[data-couch] .mh-featured--compact .mh-featured__refresh {
+  position: static;
+  margin-left: auto;
+  flex: none;
+}
+html[data-couch] .mh-featured--compact {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+html[data-couch] .mh-featured--compact .mh-featured__link {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Shelf supporting note (§3.5 honesty note). */
+html[data-couch] .mh-shelf__note {
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* View All tile (§3.3, §3.5): the trailing tile in a shelf row —
+   controller-reachable (a rail item), quiet, clearly marked. */
+html[data-couch] .mh-viewall {
+  flex: 0 0 clamp(15rem, 16.4vw, 19rem);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 12rem;
+  padding: 1.5rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  text-align: center;
+  transition:
+    border-color var(--rs-motion),
+    background-color var(--rs-motion),
+    transform var(--rs-motion);
+}
+html[data-couch] .mh-viewall:hover {
+  border-color: var(--rs-focus);
+  transform: scale(1.02);
+}
+html[data-couch] .mh-viewall:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .mh-viewall__label {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+html[data-couch] .mh-viewall__sub {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+
+/* Explore Genres (§3.6): compact typographic tiles — no artwork, so
+   no unrelated poster can mislead. Rows of four (rail-friendly). */
+html[data-couch] .mh-genres {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+html[data-couch] .mh-genres__row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+html[data-couch] .mh-genre-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 1.5rem 1.75rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    border-color var(--rs-motion),
+    background-color var(--rs-motion),
+    transform var(--rs-motion);
+}
+html[data-couch] .mh-genre-tile:hover {
+  background: var(--rs-surface-2);
+  border-color: var(--rs-focus);
+  transform: translateY(-2px);
+}
+html[data-couch] .mh-genre-tile:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .mh-genre-tile__name {
+  font-family: var(--rs-font-display);
+  font-size: 1.75rem;
+  line-height: 1.15;
+  font-weight: 700;
+}
+html[data-couch] .mh-genre-tile__count {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+
+/* Browse Everything entry (§3.7): one prominent band at the end of
+   the curated experience. No grid below it. */
+html[data-couch] .mh-browse-entry__link {
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+  padding: 1.75rem 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    border-color var(--rs-motion),
+    background-color var(--rs-motion);
+}
+html[data-couch] .mh-browse-entry__link:hover {
+  background: var(--rs-surface-2);
+  border-color: var(--rs-focus);
+}
+html[data-couch] .mh-browse-entry__link:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .mh-browse-entry__title {
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+}
+html[data-couch] .mh-browse-entry__count {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .mh-browse-entry__arrow {
+  margin-left: auto;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--rs-focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-couch] .mh-featured__link,
+  html[data-couch] .mh-viewall,
+  html[data-couch] .mh-genre-tile,
+  html[data-couch] .mh-browse-entry__link {
+    transition: none;
+  }
+  html[data-couch] .mh-viewall:hover,
+  html[data-couch] .mh-genre-tile:hover {
+    transform: none;
+  }
+}
+/* === end 0.11.8 W3: Movies Home === */

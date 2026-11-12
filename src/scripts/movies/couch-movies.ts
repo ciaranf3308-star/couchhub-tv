@@ -36,6 +36,13 @@ export interface MovieRow {
   norm: string;
   tmdb: number | null;
   containerExt?: string | null;
+  /** Raw provider category id (0.11.8): keeps same-label categories distinct in the index. */
+  category_id?: string | null;
+  /** Raw 5-based provider rating (0.11.8): lets rating evidence double it instead of misreading it as 10-point. */
+  rating_5based?: string | null;
+  /** Index signature (0.11.8): mapped rows ARE W1 catalog rows — the
+   * index and rating evidence read provider fields dynamically. */
+  [key: string]: unknown;
 }
 
 export type MovieSortMode =
@@ -107,6 +114,8 @@ export function mapMovieRow(
     norm: normalize(`${name} ${category} ${year}`),
     tmdb: Number.isFinite(tmdb) ? tmdb : null,
     containerExt: raw.container_extension || null,
+    category_id: categoryId != null ? String(categoryId) : null,
+    rating_5based: raw.rating_5based != null && raw.rating_5based !== "" ? String(raw.rating_5based) : null,
   };
 }
 
@@ -172,6 +181,29 @@ export function formatClock(totalSeconds: number): string {
   const mm = String(m).padStart(2, "0");
   const ss = String(s).padStart(2, "0");
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
+
+/**
+ * Provider `added` timestamp normalised to epoch milliseconds, or null
+ * when the value is missing or malformed (0.11.8 Movies Home).
+ *
+ * Xtream sends `added` as Unix seconds; some providers send
+ * milliseconds. Values above 1e12 are read as milliseconds, smaller
+ * positive values as seconds. Zero, negative, non-finite and absurd
+ * far-future values (more than a day past `nowMs`) are malformed —
+ * they must never order a "Recently Added" shelf or support a
+ * "just added" claim. Pure.
+ */
+export function addedTimestampMs(added: unknown, nowMs?: number): number | null {
+  const raw = Number(added);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  const now = nowMs ?? Date.now();
+  const ms = raw > 1e12 ? raw : raw * 1000;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  // Earlier than 2000-01-01 cannot be a real provider timestamp.
+  if (ms < 946684800000) return null;
+  if (ms > now + 24 * 60 * 60 * 1000) return null;
+  return ms;
 }
 
 export interface MovieFilter {

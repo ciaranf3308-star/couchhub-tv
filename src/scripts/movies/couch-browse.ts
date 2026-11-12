@@ -1,6 +1,17 @@
 // Couch browse controller (W4) — shared by the Movies and Series
 // Couch index pages.
 //
+// 0.11.8 (W2): the NEW Browse Everything framework lives in
+// src/scripts/lib/browse-everything.ts (mountBrowseEverything,
+// re-exported at the bottom of this file for adapter migration).
+// This legacy controller (mountCouchBrowse + CouchBrowseAdapter)
+// is PRESERVED unchanged until W3/W4 replace the /movies and
+// /series pages: the adapters import CouchBrowseAdapter from
+// here, and deleting the controller before the pages land would
+// break the build. Integration removes mountCouchBrowse once no
+// page mounts it. New browse work goes to browse-everything.ts,
+// never here.
+//
 // The two pages share one DOM contract (see the .astro templates) and
 // one controller; each screen supplies a small kind adapter (row
 // mapping, rails, card views, filtering). The controller owns:
@@ -691,3 +702,37 @@ export function mountCouchBrowse<T>(
 
   void boot();
 }
+
+// ── 0.11.8 W2 — Browse Everything re-exports ────────────────────
+// The canonical implementation is src/scripts/lib/browse-everything.ts.
+// Re-exported here so the kind adapters and page entries can
+// migrate off mountCouchBrowse one import at a time.
+export {
+  mountBrowseEverything,
+  deriveBrowseGroups,
+  type BrowseController,
+  type BrowseDataSource,
+  type BrowseLoadResult,
+  type BrowseWatchSets,
+  type MountBrowseEverythingOptions,
+} from "@/scripts/lib/browse-everything.ts";
+export {
+  createBrowseState,
+  selectCategory,
+  applyFilters,
+  resetAllFilters,
+  activeFilterSummary,
+  setPage,
+  setSearch,
+  setSort,
+  type BrowseState,
+  type BrowseFilters,
+  type BrowseKind,
+  type BrowseCategorySelection,
+  type BrowseSortId,
+} from "@/scripts/lib/browse-state.ts";
+export {
+  parseModeFromUrl,
+  setModeInUrl,
+  type HomeBrowseMode,
+} from "@/scripts/lib/home-browse-modes.ts";

@@ -305,6 +305,10 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // toggle-favourite — both as keys for the mode's own
       // keydown handler (livetv-keys.ts keyboard table).
       dispatchKey("x");
+    } else if (browseEverythingActive()) {
+      // 0.11.8: Browse Everything owns X as the card-context key
+      // for the controller's layer routing.
+      dispatchKey("x");
     } else if (inPlayerContext()) togglePlayPause();
     else openDetailsOfFocused();
     return;
@@ -320,6 +324,12 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // W5 (0.9.0): landing Y = open Guide, browser Y = open
       // search — both as keys for the mode's own keydown handler.
       dispatchKey("y");
+    } else if (browseEverythingActive()) {
+      // 0.11.8: Browse Everything owns Y as its search key. On
+      // Home, Y keeps falling through to goSearch() (global
+      // search) — series/movies-scoped search stays on the header
+      // button (D19).
+      dispatchKey("y");
     } else if (inPlayerContext()) toggleFullscreen();
     else goSearch();
     return;
@@ -328,8 +338,14 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     markGamepadActive();
     // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
     // W5: in the Browser LB steps to the previous category ("[").
+    // 0.11.8: in Browse Everything LB turns the page; on Movies /
+    // Series Home LB jumps to the previous shelf (the Home
+    // shelf-jump listener owns PageUp/PageDown). Both are gated on
+    // no open modal, so a dialog keeps owning the press.
     if (livetvGuideActive()) dispatchKey("PageUp");
     else if (livetvBrowserActive()) dispatchKey("[");
+    else if (browseEverythingActive() && findOpenModal() === null) dispatchKey("PageUp");
+    else if (moviesSeriesHomeActive() && findOpenModal() === null) dispatchKey("PageUp");
     else seekBy(-10);
     return;
   }
@@ -337,8 +353,11 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     markGamepadActive();
     // W3: in the Guide RB shifts time later (Guide key "PageDown").
     // W5: in the Browser RB steps to the next category ("]").
+    // 0.11.8: Browse Everything page turn / Home shelf jump (see LB).
     if (livetvGuideActive()) dispatchKey("PageDown");
     else if (livetvBrowserActive()) dispatchKey("]");
+    else if (browseEverythingActive() && findOpenModal() === null) dispatchKey("PageDown");
+    else if (moviesSeriesHomeActive() && findOpenModal() === null) dispatchKey("PageDown");
     else seekBy(10);
     return;
   }
@@ -378,6 +397,11 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     } else if (livetvLandingActive() || livetvBrowserActive()) {
       // W5 (0.9.0): landing / browser Menu = open options, as
       // the "m" key for the mode's own keydown handler.
+      dispatchKey("m");
+    } else if (browseEverythingActive()) {
+      // 0.11.8: Browse Everything Menu = Filters drawer ("m").
+      // Menu on Home keeps opening Settings: no page-options
+      // surface exists on Home (D20 — §16.1 Menu-on-Home GAP).
       dispatchKey("m");
     } else {
       openSettings();
@@ -634,6 +658,29 @@ function livetvPlaybackActive(): boolean {
 // untouched.
 function livetvGuideActive(): boolean {
   return livetvContext() === "guide";
+}
+
+// 0.11.8: Browse Everything / Movies & Series Home contexts. The
+// browse controller sets [data-browse-everything] on its root; the
+// series controller keeps the mount alive-but-hidden while Home
+// shows, so visibility is part of the predicate — a [hidden]
+// ancestor means Home is showing, not Browse. The browse overlays
+// (drawers, sort, search) are divs, not <dialog>s, so findOpenModal
+// stays null while they are open and dispatched keys reach the
+// controller's layer routing. Live TV checks always run first: on
+// the Live TV page these predicates are false (no browse/home roots
+// exist there), and the Live TV branches below win regardless.
+function browseEverythingActive(): boolean {
+  const root = document.querySelector("[data-browse-everything]");
+  if (!root || !root.isConnected) return false;
+  return root.closest("[hidden]") == null;
+}
+
+function moviesSeriesHomeActive(): boolean {
+  if (browseEverythingActive()) return false;
+  const home = document.querySelector("#movies-home-root, #series-home-root");
+  if (!home || !home.isConnected) return false;
+  return home.closest("[hidden]") == null;
 }
 
 function openDetailsOfFocused(): void {

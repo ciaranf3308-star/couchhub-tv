@@ -237,6 +237,14 @@ export const seriesAdapter: CouchBrowseAdapter<SeriesRow> = {
     const metaEl = card.querySelector(".rs-card__meta");
     if (!metaEl) return;
     observeSeasonCount(card, playlistId, row.id, (count) => {
+      // Key guard (0.11.8 integration, decision x): the season-count
+      // resolution is async, and a card node may be reused for a
+      // different series before it resolves. Never write one series'
+      // count into another series' card. Cards without a key (legacy
+      // callers) keep the old behaviour — the write is their only
+      // meta update and there is nothing to verify against.
+      const key = card.getAttribute("data-couch-key");
+      if (key != null && key !== `series-${row.id}`) return;
       metaEl.textContent = seriesMetaLine(row, count);
     });
   },
