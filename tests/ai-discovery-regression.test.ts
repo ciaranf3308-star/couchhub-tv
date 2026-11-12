@@ -300,8 +300,21 @@ describe("T3 — explicit short-query AI", () => {
 
 describe("T4 — composite identity (movie:123 vs series:123)", () => {
   it("returns both the movie and the series sharing provider id 123, with correct kinds — including from cache", async () => {
+    // Focused catalogue: both 123s are plainly retrievable for a
+    // comedy query, so this test isolates IDENTITY (do the two
+    // kinds survive as two titles?) from retrieval (T1's job).
     registerAIRanker(aiRanker)
-    const out = await rankDiscover("comedy", AI_DISCOVERY_CATALOGUE, plainTaste(), { forceAi: true })
+    const focused = [
+      COMPOSITE_MOVIE_123,
+      COMPOSITE_SERIES_123,
+      candidate({ id: "c0", title: "The Awkward Reunion", genres: ["Comedy"], overview: "A funny comedy." }),
+      candidate({ id: "c1", title: "My Neighbour's Goat", genres: ["Comedy"], overview: "A funny comedy." }),
+      candidate({ id: "c2", title: "Lawn Order", genres: ["Comedy"], overview: "A funny comedy." }),
+      candidate({ id: "c3", title: "Flatpack", genres: ["Comedy"], overview: "A funny comedy." }),
+      candidate({ id: "w0", title: "The Winter Offensive", genres: ["War"], overview: "A historical war film." }),
+      candidate({ id: "w1", title: "No Man's Land", genres: ["War"], overview: "A historical war film." }),
+    ]
+    const out = await rankDiscover("comedy", focused, plainTaste(), { forceAi: true })
     const keys = out.results.map((r) => `${r.candidate.kind}:${r.candidate.id}`)
     expect(keys).toContain("movie:123")
     expect(keys).toContain("series:123")
@@ -312,7 +325,7 @@ describe("T4 — composite identity (movie:123 vs series:123)", () => {
       "The 123rd Laugh: The Series",
     )
     // Second identical ask: the cached answer must keep both kinds.
-    const again = await rankDiscover("comedy", AI_DISCOVERY_CATALOGUE, plainTaste(), { forceAi: true })
+    const again = await rankDiscover("comedy", focused, plainTaste(), { forceAi: true })
     const keysAgain = again.results.map((r) => `${r.candidate.kind}:${r.candidate.id}`)
     expect(keysAgain).toContain("movie:123")
     expect(keysAgain).toContain("series:123")
