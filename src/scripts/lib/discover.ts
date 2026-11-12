@@ -35,6 +35,11 @@ import {
 } from "@/scripts/lib/taste.ts"
 import { confidenceScore, votesFor } from "./recommendations.ts"
 import { normalize } from "@/scripts/lib/text.ts"
+import {
+  retrieveCandidates,
+  RETRIEVAL_SHORTLIST_MAX,
+  type QueryIntent,
+} from "@/scripts/lib/retrieval.ts"
 
 // ---------------------------------------------------------------------------
 // Contract shapes (exact — the coordinator wires W2/W3 against these)
@@ -214,10 +219,16 @@ const LIGHT_GENRES = new Set([
   "music",
 ])
 
-/** Mood words a natural-language query may contain, mapped to presets. */
+/** Mood words a natural-language query may contain, mapped to presets.
+ * NOTE (0.11.5, Bug 4): "comedy" is NOT here. It is an explicit genre
+ * word — the intent parser (retrieval.ts) treats it as a HARD genre
+ * requirement, and it must never silently become the broad "Easy
+ * Watching" preset (comedy/family/animation/romance/musical). "funny"
+ * stays a mood word: asking for something funny is a mood, not a
+ * genre demand. */
 const MOOD_WORDS: Array<{ words: string[]; presetId: string }> = [
   { words: ["intense", "thrilling", "scary", "dark", "gripping", "edge"], presetId: "intense" },
-  { words: ["easy", "light", "relaxing", "chill", "feel-good", "feelgood", "funny", "comedy"], presetId: "easy" },
+  { words: ["easy", "light", "relaxing", "chill", "feel-good", "feelgood", "funny"], presetId: "easy" },
   { words: ["short", "quick", "under an hour"], presetId: "short" },
   { words: ["binge", "series", "show", "season"], presetId: "binge" },
   { words: ["hidden", "gem", "underrated", "obscure"], presetId: "hidden-gems" },
@@ -582,67 +593,48 @@ export interface SearchOptions extends RankOptions {
   moodId?: string
 }
 
-function tokenize(query: string): string[] {
-  return normalize(query)
-    .split(/\s+/)
-    // normalize() leaves punctuation like "?" and "'" in place, so strip
-    // anything non-alphanumeric here — "tonight?" must tokenize as
-    // "tonight" (a stop word), not as a text token that matches nothing.
-    .map((t) => t.replace(/[^a-z0-9]+/g, "").trim())
-    .filter((t) => t.length > 1)
-}
-
-/** Filler words that carry no search meaning ("something to watch tonight"). */
-const STOP_WORDS = new Set([
-  "something",
-  "anything",
-  "watch",
-  "tonight",
-  "for",
-  "the",
-  "a",
-  "an",
-  "me",
-  "us",
-  "we",
-  "i",
-  "like",
-  "fancy",
-  "feel",
-  "mood",
-  "should",
-  "what",
-  "show",
-  "movie",
-  "film",
-  "series",
-  "please",
-])
-
-/** Local text match: title, genres, cast and director — no network. */
-function textMatchScore(candidate: DiscoverCandidate, tokens: string[]): number {
-  if (!tokens.length) return 0
-  const haystacks = [
-    normalize(candidate.title),
-    ...candidate.genres.map((g) => normalize(g)),
-    ...candidate.cast.map((c) => normalize(c)),
-    normalize(candidate.director || ""),
-  ]
-  let score = 0
-  for (const token of tokens) {
-    const inTitle = normalize(candidate.title).includes(token)
-    const anywhere = haystacks.some((h) => h.includes(token))
-    if (!anywhere) return 0
-    score += inTitle ? 30 : 12
-    if (normalize(candidate.title).startsWith(token)) score += 10
-  }
-  return score
+export interface SearchOptions extends RankOptions {
+  moodId?: string
 }
 
 /**
- * Mood/text search over the local catalogue. Plain title queries match
- * text; mood words ("something intense", "short") also apply the matching
- * preset as a scoring boost. Returns ranked candidates, best first.
+ * Whether the parsed intent states a HARD constraint (genre, anime,
+ * kind, runtime/year bounds, reference title, exclusion). Mood-only
+ * intents (tones/moods with no hard constraint) are not hard — a mood
+ * preset may still filter them, as before.
+ */
+function intentHasHardConstraints(intent: QueryIntent): boolean {
+  return (
+    intent.genreGroups.length > 0 ||
+    intent.anime !== undefined ||
+    intent.contentKind !== undefined ||
+    intent.maxRuntimeMinutes !== undefined ||
+    intent.minRuntimeMinutes !== undefined ||
+    intent.minYear !== undefined ||
+    intent.maxYear !== undefined ||
+    intent.referenceTitles.length > 0 ||
+    intent.excludedGenres.length > 0
+  )
+}
+
+/**
+ * Mood/text search over the local catalogue, routed through the
+ * retrieval stage (retrieval.ts) — the SAME engine rankDiscover uses,
+ * not a second one.
+ *
+ * - The query is parsed into an intent; hard filters (genre, anime,
+ *   kind, runtime/year, watched, disliked) run BEFORE any ranking,
+ *   over the WHOLE catalogue — never the first N entries in catalogue
+ *   order. A relevant title at catalogue position 500 beats an
+ *   irrelevant title at position 1.
+ * - Local relevance (intent match first) orders the eligible pool;
+ *   the existing taste engine (rankCandidates) then scores the same
+ *   pool, and relevance stays the primary sort with taste second.
+ * - A mood with no text tokens and no hard constraints is a filter,
+ *   not a hint ("something intense" only returns intense titles), as
+ *   before. When the query states hard constraints, the intent already
+ *   filtered the pool — a mood preset must not re-broaden it (Bug 4:
+ *   "comedy" stays a comedy-genre requirement, never "Easy Watching").
  */
 export function searchDiscover(
   query: string,
@@ -656,49 +648,61 @@ export function searchDiscover(
     const preset = moodPreset(opts.moodId)
     if (preset && !moods.includes(preset)) moods.push(preset)
   }
-  const tokens = tokenize(trimmed).filter(
-    (t) =>
-      !STOP_WORDS.has(t) &&
-      !MOOD_WORDS.some(({ words }) => words.includes(t))
-  )
+
+  const retrieval = retrieveCandidates(trimmed, candidates, taste, {
+    excludeKeys: opts.excludeKeys,
+    watchedKeys: opts.watchedKeys,
+    excludeWatched: opts.excludeWatched,
+  })
+  const intent = retrieval.intent
+  const hasTextTokens = intent.titleTokens.length > 0
 
   // "Surprise Me" is the only non-deterministic path, and it is explicit:
-  // the user asked for a random pick. Everything else is ranked.
-  if (moods.some((m) => m.id === "surprise-me") && !tokens.length) {
+  // the user asked for a random pick. Everything else is ranked. A
+  // surprise WITH a constraint ("surprise me with a comedy") is not a
+  // blind pick — retrieval ranks the constrained pool instead.
+  if (
+    moods.some((m) => m.id === "surprise-me") &&
+    !hasTextTokens &&
+    !intent.hasConstraintIntent
+  ) {
     const ranked = rankCandidates(candidates, taste, { ...opts, moods: [] })
     const pick = pickRandomCandidate(ranked, opts)
     return pick ? [pick] : ranked.slice(0, opts.limit ?? 1)
   }
 
-  // A mood with no text tokens is a filter, not a hint: "something
-  // intense" should only return intense titles. With text tokens the
-  // mood is a scoring boost on top of the text match instead.
-  let pool = candidates
-  if (moods.length && !tokens.length) {
+  // Mood-only queries filter by the preset; constrained queries were
+  // already hard-filtered by the intent.
+  let pool = retrieval.ranked
+  if (moods.length && !hasTextTokens && !intentHasHardConstraints(intent)) {
     const activeMoods = moods.filter((m) => m.id !== "surprise-me")
     if (activeMoods.length) {
-      pool = candidates.filter((c) =>
-        activeMoods.some((m) => moodMatches(c, m))
+      pool = pool.filter((item) =>
+        activeMoods.some((m) => moodMatches(item.candidate, m))
       )
     }
-  } else if (tokens.length > 0) {
-    pool = candidates.filter((c) => textMatchScore(c, tokens) > 0)
   }
-  const ranked = rankCandidates(pool, taste, { ...opts, moods })
-  if (!tokens.length) return ranked
 
-  // Text relevance outranks taste for an explicit title search: re-sort
-  // by text score first, taste score second (stable, deterministic).
-  const withText = ranked.map((item) => ({
-    item,
-    text: textMatchScore(item.candidate, tokens),
-  }))
-  withText.sort((a, b) => {
-    if (b.text !== a.text) return b.text - a.text
-    if (b.item.score !== a.item.score) return b.item.score - a.item.score
-    return a.item.candidate.title.localeCompare(b.item.candidate.title)
+  // Taste scoring on the eligible pool (the existing engine), then
+  // relevance-first ordering: query relevance dominates taste, and
+  // taste breaks relevance ties.
+  const tasteRanked = rankCandidates(
+    pool.map((item) => item.candidate),
+    taste,
+    { ...opts, moods, limit: pool.length }
+  )
+  const relevanceByKey = new Map(
+    pool.map((item) => [candidateKey(item.candidate), item.relevanceScore])
+  )
+  tasteRanked.sort((a, b) => {
+    const relDiff =
+      (relevanceByKey.get(candidateKey(b.candidate)) ?? 0) -
+      (relevanceByKey.get(candidateKey(a.candidate)) ?? 0)
+    if (relDiff !== 0) return relDiff
+    if (b.score !== a.score) return b.score - a.score
+    return a.candidate.title.localeCompare(b.candidate.title)
   })
-  return withText.map((entry) => entry.item)
+  return tasteRanked.slice(0, opts.limit ?? 12)
 }
 
 /** Explicit random pick (Surprise Me). `random` is injectable for tests. */
@@ -730,13 +734,16 @@ export function validateRankedCandidates(
 }
 
 /**
- * Rank a shortlist, preferring the registered AI ranker when the user
- * asked a natural-language question. Any failure, empty result, or
- * unknown id falls back to the local engine — Discover never goes blank
- * because the AI path did. The returned `source` tells the page which
- * engine actually produced the results, so it can label them honestly
- * ("AI picks" vs "Local recommendations") and say when a fallback
- * happened (AI04 / AI06).
+ * Rank a query, preferring the registered AI ranker when the user asked
+ * a question (explicit Ask AI, a natural-language question, or a parsed
+ * category constraint — see rankDiscover). Either way the query first
+ * goes through the retrieval stage (retrieval.ts): the ranker only ever
+ * receives the relevance-ranked shortlist, never the raw catalogue.
+ * Any failure, empty result, or unknown id falls back to the local
+ * engine — Discover never goes blank because the AI path did. The
+ * returned `source` tells the page which engine actually produced the
+ * results, so it can label them honestly ("AI picks" vs "Local
+ * recommendations") and say when a fallback happened (AI04 / AI06).
  */
 export interface DiscoverSearchResult {
   results: RankedCandidate[]
@@ -759,50 +766,97 @@ function aiFallbackReason(error: unknown): string {
   }
 }
 
+export interface RankDiscoverOptions {
+  /** Explicit "Ask AI" tap / submit with automatic requests on: the
+   * user consented to spend one request — the ranker runs regardless
+   * of query length. Only ever set from an explicit ask. */
+  forceAi?: boolean
+  /** Hard-excluded candidate keys (not-interested / disliked). */
+  excludeKeys?: Set<string>
+  /** Keys the profile already watched; dropped when excludeWatched. */
+  watchedKeys?: Set<string>
+  excludeWatched?: boolean
+  /** False when the profile opted out of sharing taste with the AI
+   * provider: local retrieval still uses taste, but the ranker gets
+   * an empty summary. The ranker itself re-checks the stored
+   * preference (ranking.ts); this is the explicit seam for callers
+   * that already know it. Defaults to sharing (existing behaviour). */
+  shareTaste?: boolean
+  /** Shortlist cap override (default RETRIEVAL_SHORTLIST_MAX). */
+  shortlistLimit?: number
+}
+
 export async function rankDiscover(
   query: string,
   candidates: DiscoverCandidate[],
   taste: TasteModel,
-  opts: { forceAi?: boolean } = {}
+  opts: RankDiscoverOptions = {}
 ): Promise<DiscoverSearchResult> {
+  const trimmed = query.trim()
+  const searchOpts = {
+    excludeKeys: opts.excludeKeys,
+    watchedKeys: opts.watchedKeys,
+    excludeWatched: opts.excludeWatched,
+  }
+  // An empty query is nothing to ask the model — the local engine
+  // answers (and never spends a paid request on it).
+  if (!trimmed) {
+    return { results: searchDiscover(trimmed, candidates, taste, searchOpts), source: "local" }
+  }
+  // Bug 2: the query goes through the retrieval stage FIRST — intent,
+  // hard filters over the whole catalogue, local relevance ranking —
+  // and only the cost-bounded shortlist (top 20 by relevance) ever
+  // reaches the ranker. The ranker never sees catalogue order.
+  const retrieval = retrieveCandidates(trimmed, candidates, taste, {
+    ...searchOpts,
+    limit: opts.shortlistLimit ?? RETRIEVAL_SHORTLIST_MAX,
+  })
   const ranker = getAIRanker()
-  // 0.11.4: an explicit "Ask AI" tap is the user consenting to spend one
-  // request — it must reach the ranker even for a short keyword query
-  // ("COMEDY" is one word with no natural-language hint, so the gate
-  // below used to veto it silently and the rail came back "Local" with
-  // no reason given). The gate stays for non-explicit paths; forceAi
-  // only comes from an explicit ask.
-  if (ranker && (opts.forceAi || isNaturalLanguageQuery(query))) {
+  // Bug 3: AI eligibility is the explicit ask, a natural-language
+  // question, OR a parsed category constraint. "COMEDY" is a genre
+  // question, not a title lookup — it reaches the model without
+  // forceAi now. A bare title search ("Space Heist") still never
+  // reaches the model unless explicitly asked, so plain lookups stay
+  // free and local. Manual/automatic request preferences live in the
+  // caller (DiscoverView): this function only ever runs the model when
+  // the caller asked it to (forceAi) or the query itself is a question.
+  const aiEligible =
+    opts.forceAi || isNaturalLanguageQuery(query) || retrieval.intent.hasConstraintIntent
+  if (ranker && aiEligible) {
     try {
-      const summary = summarizeTaste(taste) as TasteSummary
-      const ranked = await ranker.rank(query, candidates, summary)
+      const summary =
+        opts.shareTaste === false
+          ? ({ favouriteGenres: [], likedTitles: [], dislikedTitles: [] } satisfies TasteSummary)
+          : (summarizeTaste(taste) as TasteSummary)
+      const ranked = await ranker.rank(trimmed, retrieval.shortlist, summary)
       const valid = validateRankedCandidates(
         Array.isArray(ranked) ? ranked : [],
         candidates
       )
       if (valid.length) return { results: valid, source: "ai" }
       return {
-        results: searchDiscover(query, candidates, taste),
+        results: searchDiscover(trimmed, candidates, taste, searchOpts),
         source: "local",
         fallbackReason: "AI didn't rank any titles in your library, so these are local picks.",
       }
     } catch (error) {
       return {
-        results: searchDiscover(query, candidates, taste),
+        results: searchDiscover(trimmed, candidates, taste, searchOpts),
         source: "local",
         fallbackReason: aiFallbackReason(error),
       }
     }
   }
-  return { results: searchDiscover(query, candidates, taste), source: "local" }
+  return { results: searchDiscover(trimmed, candidates, taste, searchOpts), source: "local" }
 }
 
 export async function rankWithAI(
   query: string,
   candidates: DiscoverCandidate[],
-  taste: TasteModel
+  taste: TasteModel,
+  opts: RankDiscoverOptions = {}
 ): Promise<RankedCandidate[]> {
-  return (await rankDiscover(query, candidates, taste)).results
+  return (await rankDiscover(query, candidates, taste, opts)).results
 }
 
 // ---------------------------------------------------------------------------
