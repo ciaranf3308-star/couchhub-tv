@@ -1,0 +1,361 @@
+{
+  "discover-loaded": {
+    "railTitle": null,
+    "stateNote": null,
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": false,
+    "diagOpen": null,
+    "diagText": null,
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [],
+    "scrollY": 0,
+    "activeElement": "A.rs-nav__link#",
+    "activeRect": {
+      "top": 31,
+      "bottom": 79
+    },
+    "railRect": null,
+    "firstCardRect": null,
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 577
+  },
+  "local-comedy": {
+    "railTitle": "Local recommendations for “COMEDY”",
+    "stateNote": "Local search — AI wasn't asked.",
+    "localNote": "Local results so far — Ask AI below for AI picks.",
+    "askAiVisible": true,
+    "askAiText": "Ask AI about “COMEDY”",
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "false",
+    "diagText": null,
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "A Funny Thing",
+      "The Pranksters",
+      "The Funny Bone",
+      "Stand-Up Night",
+      "Laugh Track",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Slapstick Comedy"
+    ],
+    "scrollY": 405,
+    "activeElement": "BUTTON.rs-discover-ask-ai#",
+    "activeRect": {
+      "top": 609,
+      "bottom": 668
+    },
+    "railRect": {
+      "top": 474,
+      "bottom": 1176
+    },
+    "firstCardRect": {
+      "top": 704,
+      "bottom": 1080
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 172,
+    "aiCallsDuring": 0
+  },
+  "scroll-check": {
+    "railTitle": "Local recommendations for “COMEDY”",
+    "stateNote": "Local search — AI wasn't asked.",
+    "localNote": "Local results so far — Ask AI below for AI picks.",
+    "askAiVisible": true,
+    "askAiText": "Ask AI about “COMEDY”",
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "false",
+    "diagText": null,
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "A Funny Thing",
+      "The Pranksters",
+      "The Funny Bone",
+      "Stand-Up Night",
+      "Laugh Track",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Slapstick Comedy"
+    ],
+    "scrollY": 501,
+    "activeElement": "BUTTON.rs-discover-ask-ai#",
+    "activeRect": {
+      "top": 513,
+      "bottom": 572
+    },
+    "railRect": {
+      "top": 378,
+      "bottom": 1080
+    },
+    "firstCardRect": {
+      "top": 608,
+      "bottom": 984
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 76
+  },
+  "ai-comedy": {
+    "railTitle": "AI picks for “COMEDY”",
+    "stateNote": "AI answered just now · gpt-4o-mini · 0.0s",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "false",
+    "diagText": null,
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "A Funny Thing",
+      "The Pranksters",
+      "The Funny Bone",
+      "Stand-Up Night",
+      "Laugh Track",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Slapstick Comedy"
+    ],
+    "scrollY": 392,
+    "activeElement": "A.rs-card#",
+    "activeRect": {
+      "top": 601,
+      "bottom": 977
+    },
+    "railRect": {
+      "top": 487,
+      "bottom": 1073
+    },
+    "firstCardRect": {
+      "top": 601,
+      "bottom": 977
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 185
+  },
+  "diagnostics-ai": {
+    "railTitle": "AI picks for “COMEDY”",
+    "stateNote": "AI answered just now · gpt-4o-mini · 0.0s",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "true",
+    "diagText": "Hide diagnostics EngineAI — live request StateAI result validated Modelgpt-4o-mini Query type Keyword / title search Catalogue size20 titles Retrieved candidates8 Sent to the model8 Accepted8 Rejected by catalogue check0 CacheMiss — live request Request time0.0s Fallback reason— Diagnostics never include API keys, credentials or request text.",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "A Funny Thing",
+      "The Pranksters",
+      "The Funny Bone",
+      "Stand-Up Night",
+      "Laugh Track",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Slapstick Comedy"
+    ],
+    "scrollY": 392,
+    "activeElement": "BUTTON.rs-discover-diag__toggle#",
+    "activeRect": {
+      "top": 1025,
+      "bottom": 1073
+    },
+    "railRect": {
+      "top": 487,
+      "bottom": 1342
+    },
+    "firstCardRect": {
+      "top": 601,
+      "bottom": 977
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 185
+  },
+  "ai-cached": {
+    "railTitle": "Cached AI picks for “COMEDY”",
+    "stateNote": "Cached AI answer — no new request was sent.",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "true",
+    "diagText": "Hide diagnostics EngineAI — cached answer StateCached recommendation ModelNot recorded (cached answer) Query type Keyword / title search Catalogue size20 titles Retrieved candidates8 Sent to the model8 Accepted8 Rejected by catalogue check0 CacheHit — no new request sent Request time0.0s Fallback reason— Diagnostics never include API keys, credentials or request text.",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "A Funny Thing",
+      "The Pranksters",
+      "The Funny Bone",
+      "Stand-Up Night",
+      "Laugh Track",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Slapstick Comedy"
+    ],
+    "scrollY": 405,
+    "activeElement": "A.rs-card#",
+    "activeRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "railRect": {
+      "top": 474,
+      "bottom": 1329
+    },
+    "firstCardRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 172,
+    "aiCallsDuring": 0
+  },
+  "ai-dark-anime": {
+    "localBeforeAsk": {
+      "railTitle": "Local recommendations for “some fucked up dark anime”",
+      "stateNote": "Local search — AI wasn't asked.",
+      "localNote": "Local results so far — Ask AI below for AI picks.",
+      "askAiVisible": true,
+      "askAiText": "Ask AI about “some fucked up dark anime”",
+      "fallback": null,
+      "diagToggleVisible": true,
+      "diagOpen": "true",
+      "diagText": "Hide diagnostics EngineLocal engine StateLocal search Model— Query type Natural-language question — Moods: Something Intense Catalogue size20 titles Retrieved candidatesNot reported yet Sent to the modelNot reported yet Accepted4 Rejected by catalogue check0 CacheNot used Request time0.0s Fallback reason— Diagnostics never include API keys, credentials or request text.",
+      "modeBadge": "AI connected",
+      "modeDetail": "Connected — endpoint, key and model verified.",
+      "cards": [
+        "Black Sakura",
+        "Crimson Ronin",
+        "The Hollow School",
+        "Ashen Blades"
+      ],
+      "scrollY": 405,
+      "activeElement": "BUTTON.rs-discover-ask-ai#",
+      "activeRect": {
+        "top": 609,
+        "bottom": 668
+      },
+      "railRect": {
+        "top": 474,
+        "bottom": 1445
+      },
+      "firstCardRect": {
+        "top": 704,
+        "bottom": 1080
+      },
+      "navBottom": 106,
+      "navHeight": 106,
+      "moodGridTop": 172
+    },
+    "railTitle": "AI picks for “some fucked up dark anime”",
+    "stateNote": "AI answered just now · gpt-4o-mini · 0.0s",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "true",
+    "diagText": "Hide diagnostics EngineAI — live request StateAI result validated Modelgpt-4o-mini Query type Natural-language question — Moods: Something Intense Catalogue size20 titles Retrieved candidates4 Sent to the model4 Accepted4 Rejected by catalogue check0 CacheMiss — live request Request time0.0s Fallback reason— Diagnostics never include API keys, credentials or request text.",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "Black Sakura",
+      "Crimson Ronin",
+      "The Hollow School",
+      "Ashen Blades"
+    ],
+    "scrollY": 405,
+    "activeElement": "A.rs-card#",
+    "activeRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "railRect": {
+      "top": 474,
+      "bottom": 1329
+    },
+    "firstCardRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 172
+  },
+  "diagnostics-dark-anime": {
+    "railTitle": "AI picks for “some fucked up dark anime”",
+    "stateNote": "AI answered just now · gpt-4o-mini · 0.0s",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": "true",
+    "diagText": "Hide diagnostics EngineAI — live request StateAI result validated Modelgpt-4o-mini Query type Natural-language question — Moods: Something Intense Catalogue size20 titles Retrieved candidates4 Sent to the model4 Accepted4 Rejected by catalogue check0 CacheMiss — live request Request time0.0s Fallback reason— Diagnostics never include API keys, credentials or request text.",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "cards": [
+      "Black Sakura",
+      "Crimson Ronin",
+      "The Hollow School",
+      "Ashen Blades"
+    ],
+    "scrollY": 405,
+    "activeElement": "A.rs-card#",
+    "activeRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "railRect": {
+      "top": 474,
+      "bottom": 1329
+    },
+    "firstCardRect": {
+      "top": 588,
+      "bottom": 964
+    },
+    "navBottom": 106,
+    "navHeight": 106,
+    "moodGridTop": 172
+  },
+  "aiCalls": [
+    {
+      "query": "You rank titles for a TV discovery screen. Reply with JSON o",
+      "ranked": [
+        "movie:7",
+        "movie:13",
+        "movie:12",
+        "movie:1",
+        "movie:10",
+        "movie:8",
+        "movie:9",
+        "movie:11"
+      ]
+    },
+    {
+      "query": "You rank titles for a TV discovery screen. Reply with JSON o",
+      "ranked": [
+        "movie:14",
+        "movie:15",
+        "series:16",
+        "movie:17"
+      ]
+    }
+  ]
+}

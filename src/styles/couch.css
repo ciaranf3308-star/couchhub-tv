@@ -330,6 +330,19 @@ html[data-couch] .rs-osd__btn:focus-visible {
 
 /* ── Top navigation ────────────────────────────────────────────── */
 
+/* Sticky nav: reserve its height in every scroll-into-view, so
+   focused or scrolled content never slides underneath it (0.11.5:
+   Discover's quick-pick row clipped half-under the nav when results
+   rendered — the submit focus scroll plus the on-screen-keyboard
+   close anchoring left it 32px under). Measured 106px tall at
+   1920x1080; 7.5rem covers it with breathing room. No bottom
+   padding: a nearest scroll that bottom-aligns must stop at the
+   viewport bottom, not 120px short of it — bottom padding made
+   Discover's render scroll land deeper, not shallower. */
+html[data-couch] {
+  scroll-padding-top: 7.5rem;
+}
+
 html[data-couch] .rs-topnav {
   position: sticky;
   top: 0;
