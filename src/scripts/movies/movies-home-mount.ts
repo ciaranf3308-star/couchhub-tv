@@ -39,6 +39,24 @@ import {
   scrollFocusedIntoView,
 } from "@/scripts/lib/couch-focus.ts";
 import {
+  BACK_PRIORITY,
+  recordRouteOrigin,
+  registerBackLayer,
+  setControllerHints,
+  setLogicalView,
+} from "@/scripts/lib/controller-0110-seams.ts";
+// SHIM-0110: seam imports come from controller-0110-seams.ts until
+// W1 lands the real modules (integration re-points them).
+import {
+  RETURN_HOME_HINT,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+import {
+  isTitleContextMenuOpen,
+  openTitleContextMenu,
+  titleContextActionsForEntry,
+} from "@/scripts/lib/poster-menu.ts";
+import {
   ensureLoaded as ensurePrefsLoaded,
   getProgress,
 } from "@/scripts/lib/preferences.js";
@@ -85,6 +103,27 @@ const ID = {
 } as const;
 
 const PICKS_SEED_KEY_PREFIX = "movies-home-picks-seed:";
+
+/** One-shot return focus: Browse exit records the genre tile to land on. */
+const HOME_RETURN_KEY = "rs_movies_home_return_key";
+
+export function recordMoviesHomeReturnFocus(key: string): void {
+  try {
+    sessionStorage.setItem(HOME_RETURN_KEY, key);
+  } catch {
+    // Return focus is a nicety.
+  }
+}
+
+function consumeMoviesHomeReturnFocus(): string | null {
+  try {
+    const raw = sessionStorage.getItem(HOME_RETURN_KEY);
+    sessionStorage.removeItem(HOME_RETURN_KEY);
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
 
 function $(id: string, root: ParentNode = document): HTMLElement | null {
   return root.querySelector(`#${id}`) as HTMLElement | null;
@@ -519,6 +558,19 @@ export function showMoviesHomeMessage(
  * surviving item). Returns the focused element or null.
  */
 export function restoreMoviesHomeFocus(doc: Document = document): HTMLElement | null {
+  // Browse-exit return focus wins: the genre tile the viewer came
+  // from (recorded by the router's onExit), consumed once.
+  const returnKey = consumeMoviesHomeReturnFocus();
+  if (returnKey) {
+    const tile = doc.querySelector<HTMLElement>(
+      `[data-couch-key="${escapeAttr(returnKey)}"]`,
+    );
+    if (tile && tile.isConnected) {
+      tile.focus({ preventScroll: true });
+      scrollFocusedIntoView(tile);
+      return tile;
+    }
+  }
   const memory = readCouchFocusMemory();
   if (!memory) return null;
   let route = "";
@@ -605,21 +657,157 @@ export function installHomeShelfJump(root: HTMLElement): void {
   });
 }
 
+export const MOVIES_HOME_HINTS: HintConfig = {
+  id: "movies-home",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Play / Select" },
+    { glyph: "b", label: "Home" },
+    { glyph: "x", label: "Options" },
+    { glyph: "y", label: "Search Movies" },
+    { glyph: "lb", label: "Prev shelf" },
+    { glyph: "rb", label: "Next shelf" },
+    { glyph: "menu", label: "Settings" },
+    RETURN_HOME_HINT,
+  ],
+};
+
+function homeOwnsInput(root: HTMLElement): boolean {
+  if (root.hidden || root.closest("[hidden]")) return false;
+  if (document.querySelector("dialog[open]")) return false;
+  if (isTitleContextMenuOpen()) return false;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active === document.body) return true;
+  if (isEditingTarget(active)) return false;
+  if (root.contains(active)) return true;
+  return !!active.closest?.("[data-couch-nav]");
+}
+
+/** Card identity from a focused Home card element (no URL parsing). */
+export function moviesHomeCardIdentity(
+  anchor: HTMLElement,
+): { id: number; name: string; logo: string | null } | null {
+  const key = anchor.getAttribute("data-couch-key") ?? "";
+  const match = /^vod-(\d+)$/.exec(key);
+  if (!match) return null;
+  const titleEl = anchor.querySelector(".rs-card__title, .mh-featured__title");
+  const img = anchor.querySelector<HTMLImageElement>("img");
+  return {
+    id: Number(match[1]),
+    name: titleEl?.textContent?.trim() || anchor.getAttribute("aria-label") || "",
+    logo: img?.getAttribute("src") || null,
+  };
+}
+
+export interface MoviesHomeControllerKeysOptions {
+  getPlaylistId: () => string;
+  navigate: (url: string) => void;
+}
+
+/**
+ * Controller keys for Movies Home (0.11.10 §13): B → NylahBox
+ * Home (Back layer, ROUTE), Y → Search Movies (the scoped header
+ * entry, never global search), X → the title context menu for the
+ * focused film (Contract F). D-pad/LB/RB stay with spatial nav +
+ * shelf-jump. NOTE (W1 dependency): gamepad.ts today routes Y to
+ * global search and X to its autoplay-strip helper on Home; W1
+ * must dispatch "y"/"x" keys here (as it does for Browse) for the
+ * controller to reach these handlers. Keyboard X/Y work today.
+ * Returns an unregister function.
+ */
+export function installMoviesHomeControllerKeys(
+  root: HTMLElement,
+  opts: MoviesHomeControllerKeysOptions,
+): () => void {
+  setControllerHints(MOVIES_HOME_HINTS);
+
+  const unregisterBack = registerBackLayer({
+    id: "movies-home-route",
+    priority: BACK_PRIORITY.ROUTE,
+    isActive: () => homeOwnsInput(root),
+    handle: () => {
+      opts.navigate("/");
+      return true;
+    },
+  });
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.repeat) return;
+    const key = event.key;
+    if (key !== "x" && key !== "X" && key !== "y" && key !== "Y") return;
+    if (!homeOwnsInput(root)) return;
+    if (key === "y" || key === "Y") {
+      event.preventDefault();
+      event.stopPropagation();
+      opts.navigate(MOVIES_HOME_BROWSE_URLS.search);
+      return;
+    }
+    // X: context menu for the focused film card.
+    const active = document.activeElement as HTMLElement | null;
+    const card = active?.closest?.("[data-couch-key]") as HTMLElement | null;
+    if (!card || !root.contains(card)) return;
+    const identity = moviesHomeCardIdentity(card);
+    if (!identity) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const playlistId = opts.getPlaylistId();
+    const detailHref = card.getAttribute("href") || `/movies/detail?id=${identity.id}`;
+    void titleContextActionsForEntry({
+      kind: "vod",
+      entryId: identity.id,
+      name: identity.name,
+      logo: identity.logo,
+      playlistId,
+      includeFollow: false,
+      onOpen: () => opts.navigate(detailHref),
+    }).then((actions) => {
+      if (!card.isConnected) return;
+      openTitleContextMenu(card, actions);
+    });
+  };
+  document.addEventListener("keydown", onKeyDown);
+
+  // Provenance: any Home link click records Movies Home as the
+  // detail's origin, so B on the detail returns here.
+  const onClick = (event: MouseEvent) => {
+    const link = (event.target as Element | null)?.closest?.("a[href]");
+    if (!link || !root.contains(link)) return;
+    recordRouteOrigin({
+      route: window.location.pathname + window.location.search,
+      label: "Movies Home",
+    });
+  };
+  root.addEventListener("click", onClick);
+
+  return () => {
+    unregisterBack();
+    document.removeEventListener("keydown", onKeyDown);
+    root.removeEventListener("click", onClick);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Mount
 // ---------------------------------------------------------------------------
 
 let listenersInstalled = false;
 let bootRunId = 0;
+let currentPlaylistId = "";
 
 export function mountMoviesHome(): void {
   if (typeof document === "undefined") return;
   const root = $(ID.root);
   if (!root) return;
+  setLogicalView("movies-home");
 
   if (!listenersInstalled) {
     listenersInstalled = true;
     installHomeShelfJump(root);
+    installMoviesHomeControllerKeys(root, {
+      getPlaylistId: () => currentPlaylistId,
+      navigate: (url) => window.location.assign(url),
+    });
     $(ID.retry)?.addEventListener("click", () => window.location.reload());
     document.addEventListener("xt:active-changed", () => {
       void boot(root);
@@ -667,6 +855,7 @@ async function boot(root: HTMLElement): Promise<void> {
   }
 
   const playlistId = result.playlistId;
+  currentPlaylistId = playlistId;
   let taste: TasteModel;
   try {
     const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;

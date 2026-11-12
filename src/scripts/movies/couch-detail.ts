@@ -51,10 +51,51 @@ import {
 } from "@/scripts/lib/couch-detail-presentation.ts";
 import {
   createCouchVodPlayer,
+  closeOpenTrackLists,
   type CouchVodPlayerHandle,
 } from "@/scripts/movies/couch-player.ts";
 import { renderCouchCards } from "@/scripts/movies/couch-cards.ts";
 import { openCouchDialog } from "@/scripts/lib/couch-focus.ts";
+import {
+  installDetailBackLayers,
+  navigateBackWithOrigin,
+  recordRouteOrigin,
+  setControllerHints,
+} from "@/scripts/lib/controller-0110-seams.ts";
+// SHIM-0110: seam imports come from controller-0110-seams.ts until
+// W1 lands the real modules (integration re-points them).
+import {
+  RETURN_HOME_HINT,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+
+const MOVIE_DETAIL_HINTS: HintConfig = {
+  id: "movies-detail",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Play / Select" },
+    { glyph: "b", label: "Back" },
+    { glyph: "x", label: "More options" },
+    { glyph: "y", label: "Search Movies" },
+    { glyph: "menu", label: "Settings" },
+    RETURN_HOME_HINT,
+  ],
+};
+
+const MOVIE_PLAYBACK_HINTS: HintConfig = {
+  id: "movies-detail-playback",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Show controls" },
+    { glyph: "b", label: "Exit player" },
+    { glyph: "x", label: "Play / Pause" },
+    { glyph: "y", label: "Fullscreen" },
+    { glyph: "lb", label: "Seek −10s" },
+    { glyph: "rb", label: "Seek +10s" },
+    { glyph: "lt-rt", label: "Volume" },
+    RETURN_HOME_HINT,
+  ],
+};
 
 const VOD_INFO_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const VOD_TTL_MS = 24 * 60 * 60 * 1000;
@@ -257,6 +298,14 @@ async function loadDetail() {
   renderCast();
   renderSimilar();
   renderVariants();
+  setControllerHints(MOVIE_DETAIL_HINTS);
+  // Entry focus (§18): Play/Resume, when focus is still on <body>
+  // or the top nav (never steal focus the viewer already moved).
+  const activeEl = document.activeElement as HTMLElement | null;
+  const inNav = !!activeEl?.closest?.("[data-couch-nav]");
+  if ((!activeEl || activeEl === document.body || inNav) && playBtn) {
+    playBtn.focus({ preventScroll: true });
+  }
 }
 
 function renderVariants() {
@@ -293,6 +342,7 @@ function hidePlayer() {
   player = null;
   if (playerWrap) playerWrap.hidden = true;
   syncPlayButton();
+  setControllerHints(MOVIE_DETAIL_HINTS);
   playBtn?.focus();
 }
 
@@ -385,22 +435,66 @@ async function startPlayback(variantId: number = movieId, variantDetail: MovieDe
     return;
   }
   player = created;
+  setControllerHints(MOVIE_PLAYBACK_HINTS);
 }
 
-// B / Escape while the player is open exits the player to the detail —
-// never to Home. Capture phase so the global back handler does not fire first.
-document.addEventListener(
-  "keydown",
-  (ev) => {
-    if (!playerOpen) return;
-    if (ev.key === "Escape" || ev.key === "BrowserBack") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      hidePlayer();
-    }
-  },
-  true,
-);
+// Back stack (0.11.10 §18–§19): B closes an open track list first,
+// then exits playback to the detail, then (player closed) performs
+// the same navigation as the Back button via route provenance —
+// without requiring focus on the Back button. The pre-0.11.10
+// capture handler only ran while the player was open, so B on a
+// closed detail did nothing at all.
+installDetailBackLayers({
+  isPlayerOpen: () => playerOpen,
+  closePlaybackSubLayer: () =>
+    closeOpenTrackLists(["movie-osd-subtitles-list", "movie-osd-audio-list"]),
+  onPlayerBack: () => hidePlayer(),
+  onDetailBack: () =>
+    navigateBackWithOrigin("/movies", { backLink: $("movie-detail-back") }),
+});
+
+// X/Y while browsing the detail (0.11.10 §18): X opens the More
+// options dialog (the contextual surface for this title), Y opens
+// Search Movies. While playing, X/Y belong to the player
+// (play/pause, fullscreen). NOTE (W1 dependency): gamepad.ts must
+// dispatch "x"/"y" keys on detail pages for the controller to
+// reach these handlers; keyboard X/Y work today.
+document.addEventListener("keydown", (ev) => {
+  if (ev.defaultPrevented || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (playerOpen) return;
+  if (document.querySelector("dialog[open]")) return;
+  const target = ev.target as HTMLElement | null;
+  const tag = target?.tagName?.toLowerCase() ?? "";
+  if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) {
+    return;
+  }
+  if (ev.key === "x" || ev.key === "X") {
+    const moreBtn = $("movie-detail-more") as HTMLButtonElement | null;
+    if (!moreBtn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    moreBtn.click();
+    return;
+  }
+  if (ev.key === "y" || ev.key === "Y") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.location.assign("/movies?view=browse&focus=search");
+  }
+});
+
+// Provenance: a Similar/Versions click records this detail as the
+// next detail's origin, so B returns here.
+for (const listEl of [similarListEl, variantsListEl]) {
+  listEl?.addEventListener("click", (event) => {
+    const link = (event.target as Element | null)?.closest?.("a[href], button");
+    if (!link) return;
+    recordRouteOrigin({
+      route: window.location.pathname + window.location.search,
+      label: detail.title || "Movie",
+    });
+  });
+}
 
 playBtn?.addEventListener("click", () => {
   void startPlayback();

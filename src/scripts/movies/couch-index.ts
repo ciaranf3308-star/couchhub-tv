@@ -21,8 +21,11 @@
 // destination). The dialog and text-field cases are excluded by
 // the shared gamepad gate.
 
-import { mountMoviesHome } from "@/scripts/movies/movies-home-mount.ts";
+import { mountMoviesHome, recordMoviesHomeReturnFocus } from "@/scripts/movies/movies-home-mount.ts";
 import { mountBrowseEverything } from "@/scripts/lib/browse-everything.ts";
+import { setLogicalView } from "@/scripts/lib/controller-0110-seams.ts";
+// SHIM-0110: seam import comes from controller-0110-seams.ts until
+// W1 lands the real module (integration re-points it).
 import {
   browseStateFromMode,
   parseModeFromUrl,
@@ -45,6 +48,7 @@ function mountMoviesPage(): void {
   if (homeRoot) homeRoot.hidden = browse;
   if (browseMount) browseMount.hidden = !browse;
   if (browse && browseMount) {
+    setLogicalView("movies-browse");
     // Search Movies links here with focus=search: consume it as
     // autoOpenSearch and strip it before mounting, so the mount's
     // URL sync never re-serialises it.
@@ -59,7 +63,7 @@ function mountMoviesPage(): void {
         `${window.location.pathname}${query ? `?${query}` : ""}`,
       );
     }
-    mountBrowseEverything(browseMount, {
+    const controller = mountBrowseEverything(browseMount, {
       kind: "movie",
       initialState: browseStateFromMode(mode, resolveLabel),
       source: createMoviesBrowseSource(),
@@ -68,12 +72,27 @@ function mountMoviesPage(): void {
         window.location.href = `/movies/detail?id=${encodeURIComponent(id)}`;
       },
       onExit: () => {
-        // Full navigation home (never history.back: a direct
-        // landing on a Browse URL must not back out of the app).
+        // B from Browse → Movies Home, with the genre tile the
+        // viewer came from focused where possible: the current
+        // category names the tile (genre → its tile, All → the
+        // All Genres tile). Full navigation home (never
+        // history.back: a direct landing on a Browse URL must
+        // not back out of the app).
+        try {
+          const category = controller.getState().category;
+          if (category.kind === "genre") {
+            recordMoviesHomeReturnFocus(`movies-genre-${category.id}`);
+          } else if (category.kind === "all") {
+            recordMoviesHomeReturnFocus("movies-genre-all");
+          }
+        } catch {
+          // Return focus is a nicety; the navigation still happens.
+        }
         window.location.href = "/movies";
       },
     });
   } else {
+    setLogicalView("movies-home");
     mountMoviesHome();
   }
 }
