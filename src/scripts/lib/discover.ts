@@ -91,8 +91,101 @@ export interface AIRanker {
   rank(
     query: string,
     candidates: DiscoverCandidate[],
-    tasteSummary: TasteSummary
+    tasteSummary: TasteSummary,
+    opts?: AIRankOptions
   ): Promise<RankedCandidate[]>
+  /**
+   * Primary entry (0.11.5, W2): rerank W1's relevance-ranked shortlist
+   * under structured constraints, with post-ranking validation, full-
+   * identity caching and a lifecycle status for the UI. Optional so
+   * older / test rankers that only implement `rank` keep working —
+   * rankDiscover falls back to `rank` for those.
+   */
+  rankShortlist?(request: RerankRequest): Promise<RerankResult>
+}
+
+// ---------------------------------------------------------------------------
+// AI rerank seam (0.11.5 integration — W1 intent → W2 ranker → W3 UI).
+//
+// These are the canonical shapes. W2's ranking.ts carries structural
+// copies (it must NOT import this file); the field names must match.
+// ---------------------------------------------------------------------------
+
+/**
+ * Hard constraints for one rerank, derived from W1's structured intent
+ * (see `intentToRankingConstraints`). The model may NOT override these;
+ * the ranker enforces them after the reply. Every field is optional —
+ * absent means "no constraint stated".
+ */
+export interface RankingConstraints {
+  genres?: string[]
+  kind?: "movie" | "series" | "live"
+  maxRuntimeMinutes?: number
+  minRating?: number
+  minYear?: number
+  maxYear?: number
+  excludeTitles?: string[]
+  excludeGenres?: string[]
+  mood?: string
+  referenceTitles?: string[]
+}
+
+/**
+ * Catalogue / profile context that identifies WHAT was ranked. Callers
+ * supply these when known; all are optional so the ranker still works
+ * (and still caches safely on the shortlist identity) when a caller
+ * cannot provide them. When `playlistId` is unknown the cache degrades
+ * to shortlist-identity only — still safe against a changed candidate
+ * selection, but NOT against the same provider IDs under a different
+ * playlist, so callers that know the playlist MUST pass it.
+ */
+export interface RerankContext {
+  /** Active playlist / provider entry id (DiscoverView: entry._id). */
+  playlistId?: string
+  /** Catalogue revision stamp (Discover's candidate-cache stamp). */
+  catalogueStamp?: number
+  /** Active profile id (DiscoverView: getActiveProfileId()). */
+  profileId?: string
+  /** Taste-model revision, when the caller tracks one. */
+  tasteRevision?: string
+}
+
+/** One rerank request: W1's relevance-ranked shortlist + intent. */
+export interface RerankRequest {
+  query: string
+  /** Relevance-ranked by W1. Order is meaningful — the token ceiling keeps the head of THIS order. */
+  shortlist: DiscoverCandidate[]
+  tasteSummary: TasteSummary
+  constraints?: RankingConstraints
+  context?: RerankContext
+}
+
+/** Options for the legacy `rank()` seam (same fields, flat). */
+export interface AIRankOptions {
+  constraints?: RankingConstraints
+  context?: RerankContext
+}
+
+/**
+ * The ranker's lifecycle status, as far as rankDiscover needs it: the
+ * terminal phase, whether the rail came from cache, how many entries
+ * validation dropped inside the ranker, and how many candidates were
+ * sent. Structural subset of W2's `AiRankStatus` — the ranker reports
+ * more, rankDiscover only reads these.
+ */
+export interface RankerStatus {
+  phase: string
+  cacheHit: boolean
+  droppedCount: number
+  requestedCount: number
+  fallbackReason?: string
+}
+
+export interface RerankResult {
+  rankings: RankedCandidate[]
+  /** "ai" when a request was sent, "cached" when a valid previous result was reused. */
+  source: "ai" | "cached"
+  status: RankerStatus
 }
 
 export interface FollowedEpisode {
@@ -735,14 +828,17 @@ export function validateRankedCandidates(
 
 /**
  * Rank a query, preferring the registered AI ranker when the user asked
- * a question (explicit Ask AI, a natural-language question, or a parsed
- * category constraint — see rankDiscover). Either way the query first
- * goes through the retrieval stage (retrieval.ts): the ranker only ever
- * receives the relevance-ranked shortlist, never the raw catalogue.
- * Any failure, empty result, or unknown id falls back to the local
- * engine — Discover never goes blank because the AI path did. The
- * returned `source` tells the page which engine actually produced the
- * results, so it can label them honestly ("AI picks" vs "Local
+ * a question (explicit Ask AI, or a natural-language question — see
+ * rankDiscover). Either way the query first goes through the retrieval
+ * stage (retrieval.ts): the ranker only ever receives the relevance-
+ * ranked shortlist, never the raw catalogue. The parsed intent travels
+ * with it as hard constraints (intentToRankingConstraints), and the
+ * ranker's lifecycle status (cache hit, drop count, rejected phase)
+ * comes back in the result diagnostics for the Discover receipt. Any
+ * failure, empty result, or unknown id falls back to the local engine
+ * — Discover never goes blank because the AI path did. The returned
+ * `source` tells the page which engine actually produced the results,
+ * so it can label them honestly ("AI picks" vs "Local
  * recommendations") and say when a fallback happened (AI04 / AI06).
  */
 export interface DiscoverSearchResult {
@@ -750,6 +846,43 @@ export interface DiscoverSearchResult {
   source: "ai" | "local"
   /** Set when AI was attempted but the local engine answered instead. */
   fallbackReason?: string
+  /**
+   * True when the model answered but validation kept nothing — a real
+   * terminal "rejected", not a transport failure. The UI shows the
+   * "rejected" receipt for this (never a generic fallback): the model
+   * was asked, it replied, and nothing it ranked survived the
+   * catalogue check. False/undefined when AI was never attempted or
+   * when the attempt failed before a reply.
+   */
+  aiRejected?: boolean
+  /**
+   * Per-search diagnostics for the Discover receipt (0.11.5, W3).
+   * Additive reporting only — nothing here changes what is ranked or
+   * cached. `retrievedCount` / `sentToModelCount` / `cacheHit` are
+   * W1/W2-owned and stay undefined until their layer reports them; the
+   * UI renders those as "Not reported yet", never a guessed number.
+   */
+  diagnostics?: DiscoverSearchDiagnostics
+}
+
+/**
+ * What rankDiscover itself can report honestly: the catalogue it ranked
+ * over, how many results survived validation, and how many model-ranked
+ * ids were dropped. `rejectedCount` is the ranker's OWN drop count
+ * (W2's AiRankStatus.droppedCount — invented ids, unrelated picks,
+ * constraint violations it dropped internally) PLUS any ids this layer's
+ * catalogue validation drops on top. With the production ranker it is
+ * no longer structurally 0: a model that invents one id shows one
+ * rejection here. Rankers that report no status (legacy `rank`-only)
+ * contribute only this layer's drops.
+ */
+export interface DiscoverSearchDiagnostics {
+  catalogueSize: number
+  acceptedCount: number
+  rejectedCount: number
+  retrievedCount?: number
+  sentToModelCount?: number
+  cacheHit?: boolean
 }
 
 function aiFallbackReason(error: unknown): string {
@@ -784,6 +917,51 @@ export interface RankDiscoverOptions {
   shareTaste?: boolean
   /** Shortlist cap override (default RETRIEVAL_SHORTLIST_MAX). */
   shortlistLimit?: number
+  /**
+   * Cache identity for the ranker (0.11.5, W1→W2 seam): the active
+   * playlist, the catalogue revision stamp and the active profile.
+   * DiscoverView passes all three when known; without them the ranker
+   * cache degrades to shortlist-identity only. See RerankContext.
+   */
+  playlistId?: string
+  catalogueStamp?: number
+  profileId?: string
+}
+
+/**
+ * Map W1's structured intent onto the hard constraints W2's ranker
+ * enforces (0.11.5, W1→W2 seam). The intent itself travels in these
+ * constraints — the ranker prompt states them and validation enforces
+ * them — so a parsed "dark anime" reaches the model as a requirement,
+ * not just as words in the query. Anime is a CORE constraint, never a
+ * mood: it is carried as the "animation" genre requirement (the
+ * ranker's medium check keys off the same genre), plus the tone as the
+ * mood. Vibe words ("cosy", "moving", "tonight") are never constraints:
+ * they surface only as the mood, never as hard retrieval entities —
+ * they must not starve the shortlist. Disliked / not-interested titles
+ * are NOT listed here: retrieval already excluded them from the
+ * shortlist, so the ranker never sees them.
+ */
+export function intentToRankingConstraints(intent: QueryIntent): RankingConstraints {
+  const constraints: RankingConstraints = {}
+  const genres = [...intent.genres]
+  if (intent.anime === "required" && !genres.some((g) => g.toLowerCase() === "animation")) {
+    genres.push("animation")
+  }
+  if (genres.length) constraints.genres = genres
+  if (intent.contentKind) constraints.kind = intent.contentKind
+  if (intent.maxRuntimeMinutes !== undefined) {
+    constraints.maxRuntimeMinutes = intent.maxRuntimeMinutes
+  }
+  if (intent.minYear !== undefined) constraints.minYear = intent.minYear
+  if (intent.maxYear !== undefined) constraints.maxYear = intent.maxYear
+  if (intent.excludedGenres.length) constraints.excludeGenres = [...intent.excludedGenres]
+  const mood = intent.tones[0] ?? intent.moods[0]
+  if (mood) constraints.mood = mood
+  if (intent.referenceTitles.length) {
+    constraints.referenceTitles = [...intent.referenceTitles]
+  }
+  return constraints
 }
 
 export async function rankDiscover(
@@ -801,7 +979,16 @@ export async function rankDiscover(
   // An empty query is nothing to ask the model — the local engine
   // answers (and never spends a paid request on it).
   if (!trimmed) {
-    return { results: searchDiscover(trimmed, candidates, taste, searchOpts), source: "local" }
+    const emptyResults = searchDiscover(trimmed, candidates, taste, searchOpts)
+    return {
+      results: emptyResults,
+      source: "local",
+      diagnostics: {
+        catalogueSize: candidates.length,
+        acceptedCount: emptyResults.length,
+        rejectedCount: 0,
+      },
+    }
   }
   // Bug 2: the query goes through the retrieval stage FIRST — intent,
   // hard filters over the whole catalogue, local relevance ranking —
@@ -812,42 +999,125 @@ export async function rankDiscover(
     limit: opts.shortlistLimit ?? RETRIEVAL_SHORTLIST_MAX,
   })
   const ranker = getAIRanker()
-  // Bug 3: AI eligibility is the explicit ask, a natural-language
-  // question, OR a parsed category constraint. "COMEDY" is a genre
-  // question, not a title lookup — it reaches the model without
-  // forceAi now. A bare title search ("Space Heist") still never
-  // reaches the model unless explicitly asked, so plain lookups stay
-  // free and local. Manual/automatic request preferences live in the
-  // caller (DiscoverView): this function only ever runs the model when
-  // the caller asked it to (forceAi) or the query itself is a question.
-  const aiEligible =
-    opts.forceAi || isNaturalLanguageQuery(query) || retrieval.intent.hasConstraintIntent
+  // AI eligibility (0.11.5, reconciled — seam 3): an explicit ask
+  // (forceAi: an "Ask AI" tap, or submit with automatic requests on)
+  // or a natural-language question. A parsed category constraint
+  // ("COMEDY") does NOT auto-spend a paid call on its own: in Manual
+  // mode (the default) a typed genre search stays local unless the
+  // user taps Ask AI, and in Automatic mode the view passes forceAi on
+  // submit, so the category question still reaches the model there. A
+  // bare title search ("Space Heist") likewise never reaches the model
+  // unless explicitly asked, so plain lookups stay free and local.
+  const aiEligible = opts.forceAi || isNaturalLanguageQuery(trimmed)
+  // Hard filtering emptied the pool: there is nothing to rank and
+  // nothing to broaden to — the local engine would return the same
+  // empty pool, so answer honestly without spending a request.
+  if (retrieval.shortlist.length === 0) {
+    return {
+      results: [],
+      source: "local",
+      fallbackReason:
+        retrieval.emptyReason ?? "No titles in your library match this request.",
+      diagnostics: {
+        catalogueSize: candidates.length,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        retrievedCount: 0,
+        sentToModelCount: 0,
+      },
+    }
+  }
   if (ranker && aiEligible) {
     try {
       const summary =
         opts.shareTaste === false
           ? ({ favouriteGenres: [], likedTitles: [], dislikedTitles: [] } satisfies TasteSummary)
           : (summarizeTaste(taste) as TasteSummary)
-      const ranked = await ranker.rank(trimmed, retrieval.shortlist, summary)
-      const valid = validateRankedCandidates(
-        Array.isArray(ranked) ? ranked : [],
-        candidates
-      )
-      if (valid.length) return { results: valid, source: "ai" }
+      const constraints = intentToRankingConstraints(retrieval.intent)
+      const context: RerankContext = {
+        playlistId: opts.playlistId,
+        catalogueStamp: opts.catalogueStamp,
+        profileId: opts.profileId,
+      }
+      // W1→W2 seam: the ranker's primary entry takes the shortlist +
+      // the structured intent (as constraints) + the cache context.
+      // Legacy / test rankers that only implement `rank` get the same
+      // shortlist and the same options in flat form.
+      let ranked: RankedCandidate[]
+      let rankStatus: RankerStatus | null = null
+      if (typeof ranker.rankShortlist === "function") {
+        const result = await ranker.rankShortlist({
+          query: trimmed,
+          shortlist: retrieval.shortlist,
+          tasteSummary: summary,
+          constraints,
+          context,
+        })
+        ranked = Array.isArray(result.rankings) ? result.rankings : []
+        rankStatus = result.status ?? null
+      } else {
+        ranked = await ranker.rank(trimmed, retrieval.shortlist, summary, {
+          constraints,
+          context,
+        })
+        ranked = Array.isArray(ranked) ? ranked : []
+      }
+      const valid = validateRankedCandidates(ranked, candidates)
+      // W2→W3 seam: the "Rejected" row is the ranker's own drop count
+      // (invented ids, unrelated picks, constraint violations it
+      // dropped internally — structurally 0 before this wiring) plus
+      // any ids this layer's catalogue validation drops on top.
+      const rejectedCount =
+        (rankStatus?.droppedCount ?? 0) + (ranked.length - valid.length)
+      const diagnostics: DiscoverSearchDiagnostics = {
+        catalogueSize: candidates.length,
+        acceptedCount: valid.length,
+        rejectedCount,
+        retrievedCount: retrieval.shortlist.length,
+        sentToModelCount: rankStatus?.requestedCount ?? retrieval.shortlist.length,
+        cacheHit: rankStatus?.cacheHit,
+      }
+      if (valid.length) {
+        return { results: valid, source: "ai", diagnostics }
+      }
+      // The model answered but kept nothing (empty reply, or every
+      // entry dropped by validation): a real rejection, not a
+      // transport failure — the UI says so, with the ranker's own
+      // reason when it has one.
+      const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
       return {
-        results: searchDiscover(trimmed, candidates, taste, searchOpts),
+        results: localResults,
         source: "local",
-        fallbackReason: "AI didn't rank any titles in your library, so these are local picks.",
+        fallbackReason:
+          rankStatus?.fallbackReason ??
+          "AI didn't rank any titles in your library, so these are local picks.",
+        aiRejected: true,
+        diagnostics: { ...diagnostics, acceptedCount: localResults.length },
       }
     } catch (error) {
+      const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
       return {
-        results: searchDiscover(trimmed, candidates, taste, searchOpts),
+        results: localResults,
         source: "local",
         fallbackReason: aiFallbackReason(error),
+        diagnostics: {
+          catalogueSize: candidates.length,
+          acceptedCount: localResults.length,
+          rejectedCount: 0,
+        },
       }
     }
   }
-  return { results: searchDiscover(trimmed, candidates, taste, searchOpts), source: "local" }
+  const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
+  return {
+    results: localResults,
+    source: "local",
+    diagnostics: {
+      catalogueSize: candidates.length,
+      acceptedCount: localResults.length,
+      rejectedCount: 0,
+    },
+  }
 }
 
 export async function rankWithAI(

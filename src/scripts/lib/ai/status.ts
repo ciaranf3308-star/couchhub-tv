@@ -41,10 +41,209 @@ export const AI_MODE_LABELS: Record<AiMode, string> = {
   local: "Local recommendations",
 }
 
+// ---------------------------------------------------------------------------
+// Per-search engine receipt (0.11.5, W3 display seam — W2 fills it).
+//
+// Discover shows one receipt per search: which engine actually produced
+// the rail on screen. The receipt is the ONLY thing the rail title and
+// the "AI answered" note may be derived from, so a cached or local
+// result can never be labelled as a fresh AI answer.
+//
+// Phases Discover can PROVE from the activity events the ranker emits
+// (see ai/ranking.ts `subscribeAiActivity`) plus the rankDiscover result:
+//   local-search — no AI was asked (typing, quick pick, submit in Manual)
+//   sending     — a request left the device (activity "start" fired)
+//   validated   — a real reply arrived AND passed catalogue validation
+//                 (activity "done" fired; the ranker only emits "done"
+//                 after parsing + validating the reply)
+//   cached      — the rail came from the ranker cache: no "start" fired
+//                 during this search, so no request left the device
+//   fallback    — AI was attempted but the local engine answered instead
+//                 (rankDiscover.fallbackReason says why)
+//   received / rejected — documented for W2: "received" when a reply
+//                 arrives before validation, "rejected" when validation
+//                 drops it. The current ranker emits no event between
+//                 receipt and validation, so Discover never claims these
+//                 phases itself; the label helpers still cover them so a
+//                 future event can be displayed honestly the moment it
+//                 exists. Never invent a phase: if the evidence is not
+//                 there, the receipt says so ("Not reported yet").
+// "AI answered just now" is only ever true for a validated receipt whose
+// answeredAt is inside AI_FRESH_ANSWER_WINDOW_MS — never for a cache hit
+// or a local result. See `isFreshAiAnswer()`.
+// No secrets ever live in a receipt: no key, no endpoint, no request
+// body — only the model id, counts, timings and the user-visible reason.
+// ---------------------------------------------------------------------------
+
+export type AiSearchEngine = "ai" | "cached-ai" | "local"
+
+export type AiSearchPhase =
+  | "idle"
+  | "local-search"
+  | "sending"
+  | "received"
+  | "validated"
+  | "rejected"
+  | "cached"
+  | "fallback"
+
+export const AI_SEARCH_PHASE_LABELS: Record<AiSearchPhase, string> = {
+  idle: "No search yet",
+  "local-search": "Local search",
+  sending: "AI request being sent",
+  received: "AI response received",
+  validated: "AI result validated",
+  rejected: "AI result rejected",
+  cached: "Cached recommendation",
+  fallback: "Local fallback",
+}
+
+/** "AI answered just now" stays true only this long after a real call. */
+export const AI_FRESH_ANSWER_WINDOW_MS = 60_000
+
+export type AiQueryType = "natural-language" | "keyword" | "mood" | "none"
+
+/**
+ * Diagnostics for one search. Fields W1/W2 own stay `undefined` until
+ * their layer reports them — the UI renders those as "Not reported yet",
+ * never a guessed number.
+ */
+export interface AiSearchDiagnostics {
+  queryType: AiQueryType
+  /** Human-readable intention, e.g. "Moods: Easy Watching". */
+  intention?: string
+  catalogueSize?: number
+  /** Candidates the retrieval stage returned (W1). */
+  retrievedCount?: number
+  /** Candidates actually sent to the model (W2). */
+  sentToModelCount?: number
+  /** Results shown from this search. */
+  acceptedCount?: number
+  /**
+   * Model-ranked ids dropped by rankDiscover's catalogue validation.
+   * Gap (0.11.5, for W2): the production ranker ALSO validates inside
+   * parseAiRankResponse, so an invented id it drops never reaches
+   * rankDiscover and this count stays 0 for it. The ranker's own drop
+   * count is not reported yet — until W2 surfaces it, this row reads
+   * "Rejected by catalogue check" and counts only this layer's drops.
+   */
+  rejectedCount?: number
+  /** Model id, only when a real request was made. */
+  model?: string
+  /** True when the rail came from the ranker cache (no request sent). */
+  cacheHit?: boolean
+  /** Wall time of the ranking call, ms. */
+  durationMs?: number
+  /** Why the local engine answered instead of AI. */
+  fallbackReason?: string
+}
+
+export interface AiSearchReceipt {
+  phase: AiSearchPhase
+  engine: AiSearchEngine
+  query: string
+  /** Model id, only when a real request was made. */
+  model?: string
+  /** When a real API call completed, ms since epoch; null when unknown (cache). */
+  answeredAt?: number | null
+  durationMs?: number
+  cacheHit?: boolean
+  fallbackReason?: string
+  diagnostics: AiSearchDiagnostics
+}
+
+export function aiSearchEngineLabel(engine: AiSearchEngine): string {
+  switch (engine) {
+    case "ai":
+      return "AI picks"
+    case "cached-ai":
+      return "Cached AI picks"
+    case "local":
+      return "Local recommendations"
+  }
+}
+
+/** Honest rail title for a search: the engine that produced it, nothing else. */
+export function aiSearchRailTitle(receipt: AiSearchReceipt): string {
+  const query = receipt.query.trim()
+  return `${aiSearchEngineLabel(receipt.engine)} for “${query}”`
+}
+
+/**
+ * True only for a real, recently completed API call: the reply was
+ * validated in this search, it is not a cache hit, and answeredAt is
+ * inside the fresh window. Every other receipt — cached, local,
+ * fallback, stale — returns false, so "AI answered just now" can never
+ * describe one.
+ */
+export function isFreshAiAnswer(receipt: AiSearchReceipt, nowMs: number = Date.now()): boolean {
+  if (receipt.phase !== "validated") return false
+  if (receipt.cacheHit === true) return false
+  if (receipt.engine !== "ai") return false
+  if (typeof receipt.answeredAt !== "number") return false
+  return nowMs - receipt.answeredAt < AI_FRESH_ANSWER_WINDOW_MS
+}
+
+/**
+ * The one-line state note under a results rail, derived ONLY from the
+ * receipt. A cached result says cached; a local result says local; a
+ * fallback repeats the ranker's own reason. "AI answered just now"
+ * appears only via isFreshAiAnswer().
+ */
+export function aiSearchStateNote(receipt: AiSearchReceipt, nowMs: number = Date.now()): string {
+  const duration =
+    typeof receipt.durationMs === "number" && Number.isFinite(receipt.durationMs)
+      ? ` · ${(receipt.durationMs / 1000).toFixed(1)}s`
+      : ""
+  switch (receipt.phase) {
+    case "sending":
+      return receipt.model
+        ? `Sending one request to ${receipt.model}…`
+        : "Sending one request to your AI provider…"
+    case "validated":
+      if (isFreshAiAnswer(receipt, nowMs)) {
+        return receipt.model
+          ? `AI answered just now · ${receipt.model}${duration}`
+          : `AI answered just now${duration}`
+      }
+      return receipt.model
+        ? `AI answered · ${receipt.model}${duration}`
+        : `AI answered${duration}`
+    case "received":
+      return "AI answered — checking the reply against your library…"
+    case "rejected":
+      return "AI answered, but the reply ranked nothing in your library — showing local picks."
+    case "cached":
+      return "Cached AI answer — no new request was sent."
+    case "fallback":
+      return receipt.fallbackReason || "AI couldn't answer just now, so these are local picks."
+    case "local-search":
+      return "Local search — AI wasn't asked."
+    case "idle":
+    default:
+      return ""
+  }
+}
+
 export interface AiStatus {
   mode: AiMode
   detail: string
   lastTestedAt: number | null
+  /** A key is stored, whatever the Enable toggle says. */
+  keySaved: boolean
+  /**
+   * An "Ask AI" attempt can run right now: AI is enabled, a key is
+   * saved, and an endpoint + model are set. False does NOT mean AI is
+   * broken — it means Discover must say WHY instead of offering the
+   * button (off / no key / setup unfinished). True includes the
+   * "connected but never tested" case: tapping Ask AI IS the test, and
+   * a failure surfaces through the fallback reason. The 0.11.2 film
+   * showed the old gate's failure: Settings said "AI connected" while
+   * Discover showed a local rail with no Ask AI anywhere, because the
+   * button only appeared after a passing test. 0.11.5 gates on whether
+   * an attempt can run, not on whether one already passed.
+   */
+  canAskAi: boolean
 }
 
 export type AiTestErrorCode =
@@ -244,28 +443,36 @@ export async function getAiStatus(): Promise<AiStatus> {
   const enabled = getAiEnabled()
   const endpoint = getAiEndpoint().trim()
   const model = getAiModel().trim()
+  // One presence check, shared by every branch: Discover and Settings
+  // read the same status, so they can never disagree about it.
+  let keySaved = false
+  try {
+    keySaved = await hasAiKey()
+  } catch {
+    // hasAiKey() never throws by contract; stay unsaved if it ever does.
+  }
+  const canAskAi = enabled && keySaved && !!endpoint && !!model
   if (!enabled) {
     // 0.11.4: a saved key with the toggle off is NOT "not set up" — the
     // key is saved, AI is just off. Say so, and use the "local" mode
-    // (Discover really is using local recommendations; Ask AI stays
-    // unavailable because aiConfigured only counts connected/unavailable).
-    let keyPresent = false
-    try {
-      keyPresent = await hasAiKey()
-    } catch {
-      keyPresent = false
-    }
-    if (keyPresent) {
+    // (Discover really is using local recommendations). 0.11.5: Ask AI
+    // stays unavailable here because canAskAi is false while the toggle
+    // is off — Discover says why instead of offering the button.
+    if (keySaved) {
       return {
         mode: "local",
         detail: "Key saved. Turn on AI Discovery to use it.",
         lastTestedAt: readLastTest()?.at ?? null,
+        keySaved,
+        canAskAi,
       }
     }
     return {
       mode: "not-configured",
       detail: "AI Discovery is off.",
       lastTestedAt: readLastTest()?.at ?? null,
+      keySaved,
+      canAskAi,
     }
   }
   if (!endpoint || !model) {
@@ -273,19 +480,17 @@ export async function getAiStatus(): Promise<AiStatus> {
       mode: "not-configured",
       detail: "Finish setup in Settings — add a model to use AI Discovery.",
       lastTestedAt: readLastTest()?.at ?? null,
+      keySaved,
+      canAskAi,
     }
   }
-  let keyPresent = false
-  try {
-    keyPresent = await hasAiKey()
-  } catch {
-    keyPresent = false
-  }
-  if (!keyPresent) {
+  if (!keySaved) {
     return {
       mode: "not-configured",
       detail: "Save an API key in Settings to use AI Discovery.",
       lastTestedAt: readLastTest()?.at ?? null,
+      keySaved,
+      canAskAi,
     }
   }
   const last = readLastTest()
@@ -297,6 +502,8 @@ export async function getAiStatus(): Promise<AiStatus> {
         ? "Connected — endpoint, key and model verified."
         : "Connected — endpoint and key verified.",
       lastTestedAt: last.at,
+      keySaved,
+      canAskAi,
     }
   }
   if (matchesCurrentConfig && !last.ok) {
@@ -304,12 +511,16 @@ export async function getAiStatus(): Promise<AiStatus> {
       mode: "unavailable",
       detail: `${aiStatusMessage(last.error)} Using local recommendations.`,
       lastTestedAt: last.at,
+      keySaved,
+      canAskAi,
     }
   }
   return {
     mode: "local",
     detail: "Not tested yet — using local recommendations. Test the connection in Settings.",
     lastTestedAt: last?.at ?? null,
+    keySaved,
+    canAskAi,
   }
 }
 
