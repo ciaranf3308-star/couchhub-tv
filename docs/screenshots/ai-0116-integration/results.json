@@ -1,0 +1,37 @@
+{
+  "quick-picks-after-submit": {
+    "railTitle": "Local recommendations for “COMEDY”",
+    "stateNote": "Local search — AI wasn't asked.",
+    "phase": "",
+    "localNote": "Local results so far — Ask AI below for AI picks.",
+    "askAiVisible": true,
+    "askAiText": "Ask AI about “COMEDY”",
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "aiCards": [],
+    "localCards": [
+      "A Funny Thing",
+      "Airplane!",
+      "Amélie",
+      "Brooklyn Nine-Nine",
+      "Hot Fuzz",
+      "Knives Out",
+      "Paddington 2",
+      "The Grand Budapest Hotel",
+      "The Pranksters"
+    ],
+    "refineContext": "",
+    "toggleText": "",
+    "noneAvailable": false,
+    "aiUnavailable": false,
+    "aiEmpty": false,
+    "availableEmpty": false,
+    "localSimilarVisible": false,
+    "diagToggleVisible": true,
+    "scrollY": 0,
+    "navBottom": 106,
+    "moodGridTop": 609,
+    "activeElement": "BUTTON.rs-discover-ask-ai#",
+    "clippingOk": true
+  }
+}
