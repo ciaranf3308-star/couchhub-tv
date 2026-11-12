@@ -35,6 +35,12 @@ vi.mock("@/scripts/lib/app-settings.js", () => ({
 vi.mock("@/scripts/lib/ai/verification.js", () => ({
   verifyRecommendations: verifyMock,
   defaultTmdbSearch: vi.fn().mockRejectedValue(new Error("no default TMDB search in tests")),
+  // Integration (seam 1): the orchestrator imports these defaults too
+  // and CALLS defaultResolveExternalId(); the mock must export the
+  // same names as the real module or the call throws inside the
+  // verifier try block and every result comes back unverified.
+  defaultFetchDetails: vi.fn(),
+  defaultResolveExternalId: vi.fn(),
 }))
 
 import {
