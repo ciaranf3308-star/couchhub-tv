@@ -205,14 +205,46 @@ describe("buildAiPrompt", () => {
     expect(user).toContain("Saw")
   })
 
-  it("caps the candidate list at 20 in the prompt", () => {
+  // 0.11.5 (W4): the old test here asserted the production bug —
+  // that buildAiPrompt sends the FIRST 20 catalogue entries and
+  // drops the rest. That slice-before-relevance is what returned
+  // 'G' Men et al. for "some fucked up dark anime". The 20-cap is
+  // still real, but it is a PAYLOAD cap on the shortlist the caller
+  // hands over (already retrieved for relevance), never a licence
+  // to take the first 20 catalogue entries. So this test asserts
+  // the count only — never WHICH entries are in or out — and the
+  // retrieval behaviour itself is covered at the rankDiscover level
+  // in tests/ai-discovery-regression.test.ts (T1/T2).
+  it("caps the model payload at 20 candidates by count, never by catalogue position", () => {
     const many = Array.from({ length: 25 }, (_, index) =>
       candidate({ id: `c${index}`, title: `Film ${index}` })
     )
     const { user } = buildAiPrompt("x", many, taste)
-    expect(user).toContain("Film 19")
-    expect(user).not.toContain("Film 20")
+    const lines = user.split("\n").filter((line) => /^\d+\. \[/.test(line))
+    expect(lines).toHaveLength(20)
     expect(chatMock).not.toHaveBeenCalled()
+  })
+
+  it("ranks the shortlist it is handed in full — including titles a raw catalogue would bury", async () => {
+    // Seam contract: rank() trusts the caller's retrieval. A
+    // caller that retrieved relevant anime from beyond catalogue
+    // position 20 must see all of them ranked — rank() never
+    // re-slices by catalogue position.
+    const shortlist = [
+      candidate({ id: "a0", title: "Crimson Ronin", genres: ["Animation", "Horror"] }),
+      candidate({ id: "a1", title: "Black Sakura", genres: ["Animation", "Horror"] }),
+      candidate({ id: "a2", title: "The Hollow School", genres: ["Animation", "Thriller"] }),
+    ]
+    chatMock.mockResolvedValueOnce({
+      text: modelReply([
+        { id: "a2", reason: "Dark anime." },
+        { id: "a0", reason: "Dark anime." },
+        { id: "a1", reason: "Dark anime." },
+      ]),
+      model: "gpt-4o-mini",
+    })
+    const ranked = await aiRanker.rank("some fucked up dark anime", shortlist, taste)
+    expect(ranked.map((entry) => entry.candidate.id)).toEqual(["a2", "a0", "a1"])
   })
 })
 

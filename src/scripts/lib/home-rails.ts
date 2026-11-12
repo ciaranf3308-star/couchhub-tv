@@ -5,8 +5,10 @@
 // data loadDiscoverData already loads (DiscoverData) plus the followed
 // episodes the Followed provider reports — no new data sources, no
 // network, no paid AI request anywhere on this path. Routine browsing
-// is ranked by the local engine (discover.ts rankCandidates) with a
-// confidence adjustment through the shared C2 engine
+// is ranked by the local engine through the shared browse module
+// (browse-recommendations.ts rankBrowseCandidates, which wraps
+// discover.ts rankCandidates — one engine for Home, Movies and
+// Series) with a confidence adjustment through the shared C2 engine
 // (recommendations.ts, which wraps rating-confidence.ts); the AI
 // ranker seam is never touched per homepage load.
 //
@@ -81,12 +83,12 @@
 import {
   candidateDetailHref,
   candidateKey,
-  rankCandidates,
   type DiscoverCandidate,
   type DiscoverData,
   type FollowedEpisode,
   type RankedCandidate,
 } from "@/scripts/lib/discover.ts"
+import { rankBrowseCandidates } from "./browse-recommendations.ts"
 import { BAYESIAN_PRIOR_MEAN } from "./rating-confidence.ts"
 import {
   classifyTitle,
@@ -1039,7 +1041,12 @@ function buildContext(
   // never one AI call per rail. The limit must cover every rail that
   // consumes the ranking (Next Obsession + Tonight's Picks + up to
   // three genre rails), or the later rails starve on a small library.
-  const ranked = rankCandidates(data.candidates, taste, {
+  // Ranked through the shared browse module (0.11.5 W4): Home,
+  // Movies and Series share this one engine, so a retrieval fix
+  // lands everywhere at once. kind "all": Home ranks movies and
+  // series together.
+  const ranked = rankBrowseCandidates(data.candidates, taste, {
+    kind: "all",
     excludeKeys: notInterested,
     watchedKeys: data.watchedKeys,
     excludeWatched: true,
