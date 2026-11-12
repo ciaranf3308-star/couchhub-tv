@@ -153,6 +153,55 @@ export function isDefaultBrowseFilterState(state: BrowseFilterState): boolean {
   )
 }
 
+// ── Genre selection: REPLACE, never accumulate (0.11.6, W4) ─────────
+// User-reported bug: selecting Comedy, then Horror, appeared to
+// progressively sub-filter (Comedy AND Horror). The audit found no
+// code path that ever held two genres — BrowseFilterState.genre is a
+// single string and every 0.11.5 genre control assigned it — but
+// nothing SAID replace, so each control re-implemented assignment
+// its own way, and the AND was manufactured by composition: the
+// Movies/Series text query matches the provider category
+// (filterMovies/filterSeries haystack), so a genre word left in the
+// search box kept filtering while the Genre select added its own
+// condition, and persisted filters restored with no Reset control
+// to undo them. These two helpers are the one funnel every genre
+// selection and every reset goes through, so the semantics are
+// pinned in one place and tested in tests/browse-filter-state-0116.test.ts:
+//
+//   - selectGenreFilter REPLACES the genre. It touches nothing else:
+//     decade / rating / runtime / sort are separate VISIBLE controls
+//     the user set deliberately; clearing all of them is
+//     resetBrowseFilters' job, reached through the ONE Reset Filters
+//     action in the filter UI.
+//   - There is deliberately no multi-select: AND-combination only if
+//     the user deliberately requests a combination, and no such UI
+//     exists. Do not invent one here.
+
+/**
+ * Select a genre, REPLACING any previous genre. Returns a NEW state
+ * object; the input is never mutated.
+ *
+ * Re-selecting the genre already active clears it (toggle off): a
+ * chip/button UI has no "All" option to clear with, and the Genre
+ * <select> reaches the same result through its "All genres" option
+ * ("" / null), so both controls share one funnel and one meaning.
+ * The comparison is case-insensitive (canonical ids vs labels).
+ */
+export function selectGenreFilter(state: BrowseFilterState, genre: string | null): BrowseFilterState {
+  const next = (genre ?? "").trim()
+  const current = (state.genre ?? "").trim()
+  const cleared = !next || normToken(next) === normToken(current)
+  return { ...state, genre: cleared ? "" : next }
+}
+
+/**
+ * Fresh default filter state: a NEW object every call, so mutating
+ * the result can never poison DEFAULT_BROWSE_FILTERS or a later reset.
+ */
+export function resetBrowseFilters(): BrowseFilterState {
+  return { ...DEFAULT_BROWSE_FILTERS }
+}
+
 /** Which filters the available metadata supports. Computed from the
  *  catalogue itself — never from a guess about the provider. */
 export interface BrowseFilterAvailability {
