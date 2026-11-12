@@ -32,7 +32,7 @@ import {
   resetCategoryIndexCache,
   resetCategoryIndexCounters,
 } from "@/scripts/lib/livetv-category-index";
-import { nowNextRows } from "@/scripts/lib/livetv-guide";
+import { nowNextRows, type GuideNowRow } from "@/scripts/lib/livetv-guide";
 import {
   createVirtualList,
   virtualListWindow,
@@ -208,7 +208,7 @@ describe("livetv0117 benchmark (reported numbers, no thresholds)", () => {
       configurable: true,
     });
     Object.defineProperty(container, "clientHeight", { get: () => 600, configurable: true });
-    const guide = createVirtualList({
+    const guide = createVirtualList<GuideNowRow>({
       container,
       mode: "spacer",
       rowHeightPx: 112,

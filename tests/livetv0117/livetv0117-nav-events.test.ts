@@ -86,7 +86,7 @@ describe("test 10 — LB/RB and LT/RT work without duplicate events", () => {
         connected: true,
         buttons: pressed.map((p) => ({ pressed: p, value: p ? 1 : 0 })) as GamepadButton[],
         axes: [0, 0, 0, 0],
-      } as Gamepad;
+      } as unknown as Gamepad;
     }
 
     beforeAll(() => {
