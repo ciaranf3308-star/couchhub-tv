@@ -5,7 +5,8 @@
  * (keyed row reuse, bounded mounted rows, rAF-coalesced scroll
  * paints), the category drawer (navigation semantics, focus
  * memory, one-layer Back), the W4 overlay event contract, no
- * auto-tune on highlight, and the category-index seam (stub).
+ * auto-tune on highlight, and the category-index seam (W1's real
+ * index module).
  * Synthetic data only; nothing here plays a stream.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -28,6 +29,7 @@ import {
   getCategoryIndex,
   getDerivedChannels,
 } from "@/scripts/lib/livetv-category-index";
+import { livetvNav } from "@/scripts/lib/livetv-nav";
 import type { LivetvChannel } from "@/scripts/lib/livetv-data";
 
 function ch(partial: Partial<LivetvChannel> & { id: string | number; name: string }): LivetvChannel {
@@ -82,41 +84,76 @@ function focusedDrawerLabel(root: HTMLElement): string | null {
   return item?.querySelector(".rs-tv-category-drawer__item-label")?.textContent ?? null;
 }
 
-describe("category index seam (STUB-FOR-INTEGRATION)", () => {
+function focusedDrawerKey(root: HTMLElement): string | null {
+  const item = root.querySelector<HTMLElement>("[data-category-drawer-item].is-focused");
+  return item?.getAttribute("data-drawer-item-key") ?? null;
+}
+
+function breadcrumbParts(root: HTMLElement): { group: string; sub: string | null; count: string } {
+  const crumb = root.querySelector("[data-browser-breadcrumb]")!;
+  return {
+    group: crumb.querySelector(".lv2-breadcrumb__group")?.textContent ?? "",
+    sub: crumb.querySelector(".lv2-breadcrumb__sub")?.textContent ?? null,
+    count: crumb.querySelector(".lv2-breadcrumb__count")?.textContent ?? "",
+  };
+}
+
+describe("category index seam (W1 real index)", () => {
   it("groups channels and exposes real provider subcategories", () => {
-    const index = getCategoryIndex(CHANNELS);
+    const index = getCategoryIndex(CHANNELS, "browser-0117:seam");
     const sports = index.groups.find((g) => g.id === "sports");
-    expect(sports?.count).toBe(3);
-    // Subcategory ids are the verbatim provider categories.
-    expect(sports?.subcategories.map((s) => s.id)).toEqual(["UK | Sports", "Sports HD"]);
-    expect(sports?.subcategories.map((s) => s.count)).toEqual([2, 1]);
-    expect(index.totalChannels).toBe(5);
+    expect(sports?.channelCount).toBe(3);
+    // Subcategory ids are `sub:<slug-of-raw-name>`; rawName is
+    // the verbatim provider category, label the normalised one.
+    expect(sports?.subcategories.map((s) => s.id)).toEqual([
+      "sub:uk-sports",
+      "sub:sports-hd",
+    ]);
+    expect(sports?.subcategories.map((s) => s.rawName)).toEqual([
+      "UK | Sports",
+      "Sports HD",
+    ]);
+    expect(sports?.subcategories.map((s) => s.channelCount)).toEqual([2, 1]);
+    expect(index.groups.reduce((n, g) => n + g.channelCount, 0)).toBe(5);
   });
 
   it("getDerivedChannels returns the group slice or one subcategory slice", () => {
-    const index = getCategoryIndex(CHANNELS);
+    const index = getCategoryIndex(CHANNELS, "browser-0117:derived");
+    // Group slice: subcategories in first-seen order, channels in
+    // provider order within each subcategory.
     expect(
-      getDerivedChannels(index, { groupId: "sports", subcategoryId: null }).map((c) => c.id),
-    ).toEqual([2, 4, 5]);
+      getDerivedChannels(index, { groupId: "sports" }).map((c) => c.id),
+    ).toEqual([2, 5, 4]);
     expect(
-      getDerivedChannels(index, { groupId: "sports", subcategoryId: "UK | Sports" }).map((c) => c.id),
+      getDerivedChannels(index, { groupId: "sports", subcategoryId: "sub:uk-sports" }).map((c) => c.id),
     ).toEqual([2, 5]);
     expect(
-      getDerivedChannels(index, { groupId: "sports", subcategoryId: "Sports HD" }).map((c) => c.id),
+      getDerivedChannels(index, { groupId: "sports", subcategoryId: "sub:sports-hd" }).map((c) => c.id),
     ).toEqual([4]);
-    expect(getDerivedChannels(index, { groupId: "no-such-group", subcategoryId: null })).toEqual([]);
+    expect(getDerivedChannels(index, { groupId: "no-such-group" })).toEqual([]);
     expect(getDerivedChannels(index, { groupId: "sports", subcategoryId: "nope" })).toEqual([]);
+    // Memoised: the same options return the SAME array reference.
+    expect(getDerivedChannels(index, { groupId: "sports" })).toBe(
+      getDerivedChannels(index, { groupId: "sports" }),
+    );
   });
 
-  it("caches the index per catalogue array identity and bumps revision on a new array", () => {
-    const first = getCategoryIndex(CHANNELS);
-    expect(getCategoryIndex(CHANNELS)).toBe(first);
-    const second = getCategoryIndex([...CHANNELS]);
+  it("caches the index per revision and rebuilds on a new revision", () => {
+    const first = getCategoryIndex(CHANNELS, "browser-0117:cache-a");
+    expect(getCategoryIndex(CHANNELS, "browser-0117:cache-a")).toBe(first);
+    const second = getCategoryIndex([...CHANNELS], "browser-0117:cache-b");
     expect(second).not.toBe(first);
-    expect(second.revision).toBeGreaterThan(first.revision);
+    expect(second.revision).toBe("browser-0117:cache-b");
+    expect(first.revision).toBe("browser-0117:cache-a");
   });
 
   it("applyBrowserFilter narrows a group to one subcategory", () => {
+    // Canonical W1 id, and the legacy verbatim spelling (accepted
+    // at the selection boundary and translated to the canonical
+    // id) — both resolve to the same slice.
+    expect(
+      applyBrowserFilter(CHANNELS, { categoryId: "sports", subcategoryId: "sub:uk-sports" }).map((c) => c.id),
+    ).toEqual([2, 5]);
     expect(
       applyBrowserFilter(CHANNELS, { categoryId: "sports", subcategoryId: "UK | Sports" }).map((c) => c.id),
     ).toEqual([2, 5]);
@@ -126,12 +163,21 @@ describe("category index seam (STUB-FOR-INTEGRATION)", () => {
   });
 
   it("browserSelectionLabel renders group and group/subcategory breadcrumbs", () => {
-    const index = getCategoryIndex(CHANNELS);
-    expect(browserSelectionLabel({ groupId: "all", subcategoryId: null }, index.groups)).toBe("All Channels");
-    expect(browserSelectionLabel({ groupId: "sports", subcategoryId: null }, index.groups)).toBe("Sports");
+    const index = getCategoryIndex(CHANNELS, "browser-0117:label");
+    // Production passes the drawer's group list, which adds the
+    // pseudo entries (All Channels, Favourites, Recents) around
+    // the index groups.
+    const labelGroups = [
+      ...index.groups,
+      { id: "all", label: "All Channels", subcategories: [] },
+    ];
+    expect(browserSelectionLabel({ groupId: "all", subcategoryId: null }, labelGroups)).toBe("All Channels");
+    expect(browserSelectionLabel({ groupId: "sports", subcategoryId: null }, labelGroups)).toBe("Sports");
+    const sports = index.groups.find((g) => g.id === "sports")!;
+    const ukSports = sports.subcategories.find((s) => s.rawName === "UK | Sports")!;
     expect(
-      browserSelectionLabel({ groupId: "sports", subcategoryId: "UK | Sports" }, index.groups),
-    ).toBe("Sports / UK | Sports");
+      browserSelectionLabel({ groupId: "sports", subcategoryId: ukSports.id }, labelGroups),
+    ).toBe(`Sports / ${ukSports.label}`);
   });
 });
 
@@ -537,11 +583,14 @@ describe("mountChannelBrowser 0.11.7", () => {
     // Returning to Sports restores the remembered channel.
     handle.setSelection("sports", null);
     expect(handle.getHighlightedId()).toBe(4);
-    // A subcategory selection keeps a highlight inside it.
+    // A subcategory selection keeps a highlight inside it. The
+    // verbatim provider spelling is translated to the canonical
+    // W1 id at the selection boundary.
     handle.setSelection("sports", "UK | Sports");
+    expect(handle.getSubcategoryId()).toBe("sub:uk-sports");
     expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2, 5]);
     expect(handle.getHighlightedId()).toBe(2);
-    expect(root.querySelector("[data-browser-breadcrumb]")?.textContent).toBe("Sports / UK | Sports");
+    expect(breadcrumbParts(root)).toEqual({ group: "Sports", sub: "Sports", count: "2 channels" });
     handle.destroy();
   });
 
@@ -549,7 +598,7 @@ describe("mountChannelBrowser 0.11.7", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS, recentIds: [1, 2] });
     const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
     handle.setSelection("sports", "UK | Sports");
-    expect(handle.getSubcategoryId()).toBe("UK | Sports");
+    expect(handle.getSubcategoryId()).toBe("sub:uk-sports");
     keyOn(list, "]");
     expect(handle.getSubcategoryId()).toBeNull();
     expect(handle.getCategoryId()).toBe("movies");
@@ -559,7 +608,7 @@ describe("mountChannelBrowser 0.11.7", () => {
   it("entry filters carry a subcategory", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
     handle.applyEntry({ kind: "category", value: "sports", subcategory: "UK | Sports" });
-    expect(handle.getSelection()).toEqual({ groupId: "sports", subcategoryId: "UK | Sports" });
+    expect(handle.getSelection()).toEqual({ groupId: "sports", subcategoryId: "sub:uk-sports" });
     expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2, 5]);
     // An unknown subcategory falls back to the whole group.
     handle.applyEntry({ kind: "category", value: "sports", subcategory: "nope" });
@@ -593,9 +642,9 @@ describe("mountChannelBrowser 0.11.7", () => {
     keyOn(focused(), "ArrowDown");
     keyOn(focused(), "Enter");
     expect(handle.isDrawerOpen()).toBe(false);
-    expect(handle.getSelection()).toEqual({ groupId: "sports", subcategoryId: "UK | Sports" });
+    expect(handle.getSelection()).toEqual({ groupId: "sports", subcategoryId: "sub:uk-sports" });
     expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2, 5]);
-    expect(root.querySelector("[data-browser-breadcrumb]")?.textContent).toBe("Sports / UK | Sports");
+    expect(breadcrumbParts(root)).toEqual({ group: "Sports", sub: "Sports", count: "2 channels" });
     // Focus returned to the list (highlighted row), never to <body>.
     expect(document.activeElement).not.toBe(document.body);
     expect(onSelect).not.toHaveBeenCalled();
@@ -649,8 +698,10 @@ describe("mountChannelBrowser 0.11.7", () => {
     keyOn(focused(), "Enter");
     expect(drawerItemLabels(root)[0]).toBe("All Sports");
     // LB/RB move within the subcategory level, applying nothing.
+    // (Both subcategories normalise to the label "Sports" in this
+    // fixture, so the focused item KEY pins the exact row.)
     keyOn(focused(), "]");
-    expect(focusedDrawerLabel(root)).toBe("UK | Sports");
+    expect(focusedDrawerKey(root)).toBe("sub:sports:sub:uk-sports");
     keyOn(focused(), "[");
     expect(focusedDrawerLabel(root)).toBe("All Sports");
     expect(handle.getSelection()).toEqual({ groupId: "all", subcategoryId: null });
@@ -758,7 +809,7 @@ describe("mountChannelBrowser 0.11.7", () => {
     expect(openSpy).toHaveBeenCalledTimes(1);
     expect(openSpy.mock.calls[0][0].detail).toEqual({
       groupId: "sports",
-      subcategoryId: "UK | Sports",
+      subcategoryId: "sub:uk-sports",
       sort: "source",
     });
     window.removeEventListener("livetv:open-sort", openSpy);
@@ -798,7 +849,7 @@ describe("mountChannelBrowser 0.11.7", () => {
     keyOn(list, "y");
     expect(openSpy.mock.calls[0][0].detail).toEqual({
       groupId: "sports",
-      subcategoryId: "UK | Sports",
+      subcategoryId: "sub:uk-sports",
       query: "",
       scope: "category",
     });
@@ -829,6 +880,119 @@ describe("mountChannelBrowser 0.11.7", () => {
     expect(root.querySelector("input")).toBeNull();
     expect(root.querySelector("[data-browser-category-button]")).not.toBeNull();
     expect(root.querySelector("[data-browser-breadcrumb]")).not.toBeNull();
+    handle.destroy();
+  });
+});
+
+describe("integration seams (0.11.7)", () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    root = document.createElement("div");
+    document.body.appendChild(root);
+    livetvNav.reset();
+    sessionStorage.clear();
+  });
+  afterEach(() => {
+    root.remove();
+    livetvNav.reset();
+    sessionStorage.clear();
+  });
+
+  it("a category-scoped search is cleared on ANY category change; scope-all survives", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    handle.setSelection("sports", null);
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "alpha", scope: "category" } }),
+    );
+    expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2]);
+    expect(handle.isSearchOpen()).toBe(true);
+    // Drawer/LB-RB/collection category changes all route through
+    // setSelection: the category-scoped search clears.
+    handle.setSelection("news", null);
+    expect(handle.isSearchOpen()).toBe(false);
+    expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([1]);
+    // Scope "all" survives the same change.
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "alpha", scope: "all" } }),
+    );
+    expect(handle.isSearchOpen()).toBe(true);
+    handle.setSelection("sports", null);
+    expect(handle.isSearchOpen()).toBe(true);
+    expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2]);
+    handle.destroy();
+  });
+
+  it("sort persists across mounts (sessionStorage) and sort-submit writes it", () => {
+    sessionStorage.setItem("redsilk:livetv:sort", "za");
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    handle.setSelection("sports", null);
+    expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([5, 4, 2]);
+    window.dispatchEvent(
+      new CustomEvent("livetv:sort-submit", { detail: { sort: "az" } }),
+    );
+    expect(sessionStorage.getItem("redsilk:livetv:sort")).toBe("az");
+    expect(handle.getVisibleChannels().map((c) => c.id)).toEqual([2, 4, 5]);
+    handle.destroy();
+  });
+
+  it("livetv:guide-channel highlights a channel in the current list, ignores the rest, never tunes", () => {
+    const onSelect = vi.fn();
+    const handle = mountChannelBrowser(root, { channels: CHANNELS, onSelect });
+    handle.setSelection("sports", null);
+    handle.highlightChannel(2);
+    window.dispatchEvent(
+      new CustomEvent("livetv:guide-channel", {
+        detail: { channelId: 4, programmeKey: "4@0", source: "guide" },
+      }),
+    );
+    expect(handle.getHighlightedId()).toBe(4);
+    // A channel outside the current selection is ignored.
+    window.dispatchEvent(
+      new CustomEvent("livetv:guide-channel", {
+        detail: { channelId: 1, programmeKey: "1@0", source: "guide" },
+      }),
+    );
+    expect(handle.getHighlightedId()).toBe(4);
+    expect(handle.getSelection()).toEqual({ groupId: "sports", subcategoryId: null });
+    expect(onSelect).not.toHaveBeenCalled();
+    handle.destroy();
+  });
+
+  it("drawer arrows move exactly one row per press (N arrows → index N)", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    handle.openCategories();
+    const focused = () => document.activeElement as HTMLElement;
+    // Focus starts on All Channels (last row, index 5 of 6).
+    expect(focusedDrawerLabel(root)).toBe("All Channels");
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "ArrowUp");
+    expect(focusedDrawerLabel(root)).toBe("Movies");
+    expect(root.querySelectorAll("[data-category-drawer-item].is-focused")).toHaveLength(1);
+    handle.destroy();
+  });
+
+  it("the drawer is one nav layer: open pushes, Back pops, selection pops", () => {
+    const handle = mountChannelBrowser(root, { channels: CHANNELS });
+    expect(livetvNav.topId()).toBe("landing");
+    handle.openCategories();
+    expect(livetvNav.topId()).toBe("drawer");
+    expect(livetvNav.isTop("drawer")).toBe(true);
+    // Back via the shared stack closes the drawer layer only.
+    expect(livetvNav.back()).toBe(true);
+    expect(handle.isDrawerOpen()).toBe(false);
+    expect(livetvNav.topId()).toBe("landing");
+    // A drawer selection pops the layer too.
+    handle.openCategories();
+    const focused = () => document.activeElement as HTMLElement;
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "ArrowUp");
+    keyOn(focused(), "Enter");
+    keyOn(focused(), "Enter");
+    expect(handle.isDrawerOpen()).toBe(false);
+    expect(livetvNav.topId()).toBe("landing");
     handle.destroy();
   });
 });

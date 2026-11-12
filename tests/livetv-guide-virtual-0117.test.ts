@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 // Live TV 0.11.7 (W3) — Guide virtualisation + shared category model.
 //
-// Covers: the category-index stub (real provider subcategories, no
-// invented structure), the ONE Guide adapter, virtual window math,
-// the keyed DOM virtual list at 2,000+ entries (bounded mounts,
-// node reuse, focus preservation across data refreshes), the
-// category picker's drawer contract, and source-level guards that
+// Covers: the real category index (W1: real provider
+// subcategories, no invented structure), the ONE Guide adapter,
+// virtual window math, the keyed DOM virtual list at 2,000+
+// entries (bounded mounts, node reuse, focus preservation across
+// data refreshes), the category picker's drawer contract (built
+// on W2's shared drawer module), and source-level guards that
 // the old <select> is gone and the Guide consumes the index only
 // through the adapter.
 import { describe, it, expect } from "vitest";
@@ -33,11 +34,47 @@ import {
   virtualListWindow,
 } from "@/scripts/lib/livetv-guide-virtual";
 import { mountGuideCategoryPicker } from "@/scripts/lib/livetv-guide-category-picker";
+import type { LivetvChannel } from "@/scripts/lib/livetv-data";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel: string) => readFileSync(join(root, rel), "utf8");
 
 // ── Fixtures ────────────────────────────────────────────────────
+
+/** Full LivetvChannel shape for direct index calls. */
+function ch(partial: Partial<LivetvChannel> & { id: string | number; name: string }): LivetvChannel {
+  const rawCategory = partial.categoryId ?? partial.category ?? "";
+  return {
+    displayName: partial.name,
+    logo: null,
+    category: rawCategory,
+    categoryId: rawCategory,
+    categoryLabel: partial.categoryLabel ?? rawCategory,
+    streamUrl: null,
+    tvgId: null,
+    chno: undefined,
+    catchup: false,
+    favourite: false,
+    hidden: false,
+    norm: (partial.name + " " + rawCategory).toLowerCase(),
+    ...partial,
+  };
+}
+
+function indexFixtureChannels(): LivetvChannel[] {
+  return [
+    ch({ id: 1, name: "BBC One", categoryId: "UK | Entertainment" }),
+    ch({ id: 2, name: "Sky Sports Main", categoryId: "UK | Sports" }),
+    ch({ id: 3, name: "Football 1", categoryId: "Sports | Football" }),
+    ch({ id: 4, name: "Football 2", categoryId: "Sports | Football" }),
+    ch({ id: 5, name: "F1 Channel", categoryId: "Sports | F1" }),
+    ch({ id: 6, name: "Sky News", categoryId: "News" }),
+    ch({ id: 7, name: "Movie Max", categoryId: "Movies FHD" }),
+    ch({ id: 8, name: "Mystery", categoryId: "" }),
+    ch({ id: 9, name: "RTE One", categoryId: "IE | Entertainment" }),
+    ch({ id: 10, name: "Sports Extra", categoryId: "Sports" }),
+  ];
+}
 
 function fixtureChannels() {
   return [
@@ -79,29 +116,35 @@ function flushFrames(ms = 60): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ── Category index stub ─────────────────────────────────────────
+// ── Category index (W1 real module) ─────────────────────────────
 
-describe("category index stub (STUB-FOR-INTEGRATION)", () => {
+describe("category index (W1 real module)", () => {
   it("derives subcategories from verbatim provider categories, nothing invented", () => {
-    const index = getCategoryIndex(fixtureChannels());
+    const index = getCategoryIndex(indexFixtureChannels(), "guide-0117:subs");
     const sports = index.groups.find((g) => g.id === "sports");
     expect(sports).toBeDefined();
-    // Verbatim raw strings, first-seen order — "Sports | Football"
-    // and "Sports" are distinct provider subcategories.
+    // `sub:<slug-of-raw-name>` ids, first-seen order — "Sports |
+    // Football" and "Sports" are distinct provider subcategories;
+    // rawName carries the verbatim provider string.
     expect(sports!.subcategories.map((s) => s.id)).toEqual([
+      "sub:uk-sports",
+      "sub:sports-football",
+      "sub:sports-f1",
+      "sub:sports",
+    ]);
+    expect(sports!.subcategories.map((s) => s.rawName)).toEqual([
       "UK | Sports",
       "Sports | Football",
       "Sports | F1",
       "Sports",
     ]);
-    expect(sports!.subcategories.find((s) => s.id === "Sports | Football")!.channelCount).toBe(2);
+    expect(sports!.subcategories.find((s) => s.id === "sub:sports-football")!.channelCount).toBe(2);
     expect(sports!.channelCount).toBe(5);
   });
 
   it("counts sum to the catalogue total and no channel is dropped", () => {
-    const channels = bigCatalogue();
-    const index = getCategoryIndex(channels);
-    expect(index.totalChannels).toBe(2000);
+    const channels = bigCatalogue().map((c) => ch({ id: c.id, name: c.name, categoryId: c.category }));
+    const index = getCategoryIndex(channels, "guide-0117:counts");
     const sum = index.groups.reduce((n, g) => n + g.channelCount, 0);
     expect(sum).toBe(2000);
     const subSum = index.groups.reduce(
@@ -109,30 +152,31 @@ describe("category index stub (STUB-FOR-INTEGRATION)", () => {
       0,
     );
     expect(subSum).toBe(2000);
+    expect(getDerivedChannels(index, {})).toHaveLength(2000);
   });
 
-  it("getDerivedChannels slices by group and subcategory in catalogue order", () => {
-    const channels = fixtureChannels();
-    const index = getCategoryIndex(channels);
-    expect(getDerivedChannels(channels, index, { groupId: null, subcategoryId: null })).toHaveLength(10);
-    const sports = getDerivedChannels(channels, index, { groupId: "sports", subcategoryId: null });
+  it("getDerivedChannels slices by group and subcategory in subcategory order", () => {
+    const channels = indexFixtureChannels();
+    const index = getCategoryIndex(channels, "guide-0117:slices");
+    expect(getDerivedChannels(index, {})).toHaveLength(10);
+    const sports = getDerivedChannels(index, { groupId: "sports" });
     expect(sports.map((c) => c.id)).toEqual([2, 3, 4, 5, 10]);
-    const football = getDerivedChannels(channels, index, { groupId: "sports", subcategoryId: "Sports | Football" });
+    const football = getDerivedChannels(index, { groupId: "sports", subcategoryId: "sub:sports-football" });
     expect(football.map((c) => c.id)).toEqual([3, 4]);
   });
 
   it("unknown groups / subcategories yield [] (never a silent whole-catalogue fallback)", () => {
-    const channels = fixtureChannels();
-    const index = getCategoryIndex(channels);
-    expect(getDerivedChannels(channels, index, { groupId: "nope", subcategoryId: null })).toEqual([]);
-    expect(getDerivedChannels(channels, index, { groupId: "sports", subcategoryId: "Nope" })).toEqual([]);
+    const channels = indexFixtureChannels();
+    const index = getCategoryIndex(channels, "guide-0117:unknown");
+    expect(getDerivedChannels(index, { groupId: "nope" })).toEqual([]);
+    expect(getDerivedChannels(index, { groupId: "sports", subcategoryId: "nope" })).toEqual([]);
   });
 
   it("does not mutate the input array", () => {
-    const channels = fixtureChannels();
+    const channels = indexFixtureChannels();
     const before = channels.map((c) => c.id);
-    const index = getCategoryIndex(channels);
-    getDerivedChannels(channels, index, { groupId: "sports", subcategoryId: null });
+    const index = getCategoryIndex(channels, "guide-0117:nomutate");
+    getDerivedChannels(index, { groupId: "sports" });
     expect(channels.map((c) => c.id)).toEqual(before);
   });
 });
@@ -170,7 +214,7 @@ describe("resolveGuideCategory (the one adapter)", () => {
     expect(group.triggerLabel).toBe("Sports");
     const sub = resolveGuideCategory(
       channels,
-      { kind: "group", groupId: "sports", subcategoryId: "Sports | F1" },
+      { kind: "group", groupId: "sports", subcategoryId: "sub:sports-f1" },
       context,
     );
     expect(sub.channels.map((c) => c.id)).toEqual([5]);
@@ -209,20 +253,20 @@ describe("resolveGuideCategory (the one adapter)", () => {
     expect(guideCategoryValueFromDrawer(null, null)).toEqual({ kind: "all" });
     expect(guideCategoryValueFromDrawer(GUIDE_CATEGORY_FAVOURITES, null)).toEqual({ kind: "favourites" });
     expect(guideCategoryValueFromDrawer(GUIDE_CATEGORY_RECENTS, null)).toEqual({ kind: "recents" });
-    expect(guideCategoryValueFromDrawer("sports", "Sports | F1")).toEqual({
+    expect(guideCategoryValueFromDrawer("sports", "sub:sports-f1")).toEqual({
       kind: "group",
       groupId: "sports",
-      subcategoryId: "Sports | F1",
+      subcategoryId: "sub:sports-f1",
     });
-    expect(guideCategoryValueToDrawer({ kind: "group", groupId: "sports", subcategoryId: "Sports | F1" })).toEqual({
+    expect(guideCategoryValueToDrawer({ kind: "group", groupId: "sports", subcategoryId: "sub:sports-f1" })).toEqual({
       groupId: "sports",
-      subcategoryId: "Sports | F1",
+      subcategoryId: "sub:sports-f1",
     });
     expect(sameGuideCategoryValue({ kind: "all" }, { kind: "all" })).toBe(true);
     expect(
       sameGuideCategoryValue(
         { kind: "group", groupId: "sports", subcategoryId: null },
-        { kind: "group", groupId: "sports", subcategoryId: "Sports | F1" },
+        { kind: "group", groupId: "sports", subcategoryId: "sub:sports-f1" },
       ),
     ).toBe(false);
   });
@@ -481,9 +525,9 @@ describe("preserveGuideFocus", () => {
   });
 });
 
-// ── Category picker (drawer contract) ───────────────────────────
+// ── Category picker (shared drawer module) ──────────────────────
 
-describe("Guide category picker (drawer-contract wrapper)", () => {
+describe("Guide category picker (shared drawer)", () => {
   function mountPicker() {
     const mount = document.createElement("div");
     const trigger = document.createElement("button");
@@ -494,8 +538,8 @@ describe("Guide category picker (drawer-contract wrapper)", () => {
     const groups = [
       { id: "__all__", label: "All categories", channelCount: 10, subcategories: [] },
       { id: "sports", label: "Sports", channelCount: 5, subcategories: [
-        { id: "Sports | Football", label: "Sports Football", channelCount: 2 },
-        { id: "Sports | F1", label: "Sports F1", channelCount: 1 },
+        { id: "sub:sports-football", label: "Sports Football", channelCount: 2 },
+        { id: "sub:sports-f1", label: "Sports F1", channelCount: 1 },
       ] },
       { id: "news", label: "News", channelCount: 1, subcategories: [] },
     ];
@@ -509,51 +553,113 @@ describe("Guide category picker (drawer-contract wrapper)", () => {
     return { mount, trigger, picker, selected, get backs() { return backs; }, groups };
   }
 
-  it("opens on the selected group and selects a whole group with a click", () => {
+  function drawerItems(mount: HTMLElement): HTMLElement[] {
+    return [...mount.querySelectorAll<HTMLElement>("[data-category-drawer-item]")];
+  }
+
+  function itemByLabel(mount: HTMLElement, label: string): HTMLElement {
+    const item = drawerItems(mount).find(
+      (el) => el.querySelector(".rs-tv-category-drawer__item-label")?.textContent === label,
+    );
+    if (!item) throw new Error(`no drawer item labelled ${label}`);
+    return item;
+  }
+
+  function focusedKey(mount: HTMLElement): string | null {
+    return mount
+      .querySelector("[data-category-drawer-item].is-focused")
+      ?.getAttribute("data-drawer-item-key") ?? null;
+  }
+
+  function key(keyName: string): KeyboardEvent {
+    return new KeyboardEvent("keydown", { key: keyName, bubbles: true, cancelable: true });
+  }
+
+  it("opens on the selected group and selects a group with no subcategories on click", () => {
     const { mount, picker, selected } = mountPicker();
     picker.open();
     expect(picker.isOpen()).toBe(true);
-    const news = mount.querySelector<HTMLElement>('[data-catdrawer-group="news"]')!;
-    news.click();
+    expect(picker.getLevel()).toBe("groups");
+    // Selected group is "all" (null maps to __all__): focus starts there.
+    expect(focusedKey(mount)).toBe("group:__all__");
+    itemByLabel(mount, "News").click();
     expect(selected).toEqual([{ groupId: "news", subcategoryId: null }]);
     picker.destroy();
     mount.remove();
   });
 
-  it("drills Right into subcategories and selects one (replacing the filter)", () => {
+  it("drills Enter into subcategories and selects one (replacing the filter)", () => {
     const { mount, picker, selected } = mountPicker();
     picker.open();
-    const sports = mount.querySelector<HTMLElement>('[data-catdrawer-group="sports"]')!;
-    sports.focus();
-    sports.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
-    const sub = mount.querySelector<HTMLElement>('[data-catdrawer-sub="Sports | F1"]')!;
-    expect(document.activeElement).not.toBe(sports);
-    sub.click();
-    expect(selected).toEqual([{ groupId: "sports", subcategoryId: "Sports | F1" }]);
+    // Focus starts on __all__; one ArrowDown reaches Sports.
+    // Enter drills into its subcategories ("All Sports" first),
+    // arrows move within the level, Enter selects.
+    expect(picker.handleKey(key("ArrowDown"))).toBe(true);
+    expect(focusedKey(mount)).toBe("group:sports");
+    expect(picker.handleKey(key("Enter"))).toBe(true);
+    expect(picker.getLevel()).toBe("subcategories");
+    expect(drawerItems(mount).map((el) => el.querySelector(".rs-tv-category-drawer__item-label")?.textContent)).toEqual([
+      "All Sports",
+      "Sports Football",
+      "Sports F1",
+    ]);
+    expect(picker.handleKey(key("ArrowDown"))).toBe(true);
+    expect(picker.handleKey(key("ArrowDown"))).toBe(true);
+    expect(focusedKey(mount)).toBe("sub:sports:sub:sports-f1");
+    expect(picker.handleKey(key("Enter"))).toBe(true);
+    expect(selected).toEqual([{ groupId: "sports", subcategoryId: "sub:sports-f1" }]);
     picker.destroy();
     mount.remove();
   });
 
   it("follows the one-layer B rule: subs → groups → onBack", () => {
-    const { mount, picker } = mountPicker();
+    const ctx = mountPicker();
+    const { mount, picker } = ctx;
     picker.open();
-    const sports = mount.querySelector<HTMLElement>('[data-catdrawer-group="sports"]')!;
-    sports.focus();
-    sports.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    picker.handleKey(key("ArrowDown"));
+    picker.handleKey(key("Enter"));
+    expect(picker.getLevel()).toBe("subcategories");
     expect(picker.handleBack()).toBe(true);
-    expect(document.activeElement?.getAttribute("data-catdrawer-group")).toBe("sports");
+    expect(picker.getLevel()).toBe("groups");
+    expect(focusedKey(mount)).toBe("group:sports");
     expect(picker.handleBack()).toBe(true);
+    expect(ctx.backs).toBe(1);
     picker.destroy();
     mount.remove();
   });
 
-  it("moves Up/Down within the open list", () => {
+  it("moves Up/Down within the open list and Left returns from subcategories", () => {
     const { mount, picker } = mountPicker();
     picker.open();
-    const first = mount.querySelector<HTMLElement>("[data-catdrawer-group]")!;
+    const first = drawerItems(mount)[0]!;
     first.focus();
-    first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
-    expect(document.activeElement?.getAttribute("data-catdrawer-group")).toBe("sports");
+    expect(picker.handleKey(key("ArrowDown"))).toBe(true);
+    expect(focusedKey(mount)).toBe("group:sports");
+    picker.handleKey(key("Enter"));
+    expect(picker.getLevel()).toBe("subcategories");
+    expect(picker.handleKey(key("ArrowLeft"))).toBe(true);
+    expect(picker.getLevel()).toBe("groups");
+    expect(focusedKey(mount)).toBe("group:sports");
+    picker.destroy();
+    mount.remove();
+  });
+
+  it("Right closes without a selection; update refreshes groups while open", () => {
+    const ctx = mountPicker();
+    const { mount, picker, selected } = ctx;
+    picker.open();
+    expect(picker.handleKey(key("ArrowRight"))).toBe(true);
+    expect(ctx.backs).toBe(1);
+    expect(selected).toEqual([]);
+    picker.open();
+    picker.update({
+      groups: [
+        { id: "__all__", label: "All categories", channelCount: 12, subcategories: [] },
+        { id: "news", label: "News", channelCount: 3, subcategories: [] },
+      ],
+    });
+    expect(itemByLabel(mount, "News").querySelector(".rs-tv-category-drawer__item-count")?.textContent).toBe("3");
+    expect(drawerItems(mount)).toHaveLength(2);
     picker.destroy();
     mount.remove();
   });
@@ -590,10 +696,12 @@ describe("Guide source guards (0.11.7)", () => {
     expect(guide).toContain("ONE-LAYER RULE");
   });
 
-  it("marks the index stub and the drawer wrapper as integration swap targets", () => {
-    expect(read("src/scripts/lib/livetv-category-index.ts")).toContain("STUB-FOR-INTEGRATION");
+  it("has no stub/swap markers: the real index and the shared drawer are integrated", () => {
+    expect(read("src/scripts/lib/livetv-category-index.ts")).not.toContain("STUB-FOR-INTEGRATION");
     const picker = read("src/scripts/lib/livetv-guide-category-picker.ts");
-    expect(picker).toContain("SWAP TARGET");
+    expect(picker).not.toContain("SWAP TARGET");
+    expect(picker).not.toContain("STUB-FOR-INTEGRATION");
+    expect(picker).toContain("mountCategoryDrawer");
     expect(picker).toContain("selectedGroupId");
     expect(picker).toContain("selectedSubcategoryId");
     expect(picker).toContain("onSelect");
