@@ -18,6 +18,7 @@ describe("normaliseRating", () => {
       voteCount: null,
       rawValue: 8.4,
       rawScale: 10,
+      tmdbLinked: false,
     })
   })
 
@@ -121,13 +122,18 @@ describe("hasReliableRating / ratingPassesMinimum", () => {
     expect(ratingPassesMinimum({}, 0)).toBe(true)
   })
 
-  it("hasCredibleRating: vote-supported evidence only — a bare provider 10 never earns a badge", () => {
+  it("hasCredibleRating: vote-supported or TMDb-linked evidence only — a bare provider 10 never earns a badge", () => {
     expect(hasCredibleRating({ rating: "10" })).toBe(false)
     expect(hasCredibleRating({ rating: "9.7" })).toBe(false)
+    expect(hasCredibleRating({ rating: "10", tmdb: null })).toBe(false)
     expect(hasCredibleRating({})).toBe(false)
     expect(hasCredibleRating(null)).toBe(false)
     expect(hasCredibleRating({ vote_average: 7.5 })).toBe(false)
     expect(hasCredibleRating({ vote_average: 7.5, vote_count: 150 })).toBe(true)
     expect(hasCredibleRating({ vote_average: 7.5, vote_count: 1500 })).toBe(true)
+    // TMDb linkage is the corroboration bulk rows carry.
+    expect(hasCredibleRating({ rating: "8.4", tmdb: 42 })).toBe(true)
+    expect(hasCredibleRating({ rating: "8.4", tmdb_id: "42" })).toBe(true)
+    expect(hasCredibleRating({ rating: "8.4", tmdb: "n/a" })).toBe(false)
   })
 })

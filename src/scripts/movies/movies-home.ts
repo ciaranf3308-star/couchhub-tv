@@ -10,13 +10,13 @@
 // catalogue rows, saved progress, or the local taste model the
 // caller supplies.
 //
-// Selection itself comes from the W1 contract (collection selectors
-// + catalog index + rating evidence, via movies-home-shims.ts until
-// integration wires the real W1 modules). This module owns the Home
-// composition rules on top of those selections: Continue Watching
-// eligibility, cross-shelf diversity, honest shelf labelling, genre
-// tile counts, and the featured view model (including the compact
-// fallback when no suitable artwork/description exists).
+// Selection itself comes from the W1 data layer (collection
+// selectors + catalog index + rating evidence). This module owns
+// the Home composition rules on top of those selections: Continue
+// Watching eligibility, cross-shelf diversity, honest shelf
+// labelling, genre tile counts, and the featured view model
+// (including the compact fallback when no suitable
+// artwork/description exists).
 //
 // Pure and side-effect free: no DOM, no storage, no network. The DOM
 // mount lives in movies-home-mount.ts.
@@ -25,29 +25,36 @@ import {
   addedTimestampMs,
   formatClock,
   formatMovieRuntime,
-  genreDisplayLabel,
-  movieGenres,
   movieMetaLine,
   movieProgressFraction,
   RESUME_MIN_SECONDS,
   type MovieRow,
 } from "@/scripts/movies/couch-movies.ts";
-import type { GenreId } from "@/scripts/lib/genres.ts";
-import { parseYear } from "@/scripts/lib/browse-filters.ts";
-import type { TasteModel } from "@/scripts/lib/taste.ts";
-import type { CouchCardView } from "@/scripts/movies/couch-cards.ts";
 import {
-  CANONICAL_MOVIE_GENRES,
+  genreLabelForId,
+  genresForEntry,
+  type GenreId,
+} from "@/scripts/lib/genres.ts";
+import {
   getCatalogIndex,
+  type CatalogIndex,
+} from "@/scripts/lib/catalog-index.ts";
+import {
+  hasCredibleRating,
   normaliseRating,
+} from "@/scripts/lib/rating-evidence.ts";
+import {
   selectFeaturedFilm,
   selectRecentlyAdded,
   selectWorthWatching,
-  type CatalogIndex,
-} from "@/scripts/movies/movies-home-shims.ts";
-import { buildModeUrl } from "@/scripts/movies/movies-home-modes-shim.ts";
+} from "@/scripts/lib/collection-selectors.ts";
+import { parseYear } from "@/scripts/lib/browse-filters.ts";
+import type { BrowseSortId } from "@/scripts/lib/browse-state.ts";
+import type { TasteModel } from "@/scripts/lib/taste.ts";
+import type { CouchCardView } from "@/scripts/movies/couch-cards.ts";
+import { modeToSearchParams } from "@/scripts/lib/home-browse-modes.ts";
 
-export type { CatalogIndex };
+export type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -61,6 +68,15 @@ export const WORTH_WATCHING_LIMIT = 12;
 export const RECENTLY_ADDED_LIMIT = 12;
 /** Prominent genre tiles (§3.6) — the first six canonical genres. */
 export const PROMINENT_GENRE_COUNT = 6;
+/** The prominent six, in brief §3.6 order (not taxonomy order). */
+export const PROMINENT_GENRES: GenreId[] = [
+  "action",
+  "comedy",
+  "horror",
+  "thriller",
+  "sci-fi",
+  "drama",
+];
 /** Genre tile rows: 4 tiles per rail row (controller D-pad friendly). */
 export const GENRE_TILES_PER_ROW = 4;
 /** Featured synopsis cap — a useful short synopsis, never a wall. */
@@ -83,10 +99,20 @@ export function movieDetailHref(row: MovieRow): string {
   return `/movies/detail?id=${encodeURIComponent(row.id)}`;
 }
 
+/** Browse Everything URL for one mode (W2 URL contract). */
+function browseUrl(opts: { category?: string; sort?: BrowseSortId }): string {
+  const params = modeToSearchParams({
+    view: "browse",
+    kind: "movie",
+    category: opts.category,
+    sort: opts.sort,
+  });
+  return `/movies?${params.toString()}`;
+}
+
 /** Display label for a canonical genre on Movies Home (§3.6). */
 export function movieGenreLabel(id: GenreId): string {
-  if (id === "sci-fi") return "Science Fiction";
-  return genreDisplayLabel(id);
+  return genreLabelForId(id, "vod");
 }
 
 // ---------------------------------------------------------------------------
@@ -238,12 +264,15 @@ export function featuredViewModel(
   progress: MoviesHomeProgress | null | undefined,
 ): FeaturedFilm {
   const year = parseYear(row.year);
-  const rating = normaliseRating(row.rating, { tmdb: row.tmdb });
+  const rating = normaliseRating(row);
+  const ratingLabel = hasCredibleRating(rating)
+    ? `★ ${rating!.score10.toFixed(1)}`
+    : "";
   const posterSrc = row.logo || null;
   const synopsis = truncateSynopsis(row.plot || "");
   const fraction = movieProgressFraction(progress);
   const inProgress = !!progress && !progress.completed && fraction > 0 && fraction < 1;
-  const genres = movieGenres(row).slice(0, 3).map(genreDisplayLabel);
+  const genres = genresForEntry(row, "vod").slice(0, 3).map((id) => genreLabelForId(id, "vod"));
   return {
     row,
     title: row.name,
@@ -251,7 +280,7 @@ export function featuredViewModel(
     runtimeLabel: formatMovieRuntime(row.duration),
     genreSummary: genres.join(" · "),
     synopsis,
-    ratingLabel: rating.credible ? rating.label : "",
+    ratingLabel,
     posterSrc,
     compact: posterSrc == null && synopsis === "",
     detailHref: movieDetailHref(row),
@@ -350,36 +379,30 @@ export interface GenreTile {
 }
 
 /**
- * Genre tiles: the prominent six (in canonical order) that have at
- * least one title, plus All Genres. Counts use the same genre match
- * the browse filter uses (movieGenres over the provider category),
- * so a tile count equals the Browse result count for that genre.
- * No artwork — typographic tiles only, so no unrelated poster can
- * mislead. Pure.
+ * Genre tiles: the prominent six (in brief §3.6 order, NOT the
+ * taxonomy's alphabetical order) that have at least one title, plus
+ * All Genres. Counts come from the W1 index's display-level genre
+ * buckets, so a tile count ALWAYS equals the Browse result count
+ * for that genre. No artwork — typographic tiles only, so no
+ * unrelated poster can mislead. Pure.
  */
 export function genreTiles(index: CatalogIndex): GenreTile[] {
-  const counts = new Map<GenreId, number>();
-  for (const row of index.rows) {
-    for (const genre of movieGenres(row)) {
-      counts.set(genre, (counts.get(genre) || 0) + 1);
-    }
-  }
   const tiles: GenreTile[] = [];
-  for (const genre of CANONICAL_MOVIE_GENRES.slice(0, PROMINENT_GENRE_COUNT)) {
-    const count = counts.get(genre) || 0;
+  for (const genre of PROMINENT_GENRES) {
+    const count = index.idsByGenre.get(genre)?.length || 0;
     if (count <= 0) continue;
     tiles.push({
       id: genre,
       label: movieGenreLabel(genre),
       count,
-      href: buildModeUrl({ view: "browse", genre }),
+      href: browseUrl({ category: `genre:${genre}` }),
     });
   }
   tiles.push({
     id: "all",
     label: "All Genres",
-    count: index.total,
-    href: buildModeUrl({ view: "browse" }),
+    count: index.totalGroups,
+    href: browseUrl({}),
   });
   return tiles;
 }
@@ -398,7 +421,7 @@ export function movieHomeCardView(
   progress: MoviesHomeProgress | null | undefined,
   opts: { metaSuffix?: string } = {},
 ): CouchCardView {
-  const rating = normaliseRating(row.rating, { tmdb: row.tmdb });
+  const rating = normaliseRating(row);
   const fraction = movieProgressFraction(progress);
   const meta = [movieMetaLine(row), opts.metaSuffix || ""].filter(Boolean).join(" · ");
   return {
@@ -407,7 +430,7 @@ export function movieHomeCardView(
     image: row.logo,
     kind: "poster",
     progress: fraction > 0 && fraction < 1 ? fraction : 0,
-    badge: rating.credible ? rating.label : undefined,
+    badge: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : undefined,
     href: movieDetailHref(row),
     itemKey: `vod-${row.id}`,
   };
@@ -440,72 +463,170 @@ export interface BuildMoviesHomeInput {
 }
 
 /**
+ * Group-level progress: the Home shelves show one poster per title
+ * group, so progress rolls up across a group's variants. A group is
+ * in progress when any member is genuinely in progress (the 30s
+ * rule from selectContinueWatchingMovies applies per member); the
+ * most recently updated in-progress member supplies the position.
+ * A group counts as completed only when NO member is in progress
+ * and at least one member is completed — a completed variant must
+ * not hide an in-progress one.
+ */
+function groupProgressForHome(
+  index: CatalogIndex,
+  progressById: ProgressById,
+): {
+  continueByPrimary: Map<number, MoviesHomeProgress>;
+  completedIds: Set<string>;
+} {
+  const continueByPrimary = new Map<number, MoviesHomeProgress>();
+  const completedIds = new Set<string>();
+  for (const group of index.groups) {
+    let latestInProgress: MoviesHomeProgress | null = null;
+    let latestUpdated = -1;
+    const completedMembers: string[] = [];
+    for (const memberId of group.variantIds) {
+      const progress = progressFor(progressById, Number(memberId));
+      if (!progress) continue;
+      const fraction = movieProgressFraction(progress);
+      if (progress.completed || fraction >= 1) {
+        completedMembers.push(memberId);
+        continue;
+      }
+      const duration = Number(progress.duration) || 0;
+      const position = Number(progress.position) || 0;
+      if (!(duration > 0) || !(position > 0)) continue;
+      if (position < RESUME_MIN_SECONDS && duration > 300) continue;
+      if (!(fraction > 0) || fraction >= 1) continue;
+      const updatedAt = progress.updatedAt || 0;
+      if (updatedAt >= latestUpdated) {
+        latestInProgress = progress;
+        latestUpdated = updatedAt;
+      }
+    }
+    if (latestInProgress) {
+      continueByPrimary.set(Number(group.primaryId), latestInProgress);
+    } else if (completedMembers.length > 0) {
+      for (const id of completedMembers) completedIds.add(id);
+    }
+  }
+  return { continueByPrimary, completedIds };
+}
+
+/** Resolve selector result ids to their primary rows (order kept). */
+function resolveGroupRows(index: CatalogIndex, ids: string[]): MovieRow[] {
+  const rows: MovieRow[] = [];
+  for (const id of ids) {
+    const row = index.byId.get(id) as MovieRow | undefined;
+    if (row) rows.push(row);
+  }
+  return rows;
+}
+
+/**
  * Assemble the full Movies Home model. Selection via the W1
- * contract; composition (continue eligibility, diversity, honest
+ * selectors; composition (continue eligibility, diversity, honest
  * labels, genre counts) here. Completed titles never headline and
  * never fill Worth Watching. Pure.
  */
 export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeModel {
   const nowMs = input.nowMs ?? Date.now();
   const seed = input.rotationSeed ?? 0;
-  const index = getCatalogIndex(input.rows, input.playlistId);
-  const rows = index.rows;
+  const revision = `${input.playlistId}:${input.rows.length}`;
+  const index = getCatalogIndex("vod", input.rows, revision, {
+    playlistId: input.playlistId,
+  });
+  const primaries = resolveGroupRows(
+    index,
+    index.groups.map((group) => group.primaryId),
+  );
 
-  const completedIds = new Set<number>();
-  for (const row of rows) {
-    const progress = progressFor(input.progressById, row.id);
-    if (progress?.completed || movieProgressFraction(progress) >= 1) {
-      completedIds.add(row.id);
-    }
-  }
+  const { continueByPrimary, completedIds } = groupProgressForHome(
+    index,
+    input.progressById,
+  );
 
-  const continueItems = selectContinueWatchingMovies(rows, input.progressById);
+  // D26: the selector cache does not fingerprint the completed-set
+  // contents, so the cache key carries them explicitly — a completed
+  // title must drop out of Featured/Worth on the next build.
+  const cacheKeyBase = [
+    "movies-home",
+    revision,
+    `seed:${seed}`,
+    `completed:${[...completedIds].sort().join(",")}`,
+  ].join("|");
 
-  const featuredRow = selectFeaturedFilm(index, input.taste, {
+  const continueItems = selectContinueWatchingMovies(primaries, continueByPrimary);
+
+  const featuredResult = selectFeaturedFilm(index, input.taste, 1, {
     rotationSeed: seed,
-    excludeIds: completedIds,
+    excludeCompleted: true,
+    completedIds,
+    cacheKey: `${cacheKeyBase}|featured`,
     nowMs,
   });
+  const featuredRow = featuredResult
+    ? ((index.byId.get(featuredResult.id) as MovieRow | undefined) ?? null)
+    : null;
   const featured = featuredRow
-    ? featuredViewModel(featuredRow, progressFor(input.progressById, featuredRow.id))
+    ? featuredViewModel(featuredRow, continueByPrimary.get(featuredRow.id) ?? null)
     : null;
 
-  const excludeForWorth = new Set<number>([
-    ...(featuredRow ? [featuredRow.id] : []),
-  ]);
-  const worthRaw = selectWorthWatching(index, input.taste, {
-    limit: WORTH_WATCHING_LIMIT,
-    excludeIds: excludeForWorth,
-    completedIds,
-    rotationSeed: seed,
-    // NO verified-AI input: no verified cache is plumbed and the
-    // privacy conditions are unverified — the shelf stays local.
-    nowMs,
-  });
+  // Over-fetch by one: the diversity net removes the featured film
+  // from Worth Watching, and the shelf must still fill to 12.
+  const worthRaw = resolveGroupRows(
+    index,
+    selectWorthWatching(index, input.taste, WORTH_WATCHING_LIMIT + 1, {
+      rotationSeed: seed,
+      excludeCompleted: true,
+      completedIds,
+      cacheKey: `${cacheKeyBase}|worth`,
+      // NO verified-AI input: no verified cache is plumbed and the
+      // privacy conditions are unverified — the shelf stays local.
+      nowMs,
+    }).map((result) => result.id),
+  );
 
-  const excludeForRecent = new Set<number>([
-    ...(featuredRow ? [featuredRow.id] : []),
-    ...worthRaw.map((row) => row.id),
-  ]);
-  const recentRaw = selectRecentlyAdded(index, {
-    limit: RECENTLY_ADDED_LIMIT,
-    excludeIds: excludeForRecent,
-    nowMs,
-  });
-
-  // Composition safety net (selectors already exclude by id).
-  const { worthWatching, recentlyAdded } = applyHomeDiversity(
+  // Recently Added: a 90-day cutoff first (brief §3.5's meaningful
+  // cutoff); when fewer than 4 titles survive, extend to the newest
+  // dated titles WITHOUT implying just-uploaded — the evidence note
+  // stays honest either way. Over-fetch so the diversity net (which
+  // removes featured + Worth titles) still leaves a full shelf.
+  const recentLimit =
+    RECENTLY_ADDED_LIMIT + 1 + worthRaw.length;
+  const cutoff90 = nowMs - 90 * 24 * 60 * 60 * 1000;
+  let recentRaw = resolveGroupRows(
+    index,
+    selectRecentlyAdded(index, recentLimit, cutoff90, {
+      cacheKey: `${cacheKeyBase}|recent`,
+      nowMs,
+    }).map((result) => result.id),
+  );
+  let { worthWatching, recentlyAdded } = applyHomeDiversity(
     featuredRow,
     worthRaw,
     recentRaw,
   );
+  recentlyAdded = recentlyAdded.slice(0, RECENTLY_ADDED_LIMIT);
+  if (recentlyAdded.length < 4) {
+    recentRaw = resolveGroupRows(
+      index,
+      selectRecentlyAdded(index, recentLimit, null, {
+        cacheKey: `${cacheKeyBase}|recent`,
+        nowMs,
+      }).map((result) => result.id),
+    );
+    ({ recentlyAdded } = applyHomeDiversity(featuredRow, worthRaw, recentRaw));
+    recentlyAdded = recentlyAdded.slice(0, RECENTLY_ADDED_LIMIT);
+  }
+  worthWatching = worthWatching.slice(0, WORTH_WATCHING_LIMIT);
 
-  const credibleCount = worthWatching.filter(
-    (row) => normaliseRating(row.rating, { tmdb: row.tmdb }).credible,
+  const credibleCount = worthWatching.filter((row) =>
+    hasCredibleRating(normaliseRating(row)),
   ).length;
 
   return {
-    totalCount: index.total,
+    totalCount: index.totalGroups,
     featured,
     continueWatching: {
       items: continueItems.slice(0, CONTINUE_WATCHING_VISIBLE),
@@ -524,14 +645,14 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
       evidence: recentlyAddedEvidence(recentlyAdded, nowMs),
     },
     genres: genreTiles(index),
-    hasContent: rows.length > 0,
+    hasContent: index.totalGroups > 0,
   };
 }
 
 /** Browse Everything URLs used by Home entry points (§3.5, §3.7). */
 export const MOVIES_HOME_BROWSE_URLS = {
-  everything: buildModeUrl({ view: "browse" }),
-  continueWatching: buildModeUrl({ view: "browse", list: "continue" }),
-  recentlyAdded: buildModeUrl({ view: "browse", sort: "added" }),
-  search: buildModeUrl({ view: "browse", focus: "search" }),
+  everything: browseUrl({}),
+  continueWatching: browseUrl({ category: "collection:continue" }),
+  recentlyAdded: browseUrl({ sort: "added" }),
+  search: `${browseUrl({})}&focus=search`,
 } as const;

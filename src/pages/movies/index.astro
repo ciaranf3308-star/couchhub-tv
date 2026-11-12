@@ -9,23 +9,18 @@
  //                           Browse Everything entry. The full catalogue
  //                           grid NEVER mounts here (acceptance test 1).
  //   /movies?view=browse  -> Browse Everything: the exhaustive browser
- //                           (W2's engine at integration; on this branch
- //                           the legacy browse controller mounts into the
- //                           scaffold below via the W2 shim).
+ //                           (W2's engine renders into #movies-browse-mount).
  //
  // Home sections paint client-side from the Xtream catalogue via
  // src/scripts/movies/movies-home-mount.ts. No Live TV here (B11).
  // No six dropdowns beside the title: the Home header carries the
  // library count and two primary actions (Search Movies, Browse
- // Everything). The filter selects below belong ONLY to the Browse
- // scaffold.
+ // Everything). Browse controls live inside the Browse engine
+ // (category + filter drawers, sort overlay, search layer) — never
+ // as desktop selects on this page.
 import CouchLayout from "@/layouts/CouchLayout.astro";
-import TvDialog from "@/components/couch/TvDialog.astro";
-import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
 import TvSkeleton from "@/components/couch/TvSkeleton.astro";
 import TvEmpty from "@/components/couch/TvEmpty.astro";
-import { MOVIE_SORT_MODES } from "@/scripts/movies/couch-movies.ts";
-import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
 
 <CouchLayout pageTitle="Movies" activeNav="movies" view="movies">
@@ -130,131 +125,18 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
   </div>
 
   {/*
-    0.11.8 SHIM SCAFFOLD — Browse Everything mount point. W2's real
-    engine renders into #movies-browse-mount at integration and this
-    legacy scaffold is deleted. On this branch the W2 shim mounts
-    the existing browse controller here (bare ids — the controller's own DOM contract, unchanged)
-    so the entire catalogue stays reachable from Movies Home. The
-    controller owns visibility of the skeleton / empty / error / grid
-    nodes below; the router owns the mount div's own `hidden`.
+    Browse Everything mount point. The W2 engine renders its own
+    header, grid, pagination, drawers, sort overlay, and search
+    layer into this empty div; the router owns its `hidden`.
   */}
-  <div id="movies-browse-mount" hidden>
-    <header class="rs-browse-head">
-      <h1 class="rs-page-title">Movies</h1>
-      <p class="rs-meta">
-        <span id="couch-browse-hero-count">—</span>
-        <span aria-hidden="true"> · </span>
-        <span id="couch-browse-status">Loading…</span>
-      </p>
-    </header>
-
-    <section class="rs-browse-toolbar" aria-label="Browse controls">
-      <div class="rs-browse-search">
-        <label class="rs-browse-label" for="couch-browse-search">Search movies</label>
-        <input
-          id="couch-browse-search"
-          type="search"
-          placeholder="Search movies…"
-          autocomplete="off"
-        />
-        <button
-          id="couch-search-open"
-          type="button"
-          class="rs-hero__action rs-hero__action--secondary"
-          data-couch-dialog-open="couch-search-dialog"
-        >
-          ⌨ On-screen keyboard
-        </button>
-      </div>
-
-      <div class="rs-browse-selects">
-        <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
-        <select id="couch-browse-sort">
-          {
-            MOVIE_SORT_MODES.map((mode) => (
-              <option value={mode.value}>{mode.label}</option>
-            ))
-          }
-        </select>
-        <label class="rs-browse-label" for="couch-browse-year">Decade</label>
-        <select id="couch-browse-year">
-          <option value="">Any decade</option>
-          {
-            YEAR_ORDER.map((year) => (
-              <option value={year}>{year}</option>
-            ))
-          }
-        </select>
-        <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
-        <select id="couch-browse-rating">
-          {
-            RATING_OPTIONS.map((min) => (
-              <option value={min}>
-                {min === 0 ? "Any rating" : `${min}+`}
-              </option>
-            ))
-          }
-        </select>
-        <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
-        <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
-        <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
-      </div>
-    </section>
-
-    <div
-      id="couch-browse-tabs"
-      class="rs-browse-tabs rs-browse-segmented"
-      role="group"
-      aria-label="Movie lists"
-    >
-    </div>
-
-    <div id="couch-browse-rails"></div>
-
-    <div id="couch-browse-skeleton">
-      <TvSkeleton kind="poster" count={12} />
-    </div>
-
-    <div id="couch-browse-empty" hidden>
-      <TvEmpty
-        title="No movies yet"
-        message="This playlist has no movies."
-        art="library"
-        actionLabel="Open Settings"
-        actionHref="/settings"
-      />
-    </div>
-
-    <div id="couch-browse-error" hidden role="alert">
-      <p class="rs-body-text" data-role="error-message"></p>
-      <p>
-        <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
-          Check Settings
-        </a>
-      </p>
-    </div>
-
-    <div
-      id="couch-browse-grid"
-      class="rs-grid"
-      data-couch-grid
-      aria-label="All movies"
-      hidden
-    >
-    </div>
-  </div>
-
-  <TvDialog id="couch-search-dialog" title="Search movies">
-    <TvKeyboard client:load placeholder="Type a movie title…" />
-    <p class="rs-meta">Type to filter the grid. The keyboard closes with B / Escape.</p>
-  </TvDialog>
+  <div id="movies-browse-mount" hidden></div>
 
   <script>
     import "@/scripts/movies/couch-index.ts";
   </script>
 
   <style>
-    /* Home root + Browse scaffold: flex columns matching the old
+    /* Home root + Browse mount: flex columns matching the old
        direct-children-of-main layout. :not([hidden]) so the router's
        `hidden` toggles still hide the inactive mode. */
     #movies-home-root:not([hidden]),
@@ -263,113 +145,6 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       flex-direction: column;
       gap: 2.5rem;
       min-width: 0;
-    }
-    .rs-browse-head {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .rs-browse-toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.5rem;
-      align-items: end;
-    }
-    .rs-browse-search {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: end;
-      flex: 1 1 32rem;
-    }
-    .rs-browse-search input {
-      flex: 1 1 16rem;
-      min-height: 3rem;
-      padding: 0.5rem 1rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.25rem;
-    }
-    .rs-browse-selects {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      align-items: center;
-    }
-    .rs-browse-selects select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-label {
-      font-size: 1.125rem;
-      color: var(--rs-text-2);
-    }
-    .rs-browse-genre-filter {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .rs-browse-genre-filter select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-runtime-filter {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-    .rs-browse-runtime-filter select {
-      min-height: 3rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-line);
-      background: var(--rs-surface);
-      color: var(--rs-text);
-      font-size: 1.125rem;
-    }
-    .rs-browse-reset-filter {
-      display: flex;
-      align-items: center;
-    }
-    .rs-browse-segmented {
-      display: inline-flex;
-      flex-wrap: wrap;
-      align-self: flex-start;
-      max-width: 100%;
-      border: 1px solid var(--rs-line);
-      border-radius: 0.75rem;
-      overflow: hidden;
-      background: var(--rs-surface);
-      margin-bottom: 1.5rem;
-    }
-    .rs-browse-segmented .rs-browse-segment {
-      border: none;
-      border-radius: 0;
-      background: transparent;
-      transform: none;
-    }
-    .rs-browse-segmented .rs-browse-segment:hover {
-      transform: none;
-    }
-    .rs-browse-segmented .rs-browse-segment + .rs-browse-segment {
-      border-left: 1px solid var(--rs-line);
-    }
-    .rs-browse-segmented .rs-browse-segment[aria-pressed="true"] {
-      background: var(--rs-accent);
-      border-color: var(--rs-focus);
-      color: #fff;
     }
   </style>
 </CouchLayout>

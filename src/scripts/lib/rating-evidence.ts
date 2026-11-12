@@ -50,6 +50,15 @@ export interface RatingEvidence {
   rawValue: number
   /** The scale the raw value was read on. 5-point values are doubled into score10. */
   rawScale: 5 | 10
+  /**
+   * True when the entry carries a TMDb identity (tmdb/tmdb_id).
+   * Identity is NOT provenance — the source field stays honest —
+   * but it is the best corroboration bulk provider rows carry
+   * (providers populate ratings from TMDb for matched titles), so
+   * display credibility (hasCredibleRating) counts it. Ranking
+   * never reads this field: Bayesian weighting still governs order.
+   */
+  tmdbLinked: boolean
 }
 
 /** Everything normaliseRating reads. Extra provider/enrichment fields are ignored. */
@@ -109,6 +118,7 @@ export function normaliseRating(entry: RatableEntry | null | undefined): RatingE
   const voteAverage = toFiniteNumber(entry.vote_average ?? entry.voteAverage)
   const voteCount = toVoteCount(entry.vote_count ?? entry.voteCount)
   const tmdbMarked = isTmdbMarked(entry)
+  const tmdbLinked = toFiniteNumber(entry.tmdb ?? entry.tmdb_id) != null
 
   // TMDb-shaped fields: corroborated -> "tmdb"; uncorroborated ->
   // "enrichment" (TMDb vocabulary, unverified vote support). The
@@ -123,6 +133,7 @@ export function normaliseRating(entry: RatableEntry | null | undefined): RatingE
       voteCount,
       rawValue: voteAverage,
       rawScale: 10,
+      tmdbLinked,
     }
   }
 
@@ -136,6 +147,7 @@ export function normaliseRating(entry: RatableEntry | null | undefined): RatingE
       voteCount,
       rawValue: fiveBased,
       rawScale: 5,
+      tmdbLinked,
     }
   }
 
@@ -151,6 +163,7 @@ export function normaliseRating(entry: RatableEntry | null | undefined): RatingE
       voteCount,
       rawValue: rating,
       rawScale: 5,
+      tmdbLinked,
     }
   }
 
@@ -164,6 +177,7 @@ export function normaliseRating(entry: RatableEntry | null | undefined): RatingE
     voteCount,
     rawValue: rating,
     rawScale: 10,
+    tmdbLinked,
   }
 }
 
@@ -240,17 +254,23 @@ export function hasReliableRating(
 
 /**
  * True when a rating is credible enough to DISPLAY as a quality
- * badge/label on Home shelves (brief §3.2/§14.5): any evidence whose
- * confidence is not "low". Provider ratings without vote support are
- * always "low", so a bare provider 10 never earns a badge; a
- * vote-supported TMDb/enrichment rating does. Display-only — filters
- * and sorts use ratingPassesMinimum / compareByRatingEvidence.
+ * badge/label on Home shelves (brief §3.2/§14.5): vote-supported
+ * evidence, or evidence on a TMDb-linked entry. A bare provider 10
+ * with no linkage never earns a badge; a rating on a TMDb-matched
+ * title does — TMDb linkage is the corroboration bulk provider
+ * rows actually carry (vote counts never appear in bulk rows, so a
+ * votes-only rule would make the brief's "credible rating" dead in
+ * production). This is a DISPLAY rule, not a provenance claim: the
+ * badge shows a number with no source attribution, and ranking
+ * still uses Bayesian weighting (a linked 10 cannot outrank a
+ * vote-supported film). Filters and sorts use
+ * ratingPassesMinimum / compareByRatingEvidence.
  */
 export function hasCredibleRating(
   entry: RatingEvidence | RatableEntry | null | undefined,
 ): boolean {
   const evidence = evidenceOf(entry)
-  return evidence != null && evidence.confidence !== "low"
+  return evidence != null && (evidence.confidence !== "low" || evidence.tmdbLinked === true)
 }
 
 /**

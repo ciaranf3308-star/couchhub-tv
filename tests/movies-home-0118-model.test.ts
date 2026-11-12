@@ -18,7 +18,7 @@ import {
   selectContinueWatchingMovies,
   tasteHasAffinity,
 } from "@/scripts/movies/movies-home";
-import { getCatalogIndex } from "@/scripts/movies/movies-home-shims";
+import { getCatalogIndex } from "@/scripts/lib/catalog-index";
 import { emptyTasteModel } from "@/scripts/lib/taste";
 import {
   daysAgoSeconds,
@@ -200,12 +200,12 @@ describe("genreTiles (§3.6)", () => {
       movieRow({ category: "Action, Thriller" }),
       movieRow({ category: "Comedy" }),
     ];
-    const tiles = genreTiles(getCatalogIndex(rows));
+    const tiles = genreTiles(getCatalogIndex("vod", rows, "movies-home-test"));
     const byId = new Map(tiles.map((tile) => [tile.id, tile]));
     expect(byId.get("action")?.count).toBe(2);
     expect(byId.get("thriller")?.count).toBe(1);
     expect(byId.get("comedy")?.count).toBe(1);
-    expect(byId.get("action")?.href).toBe("/movies?view=browse&genre=action");
+    expect(byId.get("action")?.href).toBe("/movies?view=browse&category=genre%3Aaction");
     expect(byId.get("action")?.label).toBe("Action");
     expect(byId.get("sci-fi")).toBeUndefined();
     expect(byId.get("all")?.count).toBe(3);
@@ -213,7 +213,9 @@ describe("genreTiles (§3.6)", () => {
     expect(byId.get("all")?.href).toBe("/movies?view=browse");
   });
   it("labels Science Fiction in full", () => {
-    const tiles = genreTiles(getCatalogIndex([movieRow({ category: "Science Fiction" })]));
+    const tiles = genreTiles(
+      getCatalogIndex("vod", [movieRow({ category: "Science Fiction" })], "movies-home-test"),
+    );
     expect(tiles.find((tile) => tile.id === "sci-fi")?.label).toBe("Science Fiction");
   });
 });
@@ -322,7 +324,13 @@ describe("buildMoviesHomeModel (§1.1, §2)", () => {
   });
   it("Continue Watching is exempt from diversity: an in-progress film can also be featured", () => {
     const rows = [
-      movieRow({ id: 1, name: "Star", rating: "9.2", tmdb: 1, category: "Drama", plot: "Great." }),
+      // Vote-supported evidence: under W1's Bayesian scoring a bare
+      // 9.2 and a bare 6.0 tie (both unproven), so the intended
+      // winner carries genuine vote support to stand out.
+      Object.assign(
+        movieRow({ id: 1, name: "Star", rating: "9.2", tmdb: 1, category: "Drama", plot: "Great." }),
+        { vote_average: 9.2, vote_count: 500 },
+      ),
       movieRow({ id: 2, name: "Also Ran", rating: "6.0", tmdb: 2, category: "Comedy" }),
     ];
     const model = buildMoviesHomeModel({
@@ -380,7 +388,9 @@ describe("buildMoviesHomeModel (§1.1, §2)", () => {
 describe("MOVIES_HOME_BROWSE_URLS", () => {
   it("names the Browse Everything entry points", () => {
     expect(MOVIES_HOME_BROWSE_URLS.everything).toBe("/movies?view=browse");
-    expect(MOVIES_HOME_BROWSE_URLS.continueWatching).toBe("/movies?view=browse&list=continue");
+    expect(MOVIES_HOME_BROWSE_URLS.continueWatching).toBe(
+      "/movies?view=browse&category=collection%3Acontinue",
+    );
     expect(MOVIES_HOME_BROWSE_URLS.recentlyAdded).toBe("/movies?view=browse&sort=added");
     expect(MOVIES_HOME_BROWSE_URLS.search).toBe("/movies?view=browse&focus=search");
   });

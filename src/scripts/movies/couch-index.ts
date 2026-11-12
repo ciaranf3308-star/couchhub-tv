@@ -2,8 +2,7 @@
 // Browse Everything split (brief §1.1, §2).
 //
 // Movies is ONE nav destination with TWO explicit modes, chosen by
-// the URL (W2's mode contract, via movies-home-modes-shim.ts until
-// integration wires the real module):
+// the URL (W2's mode contract):
 //
 //   /movies              -> Movies Home (curated; default)
 //   /movies?view=browse  -> Browse Everything (exhaustive)
@@ -14,61 +13,69 @@
 // (history.back) restores the exact URL — mode, category, page —
 // and couch-focus memory restores the selected poster.
 //
-// B / Escape in Browse mode is the mode's back step: it returns to
-// Movies Home. In Home mode B does nothing (top-level destination).
-// The dialog and text-field cases are excluded: a modal owns B, and
-// B in a field blurs (the shared gamepad gate owns that).
+// B / Escape in Browse mode is owned by the browse controller: it
+// pops overlay layers first, then calls onExit, which navigates
+// home. There is NO document-level back-step listener here — one
+// would fire before the mount's window-level handler and break
+// drawer layer-popping. In Home mode B does nothing (top-level
+// destination). The dialog and text-field cases are excluded by
+// the shared gamepad gate.
 
 import { mountMoviesHome } from "@/scripts/movies/movies-home-mount.ts";
+import { mountBrowseEverything } from "@/scripts/lib/browse-everything.ts";
 import {
-  mountBrowseEverything,
+  browseStateFromMode,
   parseModeFromUrl,
-  setModeInUrl,
-  shouldMountBrowse,
-} from "@/scripts/movies/movies-home-modes-shim.ts";
+} from "@/scripts/lib/home-browse-modes.ts";
+import {
+  createMoviesBrowseSource,
+  resolveBrowseCategoryLabel,
+} from "@/scripts/lib/browse-sources.ts";
 
 const HOME_ROOT_ID = "movies-home-root";
 const BROWSE_MOUNT_ID = "movies-browse-mount";
 
-function isEditingTarget(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  if (!element || typeof element.tagName !== "string") return false;
-  const tag = element.tagName.toLowerCase();
-  return (
-    tag === "input" ||
-    tag === "textarea" ||
-    tag === "select" ||
-    element.isContentEditable === true
-  );
-}
-
-function installBrowseBackStep(isBrowse: boolean): void {
-  if (!isBrowse) return;
-  document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" && event.key !== "BrowserBack") return;
-    if (event.defaultPrevented) return;
-    if (document.querySelector("dialog[open]")) return;
-    if (isEditingTarget(event.target)) return;
-    // Return to Movies Home (never history.back: a direct landing
-    // on a Browse URL must not back out of the app).
-    event.preventDefault();
-    setModeInUrl({ view: "home" });
-  });
-}
-
 function mountMoviesPage(): void {
-  const mode = parseModeFromUrl();
+  const resolveLabel = (selection: Parameters<typeof resolveBrowseCategoryLabel>[1]) =>
+    resolveBrowseCategoryLabel("movie", selection);
+  const mode = parseModeFromUrl("movie", resolveLabel);
   const homeRoot = document.getElementById(HOME_ROOT_ID);
   const browseMount = document.getElementById(BROWSE_MOUNT_ID);
-  const browse = shouldMountBrowse(mode) && browseMount != null;
+  const browse = mode.view === "browse" && browseMount != null;
   if (homeRoot) homeRoot.hidden = browse;
   if (browseMount) browseMount.hidden = !browse;
   if (browse && browseMount) {
-    mountBrowseEverything(browseMount, mode);
+    // Search Movies links here with focus=search: consume it as
+    // autoOpenSearch and strip it before mounting, so the mount's
+    // URL sync never re-serialises it.
+    const params = new URLSearchParams(window.location.search);
+    const autoOpenSearch = params.get("focus") === "search";
+    if (autoOpenSearch) {
+      params.delete("focus");
+      const query = params.toString();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}`,
+      );
+    }
+    mountBrowseEverything(browseMount, {
+      kind: "movie",
+      initialState: browseStateFromMode(mode, resolveLabel),
+      source: createMoviesBrowseSource(),
+      autoOpenSearch,
+      onOpenDetail: (id) => {
+        window.location.href = `/movies/detail?id=${encodeURIComponent(id)}`;
+      },
+      onExit: () => {
+        // Full navigation home (never history.back: a direct
+        // landing on a Browse URL must not back out of the app).
+        window.location.href = "/movies";
+      },
+    });
   } else {
     mountMoviesHome();
   }
-  installBrowseBackStep(browse);
 }
 
 mountMoviesPage();

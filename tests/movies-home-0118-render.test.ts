@@ -167,7 +167,7 @@ describe("paintMoviesHome — structure (§1.1, §2, §3)", () => {
     const tiles = root.querySelectorAll(".mh-genre-tile");
     expect(tiles.length).toBe(7);
     const actionTile = root.querySelector('[data-couch-key="movies-genre-action"]');
-    expect(actionTile?.getAttribute("href")).toBe("/movies?view=browse&genre=action");
+    expect(actionTile?.getAttribute("href")).toBe("/movies?view=browse&category=genre%3Aaction");
     expect(actionTile?.textContent).toContain("films");
   });
 
@@ -177,7 +177,7 @@ describe("paintMoviesHome — structure (§1.1, §2, §3)", () => {
     const cards = document.querySelectorAll('[data-nylah-rail="movies-continue"] .rs-card');
     expect(cards.length).toBe(8);
     const viewAll = document.querySelector('[data-couch-key="movies-viewall-continue"]');
-    expect(viewAll?.getAttribute("href")).toBe("/movies?view=browse&list=continue");
+    expect(viewAll?.getAttribute("href")).toBe("/movies?view=browse&category=collection%3Acontinue");
     expect(viewAll?.textContent).toContain("12 in progress");
   });
 

@@ -249,8 +249,9 @@ export function createMoviesBrowseSource(): BrowseDataSource {
       const movie = row as MovieRow;
       const view = moviesAdapter.cardView(movie, playlistId);
       // D7: the browse badge shows a rating ONLY when the evidence
-      // is credible (vote-supported). The adapter's raw >= 8 badge
-      // stays untouched on the legacy /browse route.
+      // is credible (vote-supported or TMDb-linked — D35). The
+      // adapter's raw >= 8 badge stays untouched on the legacy
+      // /browse route.
       const evidence = normaliseRating(movie);
       return {
         ...view,

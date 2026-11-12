@@ -379,31 +379,56 @@ describe("list tabs: one segmented control, all five lists work", () => {
 });
 
 describe("no pill-cluster markup remains in the catalogue views", () => {
-  it("the genre mount point lives inside the filter row on each standalone page", () => {
+  it("the Movies page carries no pill-cluster scaffold — Home root + Browse mount only", () => {
+    // 0.11.8 split: /movies is Home + Browse Everything. Filter
+    // controls live inside the Browse engine (category/filter
+    // drawers, sort overlay, search layer), never as selects, tabs,
+    // or pill rows in the page markup.
+    expect(browseAstro).toContain("location.replace");
+    expect(browseAstro).not.toContain("couch-browse-genres");
+    expect(moviesAstro).toContain('id="movies-home-root"');
+    expect(moviesAstro).toContain('id="movies-browse-mount"');
+    for (const scaffoldId of [
+      "couch-browse-rating",
+      "couch-browse-genres",
+      "couch-browse-tabs",
+      "couch-browse-sort",
+      "couch-browse-year",
+      "couch-browse-grid",
+      "couch-browse-rails",
+    ]) {
+      expect(moviesAstro, `movies has no ${scaffoldId}`).not.toContain(scaffoldId);
+    }
+    expect(moviesAstro).not.toContain("rs-browse-segmented");
+    expect(moviesAstro).not.toContain("rs-browse-genre-filter");
+    expect(moviesAstro).not.toContain('class="rs-browse-genres"');
+    expect(moviesAstro).not.toContain("<select");
+    expect(moviesAstro).not.toContain("Astro.redirect");
+  });
+
+  it("the genre mount point lives inside the filter row on the Series page", () => {
+    // The Series page still carries the legacy scaffold until the
+    // 0.11.8 W4 rewire lands; it is rescoped to the Home + Browse
+    // structure in the same commit as the series page rewrite.
     // 0.10.0 split: /movies and /series are real pages again — the
     // genre mount lives in each page's own filter row, not in
     // browse.astro (which is only a client-side redirect now).
-    expect(browseAstro).toContain("location.replace");
-    expect(browseAstro).not.toContain("couch-browse-genres");
-    for (const [name, src] of [
-      ["movies/index.astro", moviesAstro],
-      ["series/index.astro", seriesAstro],
-    ] as const) {
-      // The Genre select mount sits after the Rating select and before
-      // the list tabs — i.e. inside the one filter row.
-      const ratingIdx = src.indexOf('id="couch-browse-rating"');
-      const genreIdx = src.indexOf('id="couch-browse-genres"');
-      const tabsIdx = src.indexOf('id="couch-browse-tabs"');
-      expect(ratingIdx, `${name} rating`).toBeGreaterThan(-1);
-      expect(genreIdx, `${name} genre mount`).toBeGreaterThan(-1);
-      expect(tabsIdx, `${name} tabs`).toBeGreaterThan(-1);
-      expect(genreIdx, `${name} genre after rating`).toBeGreaterThan(ratingIdx);
-      expect(genreIdx, `${name} genre before tabs`).toBeLessThan(tabsIdx);
-      expect(src, name).toContain("rs-browse-segmented");
-      expect(src, name).toContain("rs-browse-genre-filter");
-      expect(src, name).not.toContain('class="rs-browse-genres"');
-      expect(src, name).not.toContain("Astro.redirect");
-    }
+    const src = seriesAstro;
+    const name = "series/index.astro";
+    // The Genre select mount sits after the Rating select and before
+    // the list tabs — i.e. inside the one filter row.
+    const ratingIdx = src.indexOf('id="couch-browse-rating"');
+    const genreIdx = src.indexOf('id="couch-browse-genres"');
+    const tabsIdx = src.indexOf('id="couch-browse-tabs"');
+    expect(ratingIdx, `${name} rating`).toBeGreaterThan(-1);
+    expect(genreIdx, `${name} genre mount`).toBeGreaterThan(-1);
+    expect(tabsIdx, `${name} tabs`).toBeGreaterThan(-1);
+    expect(genreIdx, `${name} genre after rating`).toBeGreaterThan(ratingIdx);
+    expect(genreIdx, `${name} genre before tabs`).toBeLessThan(tabsIdx);
+    expect(src, name).toContain("rs-browse-segmented");
+    expect(src, name).toContain("rs-browse-genre-filter");
+    expect(src, name).not.toContain('class="rs-browse-genres"');
+    expect(src, name).not.toContain("Astro.redirect");
   });
 
   it("the Discover landing has large mood cards and no pill chips", () => {
