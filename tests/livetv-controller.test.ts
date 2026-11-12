@@ -305,6 +305,15 @@ describe("the mapping table covers every context", () => {
     expect(contexts.has("guide")).toBe(true);
   });
 
+  it("documents the 0.11.7 browser drawer layering (same actions, interpreted by layer)", () => {
+    const browserRows = LIVETV_CONTROLLER_MAP.filter((row) => row.context === "browser");
+    const labels = browserRows.map((row) => row.label);
+    expect(labels).toContain("Open category drawer");
+    expect(labels).toContain("Return to channel list");
+    expect(labels).toContain("Open group / apply subcategory");
+    expect(labels).toContain("Back one drawer level, then close");
+  });
+
   it("every row names a real action", () => {
     const known = new Set([
       "move-up", "move-down", "move-left", "move-right", "select", "activate",
