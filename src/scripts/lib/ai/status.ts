@@ -86,6 +86,14 @@ export type AiSearchPhase =
   | "rejected"
   | "cached"
   | "fallback"
+  // AI Discovery 3.0 (0.11.6) generation flow — the orchestrator
+  // (discovery-orchestrator.ts) reports these; the rerank path above
+  // keeps using its own phases unchanged.
+  | "asking-ai"
+  | "verifying-tmdb"
+  | "checking-library"
+  | "ready"
+  | "unavailable"
 
 export const AI_SEARCH_PHASE_LABELS: Record<AiSearchPhase, string> = {
   idle: "No search yet",
@@ -96,6 +104,11 @@ export const AI_SEARCH_PHASE_LABELS: Record<AiSearchPhase, string> = {
   rejected: "AI result rejected",
   cached: "Cached recommendation",
   fallback: "Local fallback",
+  "asking-ai": "Asking AI for recommendations",
+  "verifying-tmdb": "Verifying titles with TMDB",
+  "checking-library": "Checking your library",
+  ready: "Recommendations ready",
+  unavailable: "AI unavailable",
 }
 
 /** "AI answered just now" stays true only this long after a real call. */
@@ -138,6 +151,19 @@ export interface AiSearchDiagnostics {
   durationMs?: number
   /** Why the local engine answered instead of AI. */
   fallbackReason?: string
+  // --- AI Discovery 3.0 (0.11.6) generation flow, reported by the
+  // orchestrator. Undefined on rerank-path receipts (not reported),
+  // never guessed. ---
+  /** Recommendations the model generated (before verification). */
+  generatedCount?: number
+  /** Results TMDB verified. */
+  verifiedCount?: number
+  /** Results matched to a title in the local catalogue. */
+  matchedCount?: number
+  /** Generated titles that could not be verified. */
+  verificationFailures?: number
+  /** Short, safe provider error text when generation failed. */
+  providerError?: string
 }
 
 export interface AiSearchReceipt {
@@ -221,6 +247,20 @@ export function aiSearchStateNote(receipt: AiSearchReceipt, nowMs: number = Date
       return receipt.fallbackReason || "AI couldn't answer just now, so these are local picks."
     case "local-search":
       return "Local search — AI wasn't asked."
+    case "asking-ai":
+      return receipt.model
+        ? `Asking ${receipt.model} for recommendations…`
+        : "Asking AI for recommendations…"
+    case "verifying-tmdb":
+      return "Verifying titles with TMDB…"
+    case "checking-library":
+      return "Checking your library…"
+    case "ready":
+      return receipt.model
+        ? `Recommendations ready · ${receipt.model}${duration}`
+        : `Recommendations ready${duration}`
+    case "unavailable":
+      return receipt.fallbackReason || "AI unavailable — no recommendations were generated."
     case "idle":
     default:
       return ""
