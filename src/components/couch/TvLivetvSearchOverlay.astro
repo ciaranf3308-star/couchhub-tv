@@ -15,12 +15,14 @@
 // chose the global scope — Sports → Movies never intersects.
 //
 // Controller: the on-screen keyboard (TvKeyboard, the shared
-// OSK — A types, B deletes, X clears) is the typing path; the
-// scope buttons, Search / Clear / Cancel are large focusables.
-// B / Escape closes the overlay (one nav layer only — the
-// overlay pushes the "search" layer on livetvNav and B pops
-// exactly that layer). Physical keyboard: type + Enter submits,
-// Escape closes, X clears when the input is not focused.
+// OSK — A types, B closes, the ⌫ key deletes, the Clear key clears)
+// is the typing path; the scope buttons, Search / Clear / Cancel are
+// large focusables. B / Escape closes the overlay (one nav layer
+// only — the overlay pushes the "search" layer on livetvNav and B
+// pops exactly that layer; B in the key grid first closes the
+// keyboard to the input via the shared lifecycle, §28). Physical
+// keyboard: type + Enter submits, Escape closes, X clears when the
+// input is not focused.
 // Mouse: click scope, Search, Clear, Cancel, or the scrim.
 //
 // Mount contract: mount ONCE per Live TV page (integration).
@@ -145,6 +147,11 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     type LivetvSearchContext,
     type LivetvSearchScope,
   } from "@/scripts/lib/livetv-search-sort.ts";
+  // Contract E (0.11.10, W3 invocation only): shared keyboard session.
+  import {
+    openCouchKeyboard,
+    endCouchKeyboardSession,
+  } from "@/scripts/lib/couch-keyboard.ts";
 
   const root = document.querySelector<HTMLElement>("[data-livetv-search-overlay]");
   if (root && !root.dataset.wired) {
@@ -251,6 +258,7 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
       // A submit already dispatched its own event and must not
       // also dispatch close-overlay.
       const wasSubmitted = submitted;
+      endCouchKeyboardSession();
       saveDraft();
       hide();
       if (!wasSubmitted) {
@@ -295,6 +303,10 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
       });
       requestAnimationFrame(() => {
         input?.focus({ preventScroll: true });
+        // Shared keyboard session (Contract E): the Back layer +
+        // B-close path know this input is being edited. Focus stays
+        // in the input; the key grid is reached via D-pad / A.
+        if (input) openCouchKeyboard(input, () => submit(), { focusGrid: false });
       });
     }
 
@@ -361,9 +373,10 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
       if (!isOpen) return;
       const target = event.target as HTMLElement | null;
       if (event.key === "Escape") {
-        // Focus inside the OSK grid never reaches here (the
-        // OSK stops Escape for backspace). Anywhere else in
-        // the overlay, B/Escape closes exactly this layer.
+        // Focus inside the OSK grid never reaches here (the OSK
+        // handles Escape as dismiss, via the shared lifecycle).
+        // Anywhere else in the overlay, B/Escape closes exactly
+        // this layer.
         if (target?.closest?.("[data-osk]")) return;
         event.preventDefault();
         event.stopPropagation();
@@ -382,7 +395,8 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
         !event.ctrlKey &&
         !event.altKey
       ) {
-        // X clears the query (matches the OSK's X behaviour).
+        // X clears the query (physical 'x' key / the gamepad layer's
+        // 'x' key in Live TV contexts — not the removed OSK X poll).
         event.preventDefault();
         if (input) {
           input.value = "";

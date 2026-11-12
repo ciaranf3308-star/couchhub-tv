@@ -324,14 +324,14 @@ describe("editing + fallback", () => {
     expect(hintsForView("search", { editing: true, osk: true }).id).toBe("editing");
   });
 
-  it("X-clear poll is scoped to the live keyboard wrapper (W2 fix)", () => {
-    // OnScreenKeyboard.svelte polls gamepad X and clears only when
-    // focus is inside [data-couch-keyboard] (TvKeyboard's wrapper).
-    // Before W2 the poll was scoped to `.search-view`, a class no
-    // element carried, so X cleared nothing — that scope must never
-    // come back.
+  it("no X-clear poll in the OSK (0.11.10 §28 removed it)", () => {
+    // The W2 poll is gone: it read navigator.getGamepads()[0] only
+    // and was invisible to the native XInput path. The Clear key is
+    // the clear path. The `.search-view` scope must never come back
+    // in any form (it matched no element anywhere).
     const osk = read("src/components/OnScreenKeyboard.svelte");
-    expect(osk).toContain('closest?.("[data-couch-keyboard]")');
+    expect(osk).not.toContain("getGamepads");
+    expect(osk).not.toContain("pollGamepadX");
     expect(osk).not.toContain('".search-view"');
     expect(read("src/components/SearchView.svelte")).not.toContain("search-view");
     const hits = read("src/components/DiscoverView.svelte").match(/search-view/g) ?? [];

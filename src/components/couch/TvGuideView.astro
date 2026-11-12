@@ -823,6 +823,8 @@ const nowMs = Date.now();
   } from "@/scripts/lib/livetv-guide-categories.ts";
   import { mountGuideCategoryPicker } from "@/scripts/lib/livetv-guide-category-picker.ts";
   import { livetvNav } from "@/scripts/lib/livetv-nav.ts";
+  // Contract E (0.11.10, W3 invocation only): shared keyboard session.
+  import { openCouchKeyboard } from "@/scripts/lib/couch-keyboard.ts";
 
   const PX_PER_HOUR = 200;
   const ROW_HEIGHT_PX = 76;
@@ -2735,6 +2737,13 @@ const nowMs = Date.now();
         searchQuery = searchEl.value || "";
         pendingListReset = true;
         renderActivePanel();
+      });
+      // Shared keyboard session (Contract E): the Back layer + B-close
+      // path know the Guide search input is being edited. No OSK is
+      // mounted in the Guide, so no grid focus is taken; filtering
+      // stays live on the input event above.
+      searchEl.addEventListener("focus", () => {
+        openCouchKeyboard(searchEl, undefined, { focusGrid: false });
       });
     }
     if (scrollEl instanceof HTMLElement) {
