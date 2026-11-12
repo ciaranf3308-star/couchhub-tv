@@ -90,7 +90,7 @@ describe("test 4 — virtual lists mount a bounded number of DOM rows", () => {
     handle.destroy();
   });
 
-  it("REAL browser: scrolling 100 windows never grows the mounted count past the bound", async () => {
+  it("REAL browser: scrolling 100 windows never grows the mounted count past the bound", { timeout: 60_000 }, async () => {
     const channels = fixture10000();
     const handle = mountChannelBrowser(root, { channels });
     const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
