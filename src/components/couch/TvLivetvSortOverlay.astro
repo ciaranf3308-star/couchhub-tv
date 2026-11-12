@@ -104,6 +104,8 @@ import { LIVETV_SORT_OPTIONS } from "@/scripts/lib/livetv-search-sort.ts";
     let selected: LivetvSortValue = LIVETV_DEFAULT_SORT;
     let closeReason: "back" | "cancel" = "back";
     let submitted = false;
+    // Last element focused inside the overlay (focus containment).
+    let lastInside: HTMLElement | null = null;
 
     function syncOptions(): void {
       for (const button of optionButtons) {
@@ -191,6 +193,28 @@ import { LIVETV_SORT_OPTIONS } from "@/scripts/lib/livetv-search-sort.ts";
     // consumed here only while sort is the top layer, and
     // stopped so no hidden layer pops a second layer.
     installTopLayerBackGuard(livetvNav, "sort", window);
+
+    // Focus containment (§10: only one input context active).
+    // Same rule as the search overlay: while open, focus
+    // leaving the overlay is pulled back inside, so A can never
+    // activate a browser row behind it. Inactive the moment the
+    // overlay closes, so the nav stack's focus restore is never
+    // fought.
+    document.addEventListener("focusin", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (root.contains(target)) {
+        lastInside = target;
+        return;
+      }
+      if (!isOpen) return;
+      const back = lastInside?.isConnected
+        ? lastInside
+        : optionButtons.find(
+            (button) => button.dataset.livetvSortOption === selected,
+          ) ?? optionButtons[0];
+      back?.focus({ preventScroll: true });
+    });
 
     root.addEventListener("keydown", (event) => {
       if (!isOpen) return;

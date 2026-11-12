@@ -767,7 +767,6 @@ const nowMs = Date.now();
     filterGuideRows,
     guideCellViewModel,
     guideDayForOffset,
-    guideReturnMode,
     jumpToNowWindow,
     normaliseCategoryLabel,
     nowNextRows,
@@ -822,9 +821,15 @@ const nowMs = Date.now();
     resolveGuideCategory,
   } from "@/scripts/lib/livetv-guide-categories.ts";
   import { mountGuideCategoryPicker } from "@/scripts/lib/livetv-guide-category-picker.ts";
-  import { livetvNav } from "@/scripts/lib/livetv-nav.ts";
-  // Contract E (0.11.10, W3 invocation only): shared keyboard session.
-  import { openCouchKeyboard } from "@/scripts/lib/couch-keyboard.ts";
+  import { livetvNav, resolveGuideOrigin } from "@/scripts/lib/livetv-nav.ts";
+  import { hintsForLivetvLayer } from "@/scripts/lib/livetv-hints.ts";
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts";
+  import {
+    closeCouchKeyboard,
+    isCouchKeyboardOpen,
+    openCouchKeyboard,
+  } from "@/scripts/lib/couch-keyboard.ts";
+  import { setLogicalView } from "@/scripts/lib/couch-focus.ts";
 
   const PX_PER_HOUR = 200;
   const ROW_HEIGHT_PX = 76;
@@ -875,7 +880,13 @@ const nowMs = Date.now();
     const channelNextDayBtn = root.querySelector("[data-guide-channel-next-day]");
 
     let liveState = restoreLivetvState();
-    let enteredFrom = "home";
+    /** Origin mode for B-exit (0.11.10 W4 §11): resolved in
+     *  activate() from the invoker's mount + persisted mode +
+     *  tuned-session heuristic. It knows "browser" as well as
+     *  "landing"/"playback", so leaving the Guide from the
+     *  browser returns to the browser (the old home/playback
+     *  derivation always dumped browser entries on landing). */
+    let guideOrigin = "landing";
     let active = false;
     let playlistId = root.dataset.playlistId || "";
     /** Local working copy of the SHARED guideMode (livetv-state).
@@ -1891,6 +1902,12 @@ const nowMs = Date.now();
         panel.hidden = panel.dataset.guidePanel !== next;
       }
       renderActivePanel();
+      // 0.11.10 W4 (seam contracts): the Guide names its own
+      // sub-mode hints on every tab switch (the shell only
+      // names "guide" on mode entry) and re-asserts the logical
+      // view so focus memory stays Guide-scoped across tabs.
+      setLogicalView("livetv-guide");
+      setControllerHints(hintsForLivetvLayer("guide", { guideMode: next }));
       if (focusTab) {
         const tab = tabEls.find((t) => t.dataset.guideTab === next);
         if (tab instanceof HTMLElement) tab.focus({ preventScroll: true });
@@ -2160,9 +2177,26 @@ const nowMs = Date.now();
     }
 
     function closeDetail() {
+      // §11.7: B closes the detail ONLY — the Guide stays in
+      // mode, and focus returns to the programme that opened
+      // it. The old code nulled the selection and restored no
+      // focus, so focus stranded on the hidden Watch button
+      // (or <body>) after every detail close. Preserve the
+      // selection, close, then re-select without opening the
+      // detail: that re-focuses the row/cell. If the row is no
+      // longer mounted (virtual window moved), fall back to the
+      // first panel item rather than leaving focus nowhere.
+      const previous = selected;
       selected = null;
       detailOpen = false;
       updateDetail();
+      if (previous) {
+        selectProgramme(previous.channel.id, previous.programme.startMs, {
+          focus: true,
+          openDetail: false,
+        });
+      }
+      if (!root.contains(document.activeElement)) focusFirstPanelItem();
     }
 
     function updateDetail() {
@@ -2427,6 +2461,133 @@ const nowMs = Date.now();
       return false;
     }
 
+    /** Focus the tab for the active sub-mode (Up-to-tab moves). */
+    function focusActiveTab() {
+      const tab = tabEls.find((t) => t.dataset.guideTab === guideMode);
+      if (tab instanceof HTMLElement) tab.focus({ preventScroll: true });
+    }
+
+    /** Focus is on panel content (row / cell / pick / featured)? */
+    function inPanelContent() {
+      const activeEl = document.activeElement;
+      if (!(activeEl instanceof HTMLElement)) return false;
+      return Boolean(
+        activeEl.closest(
+          "[data-guide-row], [data-guide-cell], [data-guide-channel-pick], [data-guide-now-featured], [data-guide-tonight-featured]",
+        ),
+      );
+    }
+
+    /** Grid day step: the same day-list walk as the day buttons. */
+    function stepGridDay(delta) {
+      const idx = days.indexOf(dayStartMs());
+      if (delta < 0) {
+        if (idx > 0) goToDay(days[idx - 1]);
+      } else if (idx >= 0 && idx < days.length - 1) {
+        goToDay(days[idx + 1]);
+      }
+    }
+
+    /**
+     * Intentional cross-region D-pad moves (0.11.10 W4 §11.6).
+     * Returns true when the move was handled (claimed) here, so
+     * the generic cell/list handling must not also run.
+     * Regions: tab row ↔ panel (Down enters the panel, Up from
+     * the tab row stays), featured ↔ list (On Now: Right
+     * featured→list, Left list→featured; featured Up→tab,
+     * Down→first row), picker ↔ schedule (By Channel: Right
+     * pick→first schedule row, Left schedule→selected pick).
+     * Every target is resolved from the live DOM of the
+     * visible panel — a move to an unmounted row is impossible
+     * by construction (the query simply finds nothing and the
+     * move is a claimed no-op).
+     */
+    function handleIntentionalMove(moveAction, claim) {
+      const activeEl = document.activeElement;
+      if (!(activeEl instanceof HTMLElement)) return false;
+      const focusEl = (el) => {
+        if (el instanceof HTMLElement) {
+          el.focus({ preventScroll: true });
+          return true;
+        }
+        return false;
+      };
+      const onTab = activeEl.closest("[data-guide-tab]");
+      if (onTab) {
+        if (moveAction === "move-down") {
+          claim();
+          focusFirstPanelItem();
+          return true;
+        }
+        if (moveAction === "move-up") {
+          claim();
+          return true;
+        }
+        return false;
+      }
+      const featured = activeEl.closest(
+        "[data-guide-now-featured], [data-guide-tonight-featured]",
+      );
+      if (featured) {
+        if (moveAction === "move-up") {
+          claim();
+          focusActiveTab();
+          return true;
+        }
+        if (moveAction === "move-down") {
+          claim();
+          const first = root.querySelector(
+            guideMode === "now"
+              ? "[data-guide-now-list] [data-guide-row]"
+              : "[data-guide-tonight-sections] [data-guide-row], [data-guide-tonight-fallback] [data-guide-row]",
+          );
+          focusEl(first);
+          return true;
+        }
+        if (moveAction === "move-right" && guideMode === "now") {
+          claim();
+          focusEl(root.querySelector("[data-guide-now-list] [data-guide-row]"));
+          return true;
+        }
+        return false;
+      }
+      const row = activeEl.closest("[data-guide-row]");
+      if (row) {
+        if (moveAction === "move-left" && guideMode === "now") {
+          claim();
+          focusEl(nowFeaturedEl?.querySelector("[data-guide-row]"));
+          return true;
+        }
+        if (
+          moveAction === "move-left" &&
+          guideMode === "channel" &&
+          row.closest("[data-guide-channel-schedule]")
+        ) {
+          claim();
+          const target =
+            (selectedChannelId
+              ? channelListEl?.querySelector(
+                  `[data-guide-channel-pick="${CSS.escape(selectedChannelId)}"]`,
+                )
+              : null) ||
+            channelListEl?.querySelector("[data-guide-channel-pick]");
+          focusEl(target);
+          return true;
+        }
+        return false;
+      }
+      const pick = activeEl.closest("[data-guide-channel-pick]");
+      if (pick) {
+        if (moveAction === "move-right" && guideMode === "channel") {
+          claim();
+          focusEl(channelScheduleEl?.querySelector("[data-guide-row]"));
+          return true;
+        }
+        return false;
+      }
+      return false;
+    }
+
     // ── B BEHAVIOUR — ONE-LAYER RULE (W4 NAV-STATE SEAM) ──────────
     // ALL B handling for the Guide lives in this one section. One
     // B press closes exactly one layer, innermost first:
@@ -2460,7 +2621,11 @@ const nowMs = Date.now();
     }
 
     function leaveGuide() {
-      const returnTo = guideReturnMode(enteredFrom);
+      // 0.11.10 W4: exit to the resolved origin (landing,
+      // browser, or playback) — the old guideReturnMode path
+      // only knew home/playback, so a Guide opened from the
+      // browser always dumped the user on the landing.
+      const returnTo = guideOrigin;
       liveState = exitGuide(liveState, returnTo);
       persistLivetvState(liveState);
       active = false;
@@ -2478,6 +2643,17 @@ const nowMs = Date.now();
         );
         if (target instanceof HTMLElement) {
           target.focus({ preventScroll: true });
+          return;
+        }
+      }
+      // The invoker's node may have been recycled (browser row
+      // pool) — fall back to the origin's own focusable entry
+      // point instead of the top nav, which would strand a
+      // browser return on unrelated chrome.
+      if (returnTo === "browser") {
+        const list = document.querySelector("[data-browser-list]");
+        if (list instanceof HTMLElement) {
+          list.focus({ preventScroll: true });
           return;
         }
       }
@@ -2499,6 +2675,48 @@ const nowMs = Date.now();
     // longer waits for data (see activate).
     let activationFinished = false;
     let catalogRetryTimer = null;
+
+    /**
+     * Focus the first meaningful item of the active panel
+     * (0.11.10 W4 §11.2–§11.5): Guide entry must land focus on a
+     * useful programme, not on the hidden invoker (or <body>,
+     * where Up/Down are claimed-but-failing). Per mode:
+     * On Now — first list row (the airing programme); Tonight —
+     * featured programme, else first section/fallback row;
+     * By Channel — the selected channel's pick, else the first
+     * pick; grid — first rendered cell. Returns true when
+     * something was focused. Never focuses a hidden or
+     * unmounted node: every candidate comes from the live DOM
+     * of the visible panel.
+     */
+    function focusFirstPanelItem() {
+      // Every mode branch below assigns before the check.
+      let target;
+      if (guideMode === "now") {
+        target = nowListEl?.querySelector("[data-guide-row]");
+      } else if (guideMode === "tonight") {
+        target =
+          tonightFeaturedEl?.querySelector("[data-guide-row]") ||
+          tonightSectionsEl?.querySelector("[data-guide-row]") ||
+          tonightFallbackEl?.querySelector("[data-guide-row]") ||
+          null;
+      } else if (guideMode === "channel") {
+        target =
+          (selectedChannelId
+            ? channelListEl?.querySelector(
+                `[data-guide-channel-pick="${CSS.escape(selectedChannelId)}"]`,
+              )
+            : null) || channelListEl?.querySelector("[data-guide-channel-pick]") || null;
+      } else {
+        target = bodyEl?.querySelector("[data-guide-cell]") || null;
+      }
+      if (target instanceof HTMLElement) {
+        target.focus({ preventScroll: true });
+        target.scrollIntoView({ block: "nearest", inline: "nearest" });
+        return true;
+      }
+      return false;
+    }
 
     function finishActivation() {
       if (activationFinished) return;
@@ -2530,6 +2748,14 @@ const nowMs = Date.now();
         renderRows();
         scrollToViewStart();
         restoreSelectionFocus();
+        // No stored selection (or its cell is off-window):
+        // land on the first rendered cell rather than nowhere.
+        if (!root.contains(document.activeElement)) focusFirstPanelItem();
+      } else {
+        // List modes had NO entry focus: focus stayed on the
+        // (now hidden) invoker and the first arrows went
+        // nowhere. Land on the first meaningful item (§11.2–4).
+        focusFirstPanelItem();
       }
     }
 
@@ -2562,7 +2788,22 @@ const nowMs = Date.now();
         return;
       }
       const persisted = restoreLivetvState();
-      enteredFrom = persisted.mode === "playback" ? "playback" : "home";
+      // 0.11.10 W4 §11.1: resolve the B-exit origin from the
+      // invoker's mount FIRST (the mount is live DOM truth —
+      // the persisted mode may already have flipped to "guide"
+      // by the time this runs), then the persisted mode, then
+      // the tuned-session heuristic. This is the ONLY place
+      // the browser origin can be recovered: persisted mode
+      // alone never distinguishes landing from browser.
+      const invokerMount =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement.closest("[data-livetv-mode]")
+          : null;
+      guideOrigin = resolveGuideOrigin(
+        invokerMount?.getAttribute("data-livetv-mode") ?? null,
+        persisted.mode,
+        Boolean(persisted.tunedChannelId),
+      );
       const invokerKey =
         document.activeElement instanceof HTMLElement
           ? document.activeElement.getAttribute("data-focus-key")
@@ -2579,7 +2820,7 @@ const nowMs = Date.now();
         requestedMode !== undefined
           ? parseGuideMode(requestedMode, persisted.guideMode)
           : undefined,
-        enteredFrom === "playback" ? "playback" : "landing",
+        guideOrigin,
       );
       guideMode = liveState.guideMode;
       persistLivetvState(liveState);
@@ -2738,12 +2979,27 @@ const nowMs = Date.now();
         pendingListReset = true;
         renderActivePanel();
       });
-      // Shared keyboard session (Contract E): the Back layer + B-close
-      // path know the Guide search input is being edited. No OSK is
-      // mounted in the Guide, so no grid focus is taken; filtering
-      // stays live on the input event above.
-      searchEl.addEventListener("focus", () => {
-        openCouchKeyboard(searchEl, undefined, { focusGrid: false });
+      // Shared keyboard session (Contract E): Guide search edits
+      // ONLY through the shared lifecycle, so the B hierarchy
+      // stays consistent. No OSK is mounted in the Guide, so no
+      // grid focus is taken; filtering stays live on the input
+      // event above. Commit lands focus on the first matching
+      // item; blur-to-nowhere ends the edit without touching
+      // the query or the panel.
+      searchEl.addEventListener("focusin", () => {
+        if (isCouchKeyboardOpen()) return;
+        openCouchKeyboard(
+          searchEl,
+          () => {
+            focusFirstPanelItem();
+          },
+          { focusGrid: false },
+        );
+      });
+      searchEl.addEventListener("focusout", (event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && root.contains(next)) return;
+        closeCouchKeyboard(false);
       });
     }
     if (scrollEl instanceof HTMLElement) {
@@ -2768,7 +3024,20 @@ const nowMs = Date.now();
       if (target instanceof HTMLInputElement) {
         return;
       }
-      const action = livetvKeyActionForKey("guide", event.key);
+      // 0.11.10 W4 §11.6: the resolver MUST know whether focus
+      // is on the tab row — without onTabRow every arrow
+      // resolved to move-*, the intentional tab/featured/picker
+      // logic below was dead code, and tab navigation rode
+      // accidental spatial focus. Passing onTabRow makes
+      // Left/Right on the tabs resolve to guide-mode-prev/next
+      // intentionally, in every sub-mode.
+      const onTabRow = Boolean(
+        document.activeElement?.closest?.("[data-guide-tab]"),
+      );
+      const action = livetvKeyActionForKey("guide", event.key, {
+        onTabRow,
+        guideMode,
+      });
       // While the category drawer is open it owns the keys:
       // non-B keys route to the drawer's own handler (arrows move
       // within it, Enter drills/selects); B routes through the
@@ -2786,66 +3055,27 @@ const nowMs = Date.now();
         handleBack();
         return;
       }
-      if (!action) {
-        // NOTE (0.11.7 audit): arrows always resolve to move-*
-        // actions above, so this branch is unreachable for arrow
-        // keys — Left/Right tab stepping and featured/picker
-        // moves here ride spatial navigation in practice. The
-        // branch is preserved as-is (W4 nav work owns it); only
-        // the Tonight query below gained the fallback container.
-        const row = document.activeElement?.closest?.("[data-guide-row]");
-        const tab = document.activeElement?.closest?.("[data-guide-tab]");
-        const featured = document.activeElement?.closest?.(
-          "[data-guide-now-featured], [data-guide-tonight-featured]",
-        );
-        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-          if (featured) {
-            // From a featured panel: Down enters the list, Up
-            // returns to the mode tabs.
-            claim();
-            if (event.key === "ArrowDown") {
-              const first = root.querySelector(
-                guideMode === "now"
-                  ? "[data-guide-now-list] [data-guide-row]"
-                  : "[data-guide-tonight-sections] [data-guide-row], [data-guide-tonight-fallback] [data-guide-row]",
-              );
-              if (first instanceof HTMLElement) first.focus({ preventScroll: true });
-            } else {
-              const activeTab = tabEls.find((t) => t.dataset.guideTab === guideMode);
-              if (activeTab instanceof HTMLElement) activeTab.focus({ preventScroll: true });
-            }
-            return;
-          }
-          if (row) {
-            claim();
-            moveRowFocus(event.key === "ArrowUp" ? "move-up" : "move-down");
-          }
-          return;
-        }
-        if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-          if (tab) {
-            claim();
-            stepGuideMode(event.key === "ArrowLeft" ? -1 : 1);
-          } else if (featured && guideMode === "now" && event.key === "ArrowRight") {
-            // From the On Now featured panel: Right enters the list.
-            claim();
-            const first = root.querySelector("[data-guide-now-list] [data-guide-row]");
-            if (first instanceof HTMLElement) first.focus({ preventScroll: true });
-          } else if (row && guideMode === "now" && event.key === "ArrowLeft") {
-            // From an On Now row: Left enters the featured panel.
-            claim();
-            const featuredBtn = nowFeaturedEl?.querySelector("[data-guide-row]");
-            if (featuredBtn instanceof HTMLElement) featuredBtn.focus({ preventScroll: true });
-          } else if (row && guideMode === "channel") {
-            // Left/Right moves between the channel picker and the schedule.
-            if (event.key === "ArrowLeft" && row) {
-              claim();
-              const firstPick = channelListEl?.querySelector("[data-guide-channel-pick]");
-              if (firstPick instanceof HTMLElement) firstPick.focus({ preventScroll: true });
-            }
-          }
-          return;
-        }
+      if (!action) return;
+      if (action === "guide-mode-prev" || action === "guide-mode-next") {
+        // Intentional tab navigation (§11.6): Left/Right ON the
+        // tab row steps the mode and keeps focus on the new
+        // tab (stepGuideMode focuses it). Never spatial.
+        claim();
+        stepGuideMode(action === "guide-mode-prev" ? -1 : 1);
+        return;
+      }
+      if (action === "day-prev" || action === "day-next") {
+        // "[" / "]" day stepping (§11.1/§11.4/§11.5): the
+        // resolver has returned these for years, but no handler
+        // case existed — the keys did nothing. By Channel steps
+        // its schedule day; the grid steps its day (same
+        // day-list walk as the day buttons); On Now / Tonight
+        // have no day axis and ignore the key (claimed, so
+        // nothing behind the Guide sees it).
+        claim();
+        const delta = action === "day-prev" ? -1 : 1;
+        if (guideMode === "channel") stepChannelDay(delta);
+        else if (guideMode === "grid") stepGridDay(delta);
         return;
       }
       if (action === "jump-to-now") {
@@ -2876,17 +3106,34 @@ const nowMs = Date.now();
         return;
       }
       if (action.startsWith("move-")) {
+        // Intentional cross-region moves FIRST (§11.2–§11.4):
+        // tab row ↔ panel, featured ↔ list, picker ↔ schedule.
+        // These replace the removed dead !action branch — the
+        // moves are claimed here, never left to spatial
+        // navigation, which cannot see virtualised rows.
+        if (handleIntentionalMove(action, claim)) return;
         const cell = document.activeElement?.closest?.("[data-guide-cell]");
         if (cell) {
           claim();
-          moveFocus(action);
+          if (!moveFocus(action) && action === "move-up") focusActiveTab();
           return;
         }
         if (action === "move-up" || action === "move-down") {
           claim();
           // Virtualised lists first: the next row may be unmounted.
-          if (!moveListFocus(action)) moveRowFocus(action);
+          const moved = moveListFocus(action) || moveRowFocus(action);
+          if (!moved && action === "move-up" && inPanelContent()) {
+            // Up from the first row/cell/pick returns to the
+            // active tab instead of stranding focus at the top
+            // of the list (chrome focus — day buttons, detail
+            // actions — is deliberately excluded: Up there
+            // stays put, as before).
+            focusActiveTab();
+          }
         }
+        // move-left/move-right with focus on a row/pick and no
+        // intentional move above fall through unclaimed:
+        // spatial navigation owns those within a panel.
       }
       // "select" falls through to the native button click (Enter/Space).
     });

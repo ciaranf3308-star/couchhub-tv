@@ -54,7 +54,7 @@ import TvChannelRow from "./TvChannelRow.astro";
          category filter stays: it changes what is surfable. -->
     <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
     <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
-      ↑↓ browse · A watch · B back · X guide · ←→ programme info
+      ↑↓ browse · A watch · B back · X guide
     </p>
   </div>
 
@@ -381,6 +381,18 @@ import TvChannelRow from "./TvChannelRow.astro";
           catsEl.appendChild(chip);
         }
       }
+      // 0.11.10 W4 §12: paint() rebuilds the rows, destroying
+      // the focused node — every U/D step lost DOM focus while
+      // the highlight ring moved on. Re-focus the highlighted
+      // row whenever the surf is open, so focus and highlight
+      // never diverge (A then confirms the focused row).
+      // openSurf paints BEFORE show() sets `open`, so this
+      // does not double-focus on open (show() focuses once).
+      if (open) {
+        const highlighted =
+          listEl?.querySelector<HTMLElement>(".rs-channel-row--highlighted");
+        highlighted?.focus?.({ preventScroll: true });
+      }
     };
 
     const emitOverlay = (overlay: string) => {
@@ -403,6 +415,13 @@ import TvChannelRow from "./TvChannelRow.astro";
         clearTimeout(artTimer);
         artTimer = null;
       }
+      // 0.11.10 W4: focus inside the panel must not survive the
+      // hide — a hidden focused node strands the controller.
+      // Blur BEFORE hiding so focus lands cleanly on <body>,
+      // where the shell's playback keys (and the next surf
+      // open) work from.
+      const active = document.activeElement as HTMLElement | null;
+      if (active && root.contains(active)) active.blur();
       root.hidden = true;
       root.dataset.hidden = "true";
       if (dispatch) emitOverlay("none");
@@ -526,23 +545,37 @@ import TvChannelRow from "./TvChannelRow.astro";
           ev.preventDefault();
           hide();
         } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-          const channel = highlightedChannel();
-          const nn = channel ? nowNextForChannel(channel, programmes, playlistId) : null;
-          if (channel && nn?.current) {
-            ev.preventDefault();
-            window.dispatchEvent(
-              new CustomEvent("livetv:programme", {
-                detail: { channelId: channel.id, startMs: nn.current.start },
-              }),
-            );
-            emitOverlay("programme");
-          }
+          // §12: Left/Right inside Quick Surf do NOTHING
+          // (claimed). The rows already show the highlighted
+          // channel's current programme; the old code
+          // dispatched `livetv:programme`, whose consumer
+          // PLAYS catch-up — focus movement tuning/playing,
+          // against the global rule. Programme info outside
+          // the surf is the shell's Left/Right → OSD path.
+          ev.preventDefault();
         }
         return;
       }
       // Closed: Up/Down opens Quick Surf (highlight starts on the
       // tuned channel) instead of zapping — browsing never tunes.
       if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+        // 0.11.10 W4: never open over another overlay, or after
+        // a handled key. The old branch opened the surf over
+        // the options/browser/error overlays — the browser's
+        // handler runs after this one, so its preventDefault
+        // came too late and both surfaces owned the arrows.
+        if (ev.defaultPrevented) return;
+        const overlayVisible = (selector: string) => {
+          const el = document.querySelector<HTMLElement>(selector);
+          return !!el && !el.hidden;
+        };
+        if (
+          overlayVisible("[data-livetv-options]") ||
+          overlayVisible("[data-livetv-play-browser]") ||
+          overlayVisible("[data-livetv-error]")
+        ) {
+          return;
+        }
         ev.preventDefault();
         void openSurf();
       }

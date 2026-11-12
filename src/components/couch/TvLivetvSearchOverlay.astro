@@ -15,14 +15,24 @@
 // chose the global scope — Sports → Movies never intersects.
 //
 // Controller: the on-screen keyboard (TvKeyboard, the shared
-// OSK — A types, B closes, the ⌫ key deletes, the Clear key clears)
-// is the typing path; the scope buttons, Search / Clear / Cancel are
-// large focusables. B / Escape closes the overlay (one nav layer
-// only — the overlay pushes the "search" layer on livetvNav and B
-// pops exactly that layer; B in the key grid first closes the
-// keyboard to the input via the shared lifecycle, §28). Physical
-// keyboard: type + Enter submits, Escape closes, X clears when the
-// input is not focused.
+// OSK — A types, B deletes, X clears) is the typing path; the
+// scope buttons, Search / Clear / Cancel are large focusables.
+// B / Escape is a TWO-step hierarchy (0.11.10 §10): while
+// editing, the first B only leaves the editing layer (focus
+// moves to Search, the overlay stays); the next B cancels the
+// overlay and restores the browser's position (one nav layer
+// only — the overlay pushes the "search" layer on livetvNav and
+// the editing step is an onBack veto, never a second pop).
+// Physical keyboard: type + Enter submits, Escape follows the
+// same two steps, X clears when the input is not focused.
+// EXCEPTION — controller B with the input itself focused: the
+// gamepad layer's editing branch blurs the input and dispatches
+// Escape, so one B press closes the overlay (the blur exits
+// editing onto Search, the trailing Escape cancels). The
+// alternative would be a dead first press (Escape targeting
+// <body> reaches no overlay handler). Still exactly one layer
+// popped, still browser focus restored; the two steps survive
+// for keyboard Escape and for B from the OSK grid.
 // Mouse: click scope, Search, Clear, Cancel, or the scrim.
 //
 // Mount contract: mount ONCE per Live TV page (integration).
@@ -147,10 +157,14 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     type LivetvSearchContext,
     type LivetvSearchScope,
   } from "@/scripts/lib/livetv-search-sort.ts";
-  // Contract E (0.11.10, W3 invocation only): shared keyboard session.
+  // Contract E: editing in this overlay goes ONLY through the
+  // shared keyboard lifecycle: open on entry, close-first on B
+  // (see the search layer's onBack veto), commit on submit.
   import {
-    openCouchKeyboard,
+    closeCouchKeyboard,
     endCouchKeyboardSession,
+    isCouchKeyboardOpen,
+    openCouchKeyboard,
   } from "@/scripts/lib/couch-keyboard.ts";
 
   const root = document.querySelector<HTMLElement>("[data-livetv-search-overlay]");
@@ -180,6 +194,28 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
       scope: LivetvSearchScope;
       context: LivetvSearchContext;
     } | null = null;
+    // Last element focused inside the overlay (focus containment).
+    let lastInside: HTMLElement | null = null;
+
+    /** True while the user is editing: input focused or on the OSK grid. */
+    function editingActive(): boolean {
+      if (!isOpen) return false;
+      if (isCouchKeyboardOpen()) return true;
+      const active = document.activeElement as HTMLElement | null;
+      return !!active && (active === input || !!active.closest?.("[data-livetv-search-osk]"));
+    }
+
+    /**
+     * Leave the editing layer WITHOUT closing the overlay (the
+     * first B press): end the keyboard edit and move focus to
+     * the Search action, so the next B cancels the overlay and
+     * A from here applies the query. Focus never strands on
+     * <body>: the overlay still owns the controller.
+     */
+    function exitEditing(): void {
+      closeCouchKeyboard(false);
+      (submitButton ?? input)?.focus({ preventScroll: true });
+    }
 
     function saveDraft(): void {
       lastDraft = {
@@ -192,7 +228,12 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     function renderContext(): void {
       if (!contextEl || !noteEl) return;
       contextEl.replaceChildren();
-      const groupLabel = context.groupLabel ?? context.groupId ?? null;
+      // The raw group id "all" is not a display label: without a
+      // real label the breadcrumb reads "All channels" (the
+      // empty-context branch below), never the bare id.
+      const groupLabel =
+        context.groupLabel ??
+        (context.groupId && context.groupId !== "all" ? context.groupId : null);
       const subLabel = context.subcategoryLabel ?? context.subcategoryId ?? null;
       if (groupLabel) {
         const group = document.createElement("span");
@@ -256,7 +297,8 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     function onNavExit(): void {
       // Runs inside pop()/back(): hide, then report the close.
       // A submit already dispatched its own event and must not
-      // also dispatch close-overlay.
+      // also dispatch close-overlay. Editing ends with the
+      // overlay either way (the record must not outlive it).
       const wasSubmitted = submitted;
       endCouchKeyboardSession();
       saveDraft();
@@ -275,6 +317,12 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
         // the stack rather than popping the wrong layer.
         hide();
       }
+    }
+
+    /** A committing keyboard close applies the query as a submit. */
+    function commitKeyboardEdit(value: string): void {
+      if (input) input.value = value;
+      submit();
     }
 
     function open(detail: unknown): void {
@@ -299,8 +347,26 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
       livetvNav.push({
         id: "search",
         context: { ...context },
+        // B hierarchy (§10): while editing, the FIRST B only
+        // leaves the editing layer (veto — the overlay stays);
+        // the next B pops the layer and cancels. Both the
+        // gamepad `livetv:back` guard and the Escape handler
+        // below route through back(), so both get the veto.
+        onBack: () => {
+          if (editingActive()) {
+            exitEditing();
+            return false;
+          }
+          return true;
+        },
         onExit: () => onNavExit(),
       });
+      // Editing opens ONLY through the keyboard contract: the
+      // input is the edit target, and a committing close applies
+      // the query (the same submit the OSK commit event runs).
+      if (input) {
+        openCouchKeyboard(input, commitKeyboardEdit);
+      }
       requestAnimationFrame(() => {
         input?.focus({ preventScroll: true });
         // Shared keyboard session (Contract E): the Back layer +
@@ -311,6 +377,10 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     }
 
     function submit(): void {
+      if (!isOpen) return;
+      // Editing ends with the submit; the record must not
+      // survive into the browser underneath.
+      closeCouchKeyboard(false);
       const query = (input?.value ?? "").trim();
       dispatchLivetvSearchSubmit(window, {
         query,
@@ -335,6 +405,54 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     // consumed here only while search is the top layer, and
     // stopped so no hidden layer pops a second layer.
     installTopLayerBackGuard(livetvNav, "search", window);
+
+    // Focus containment (§10: only one input context active).
+    // While the overlay is open, focus leaving it (spatial nav
+    // is geometric and cannot see the scrim) is pulled back to
+    // the last element focused inside — A can never activate a
+    // browser row behind the overlay. Inactive the moment the
+    // overlay closes, so the nav stack's focus restore (which
+    // runs after onExit) is never fought.
+    document.addEventListener("focusin", (event) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      if (root.contains(target)) {
+        lastInside = target;
+        return;
+      }
+      if (!isOpen) return;
+      const back = lastInside?.isConnected ? lastInside : input;
+      back?.focus({ preventScroll: true });
+    });
+
+    // Gamepad B while the input holds focus blurs it (the
+    // gamepad layer's editing branch) and then dispatches
+    // Escape at the new activeElement. A blur to nowhere while
+    // editing is that first B: leave the editing layer (focus
+    // lands on Search) instead of stranding focus on <body>
+    // with the keyboard record still open — and, crucially, the
+    // trailing Escape then targets Search (inside the overlay),
+    // so the same press cancels the overlay instead of dying on
+    // <body>. One controller B from the input closes the
+    // overlay; the two-step hierarchy survives for keyboard
+    // Escape and B from the OSK grid. Blurs onto a real element
+    // inside the overlay (OSK keys, scope buttons) are ordinary
+    // navigation, not an exit.
+    input?.addEventListener("focusout", (event) => {
+      if (!isOpen || root.hidden) return;
+      const next = event.relatedTarget as Node | null;
+      if (next && root.contains(next)) return;
+      if (!isCouchKeyboardOpen()) return;
+      exitEditing();
+    });
+
+    // Re-entering the input (after an editing exit) re-opens
+    // the keyboard edit through the contract, so the record —
+    // and the B hierarchy — stay truthful for the whole visit.
+    input?.addEventListener("focusin", () => {
+      if (!isOpen || isCouchKeyboardOpen()) return;
+      openCouchKeyboard(input, commitKeyboardEdit);
+    });
 
     // Category changed behind the open overlay (drawer/LB/RB):
     // re-resolve the draft — a category-scoped draft is
