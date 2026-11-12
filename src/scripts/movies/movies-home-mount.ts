@@ -37,20 +37,18 @@ import {
   couchRailItems,
   readCouchFocusMemory,
   scrollFocusedIntoView,
+  setLogicalView,
 } from "@/scripts/lib/couch-focus.ts";
 import {
   BACK_PRIORITY,
-  recordRouteOrigin,
   registerBackLayer,
-  setControllerHints,
-  setLogicalView,
-} from "@/scripts/lib/controller-0110-seams.ts";
-// SHIM-0110: seam imports come from controller-0110-seams.ts until
-// W1 lands the real modules (integration re-points them).
+} from "@/scripts/lib/back-handler.ts";
 import {
   RETURN_HOME_HINT,
+  setControllerHints,
   type HintConfig,
 } from "@/scripts/lib/couch-button-hints.ts";
+import { recordRouteOrigin } from "@/scripts/lib/route-origin.ts";
 import {
   isTitleContextMenuOpen,
   openTitleContextMenu,

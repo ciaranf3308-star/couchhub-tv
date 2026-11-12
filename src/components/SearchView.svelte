@@ -48,9 +48,11 @@
   import {
     BACK_PRIORITY,
     registerBackLayer,
+  } from "@/scripts/lib/back-handler.ts"
+  import {
     recordOriginFromReferrer,
     navigateBackWithOrigin,
-  } from "@/scripts/lib/controller-0110-seams.ts"
+  } from "@/scripts/lib/route-origin.ts"
 
   /** @type {{ focusOnMount?: boolean }} */
   let { focusOnMount = false } = $props()

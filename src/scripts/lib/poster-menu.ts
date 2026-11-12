@@ -16,7 +16,7 @@ import { toast } from "@/scripts/lib/toast.js"
 import {
   BACK_PRIORITY,
   registerBackLayer,
-} from "@/scripts/lib/controller-0110-seams.ts"
+} from "@/scripts/lib/back-handler.ts"
 import { isFollowing, unfollowSeries } from "@/scripts/lib/followed.ts"
 import {
   isFavorite,
@@ -360,10 +360,6 @@ export function attachPosterContextMenu(
 // competing title-management store. See
 // titleContextActionsForEntry for the Browse/Home action set.
 
-// SHIM-0110: registerBackLayer/BACK_PRIORITY come from the seams
-// shim until W1's back-handler.ts carries them (integration
-// re-points the import; this file's logic does not change).
-
 export interface TitleContextAction {
   id: string
   label: string
@@ -462,7 +458,7 @@ export function openTitleContextMenu(
   window.addEventListener("scroll", closeMenu, true)
 
   // B closes exactly this menu (MODAL priority — above drawers,
-  // below confirm dialogs). The shim dispatcher claims the press
+  // below confirm dialogs). The Back coordinator claims the press
   // before any grid/dialog handler sees it.
   unregisterBack = registerBackLayer({
     id: "title-context-menu",

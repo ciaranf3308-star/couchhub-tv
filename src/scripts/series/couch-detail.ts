@@ -63,16 +63,13 @@ import {
   type CouchVodPlayerHandle,
 } from "@/scripts/movies/couch-player.ts";
 import { renderCouchCards } from "@/scripts/movies/couch-cards.ts";
+import { installDetailBackLayers } from "@/scripts/lib/back-handler.ts";
 import {
-  installDetailBackLayers,
   navigateBackWithOrigin,
   recordRouteOrigin,
-  setControllerHints,
-} from "@/scripts/lib/controller-0110-seams.ts";
-// SHIM-0110: seam imports come from controller-0110-seams.ts until
-// W1 lands the real modules (integration re-points them).
-import {
+} from "@/scripts/lib/route-origin.ts";import {
   RETURN_HOME_HINT,
+  setControllerHints,
   type HintConfig,
 } from "@/scripts/lib/couch-button-hints.ts";
 

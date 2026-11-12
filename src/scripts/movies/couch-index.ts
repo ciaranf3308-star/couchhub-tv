@@ -23,9 +23,7 @@
 
 import { mountMoviesHome, recordMoviesHomeReturnFocus } from "@/scripts/movies/movies-home-mount.ts";
 import { mountBrowseEverything } from "@/scripts/lib/browse-everything.ts";
-import { setLogicalView } from "@/scripts/lib/controller-0110-seams.ts";
-// SHIM-0110: seam import comes from controller-0110-seams.ts until
-// W1 lands the real module (integration re-points it).
+import { setLogicalView } from "@/scripts/lib/couch-focus.ts";
 import {
   browseStateFromMode,
   parseModeFromUrl,

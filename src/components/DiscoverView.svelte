@@ -81,10 +81,12 @@
   import {
     BACK_PRIORITY,
     registerBackLayer,
+  } from "@/scripts/lib/back-handler.ts"
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts"
+  import {
     recordOriginFromReferrer,
     navigateBackWithOrigin,
-    setControllerHints,
-  } from "@/scripts/lib/controller-0110-seams.ts"
+  } from "@/scripts/lib/route-origin.ts"
   import { initAI } from "@/scripts/lib/ai/init.ts"
   import {
     getAiStatus,

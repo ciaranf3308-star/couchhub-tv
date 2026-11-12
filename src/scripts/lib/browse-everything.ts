@@ -38,9 +38,8 @@
 //     - The search-scope rule (livetv-search-sort.ts): category
 //       change clears category-scoped search; scope "all"
 //       survives. Implemented in browse-state.ts selectCategory.
-//     - The one-hints-bar pattern (TvLivetvHints): one bar,
-//       layer-driven. Rendered locally (hints modules are not
-//       in W2 ownership; unification is an integration flag).
+//     - The one-hints-bar pattern (TvButtonHints): one bar,
+//       layer-driven via the setControllerHints override.
 //   NEW (no 0.11.7 equivalent):
 //     - browse-state.ts, home-browse-modes.ts, the keyed page
 //       grid, the filter drawer, the search/sort overlays, and
@@ -952,11 +951,6 @@ export function mountBrowseEverything(
   paginationEl.setAttribute("aria-label", "Browse pages");
   root.appendChild(paginationEl);
 
-  const hintsEl = el("div", "rs-browse2__hints");
-  hintsEl.setAttribute("data-role", "browse-hints");
-  hintsEl.setAttribute("aria-hidden", "true");
-  root.appendChild(hintsEl);
-
   const overlayHost = el("div", "rs-browse2__overlay-host");
   overlayHost.setAttribute("data-role", "browse-overlay-host");
   root.appendChild(overlayHost);
@@ -1077,24 +1071,15 @@ export function mountBrowseEverything(
   };
 
   const renderHints = () => {
-    const hints: Record<BrowseLayer, string> = {
-      grid: "D-pad Move · A Open · B Back · X Options · Y Search · LB/RB Page · Menu Filters",
-      categories: "D-pad Move · A Select · B Back · ◀ ▶ List",
-      filters: "↕ Family · ↔ Value · A Select · B Cancel",
-      search: "Type to search · Enter Apply · B Close",
-      sort: "D-pad Move · A Select · B Close without changing",
-    };
-    hintsEl.textContent = hints[layer];
-    // Route the same legend through the shared hints bar
-    // (0.11.10 unification). The local line stays until W1's
-    // TvButtonHints override lands — the shared bar re-renders
-    // from its view config today and would drop layer hints.
+    // One hints bar (0.11.10 unification): the layer legend goes
+    // through the shared TvButtonHints bar via the override. The
+    // Browse-local hints line is deleted — it duplicated the bar.
     setControllerHints(browseHintsForLayer(layer, kind));
   };
 
   // ── Back layers (0.11.10) ───────────────────────────────────
-  // Registered once per mount, unregistered on destroy. The shim
-  // dispatcher (window capture) claims Escape before the bubble
+  // Registered once per mount, unregistered on destroy. The Back
+  // coordinator (window capture) claims Escape before the bubble
   // handler below, so each press pops exactly one layer and the
   // bubble handler's Escape branches stay as fallback only.
   // isActive re-checks suspension: the series controller keeps a
