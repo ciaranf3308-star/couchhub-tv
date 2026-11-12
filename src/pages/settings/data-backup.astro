@@ -1,0 +1,288 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconAlertTriangle,
+  IconArchive,
+  IconDatabase,
+  IconDownload,
+  IconFolderOpen,
+  IconRefresh,
+  IconShare,
+  IconTrash,
+  IconUpload,
+} from "@tabler/icons-svelte"
+import ConnectionLimitBanner from "@/components/ConnectionLimitBanner.svelte"
+---
+<SettingsShell
+  title="Data & Backup"
+  titleKey=""
+  sub="Downloads, backup and storage"
+  subKey=""
+  current="data-backup">
+  <section id="settings-data" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div id="downloads-folder-section" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconDownload aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.downloadsSection.title" class="text-base font-semibold">Downloads</h3>
+            <span id="downloads-availability" class="ms-auto text-xs text-fg-3 shrink-0 truncate empty:hidden"></span>
+          </div>
+          <div class="px-5 sm:px-6 pt-3 empty:pt-0">
+            <ConnectionLimitBanner client:load />
+          </div>
+          <div class="settings-rows">
+
+            <!-- Save to -->
+            <div data-settings-item class="settings-row settings-row--stack scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.downloadsFolder.savedTo" class="text-sm font-medium leading-snug">Save to</h3>
+                <p data-i18n-html="settings.downloadsFolder.intro" class="text-xs text-fg-3">
+                  Folder where new downloads land. Manage the queue itself on the
+                  <a href="/downloads" class="text-accent underline">Downloads page</a>.
+                </p>
+              </div>
+              <div class="settings-row__control w-full flex-col items-stretch">
+                <div class="flex gap-2 flex-wrap">
+                  <input
+                    id="download-dir-input"
+                    type="text"
+                    readonly
+                    placeholder="Not set - picked on first download"
+                    data-i18n-attr="placeholder:settings.downloadsFolder.notSetPlaceholder;aria-label:settings.downloadsFolder.savedTo"
+                    aria-label="Save to"
+                    class="field-input flex-1 min-w-0 font-mono"
+                  />
+                  <button id="download-dir-pick" type="button" class="btn">
+                    <IconFolderOpen aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.downloadsFolder.choose">Choose…</span>
+                  </button>
+                  <button id="download-dir-clear" type="button" class="btn text-fg-2">
+                    <span data-i18n="common.clear">Clear</span>
+                  </button>
+                  <button id="settings-open-downloads" type="button" class="btn justify-center hidden">
+                    <IconFolderOpen aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="downloads.action.openFolder">Open folder</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Restore from folder -->
+            <div data-settings-item class="settings-row settings-row--stack scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.downloadsFolder.restoreLabel" class="text-sm font-medium leading-snug">Restore from folder</h3>
+                <p data-i18n="settings.downloadsFolder.restoreHelper" class="text-xs text-fg-3">
+                  After a reinstall, scan the folder above for `.xtmeta.json` sidecars and re-add the matching files to your downloads list.
+                </p>
+              </div>
+              <div class="settings-row__control w-full flex-col items-stretch gap-1">
+                <div class="flex">
+                  <button id="downloads-scan" type="button" class="btn justify-start sm:justify-center">
+                    <IconRefresh aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.downloadsFolder.scanFolder">Scan folder</span>
+                  </button>
+                </div>
+                <span
+                  id="downloads-scan-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+            <!-- Concurrent downloads -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.downloadsFolder.concurrency" class="text-sm font-medium leading-snug">Concurrent downloads</h3>
+                <p data-i18n="settings.downloadsFolder.concurrencyHelper" class="text-xs text-fg-3">
+                  Most Xtream providers cap connections per account, so a second
+                  parallel download fails mid-stream. Keep this at 1 unless your
+                  provider explicitly allows multiple slots.
+                </p>
+              </div>
+              <div class="settings-row__control flex-col items-end gap-1">
+                <div
+                  id="settings-download-concurrency"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Concurrent downloads"
+                  data-i18n-attr="aria-label:settings.downloadsFolder.concurrency">
+                  <button type="button" data-concurrency="1" aria-pressed="false" class="dl-concurrency-btn btn">1</button>
+                  <button type="button" data-concurrency="2" aria-pressed="false" class="dl-concurrency-btn btn">2</button>
+                  <button type="button" data-concurrency="3" aria-pressed="false" class="dl-concurrency-btn btn">3</button>
+                  <button type="button" data-concurrency="4" aria-pressed="false" class="dl-concurrency-btn btn">4</button>
+                </div>
+                <p
+                  id="settings-download-concurrency-cap"
+                  class="text-2xs text-fg-3 tabular-nums empty:hidden"
+                  aria-live="polite"></p>
+              </div>
+            </div>
+
+            <!-- Kodi .nfo sidecar: desktop only -->
+            <div id="card-write-nfo" data-settings-item class="hidden settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.downloadsFolder.nfoTitle" class="text-sm font-medium leading-snug">Write Kodi metadata</h3>
+                <p data-i18n="settings.downloadsFolder.nfoHelper" class="text-xs text-fg-3">
+                  Save a .nfo file with title, year, plot and poster next to each finished download so Kodi, Jellyfin or Emby can index it.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-write-nfo"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Write Kodi metadata"
+                  data-i18n-attr="aria-label:settings.downloadsFolder.nfoTitle">
+                  <button type="button" data-nfo="on"  aria-pressed="false" data-i18n="settings.downloadsFolder.nfo.on"  class="write-nfo-btn btn">On</button>
+                  <button type="button" data-nfo="off" aria-pressed="false" data-i18n="settings.downloadsFolder.nfo.off" class="write-nfo-btn btn">Off</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div id="card-backup" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconArchive aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.backup.title" class="text-base font-semibold">Backup</h3>
+          </div>
+          <div class="settings-rows">
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <p data-i18n="settings.backup.helperLong" class="text-xs text-fg-3">
+                  Save all playlists, favorites, recents, watched progress, hidden categories, and app settings to a file. Cache and the downloads queue are not exported.
+                </p>
+              </div>
+              <div class="settings-row__control flex-col items-end gap-1">
+                <div class="flex gap-2">
+                  <button id="settings-export" type="button" class="btn justify-center">
+                    <IconDownload aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.backup.export">Export to file</span>
+                  </button>
+                  <button id="settings-import" type="button" class="btn justify-center">
+                    <IconUpload aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.backup.import">Import from file</span>
+                  </button>
+                </div>
+                <input id="settings-import-input" type="file" accept="application/json,text/json,text/plain,.json" hidden />
+                <span id="settings-backup-msg" aria-live="polite" class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="card-storage" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconDatabase aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.storage.title" class="text-base font-semibold">Storage</h3>
+          </div>
+          <div class="settings-rows">
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.storage.size" class="text-sm font-medium leading-snug">Cache</h3>
+              </div>
+              <div class="settings-row__control flex-col items-end gap-0.5 text-sm">
+                <span id="settings-cache-size" class="text-fg tabular-nums">-</span>
+                <span class="text-xs text-fg-3">
+                  <span data-i18n="settings.storage.lastUpdated">Last updated</span>
+                  <span id="settings-cache-newest" class="tabular-nums ms-1">-</span>
+                </span>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.storage.clear" class="text-sm font-medium leading-snug">Clear cache</h3>
+                <p data-i18n="settings.storage.helperLong" class="text-xs text-fg-3">
+                  Clears channel, movie, and series lists. Playlists, favorites, and recents are kept.
+                </p>
+              </div>
+              <div class="settings-row__control flex-col items-end gap-1">
+                <div class="flex flex-wrap gap-2 justify-end">
+                  <button id="settings-clear-cache" type="button" class="btn justify-center">
+                    <IconTrash aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.storage.clear">Clear cache</span>
+                  </button>
+                  <button id="settings-open-logs" type="button" class="btn justify-center hidden">
+                    <IconFolderOpen aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.storage.openLogs">Open log folder</span>
+                  </button>
+                  <button id="settings-open-appdata" type="button" class="btn justify-center hidden">
+                    <IconFolderOpen aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.storage.openAppData">Open app data folder</span>
+                  </button>
+                  <button id="settings-share-logs" type="button" class="btn justify-center hidden">
+                    <IconShare aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.storage.shareLogs">Share logs</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-cache-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.viewingHistory.title" class="text-sm font-medium leading-snug">Clear viewing history</h3>
+                <p data-i18n="settings.viewingHistory.helper" class="text-xs text-fg-3">
+                  Removes continue watching and recently watched items from every playlist. Favorites and watchlist are kept.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <button id="settings-clear-history" type="button" class="btn justify-center">
+                  <IconTrash aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.viewingHistory.clear">Clear history</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+    </div>
+  </section>
+
+  <!-- Import confirmation dialog -->
+  <dialog
+    id="settings-import-dialog"
+    aria-labelledby="settings-import-title"
+    aria-describedby="settings-import-desc"
+    class="fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0
+           w-[min(28rem,calc(100vw-2rem))] shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)] backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]">
+    <div class="icon-mark-host flex flex-col p-5 gap-4">
+      <div class="flex items-start gap-3">
+        <span class="icon-mark icon-mark--bad icon-mark--lg">
+          <IconAlertTriangle aria-hidden="true" stroke={2} />
+        </span>
+        <div class="flex flex-col gap-1 min-w-0 pt-0.5">
+          <h2 id="settings-import-title" class="font-serif text-lg">
+            Replace everything with this backup?
+          </h2>
+          <p id="settings-import-desc" class="text-sm text-fg-2">
+            Import will replace all playlists, favorites, recents, watched
+            progress, hidden categories, and app settings on this device.
+          </p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+        <button id="settings-import-cancel" type="button" class="btn justify-start sm:justify-center">
+          <span data-i18n="common.cancel">Cancel</span>
+        </button>
+        <button id="settings-import-confirm" type="button" class="btn-danger justify-start sm:justify-center">
+          <IconUpload aria-hidden="true" class="btn-icon" />
+          <span>Continue</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+</SettingsShell>

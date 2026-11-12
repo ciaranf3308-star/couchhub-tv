@@ -1,0 +1,228 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconChevronDown,
+  IconCloudDownload,
+  IconPlayerPlay,
+} from "@tabler/icons-svelte"
+import PlayerPicker from "@/components/PlayerPicker.svelte"
+import AndroidNativePlayerCard from "@/components/AndroidNativePlayerCard.svelte"
+import RememberedAndroidPlayerCard from "@/components/RememberedAndroidPlayerCard.svelte"
+---
+<SettingsShell
+  title="Playback"
+  titleKey="settings.playback.title"
+  sub="Players, audio, captions and continue watching"
+  subKey=""
+  current="playback">
+  <section id="settings-watching" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div id="playback-section" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconPlayerPlay aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.playback.title" class="text-base font-semibold">Playback</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- Continue watching: how long paused movies / episodes linger -->
+            <div id="card-progress-retention" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.progressRetention.title" class="text-sm font-medium leading-snug">Continue watching</h3>
+                <p data-i18n="settings.progressRetention.helper" class="text-xs text-fg-3">
+                  How long to keep paused movies and episodes in Continue Watching. Older entries are dropped on the next save. The 200-item cap still applies regardless.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-progress-retention"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Continue Watching retention"
+                  data-i18n-attr="aria-label:settings.progressRetention.label">
+                  <button type="button" data-retention="30"  aria-pressed="false" data-i18n="settings.progressRetention.30days"  class="retention-btn btn">30 days</button>
+                  <button type="button" data-retention="90"  aria-pressed="false" data-i18n="settings.progressRetention.90days"  class="retention-btn btn">90 days</button>
+                  <button type="button" data-retention="180" aria-pressed="false" data-i18n="settings.progressRetention.180days" class="retention-btn btn">180 days</button>
+                  <button type="button" data-retention="0"   aria-pressed="false" data-i18n="settings.progressRetention.never"   class="retention-btn btn">Never</button>
+                </div>
+              </div>
+            </div>
+
+
+            <div data-settings-item class="px-5 sm:px-6 py-4">
+              <p data-i18n="settings.playback.helper" class="text-xs text-fg-3 mb-3">
+                Choose how streams open. External players play 4K and HDR more reliably.
+              </p>
+              <PlayerPicker client:load />
+            </div>
+
+            <!-- Audio transcode auto-fix: desktop-only, unhidden by the script below -->
+            <details id="audio-transcode-section" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">
+              <summary class="settings-row cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                <span class="settings-row__text">
+                  <h3 data-i18n="settings.playback.audioTranscodeAuto" class="text-sm font-medium leading-snug">Fix unsupported audio automatically</h3>
+                  <span id="audio-transcode-helper" data-i18n="settings.playback.audioTranscodeAutoHelper" class="text-xs text-fg-3 block">
+                    When a live channel plays video with no sound (AC-3, E-AC-3, MP2, or DTS audio), fix it automatically instead of asking each time.
+                  </span>
+                  <span id="ffmpeg-status" aria-live="polite" class="text-xs text-fg-3 block mt-1 empty:hidden"></span>
+                </span>
+                <span class="settings-row__control">
+                  <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
+              <div class="px-5 sm:px-6 pb-4 pt-1 flex flex-col gap-3">
+                <label for="ffmpeg-path-input" data-i18n="settings.playback.ffmpegPathLabel" class="text-eyebrow font-medium uppercase text-fg-3">FFmpeg path</label>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    id="ffmpeg-path-input"
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder="C:\ffmpeg\bin\ffmpeg.exe"
+                    class="field-input font-mono flex-1"
+                    aria-describedby="ffmpeg-path-helper" />
+                  <button type="button" id="ffmpeg-browse-btn" class="btn" data-i18n="settings.playback.browse">Browse…</button>
+                  <button type="button" id="ffmpeg-test-btn" class="btn" data-i18n="settings.playback.ffmpegTest">Test</button>
+                </div>
+                <p id="ffmpeg-path-helper" data-i18n="settings.playback.ffmpegPathHelper" class="text-xs text-fg-3">
+                  Point to your own FFmpeg if the bundled one is missing or you prefer a specific build.
+                </p>
+
+                <div class="flex flex-wrap items-center gap-3 pt-3 border-t border-line/60">
+                  <span data-i18n="settings.playback.audioTranscodeAuto" class="text-sm font-medium leading-snug me-auto">Fix unsupported audio automatically</span>
+                  <div
+                    id="settings-audio-transcode-auto"
+                    class="settings-seg"
+                    role="radiogroup"
+                    aria-label="Fix unsupported audio automatically"
+                    data-i18n-attr="aria-label:settings.playback.audioTranscodeAuto"
+                    aria-describedby="audio-transcode-helper">
+                    <button type="button" data-audio-transcode="on" aria-pressed="false" data-i18n="settings.playback.audioTranscodeOn" class="audio-transcode-btn btn">On</button>
+                    <button type="button" data-audio-transcode="off" aria-pressed="false" data-i18n="settings.playback.audioTranscodeOff" class="audio-transcode-btn btn">Off</button>
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <div id="card-lang-grouping" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.langGrouping.title" class="text-sm font-medium leading-snug">Group language variants</h3>
+                <p data-i18n="settings.langGrouping.hint" class="text-xs text-fg-3">
+                  Combine copies of the same title in different languages into one entry. Turn off if titles are grouped incorrectly for your provider.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <select id="lang-grouping-select" class="field-input">
+                  <option value="on" data-i18n="settings.langGrouping.on">On</option>
+                  <option value="off" data-i18n="settings.langGrouping.off">Off</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="card-content-language" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.contentLang.title" class="text-sm font-medium leading-snug">Preferred audio language</h3>
+                <p data-i18n="settings.contentLang.hint" class="text-xs text-fg-3">
+                  When a title exists in several languages, open and recommend this one first. Auto follows the interface language.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <select id="content-lang-select" class="field-input"></select>
+              </div>
+            </div>
+
+            <!-- HEVC extension install: Windows desktop only, unhidden by the script below -->
+            <div id="card-hevc" data-settings-item class="settings-row hidden scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.playback.hevcTitle" class="text-sm font-medium leading-snug">HEVC video (H.265)</h3>
+                <p data-i18n="settings.playback.hevcHelper" class="text-xs text-fg-3">Some channels use HEVC video, which Windows can't decode out of the box. Install Microsoft's HEVC extension to play them in the built-in player.</p>
+              </div>
+              <div class="settings-row__control flex-col items-end gap-1">
+                <button id="settings-hevc-install" type="button" class="btn justify-center">
+                  <IconCloudDownload aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.playback.hevcInstall">Install</span>
+                </button>
+                <span id="settings-hevc-status" aria-live="polite" class="text-xs text-fg-3 empty:hidden"></span>
+              </div>
+            </div>
+
+            <!-- Mono audio: downmixes embedded playback to one channel for single-earbud use -->
+            <div id="card-mono-audio" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.monoAudio.title" class="text-sm font-medium leading-snug">Mono audio</h3>
+                <p data-i18n="settings.monoAudio.helperLong" class="text-xs text-fg-3">
+                  Play all audio in both ears as a single channel - useful with one earbud. Applies to streams played by the built-in engines; some directly played files keep their original stereo.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-mono-audio"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Mono audio"
+                  data-i18n-attr="aria-label:settings.monoAudio.label">
+                  <button type="button" data-mono="on"  aria-pressed="false" data-i18n="settings.monoAudio.on"  class="mono-audio-btn btn">On</button>
+                  <button type="button" data-mono="off" aria-pressed="false" data-i18n="settings.monoAudio.off" class="mono-audio-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var monoAudioRaw = localStorage.getItem("xt_mono_audio");
+                  var monoAudioOn = monoAudioRaw === "1";
+                  var monoAudioGroup = document.getElementById("settings-mono-audio");
+                  if (monoAudioGroup) {
+                    var monoAudioBtns = monoAudioGroup.querySelectorAll(".mono-audio-btn");
+                    for (var mIdx = 0; mIdx < monoAudioBtns.length; mIdx++) {
+                      var monoAudioBtnOn = monoAudioBtns[mIdx].getAttribute("data-mono") === "on";
+                      monoAudioBtns[mIdx].setAttribute("aria-pressed", monoAudioBtnOn === monoAudioOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Captions auto: turns on subtitles at playback start when the title has them -->
+            <div id="card-captions-auto" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.captionsAuto.title" class="text-sm font-medium leading-snug">Captions on by default</h3>
+                <p data-i18n="settings.captionsAuto.helperLong" class="text-xs text-fg-3">
+                  Automatically turns on subtitles when a movie or episode has them, preferring your app language. You can still turn them off in the player. Applies to this device.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-captions-auto"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Captions on by default"
+                  data-i18n-attr="aria-label:settings.captionsAuto.label">
+                  <button type="button" data-captions="on"  aria-pressed="false" data-i18n="settings.captionsAuto.on"  class="captions-auto-btn btn">On</button>
+                  <button type="button" data-captions="off" aria-pressed="false" data-i18n="settings.captionsAuto.off" class="captions-auto-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var captionsAutoRaw = localStorage.getItem("xt_captions_auto");
+                  var captionsAutoOn = captionsAutoRaw === "1";
+                  var captionsAutoGroup = document.getElementById("settings-captions-auto");
+                  if (captionsAutoGroup) {
+                    var captionsAutoBtns = captionsAutoGroup.querySelectorAll(".captions-auto-btn");
+                    for (var cIdx = 0; cIdx < captionsAutoBtns.length; cIdx++) {
+                      var captionsAutoBtnOn = captionsAutoBtns[cIdx].getAttribute("data-captions") === "on";
+                      captionsAutoBtns[cIdx].setAttribute("aria-pressed", captionsAutoBtnOn === captionsAutoOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <AndroidNativePlayerCard client:load />
+
+            <RememberedAndroidPlayerCard client:load />
+
+          </div>
+        </div>
+    </div>
+  </section>
+</SettingsShell>

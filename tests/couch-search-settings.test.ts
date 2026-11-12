@@ -175,7 +175,9 @@ const BASELINE_SETTINGS_IDS: string[] = [
   "settings-download-concurrency", "settings-download-concurrency-cap", "settings-export", "settings-export-diagnostics", "settings-export-diagnostics-msg",
   "settings-followed", "settings-followed-check-now", "settings-followed-interval", "settings-followed-scheduled", "settings-followed-status", "settings-font-scale",
   "settings-help", "settings-hevc-install", "settings-hevc-status", "settings-import", "settings-import-cancel",
-  "settings-import-confirm", "settings-import-desc", "settings-import-dialog", "settings-import-input", "settings-import-title", "settings-library",
+  "settings-import-confirm", "settings-import-desc", "settings-import-dialog", "settings-import-input", "settings-import-title",
+  // 0.11.4 W1: "settings-library" is gone by design — the Library group
+  // dissolved into Live TV (categories / channel edits / favorites).
   "settings-mono-audio", "settings-network", "settings-network-timeout", "settings-network-timeout-helper", "settings-new-custom-playlist", "settings-new-custom-playlist-dialog",
   "settings-new-custom-playlist-name", "settings-new-custom-playlist-title", "settings-open-appdata", "settings-open-downloads", "settings-open-logs", "settings-perf-mode",
   "settings-playlists", "settings-playlists-list", "settings-profile", "settings-progress-retention", "settings-receiver-screensaver-hint", "settings-receiver-screensaver-open",
@@ -200,15 +202,31 @@ const BASELINE_LOGIN_IDS: string[] = [
   "title", "username", "xtream-advanced", "xtream-fields",
 ];
 
+// 0.11.4 W1: Settings is split — one short page per section under
+// src/pages/settings/*.astro, shared shell in
+// src/components/settings/SettingsShell.astro, shared behaviour in
+// src/scripts/settings/settings-page.js. Control ids live on their
+// section page (or the shell, for the search box), never all in one file.
+function settingsSources(): string {
+  const pages = readdirSync(resolve(root, "src/pages/settings"))
+    .filter((f) => f.endsWith(".astro"))
+    .map((f) => pageSource(`src/pages/settings/${f}`));
+  return [
+    pageSource("src/pages/settings.astro"),
+    pageSource("src/components/settings/SettingsShell.astro"),
+    ...pages,
+  ].join("\n");
+}
+
 describe("couch-settings: preservation", () => {
-  it("settings.astro still contains every baseline control id", () => {
-    const src = pageSource("src/pages/settings.astro");
+  it("settings pages still contain every baseline control id", () => {
+    const src = settingsSources();
     const missing = BASELINE_SETTINGS_IDS.filter((id) => !src.includes(`id="${id}"`));
     expect(missing).toEqual([]);
   });
 
   it("0.11.1 settings cull: removed controls stay removed", () => {
-    const src = pageSource("src/pages/settings.astro");
+    const src = settingsSources();
     // Themes (picker + accent), the dead "Show EPG by default" toggle (its
     // xt_epg_open_default key was never read), the TV-irrelevant haptics
     // row, the Discord Rich Presence section, and the action-less support
@@ -233,15 +251,32 @@ describe("couch-settings: preservation", () => {
     expect(src).not.toContain("commitTheme(");
   });
 
-  it("settings.astro is a Couch page with Quick + Advanced groups", () => {
-    const src = pageSource("src/pages/settings.astro");
-    expect(src).toContain('import CouchLayout from "@/layouts/CouchLayout.astro"');
-    expect(src).toContain("TvSettingsGroup");
-    expect(src).toContain('id="settings-quick"');
-    expect(src).toContain('id="settings-advanced"');
-    expect(src).toContain('variant="advanced"');
-    expect(src).toContain("<CouchLayout");
-    expect(src).not.toContain('import Layout from "@/layouts/Layout.astro"');
+  it("settings is split into short pages with no Quick + Advanced split", () => {
+    // 0.11.4 W1: the Quick/Advanced split is killed — one Settings, every
+    // control exactly one home. The shell owns the Couch layout; section
+    // pages mount through it.
+    const src = settingsSources();
+    expect(src).not.toContain('id="settings-quick"');
+    expect(src).not.toContain('id="settings-advanced"');
+    expect(src).not.toContain("TvSettingsGroup");
+    expect(src).not.toContain('variant="advanced"');
+    expect(src).not.toContain("Anything that didn't work");
+    expect(src).not.toContain("Set up in four steps");
+    const shell = pageSource("src/components/settings/SettingsShell.astro");
+    expect(shell).toContain('import CouchLayout from "@/layouts/CouchLayout.astro"');
+    expect(shell).toContain("<CouchLayout");
+    expect(shell).not.toContain('import Layout from "@/layouts/Layout.astro"');
+    const pages = readdirSync(resolve(root, "src/pages/settings"))
+      .filter((f) => f.endsWith(".astro"));
+    expect(pages.length).toBeGreaterThanOrEqual(11);
+    for (const f of pages) {
+      expect(pageSource(`src/pages/settings/${f}`)).toContain("SettingsShell");
+    }
+    // The old 6,305-line monolith is a short home listing the sections.
+    const home = pageSource("src/pages/settings.astro");
+    expect(home.split("\n").length).toBeLessThan(120);
+    expect(home).toContain('id="settings-home-list"');
+    expect(home).toContain('id="settings-exit-row"');
   });
 
   it("every app-settings storage key is still referenced by app-settings.js", async () => {
@@ -423,12 +458,11 @@ describe("couch-brand: NylahBox Studios", () => {
     }
   });
 
-  it("settings.astro / login.astro carry no old brand name; upstream attribution stays", () => {
-    for (const page of ["src/pages/settings.astro", "src/pages/login.astro"]) {
-      const src = pageSource(page);
-      expect(src, page).not.toContain("Nylah Studios");
-    }
-    const settings = pageSource("src/pages/settings.astro");
+  it("settings pages / login.astro carry no old brand name; upstream attribution stays", () => {
+    // 0.11.4 W1: settings is split, so the brand check reads all of it.
+    expect(settingsSources()).not.toContain("Nylah Studios");
+    expect(pageSource("src/pages/login.astro")).not.toContain("Nylah Studios");
+    const settings = settingsSources();
     expect(settings).toContain("NylahBox Studios");
     // Deliberate exceptions, not rebrand misses: the upstream fork
     // attribution and real github.com/infinitel8p URLs must stay factual.

@@ -1,0 +1,298 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconActivity,
+  IconBook,
+  IconBrandDiscord,
+  IconBug,
+  IconChevronDown,
+  IconDeviceFloppy,
+  IconFileZip,
+  IconMail,
+  IconRocket,
+  IconTrash,
+  IconWifi,
+} from "@tabler/icons-svelte"
+---
+<SettingsShell
+  title="Help & Diagnostics"
+  titleKey=""
+  sub="Docs, feedback and network log"
+  subKey=""
+  current="help-diagnostics">
+  <section id="settings-network" class="settings-group">
+    <h2 data-i18n="settings.group.network" class="settings-group__title">Network</h2>
+    <div class="flex flex-col gap-4">
+        <div id="card-network" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconWifi aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.network.title" class="text-base font-semibold">Network</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- User agent preset -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.network.uaPreset" class="text-sm font-medium leading-snug">User-Agent preset</h3>
+                <p data-i18n="settings.network.helperLong" class="text-xs text-fg-3">
+                  Some IPTV providers reject the default browser User-Agent. Pick a preset or enter a custom string. Applies to provider API, M3U, and EPG fetches. Effective in the desktop build.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-72">
+                <select
+                  id="ua-preset"
+                  class="field-input"
+                  data-i18n-attr="aria-label:settings.network.uaPreset"
+                  aria-label="User-Agent preset"></select>
+              </div>
+            </div>
+
+            <!-- User agent custom override -->
+            <div data-settings-item class="settings-row settings-row--stack scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.network.uaCustom" class="text-sm font-medium leading-snug">Custom (overrides preset)</h3>
+              </div>
+              <div class="settings-row__control w-full flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <input
+                    id="ua-custom"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="e.g. VLC/3.0.20 LibVLC/3.0.20"
+                    data-i18n-attr="placeholder:settings.network.uaPlaceholder"
+                    class="field-input font-mono flex-1 min-w-0"
+                  />
+                  <button id="ua-save" type="button" class="btn justify-center">
+                    <IconDeviceFloppy aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="common.save">Save</span>
+                  </button>
+                </div>
+                <span
+                  id="ua-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+            <!-- Request timeout -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.network.timeoutLabel" class="text-sm font-medium leading-snug">Request timeout</h3>
+                <p id="settings-network-timeout-helper" data-i18n="settings.network.timeoutHelper" class="text-xs text-fg-3">
+                  How long to wait for a provider response before giving up. Bump this when a large catalog (tens of thousands of movies / series) times out before it finishes loading.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-network-timeout"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Request timeout"
+                  aria-describedby="settings-network-timeout-helper"
+                  data-i18n-attr="aria-label:settings.network.timeoutLabel">
+                  <button type="button" role="radio" data-timeout="20"  aria-checked="false" data-i18n="settings.network.timeout.20s"  class="net-timeout-btn btn">20s</button>
+                  <button type="button" role="radio" data-timeout="45"  aria-checked="false" data-i18n="settings.network.timeout.45s"  class="net-timeout-btn btn">45s</button>
+                  <button type="button" role="radio" data-timeout="90"  aria-checked="false" data-i18n="settings.network.timeout.90s"  class="net-timeout-btn btn">90s</button>
+                  <button type="button" role="radio" data-timeout="180" aria-checked="false" data-i18n="settings.network.timeout.180s" class="net-timeout-btn btn">3 min</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Developer mode: unlocks the network log card below -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.devMode.title" class="text-sm font-medium leading-snug">Developer mode</h3>
+                <p id="settings-dev-mode-helper" data-i18n="settings.devMode.helperLong" class="text-xs text-fg-3">
+                  Unlocks a network log of recent provider requests, useful when troubleshooting a connection issue. Off by default.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-dev-mode"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Developer mode"
+                  aria-describedby="settings-dev-mode-helper"
+                  data-i18n-attr="aria-label:settings.devMode.label">
+                  <button type="button" role="radio" data-dev="on"  aria-checked="false" data-i18n="settings.devMode.on"  class="dev-mode-btn btn">On</button>
+                  <button type="button" role="radio" data-dev="off" aria-checked="false" data-i18n="settings.devMode.off" class="dev-mode-btn btn">Off</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+
+        <details id="card-net-log" data-settings-item class="changelog-outer settings-surface icon-mark-host group hidden scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden pb-5 sm:pb-6">
+            <span class="icon-mark">
+              <IconActivity aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.netLog.title" class="text-base font-semibold">Network log</h3>
+            <span class="ms-auto shrink-0">
+              <IconChevronDown
+                aria-hidden="true"
+                stroke={1.75}
+                class="size-4 text-fg-3 shrink-0 changelog-chevron transition-transform duration-200" />
+            </span>
+          </summary>
+          <div class="flex flex-col gap-3 px-5 sm:px-6 pb-5 sm:pb-6 pt-4 sm:pt-5 border-t border-line/60">
+
+            <p data-i18n="settings.netLog.helper" class="text-xs text-fg-3">
+              Recent provider requests, with credentials stripped. Kept for this app session only and cleared when you close the app.
+            </p>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="net-log-clear" type="button" class="btn">
+                <IconTrash aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.netLog.clear">Clear</span>
+              </button>
+              <select
+                id="net-log-kind-filter"
+                class="field-input w-auto"
+                data-i18n-attr="aria-label:settings.netLog.kindFilter"
+                aria-label="Filter by kind">
+                <option value="all" data-i18n="settings.netLog.kind.all">All kinds</option>
+                <option value="api" data-i18n="settings.netLog.kind.api">API</option>
+                <option value="playlist" data-i18n="settings.netLog.kind.playlist">Playlist</option>
+                <option value="epg" data-i18n="settings.netLog.kind.epg">EPG</option>
+                <option value="image" data-i18n="settings.netLog.kind.image">Image</option>
+                <option value="media" data-i18n="settings.netLog.kind.media">Media</option>
+                <option value="update" data-i18n="settings.netLog.kind.update">Update</option>
+                <option value="other" data-i18n="settings.netLog.kind.other">Other</option>
+              </select>
+              <span class="inline-flex items-center gap-3 min-h-11">
+                <span data-i18n="settings.netLog.includeImages" class="text-sm font-medium leading-snug">Include image requests</span>
+                <span
+                  id="net-log-include-images"
+                  class="settings-seg"
+                  role="radiogroup"
+                  data-i18n-attr="aria-label:settings.netLog.includeImages"
+                  aria-label="Include image requests">
+                  <button type="button" data-images="on" aria-pressed="false" data-i18n="settings.tmdb.on" class="netlog-images-btn btn">On</button>
+                  <button type="button" data-images="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="netlog-images-btn btn">Off</button>
+                </span>
+              </span>
+              <button id="net-log-copy" type="button" class="btn ms-auto">
+                <IconDeviceFloppy aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.netLog.copyJson">Copy as JSON</span>
+              </button>
+            </div>
+
+            <div id="net-log-rows" class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden empty:hidden"></div>
+
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <p id="net-log-count" class="text-2xs text-fg-3 tabular-nums"></p>
+              <span
+                id="net-log-msg"
+                aria-live="polite"
+                class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+            </div>
+
+          </div>
+        </details>
+    </div>
+  </section>
+
+    <section id="settings-help" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <div class="flex flex-col gap-4">
+        <div id="card-docs" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconBook aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.help.docsTitle" class="text-base font-semibold">Read the docs</h3>
+          </div>
+          <p data-i18n="settings.help.docsIntro" class="settings-surface__helper text-xs text-fg-3">
+            Step-by-step guides for sign-in, external players, the keyboard and D-pad bindings, and the most common things people get stuck on.
+          </p>
+          <div class="px-5 sm:px-6 pb-5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <a
+                href="/docs"
+                class="btn justify-start sm:justify-center">
+                <IconBook aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.help.openDocs">Open documentation</span>
+              </a>
+              <a
+                href="/docs?p=getting-started"
+                class="btn justify-start sm:justify-center">
+                <IconRocket aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.help.openQuickStart">Quick start</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div id="card-feedback" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconMail aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.help.title" class="text-base font-semibold">Found a bug or have a suggestion?</h3>
+          </div>
+          <p data-i18n="settings.help.intro" class="settings-surface__helper text-xs text-fg-3">
+            Bug reports, feature requests, questions, and general feedback all go to GitHub - search existing issues first, or pick a template and open a new one.
+          </p>
+          <div class="px-5 sm:px-6 pb-5">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <a
+                href="https://github.com/infinitel8p/Extreme-InfiniTV/issues/new/choose"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-external
+                class="btn justify-start sm:justify-center">
+                <IconBug aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.help.reportIssue">Report a bug</span>
+              </a>
+              <a
+                href="https://github.com/infinitel8p/Extreme-InfiniTV/discussions/new/choose"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-external
+                class="btn justify-start sm:justify-center">
+                <IconMail aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.help.sendFeedback">Send feedback</span>
+              </a>
+            </div>
+            <button id="settings-export-diagnostics" type="button" class="btn justify-start sm:justify-center w-full mt-2">
+              <IconFileZip aria-hidden="true" class="btn-icon" />
+              <span data-i18n="settings.help.exportDiagnostics">Export diagnostics</span>
+            </button>
+            <p data-i18n="settings.help.exportDiagnosticsHelper" class="text-xs text-fg-3 mt-2">
+              Save a single file with app and device details, recent network activity, playlist types and the newest log files. Attach it to a bug report so the problem can be traced.
+            </p>
+            <p data-i18n="settings.help.diagnosticsPrivacy" class="text-xs text-fg-3 mt-1">
+              Usernames, passwords and tokens are stripped out. Server names can still appear, so review the file before posting it publicly.
+            </p>
+            <span id="settings-export-diagnostics-msg" aria-live="polite" class="text-xs text-fg-3 break-all transition-opacity duration-300 empty:hidden mt-1 block"></span>
+          </div>
+
+          <div data-settings-item class="settings-row mt-1 border-t border-line-soft pt-4">
+            <div class="settings-row__text">
+              <h3 data-i18n="settings.help.discordTitle" class="text-sm font-medium leading-snug">Discord community</h3>
+              <p data-i18n="settings.help.discordHelper" class="text-xs text-fg-3">
+                Questions, feedback, and beta chat - come say hi.
+              </p>
+            </div>
+            <div class="settings-row__control">
+              <a
+                href="https://discord.gg/GH5V3AkzfA"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-external
+                class="btn justify-center">
+                <IconBrandDiscord aria-hidden="true" class="btn-icon" />
+                <span data-i18n="settings.help.discordJoin">Join</span>
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+</SettingsShell>

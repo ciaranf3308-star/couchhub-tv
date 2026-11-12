@@ -1,0 +1,340 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconBrandGithub,
+  IconChevronDown,
+  IconCloudDownload,
+  IconExternalLink,
+  IconLicense,
+  IconRefresh,
+  IconSparkles,
+} from "@tabler/icons-svelte"
+import TvLogo from "@/components/couch/TvLogo.astro"
+---
+<SettingsShell
+  title="App & Updates"
+  titleKey=""
+  sub="Version, update channel and what's new"
+  subKey=""
+  current="app-updates">
+  <section id="settings-about" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div
+          id="update-section"
+          data-settings-item
+          data-state="idle"
+          class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20
+                 data-[state=available]:border-accent/50 data-[state=available]:bg-accent-soft/30
+                 transition-colors">
+          <div class="settings-surface__header">
+            <TvLogo variant="lockup" size="about" />
+            <span
+              id="update-pill"
+              data-i18n="settings.about.updateAvailableShort"
+              class="hidden h-5 px-2 items-center justify-center rounded-full text-label font-semibold uppercase tracking-wide bg-accent text-bg shrink-0 pulse-ring">
+              Update available
+            </span>
+          </div>
+          <p class="text-sm text-fg-3 px-5 sm:px-6 -mt-1">NylahBox Studios. A fork of Extreme InfiniTV, licensed GPL-3.0-or-later — full credit is on the <a href="/docs" class="underline">Documentation</a> page. No IPTV subscription is included.</p>
+          <div class="settings-rows">
+
+            <div class="settings-row settings-row--stack">
+              <div class="settings-row__control w-full flex-col items-stretch gap-3">
+                <dl class="flex flex-col gap-1.5 sm:grid sm:grid-cols-3 sm:gap-x-6 text-sm">
+                  <div class="flex items-baseline justify-between gap-2 sm:flex-col sm:gap-0.5 min-w-0">
+                    <dt data-i18n="settings.about.current" class="text-fg-3 text-eyebrow font-medium uppercase">Current</dt>
+                    <dd id="update-current" class="text-fg tabular-nums truncate">-</dd>
+                  </div>
+                  <div class="flex items-baseline justify-between gap-2 sm:flex-col sm:gap-0.5 min-w-0">
+                    <dt data-i18n="settings.about.latest" class="text-fg-3 text-eyebrow font-medium uppercase">Latest</dt>
+                    <dd id="update-latest" class="text-fg tabular-nums truncate">-</dd>
+                  </div>
+                  <div class="flex items-baseline justify-between gap-2 sm:flex-col sm:gap-0.5 min-w-0">
+                    <dt data-i18n="settings.about.accountExpires" class="text-fg-3 text-eyebrow font-medium uppercase">Account expires</dt>
+                    <dd data-account-expiration="raw" class="text-fg tabular-nums truncate">-</dd>
+                  </div>
+                </dl>
+
+                <p
+                  id="update-display-diag"
+                  class="text-xs text-fg-3 tabular-nums break-words">Display: checking…</p>
+
+                <div
+                  id="update-progress-wrap"
+                  class="hidden flex-col gap-1.5">
+                  <div
+                    id="update-progress-track"
+                    class="update-progress-track h-1.5 rounded-full bg-surface-2 overflow-hidden"
+                    role="progressbar"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-label="Update download progress"
+                    data-i18n-attr="aria-label:settings.update.progressLabel">
+                    <div id="update-progress-bar" class="update-progress-fill h-full transition-[width] duration-150" style="width: 0%"></div>
+                  </div>
+                  <div id="update-progress-text" class="text-xs text-fg-3 tabular-nums">0%</div>
+                </div>
+              </div>
+            </div>
+
+            <div id="auto-update-row" class="settings-row">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.update.autoUpdate" class="text-sm font-medium leading-snug">Automatic updates</h3>
+                <p id="auto-update-hint" data-i18n="settings.update.autoUpdateHint" class="text-xs text-fg-3">
+                  When disabled, updates will not install automatically. You will still see when one is available.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <select id="auto-update-select" class="field-input" aria-describedby="auto-update-hint">
+                  <option value="on" data-i18n="settings.update.autoUpdateOn">Enabled</option>
+                  <option value="off" data-i18n="settings.update.autoUpdateOff">Disabled</option>
+                </select>
+              </div>
+            </div>
+
+            <div id="update-channel-row" class="settings-row">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.update.channel" class="text-sm font-medium leading-snug">Update channel</h3>
+                <p id="update-channel-hint" data-i18n="settings.update.channelHint" class="text-xs text-fg-3">
+                  Beta versions are early test builds and may be unstable.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <select id="update-channel-select" class="field-input" aria-describedby="update-channel-hint">
+                  <option value="stable" data-i18n="settings.update.channelStable">Stable</option>
+                  <option value="beta" data-i18n="settings.update.channelBeta">Beta</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-row settings-row--stack">
+              <div class="settings-row__control w-full">
+                <div class="grid grid-cols-1 gap-2 sm:grid-flow-col sm:auto-cols-fr">
+                  <button id="update-check" type="button" class="btn justify-start sm:justify-center">
+                    <IconRefresh aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.about.checkUpdate">Check for updates</span>
+                  </button>
+                  <button id="update-install" type="button" hidden class="btn justify-start sm:justify-center">
+                    <IconCloudDownload aria-hidden="true" class="btn-icon" />
+                    <span id="update-install-label">Download &amp; install</span>
+                  </button>
+                  <button id="update-relaunch" type="button" hidden class="btn justify-start sm:justify-center">
+                    <span data-i18n="settings.about.restartNow">Restart now</span>
+                  </button>
+                  <button id="update-get" type="button" hidden class="btn justify-start sm:justify-center">
+                    <IconExternalLink aria-hidden="true" class="btn-icon" />
+                    <span id="update-get-label" data-i18n="settings.update.getFromGithub">Get it on GitHub</span>
+                  </button>
+                  <a
+                    id="update-github"
+                    href="https://github.com/ciaranf3308-star/couchhub-tv/releases/latest"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-external
+                    class="btn justify-start sm:justify-center text-fg-2">
+                    <IconBrandGithub aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.support.github">GitHub</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="px-5 sm:px-6 pt-4 pb-5 flex flex-col gap-2 border-t border-line/60">
+            <span
+              id="update-msg"
+              aria-live="polite"
+              class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+            <p id="update-notes" class="hidden text-xs text-fg-3 whitespace-pre-line"></p>
+            <p
+              id="update-degraded"
+              hidden
+              data-i18n="settings.update.updaterUnreachable"
+              class="text-xs text-warn leading-relaxed">
+              Couldn't reach the update server, so in-app install isn't available right now. Use GitHub, or check again in a moment.
+            </p>
+            <p
+              id="update-manual-only"
+              hidden
+              data-i18n="settings.update.manualOnly"
+              class="text-xs text-fg-3 leading-relaxed">
+              Auto-update isn't available on this build.
+            </p>
+            <p
+              id="linux-appimage-notice"
+              hidden
+              data-i18n="settings.about.linuxAppImageNotice"
+              class="text-xs text-fg-3 leading-relaxed">
+              Auto-updates on Linux are only delivered to the AppImage build. For deb / rpm installs, grab new versions from the GitHub releases page above.
+            </p>
+          </div>
+        </div>
+
+        <details
+          id="changelog-section"
+          data-settings-item
+          class="changelog-outer settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden pb-5 sm:pb-6">
+            <span class="icon-mark">
+              <IconSparkles aria-hidden="true" stroke={2} />
+            </span>
+            <span class="flex items-center gap-2 min-w-0">
+              <h3 data-i18n="settings.about.whatsNew" class="text-base font-semibold">What's new</h3>
+              <span
+                id="changelog-status"
+                data-i18n="settings.about.whatsNewLoading"
+                class="text-xs text-fg-3 empty:hidden">Loading…</span>
+            </span>
+            <span class="ms-auto shrink-0">
+              <IconChevronDown
+                aria-hidden="true"
+                stroke={1.75}
+                class="size-4 text-fg-3 shrink-0 changelog-chevron transition-transform duration-200" />
+            </span>
+          </summary>
+          <div id="changelog-body" class="flex flex-col gap-2 px-5 sm:px-6 pb-5 sm:pb-6 pt-1 border-t border-line/60 empty:hidden"></div>
+        </details>
+
+        <details
+          id="licenses-section"
+          data-settings-item
+          class="changelog-outer settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden pb-5 sm:pb-6">
+            <span class="icon-mark">
+              <IconLicense aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.licenses.title" class="text-base font-semibold">Licenses and attribution</h3>
+            <span class="ms-auto shrink-0">
+              <IconChevronDown
+                aria-hidden="true"
+                stroke={1.75}
+                class="size-4 text-fg-3 shrink-0 changelog-chevron transition-transform duration-200" />
+            </span>
+          </summary>
+          <div class="flex flex-col gap-5 px-5 sm:px-6 pb-5 sm:pb-6 pt-1 border-t border-line/60">
+
+            <!-- FFmpeg -->
+            <div class="flex flex-col gap-2">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">FFmpeg</span>
+                <span class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">LGPL 2.1+</span>
+              </div>
+              <p data-i18n="settings.licenses.ffmpegNotice" class="text-xs text-fg-3">
+                The Windows and Linux desktop builds bundle a trimmed FFmpeg build (LGPL v2.1 or later), used only to convert live TV audio the app can't otherwise play.
+              </p>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <a
+                  href="https://ffmpeg.org"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  class="btn justify-start sm:justify-center">
+                  <IconExternalLink aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.licenses.ffmpegSite">FFmpeg project</span>
+                </a>
+                <a
+                  href="https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  class="btn justify-start sm:justify-center">
+                  <IconExternalLink aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.licenses.lgplText">LGPL v2.1 license text</span>
+                </a>
+                <a
+                  href="https://github.com/infinitel8p/Extreme-InfiniTV/releases/tag/ffmpeg-sidecar-v2"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  class="btn justify-start sm:justify-center">
+                  <IconBrandGithub aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.licenses.sourceRecipe">Source & build recipe</span>
+                </a>
+              </div>
+            </div>
+
+            <!-- TMDB -->
+            <div class="flex flex-col gap-1">
+              <span class="text-sm font-medium text-fg">TMDB</span>
+              <p class="text-xs text-fg-3">
+                This product uses the TMDB API but is not endorsed or certified by TMDB.
+                <a
+                  href="https://www.themoviedb.org/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  class="text-accent underline ms-1">themoviedb.org</a>
+              </p>
+            </div>
+
+            <!-- Playback engines -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">hls.js · mpegts.js · Shaka Player · Video.js · ArtPlayer</span>
+                <span class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">APACHE-2.0 · MIT</span>
+              </div>
+              <p class="text-xs text-fg-3">
+                <span data-i18n="settings.licenses.mpegtsPatch">mpegts.js ships with a small audio-track fallback patch.</span>
+                <a
+                  href="https://github.com/infinitel8p/Extreme-InfiniTV/blob/main/patches/mpegts.js.patch"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  data-i18n="settings.licenses.patchFile"
+                  class="text-accent underline ms-1">View patch</a>
+              </p>
+            </div>
+
+            <!-- Fonts -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">Geist Variable · Instrument Serif</span>
+                <a
+                  href="https://scripts.sil.org/OFL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-external
+                  data-i18n="settings.licenses.oflText"
+                  class="text-2xs uppercase tracking-wide text-accent underline shrink-0 ms-3">SIL OFL</a>
+              </div>
+              <p data-i18n="settings.licenses.fontsNotice" class="text-xs text-fg-3">Self-hosted typefaces.</p>
+            </div>
+
+            <!-- Framework -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">Tauri · Tabler Icons</span>
+                <span class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">MIT / APACHE-2.0</span>
+              </div>
+              <p data-i18n="settings.licenses.uiNotice" class="text-xs text-fg-3">App framework and icon set.</p>
+            </div>
+
+            <!-- Metadata attribution: wording is required by each provider's terms. -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">TheTVDB</span>
+                <span data-i18n="settings.licenses.metadataTag" class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">Metadata</span>
+              </div>
+              <p class="text-xs text-fg-3">
+                Metadata provided by <a href="https://www.thetvdb.com/" data-external class="underline hover:text-fg">TheTVDB</a>.
+                Please consider <a href="https://www.thetvdb.com/subscribe" data-external class="underline hover:text-fg">adding missing information or subscribing</a>.
+              </p>
+            </div>
+
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">TMDB</span>
+                <span data-i18n="settings.licenses.metadataTag" class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">Metadata</span>
+              </div>
+              <p class="text-xs text-fg-3">
+                This application uses <a href="https://www.themoviedb.org/" data-external class="underline hover:text-fg">TMDB</a>
+                and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.
+              </p>
+            </div>
+
+          </div>
+        </details>
+    </div>
+  </section>
+</SettingsShell>

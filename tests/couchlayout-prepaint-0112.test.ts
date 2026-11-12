@@ -31,8 +31,14 @@ const couchLayout = readFileSync(
   join(repo, "src/layouts/CouchLayout.astro"),
   "utf8",
 );
+// 0.11.4 W1: Settings is split — the diagnostics line lives on the
+// App & Updates page, the fill code in the shared settings-page.js.
 const settings = readFileSync(
-  join(repo, "src/pages/settings.astro"),
+  join(repo, "src/pages/settings/app-updates.astro"),
+  "utf8",
+);
+const settingsScript = readFileSync(
+  join(repo, "src/scripts/settings/settings-page.js"),
   "utf8",
 );
 
@@ -64,12 +70,12 @@ describe("Settings display diagnostics (0.11.2 W2)", () => {
   });
 
   it("fills it with the live computed theme values", () => {
-    expect(settings).toContain("fillDisplayDiagnostics()");
-    expect(settings).toContain('getPropertyValue("--color-bg")');
-    expect(settings).toContain("prefers-color-scheme: dark");
-    expect(settings).toContain("Chrome\\/");
+    expect(settingsScript).toContain("fillDisplayDiagnostics()");
+    expect(settingsScript).toContain('getPropertyValue("--color-bg")');
+    expect(settingsScript).toContain("prefers-color-scheme: dark");
+    expect(settingsScript).toContain("Chrome\\/");
     // Only linked stylesheets count: the page also carries inline
     // <style> blocks, which must not inflate the load count.
-    expect(settings).toContain("filter((s) => !!s.href)");
+    expect(settingsScript).toContain("filter((s) => !!s.href)");
   });
 });

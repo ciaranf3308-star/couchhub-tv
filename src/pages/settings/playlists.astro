@@ -1,0 +1,85 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconPlus,
+  IconRefresh,
+  IconWorld,
+} from "@tabler/icons-svelte"
+---
+<SettingsShell
+  title="Playlists"
+  titleKey="settings.group.playlists"
+  sub="Add, refresh and switch playlists"
+  subKey=""
+  current="playlists">
+    <section id="settings-playlists" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6 flex flex-col gap-4">
+        <div
+          id="settings-playlists-list"
+          class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden">
+          <div data-i18n="settings.playlists.empty" class="px-4 py-4 text-xs text-fg-3">No playlists yet.</div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <a href="/login" class="btn justify-start sm:justify-center">
+            <IconPlus aria-hidden="true" class="btn-icon" />
+            <span data-i18n="playlist.add">Add playlist</span>
+          </a>
+          <button
+            id="settings-refresh-active"
+            type="button"
+            class="btn justify-start sm:justify-center hidden">
+            <IconRefresh aria-hidden="true" class="btn-icon" />
+            <span data-i18n="playlist.refreshActive">Refresh active</span>
+          </button>
+          <button
+            id="settings-add-from-website"
+            type="button"
+            class="btn justify-start sm:justify-center hidden">
+            <IconWorld aria-hidden="true" class="btn-icon" />
+            <span data-i18n="settings.playlists.addFromWebsite">Add from website</span>
+          </button>
+          <button
+            id="settings-new-custom-playlist"
+            type="button"
+            class="btn justify-start sm:justify-center">
+            <IconPlus aria-hidden="true" class="btn-icon" />
+            <span data-i18n="editor.newCustomPlaylistBtn">New custom playlist</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- New custom playlist dialog -->
+    <dialog
+      id="settings-new-custom-playlist-dialog"
+      aria-labelledby="settings-new-custom-playlist-title"
+      class="fixed inset-0 m-auto rounded-2xl border border-line bg-surface text-fg p-0
+             w-[min(24rem,calc(100vw-2rem))] backdrop:bg-black/60">
+      <form method="dialog" class="flex flex-col gap-4 p-5">
+        <h2 id="settings-new-custom-playlist-title" data-i18n="editor.newPlaylistDialogTitle" class="text-base font-semibold">
+          New custom playlist
+        </h2>
+        <label class="flex flex-col gap-1.5">
+          <span data-i18n="editor.newPlaylistNameLabel" class="text-xs font-semibold uppercase tracking-wider text-fg-3">
+            Playlist name
+          </span>
+          <input
+            id="settings-new-custom-playlist-name"
+            type="text"
+            class="field-input"
+            data-i18n-attr="placeholder:editor.newPlaylistNamePlaceholder"
+            placeholder="My playlist"
+          />
+        </label>
+        <div class="flex gap-2 justify-end">
+          <button type="button" data-role="cancel" class="btn">
+            <span data-i18n="common.cancel">Cancel</span>
+          </button>
+          <button type="submit" data-role="create" class="btn-primary">
+            <span data-i18n="editor.newPlaylistCreate">Create</span>
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+</SettingsShell>

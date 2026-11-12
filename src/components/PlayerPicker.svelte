@@ -469,22 +469,20 @@
         </div>
       </label>
 
-      <label class="flex items-start gap-2 text-xs text-fg-2 cursor-pointer" class:opacity-50={!pathMpv}>
-        <input
-          type="checkbox"
-          checked={reuseMpv}
-          disabled={!pathMpv}
-          onchange={(event) => onReuseChange("mpv", event.target.checked)}
-          class="mt-0.5"
-        />
-        <span class="flex flex-col gap-0.5">
+      <!-- 0.11.4 W1 (f): booleans are On/Off pills everywhere — no checkboxes. -->
+      <div class="flex items-start justify-between gap-3" class:opacity-50={!pathMpv}>
+        <span class="flex flex-col gap-0.5 text-xs text-fg-2">
           <span>{label("reuse", "Reuse the same window")}</span>
           <span class="text-fg-3">
             {label("reuseHelper",
               "Open new streams in the same MPV window.")}
           </span>
         </span>
-      </label>
+        <span class="settings-seg shrink-0" role="radiogroup" aria-label={label("reuse", "Reuse the same window")}>
+          <button type="button" class="btn" aria-pressed={reuseMpv} disabled={!pathMpv} onclick={() => onReuseChange("mpv", true)}>{label("on", "On")}</button>
+          <button type="button" class="btn" aria-pressed={!reuseMpv} disabled={!pathMpv} onclick={() => onReuseChange("mpv", false)}>{label("off", "Off")}</button>
+        </span>
+      </div>
 
       <details class="player-config__advanced">
         <summary class="cursor-pointer text-xs font-medium text-fg-3">{advancedLabel}</summary>
@@ -526,22 +524,20 @@
         </div>
       </label>
 
-      <label class="flex items-start gap-2 text-xs text-fg-2 cursor-pointer" class:opacity-50={!pathVlc}>
-        <input
-          type="checkbox"
-          checked={reuseVlc}
-          disabled={!pathVlc}
-          onchange={(event) => onReuseChange("vlc", event.target.checked)}
-          class="mt-0.5"
-        />
-        <span class="flex flex-col gap-0.5">
+      <!-- 0.11.4 W1 (f): booleans are On/Off pills everywhere — no checkboxes. -->
+      <div class="flex items-start justify-between gap-3" class:opacity-50={!pathVlc}>
+        <span class="flex flex-col gap-0.5 text-xs text-fg-2">
           <span>{label("reuse", "Reuse the same window")}</span>
           <span class="text-fg-3">
             {label("reuseHelperVlc",
               "Open new streams in the same VLC window. The first stream's settings apply for the session.")}
           </span>
         </span>
-      </label>
+        <span class="settings-seg shrink-0" role="radiogroup" aria-label={label("reuse", "Reuse the same window")}>
+          <button type="button" class="btn" aria-pressed={reuseVlc} disabled={!pathVlc} onclick={() => onReuseChange("vlc", true)}>{label("on", "On")}</button>
+          <button type="button" class="btn" aria-pressed={!reuseVlc} disabled={!pathVlc} onclick={() => onReuseChange("vlc", false)}>{label("off", "Off")}</button>
+        </span>
+      </div>
 
       <details class="player-config__advanced">
         <summary class="cursor-pointer text-xs font-medium text-fg-3">{advancedLabel}</summary>

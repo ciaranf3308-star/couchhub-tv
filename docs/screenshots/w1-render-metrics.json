@@ -1,0 +1,376 @@
+{
+  "measure:home": {
+    "url": "/settings/",
+    "docScrollH": 1844,
+    "bodyScrollH": 1844,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 230,
+    "subH": 131,
+    "stackH": 1299,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 0,
+    "h1": "Settings",
+    "navCurrent": "All settings"
+  },
+  "measure-scrolled:home": {
+    "scrollY": 764,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "search:home": {
+    "scrollYBefore": 764,
+    "scrollYAfter": 0,
+    "visibleRows": 1,
+    "emptyHidden": true,
+    "xpageVisible": false,
+    "xpageHits": 0
+  },
+  "measure:playlists": {
+    "url": "/settings/playlists/",
+    "docScrollH": 1080,
+    "bodyScrollH": 1080,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 172,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 0,
+    "h1": "Playlists",
+    "navCurrent": "Playlists"
+  },
+  "measure-scrolled:playlists": {
+    "scrollY": 0,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subStuck": false,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 0,
+    "pillCoversContent": false
+  },
+  "anchor:playlists": {
+    "anchor": "#settings-playlists",
+    "targetTop": 449,
+    "headerBottom": 425,
+    "clipped": false
+  },
+  "measure:profile": {
+    "url": "/settings/profile/",
+    "docScrollH": 1080,
+    "bodyScrollH": 1080,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 152,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 0,
+    "h1": "Profile",
+    "navCurrent": "Profile"
+  },
+  "measure-scrolled:profile": {
+    "scrollY": 0,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subStuck": false,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 0,
+    "pillCoversContent": false
+  },
+  "measure:display": {
+    "url": "/settings/display/",
+    "docScrollH": 1899,
+    "bodyScrollH": 1899,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 1290,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 7,
+    "h1": "Display",
+    "navCurrent": "Display"
+  },
+  "measure-scrolled:display": {
+    "scrollY": 819,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "measure:playback": {
+    "url": "/settings/playback/",
+    "docScrollH": 1451,
+    "bodyScrollH": 1451,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 842,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 9,
+    "h1": "Playback",
+    "navCurrent": "Playback"
+  },
+  "measure-scrolled:playback": {
+    "scrollY": 371,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "anchor:playback": {
+    "anchor": "#playback-section",
+    "targetTop": 449,
+    "headerBottom": 425,
+    "clipped": false
+  },
+  "search:playback": {
+    "scrollYBefore": 0,
+    "scrollYAfter": 0,
+    "visibleRows": 7,
+    "emptyHidden": true,
+    "xpageVisible": false,
+    "xpageHits": 0
+  },
+  "measure:live-tv": {
+    "url": "/settings/live-tv/",
+    "docScrollH": 1393,
+    "bodyScrollH": 1393,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 784,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 6,
+    "h1": "Live TV",
+    "navCurrent": "Live TV"
+  },
+  "measure-scrolled:live-tv": {
+    "scrollY": 313,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "anchor:live-tv": {
+    "anchor": "#card-categories",
+    "targetTop": 502,
+    "headerBottom": 232,
+    "clipped": false
+  },
+  "measure:followed": {
+    "url": "/settings/followed/",
+    "docScrollH": 1080,
+    "bodyScrollH": 1080,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 443,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 3,
+    "h1": "Followed Series",
+    "navCurrent": "Followed Series"
+  },
+  "measure-scrolled:followed": {
+    "scrollY": 0,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subStuck": false,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 858,
+    "pillCoversContent": false
+  },
+  "anchor:followed": {
+    "anchor": "#card-followed",
+    "targetTop": 449,
+    "headerBottom": 425,
+    "clipped": false
+  },
+  "measure:discover-ai": {
+    "url": "/settings/discover-ai/",
+    "docScrollH": 2223,
+    "bodyScrollH": 2223,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 1614,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 15,
+    "h1": "Discover & AI",
+    "navCurrent": "Discover & AI"
+  },
+  "measure-scrolled:discover-ai": {
+    "scrollY": 1143,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "anchor:discover-ai": {
+    "anchor": "#card-ai-discovery",
+    "targetTop": 480,
+    "headerBottom": 232,
+    "clipped": false
+  },
+  "measure:casting": {
+    "url": "/settings/casting/",
+    "docScrollH": 1080,
+    "bodyScrollH": 1080,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 0,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 18,
+    "h1": "Casting",
+    "navCurrent": "Casting"
+  },
+  "measure-scrolled:casting": {
+    "scrollY": 0,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subStuck": false,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 0,
+    "pillCoversContent": false
+  },
+  "measure:data-backup": {
+    "url": "/settings/data-backup/",
+    "docScrollH": 1508,
+    "bodyScrollH": 1508,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 900,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 11,
+    "h1": "Data & Backup",
+    "navCurrent": "Data & Backup"
+  },
+  "measure-scrolled:data-backup": {
+    "scrollY": 428,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "anchor:data-backup": {
+    "anchor": "#card-backup",
+    "targetTop": 480,
+    "headerBottom": 232,
+    "clipped": false
+  },
+  "measure:app-updates": {
+    "url": "/settings/app-updates/",
+    "docScrollH": 1274,
+    "bodyScrollH": 1274,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 665,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 3,
+    "h1": "App & Updates",
+    "navCurrent": "App & Updates"
+  },
+  "measure-scrolled:app-updates": {
+    "scrollY": 194,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "anchor:app-updates": {
+    "anchor": "#update-section",
+    "targetTop": 449,
+    "headerBottom": 425,
+    "clipped": false
+  },
+  "measure:help-diagnostics": {
+    "url": "/settings/help-diagnostics/",
+    "docScrollH": 1791,
+    "bodyScrollH": 1791,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 1182,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 9,
+    "h1": "Help & Diagnostics",
+    "navCurrent": "Help & Diagnostics"
+  },
+  "measure-scrolled:help-diagnostics": {
+    "scrollY": 711,
+    "topnavTop": 0,
+    "subTop": 101,
+    "subStuck": true,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 920,
+    "pillCoversContent": false
+  },
+  "measure:danger": {
+    "url": "/settings/danger/",
+    "docScrollH": 1080,
+    "bodyScrollH": 1080,
+    "topnavH": 101,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subH": 131,
+    "stackH": 190,
+    "pillVisible": true,
+    "pillBottom": 1068,
+    "items": 0,
+    "h1": "Danger zone",
+    "navCurrent": "Danger zone"
+  },
+  "measure-scrolled:danger": {
+    "scrollY": 0,
+    "topnavTop": 0,
+    "subTop": 294,
+    "subStuck": false,
+    "pillTop": 1035,
+    "lowestContentBottomInView": 0,
+    "pillCoversContent": false
+  },
+  "lockup": {
+    "text": "NylahBox Studios",
+    "hasImg": true
+  }
+}

@@ -383,14 +383,14 @@
     </div>
     <div class="rs-discover__hero-side">
       <a
-        href="/settings#card-ai-discovery"
+        href="/settings/discover-ai#card-ai-discovery"
         data-nylah-item
         class="rs-discover-mode rs-discover-mode--{aiMode ?? 'unknown'}"
         title={aiDetail}>
         <span class="rs-discover-mode__dot" aria-hidden="true"></span>
         <span>{modeLabel}</span>
       </a>
-      <a href="/settings#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
+      <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
         Discovery preferences
       </a>
       {#if aiDetail}
@@ -416,7 +416,7 @@
       </div>
       <div class="rs-discover-onboard__actions">
         <a
-          href="/settings#card-ai-discovery"
+          href="/settings/discover-ai#card-ai-discovery"
           data-nylah-item
           class="rs-discover-onboard__primary">Set Up AI</a>
         <button type="button" onclick={dismissOnboarding} data-nylah-item class="rs-discover-onboard__secondary">

@@ -1,0 +1,252 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconAlertTriangle,
+  IconCast,
+  IconChevronDown,
+  IconDeviceTv,
+  IconExternalLink,
+  IconEye,
+  IconEyeOff,
+  IconPlus,
+  IconRefresh,
+} from "@tabler/icons-svelte"
+---
+<SettingsShell
+  title="Casting"
+  titleKey="settings.casting.title"
+  sub="Cast to this TV and play on other TVs"
+  subKey=""
+  current="casting">
+  <section id="settings-casting" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div id="card-casting" data-settings-item class="settings-surface icon-mark-host hidden scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconCast aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.casting.title" class="text-base font-semibold">Casting</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- TV receiver: desktop-only, unhidden by receiver-card.ts -->
+            <details id="card-tv-receiver" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">
+              <summary class="settings-row cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                <span class="settings-row__text">
+                  <h3 class="text-sm font-medium leading-snug">
+                    <IconDeviceTv aria-hidden="true" stroke={2} class="size-4 text-fg-3 inline-block align-[-2px] me-1.5" />
+                    <span data-i18n="settings.receiver.title">TV receiver</span>
+                    <span id="receiver-live-badge" class="hidden ms-2 items-center gap-1.5 align-middle rounded-full bg-accent-soft px-2 py-0.5 text-2xs font-semibold text-accent">
+                      <span class="size-1.5 rounded-full bg-ok"></span>
+                      <span data-i18n="settings.receiver.on">On</span>
+                    </span>
+                  </h3>
+                  <span id="receiver-summary-helper" data-i18n="settings.receiver.helperLong" class="text-xs text-fg-3 line-clamp-1 block">
+                    Let other devices running NylahBox Studios send playback to this one over your local network.
+                  </span>
+                  <span id="receiver-summary-status" class="hidden text-xs text-fg-3 line-clamp-1 block"></span>
+                </span>
+                <span class="settings-row__control">
+                  <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
+              <div class="px-5 sm:px-6 pb-4 pt-1 flex flex-col gap-3">
+
+                <div data-settings-item class="settings-row">
+                  <div class="settings-row__text">
+                    <h3 data-i18n="settings.receiver.label" class="text-sm font-medium leading-snug">Allow casting to this device</h3>
+                  </div>
+                  <div class="settings-row__control">
+                    <div
+                      id="receiver-mode-toggle"
+                      class="settings-seg"
+                      role="radiogroup"
+                      aria-label="Allow casting to this device"
+                      data-i18n-attr="aria-label:settings.receiver.label">
+                      <button type="button" role="radio" data-receiver="on"  aria-checked="false" data-i18n="settings.receiver.on"  class="receiver-mode-btn btn">On</button>
+                      <button type="button" role="radio" data-receiver="off" aria-checked="false" data-i18n="settings.receiver.off" class="receiver-mode-btn btn">Off</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div data-settings-item class="settings-row">
+                  <div class="settings-row__text">
+                    <h3 data-i18n="settings.receiver.deviceName" class="text-sm font-medium leading-snug">Device name</h3>
+                    <p data-i18n="settings.receiver.deviceNameHelper" class="text-xs text-fg-3">Shown on the pairing screen and in other devices' cast menus.</p>
+                  </div>
+                  <div class="settings-row__control w-full @2xl:w-72">
+                    <input
+                      id="receiver-device-name-input"
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      placeholder="This device's name"
+                      data-i18n-attr="placeholder:settings.receiver.deviceNamePlaceholder"
+                      class="field-input"
+                    />
+                  </div>
+                </div>
+
+                <div id="receiver-status-block" class="hidden flex-col gap-3">
+
+                  <div data-settings-item class="settings-row settings-row--stack gap-1.5">
+                    <p id="receiver-status-line" class="inline-flex items-center gap-2 text-sm text-fg">
+                      <span class="size-2 rounded-full bg-ok"></span>
+                      <span id="receiver-status-line-text"></span>
+                    </p>
+                    <p id="receiver-discoverable-line" class="hidden text-xs text-fg-3"></p>
+                  </div>
+
+                  <div id="receiver-firewall-warning" data-settings-item class="hidden flex-col gap-2 rounded-xl border border-warn/35 bg-warn/10 px-4 py-3">
+                    <p class="inline-flex items-center gap-2 text-sm font-medium text-warn">
+                      <IconAlertTriangle aria-hidden="true" stroke={2} class="size-4 flex-none" />
+                      <span id="receiver-firewall-warning-title" data-i18n="settings.receiver.firewall.title">Windows Firewall may be blocking this</span>
+                    </p>
+                    <p id="receiver-firewall-warning-body" data-i18n="settings.receiver.firewall.body" class="text-xs text-warn/90">
+                      Other devices on your network may not be able to reach this receiver. Add a firewall rule to allow it.
+                    </p>
+                    <button id="receiver-firewall-allow-btn" type="button" data-settings-item class="btn self-start">
+                      <span data-i18n="settings.receiver.firewall.allow">Allow through firewall</span>
+                    </button>
+                  </div>
+
+                  <div data-settings-item class="settings-row">
+                    <div class="settings-row__text">
+                      <h3 data-i18n="settings.receiver.addressLabel" class="text-sm font-medium leading-snug">Address</h3>
+                    </div>
+                    <div class="settings-row__control">
+                      <div id="receiver-addresses-list" class="flex flex-wrap items-center justify-end gap-1.5"></div>
+                    </div>
+                  </div>
+
+                  <div data-settings-item class="settings-row">
+                    <div class="settings-row__text">
+                      <h3 data-i18n="settings.receiver.code" class="text-sm font-medium leading-snug">Pair code</h3>
+                    </div>
+                    <div class="settings-row__control flex-wrap justify-end">
+                      <div id="receiver-pair-code-display" class="text-3xl tracking-[0.3em] tabular-nums text-fg-3 font-semibold select-none"></div>
+                      <button
+                        id="receiver-code-reveal"
+                        type="button"
+                        class="btn flex-none w-11 justify-center p-0"
+                        aria-label="Show pair code"
+                        data-i18n-attr="aria-label:settings.receiver.showCode">
+                        <IconEye aria-hidden="true" class="btn-icon" data-receiver-reveal-icon="show" />
+                        <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-receiver-reveal-icon="hide" />
+                      </button>
+                      <button id="receiver-regenerate-btn" type="button" data-settings-item class="btn">
+                        <IconRefresh aria-hidden="true" class="btn-icon" />
+                        <span data-i18n="settings.receiver.regenerate">Regenerate code</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div data-settings-item class="settings-row settings-row--stack">
+                    <div class="settings-row__text">
+                      <h3 data-i18n="settings.receiver.pairedDevices" class="text-sm font-medium leading-snug">Paired devices</h3>
+                    </div>
+                    <div class="settings-row__control w-full flex-col items-stretch gap-1">
+                      <div id="receiver-paired-list" class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden"></div>
+                      <p id="receiver-no-devices" data-i18n="settings.receiver.noDevices" class="px-4 py-4 text-xs text-fg-3 hidden">No devices have paired yet. Pair one by choosing Play on TV on your phone or computer.</p>
+                    </div>
+                  </div>
+
+                  <button id="receiver-open-screen" type="button" data-settings-item class="btn-primary self-end">
+                    <IconExternalLink aria-hidden="true" class="btn-icon" />
+                    <span data-i18n="settings.receiver.openScreen">Open receiver screen</span>
+                  </button>
+
+                </div>
+
+                <div data-settings-item class="settings-row mt-1 border-t border-line-soft pt-4">
+                  <div class="settings-row__text">
+                    <h3 data-i18n="settings.receiver.boot.title" class="text-sm font-medium leading-snug">Start on receiver screen</h3>
+                    <p data-i18n="settings.receiver.boot.helper" class="text-xs text-fg-3">
+                      Start the app on the pairing screen, like a dedicated receiver. Exit it anytime; it returns on the next launch.
+                    </p>
+                  </div>
+                  <div class="settings-row__control">
+                    <div
+                      id="receiver-boot-toggle"
+                      class="settings-seg"
+                      role="radiogroup"
+                      aria-label="Start on receiver screen"
+                      data-i18n-attr="aria-label:settings.receiver.boot.label">
+                      <button type="button" role="radio" data-receiver-boot="on"  aria-checked="false" data-i18n="settings.receiver.boot.on"  class="receiver-boot-btn btn">On</button>
+                      <button type="button" role="radio" data-receiver-boot="off" aria-checked="false" data-i18n="settings.receiver.boot.off" class="receiver-boot-btn btn">Off</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div id="settings-receiver-screensaver-hint" data-settings-item class="settings-row hidden">
+                  <div class="settings-row__text">
+                    <h3 data-i18n="settings.receiver.screensaver.title" class="text-sm font-medium leading-snug">Screensaver</h3>
+                    <p data-i18n="settings.receiver.screensaver.helper" class="text-xs text-fg-3">
+                      Select NylahBox Studios as the system screensaver to see artwork from your library while idle.
+                    </p>
+                  </div>
+                  <div class="settings-row__control">
+                    <button id="settings-receiver-screensaver-open" type="button" data-settings-item class="btn">
+                      <span data-i18n="settings.receiver.screensaver.open">Open screensaver settings</span>
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </details>
+
+            <!-- Play on TV: desktop + Android, unhidden by play-on-tv-card.ts -->
+            <details id="card-play-on-tv" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">
+              <summary class="settings-row cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                <span class="settings-row__text">
+                  <h3 class="text-sm font-medium leading-snug">
+                    <IconCast aria-hidden="true" stroke={2} class="size-4 text-fg-3 inline-block align-[-2px] me-1.5" />
+                    <span data-i18n="settings.playOnTv.title">Play on TV</span>
+                    <span id="play-on-tv-live-badge" class="hidden ms-2 items-center gap-1.5 align-middle rounded-full bg-accent-soft px-2 py-0.5 text-2xs font-semibold text-accent">
+                      <span class="size-1.5 rounded-full bg-ok"></span>
+                      <span data-i18n="settings.playOnTv.badgeCasting">Casting</span>
+                    </span>
+                  </h3>
+                  <span id="play-on-tv-summary-helper" data-i18n="settings.playOnTv.helper" class="text-xs text-fg-3 line-clamp-1 block">
+                    Pair TVs on your network. While casting, play actions go to the TV.
+                  </span>
+                  <span id="play-on-tv-summary-status" class="hidden text-xs text-fg-3 line-clamp-1 block"></span>
+                </span>
+                <span class="settings-row__control">
+                  <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
+              <div class="px-5 sm:px-6 pb-4 pt-1 flex flex-col gap-3">
+
+                <div id="play-on-tv-session" class="hidden items-center justify-between gap-3 rounded-xl border border-accent/40 bg-accent-soft px-4 py-3">
+                  <div class="flex flex-col min-w-0">
+                    <span id="play-on-tv-session-line" class="text-sm font-medium truncate"></span>
+                    <span id="play-on-tv-session-title" class="text-xs text-fg-3 truncate"></span>
+                  </div>
+                  <button id="play-on-tv-stop" type="button" class="btn flex-none" data-i18n="settings.playOnTv.stopCasting">Stop casting</button>
+                </div>
+
+                <div data-settings-item class="settings-row settings-row--stack">
+                  <div class="settings-row__text">
+                    <h3 data-i18n="settings.playOnTv.devices" class="text-sm font-medium leading-snug">Paired TVs</h3>
+                  </div>
+                  <div class="settings-row__control w-full flex-col items-stretch gap-1">
+                    <div id="play-on-tv-list" class="flex flex-col divide-y divide-line/60 rounded-xl border border-line bg-bg overflow-hidden"></div>
+                    <p id="play-on-tv-empty" data-i18n="settings.playOnTv.noDevices" class="px-4 py-4 text-xs text-fg-3 hidden">No TVs paired yet. On the TV, open Settings, TV receiver and allow casting, then add it here.</p>
+                  </div>
+                </div>
+
+                <button id="play-on-tv-add" type="button" data-settings-item class="btn-primary self-end">
+                  <IconPlus aria-hidden="true" class="btn-icon" />
+                  <span data-i18n="settings.playOnTv.addDevice">Add a TV</span>
+                </button>
+
+              </div>
+            </details>
+
+          </div>
+        </div>
+
+    </div>
+  </section>
+</SettingsShell>

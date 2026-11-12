@@ -1,21 +1,28 @@
-// Settings inline filter. Indexes section title + each card's text content
-// at mount, re-indexes when the locale changes, and on input hides cards
-// whose index doesn't contain every whitespace-split query token (AND
-// match). Sections collapse when all their visible cards miss; subnav
-// links resolve their miss state from whatever DOM node their href
-// targets, since some point at surfaces that aren't indexed cards
-// themselves (only the rows inside them are).
+// Settings search, multi-page edition (0.11.4 W1).
 //
-// Cards already platform-hidden (`.hidden` set by some other init code,
-// e.g. desktop-only Discord card on web) are skipped from search results
-// regardless of query - exposing them via search would be misleading
-// because the user can't actually use them.
+// Settings is split into one short page per section, so search has two
+// modes, both filtering IN PLACE — nothing ever yanks the view to the top:
+//
+//  * Home (/settings): the input filters the section list. Each row
+//    carries data-search-text (title + description + keywords from
+//    settings-index), so a query matches sections by the controls inside
+//    them, not just their names.
+//  * Section page (/settings/*): the input filters that page's own
+//    [data-settings-item] rows (same AND-token index as before), AND
+//    shows cross-page hits from settings-index as links under the box,
+//    so the search indexes everything including the section homes.
+//
+// The old scroll-spy/nav-link miss marking is gone with the spy: the
+// section nav is page-based now and always stays usable while searching.
 
 import { LOCALE_EVENT } from "@/scripts/lib/i18n.js"
+import { searchSettingsIndex } from "@/scripts/settings/settings-index.ts"
 
 const INPUT_ID = "settings-search-input"
 const CLEAR_ID = "settings-search-clear"
 const EMPTY_ID = "settings-search-empty"
+const XPAGE_ID = "settings-search-xpage"
+const HOME_LIST_ID = "settings-home-list"
 
 interface CardEntry {
   card: HTMLElement
@@ -23,16 +30,10 @@ interface CardEntry {
 }
 interface SectionEntry {
   section: HTMLElement
-  navLink: HTMLAnchorElement | null
   cards: CardEntry[]
-}
-interface SubnavLinkEntry {
-  link: HTMLAnchorElement
-  targetId: string
 }
 
 let sections: SectionEntry[] = []
-let subnavLinks: SubnavLinkEntry[] = []
 const indexByCardKey = new Map<string, string>()
 
 function findCardsInSection(section: HTMLElement): HTMLElement[] {
@@ -53,51 +54,12 @@ function buildStructure(stack: HTMLElement): void {
     "section.settings-group[id]"
   )
   for (const section of sectionEls) {
-    const navLink = document.querySelector<HTMLAnchorElement>(
-      `.settings-nav-link[href="#${section.id}"]`
-    )
     const cardEls = findCardsInSection(section)
     const cards: CardEntry[] = cardEls.map((card, index) => ({
       card,
       key: card.id || `${section.id}__card-${index}`,
     }))
-    sections.push({ section, navLink, cards })
-  }
-}
-
-// Subnav links may target a surface that isn't itself an indexed card (the
-// index units are the [data-settings-item] rows inside it), so their
-// miss state is resolved generically against the target's own subtree.
-function buildSubnavLinks(): void {
-  subnavLinks = Array.from(
-    document.querySelectorAll<HTMLAnchorElement>(".settings-subnav-link[href^='#']")
-  )
-    .map((link) => ({ link, targetId: (link.getAttribute("href") ?? "").slice(1) }))
-    .filter((entry) => entry.targetId)
-}
-
-function applySubnavLinkMiss(): void {
-  for (const { link, targetId } of subnavLinks) {
-    const target = document.getElementById(targetId)
-    if (!target || target.classList.contains("hidden")) {
-      if (target) link.setAttribute("data-search-miss", "")
-      else link.removeAttribute("data-search-miss")
-      continue
-    }
-    const selfMatch = target.dataset.search === "match"
-    const descendantMatch = !!target.querySelector('[data-search="match"]')
-    if (selfMatch || descendantMatch) {
-      link.removeAttribute("data-search-miss")
-      continue
-    }
-    const hasCarrier = target.dataset.search !== undefined || !!target.querySelector("[data-search]")
-    if (!hasCarrier) {
-      const ownerSection = target.closest<HTMLElement>("section.settings-group[id]")
-      if (ownerSection?.dataset.search === "miss") link.setAttribute("data-search-miss", "")
-      else link.removeAttribute("data-search-miss")
-      continue
-    }
-    link.setAttribute("data-search-miss", "")
+    sections.push({ section, cards })
   }
 }
 
@@ -132,10 +94,11 @@ function tokenize(query: string): string[] {
     .filter(Boolean)
 }
 
-function applyFilter(
+function applyPageFilter(
   query: string,
   stack: HTMLElement,
-  emptyEl: HTMLElement | null
+  emptyEl: HTMLElement | null,
+  xpageEl: HTMLElement | null
 ): void {
   const tokens = tokenize(query)
   const active = tokens.length > 0
@@ -146,13 +109,15 @@ function applyFilter(
   if (!active) {
     for (const sectionEntry of sections) {
       delete sectionEntry.section.dataset.search
-      sectionEntry.navLink?.removeAttribute("data-search-miss")
       for (const cardEntry of sectionEntry.cards) {
         delete cardEntry.card.dataset.search
       }
     }
-    for (const { link } of subnavLinks) link.removeAttribute("data-search-miss")
     if (emptyEl) emptyEl.hidden = true
+    if (xpageEl) {
+      xpageEl.hidden = true
+      xpageEl.replaceChildren()
+    }
     return
   }
 
@@ -183,29 +148,97 @@ function applyFilter(
     }
 
     sectionEntry.section.dataset.search = sectionHasMatch ? "match" : "miss"
-    if (sectionEntry.navLink) {
-      if (sectionHasMatch) sectionEntry.navLink.removeAttribute("data-search-miss")
-      else sectionEntry.navLink.setAttribute("data-search-miss", "")
+  }
+
+  // Cross-page hits: same query against every section + headline item,
+  // excluding this page (its own matches are already visible above).
+  // Rendered in place under the search box; each hit is a link to the
+  // section page (and card anchor when known).
+  let xpageCount = 0
+  if (xpageEl) {
+    xpageEl.replaceChildren()
+    const here = window.location.pathname.replace(/\/+$/, "") || "/"
+    const hits = searchSettingsIndex(query).filter(
+      (hit) => hit.href.split("#")[0] !== here
+    )
+    xpageCount = hits.length
+    if (hits.length > 0) {
+      const label = document.createElement("div")
+      label.className = "settings-xpage__label"
+      label.textContent = "Also in other sections"
+      xpageEl.appendChild(label)
+      for (const hit of hits) {
+        const a = document.createElement("a")
+        a.className = "settings-xpage__hit"
+        a.href = hit.href
+        const name = document.createElement("span")
+        name.textContent = hit.label
+        const where = document.createElement("span")
+        where.className = "settings-xpage__hit-section"
+        where.textContent = hit.sectionTitle
+        a.append(name, where)
+        xpageEl.appendChild(a)
+      }
+      const all = document.createElement("a")
+      all.className = "settings-xpage__hit"
+      all.href = `/settings?q=${encodeURIComponent(query)}`
+      const allName = document.createElement("span")
+      allName.textContent = "See all results in All settings"
+      all.appendChild(allName)
+      xpageEl.appendChild(all)
+      xpageEl.hidden = false
+    } else {
+      xpageEl.hidden = true
     }
   }
 
-  applySubnavLinkMiss()
-  if (emptyEl) emptyEl.hidden = visibleCount > 0
+  if (emptyEl) emptyEl.hidden = visibleCount > 0 || xpageCount > 0
+}
+
+function applyHomeFilter(
+  query: string,
+  list: HTMLElement,
+  emptyEl: HTMLElement | null
+): void {
+  const tokens = tokenize(query)
+  const active = tokens.length > 0
+  if (active) list.setAttribute("data-search-active", "true")
+  else list.removeAttribute("data-search-active")
+
+  const rows = list.querySelectorAll<HTMLElement>("[data-search-text]")
+  let visibleCount = 0
+  for (const row of rows) {
+    if (!active) {
+      delete row.dataset.search
+      visibleCount++
+      continue
+    }
+    const hay = (row.dataset.searchText ?? "").toLowerCase()
+    const matches = tokens.every((token) => hay.includes(token))
+    row.dataset.search = matches ? "match" : "miss"
+    if (matches) visibleCount++
+  }
+  if (emptyEl) emptyEl.hidden = !active || visibleCount > 0
 }
 
 function init(): void {
-  const stack = document.querySelector<HTMLElement>(".settings-stack")
-  if (!stack) return
   const input = document.getElementById(INPUT_ID) as HTMLInputElement | null
   const clearBtn = document.getElementById(CLEAR_ID) as HTMLButtonElement | null
   const emptyEl = document.getElementById(EMPTY_ID)
+  const xpageEl = document.getElementById(XPAGE_ID)
   if (!input) return
 
-  buildStructure(stack)
-  buildSubnavLinks()
-  buildIndex()
+  const homeList = document.getElementById(HOME_LIST_ID)
+  const stack = document.querySelector<HTMLElement>(".settings-stack")
+  if (stack && !homeList) {
+    buildStructure(stack)
+    buildIndex()
+  }
 
-  const apply = (): void => applyFilter(input.value, stack, emptyEl)
+  const apply = (): void => {
+    if (homeList) applyHomeFilter(input.value, homeList, emptyEl)
+    else if (stack) applyPageFilter(input.value, stack, emptyEl, xpageEl)
+  }
   const syncClearVisibility = (): void => {
     if (clearBtn) clearBtn.hidden = input.value.length === 0
   }
@@ -220,14 +253,16 @@ function init(): void {
       if (input.value) apply()
     })
   }
-  try {
-    const hydrationObserver = new MutationObserver(scheduleReindex)
-    hydrationObserver.observe(stack, { childList: true, subtree: true })
-    window.setTimeout(() => {
-      try { hydrationObserver.disconnect() } catch {}
-    }, 3000)
-  } catch {
-    window.setTimeout(buildIndex, 600)
+  if (stack && !homeList) {
+    try {
+      const hydrationObserver = new MutationObserver(scheduleReindex)
+      hydrationObserver.observe(stack, { childList: true, subtree: true })
+      window.setTimeout(() => {
+        try { hydrationObserver.disconnect() } catch {}
+      }, 3000)
+    } catch {
+      window.setTimeout(buildIndex, 600)
+    }
   }
 
   input.addEventListener("input", () => {
@@ -275,6 +310,15 @@ function init(): void {
     buildIndex()
     if (input.value) apply()
   })
+
+  // Deep-link a query (?q=) from a section page's "See all results" link.
+  try {
+    const q = new URLSearchParams(window.location.search).get("q")
+    if (q && !input.value) {
+      input.value = q
+      apply()
+    }
+  } catch {}
 
   syncClearVisibility()
 }

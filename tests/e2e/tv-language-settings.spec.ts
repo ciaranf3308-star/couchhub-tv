@@ -144,36 +144,34 @@ async function primeTvWithLiveEpg(page: Page): Promise<void> {
   await page.waitForSelector("#tv-nav [data-tv-nav-item]")
 }
 
+// 0.11.4 W1: the duplicate /tv/settings view is gone — these controls live
+// on the Couch Settings pages now (Playback for language, Live TV for EPG),
+// as native <select>s instead of the old row + choice-dialog UI.
 test.describe("TV settings: language grouping / audio language / EPG time zone", () => {
   test("language grouping toggle and preferred audio language rows exist and store values", async ({ page }) => {
     await primeTv(page)
-    await page.goto("/tv/settings")
-    await page.waitForSelector("#tv-settings-rows [data-focus-key]")
+    await page.goto("/settings/playback")
+    await page.waitForSelector("#lang-grouping-select")
 
-    const groupingRow = page.locator('[data-row-id="lang-grouping"]')
-    await expect(groupingRow).toBeVisible()
-    await expect(groupingRow).toHaveAttribute("aria-checked", "true")
+    const groupingSelect = page.locator("#lang-grouping-select")
+    await expect(groupingSelect).toBeVisible()
+    await expect(groupingSelect).toHaveValue("on")
 
-    await groupingRow.click()
-    await expect(groupingRow).toHaveAttribute("aria-checked", "false")
+    await groupingSelect.selectOption("off")
     expect(await page.evaluate(() => localStorage.getItem("xt_lang_grouping"))).toBe("0")
 
-    await groupingRow.click()
-    await expect(groupingRow).toHaveAttribute("aria-checked", "true")
+    await groupingSelect.selectOption("on")
     expect(await page.evaluate(() => localStorage.getItem("xt_lang_grouping"))).toBe("1")
 
-    const contentLangRow = page.locator('[data-row-id="content-language"]')
-    await expect(contentLangRow).toBeVisible()
-    await expect(contentLangRow).toContainText("Auto")
+    const contentLangSelect = page.locator("#content-lang-select")
+    await expect(contentLangSelect).toBeVisible()
+    // Options populate asynchronously once i18n settles.
+    await expect.poll(async () => await contentLangSelect.locator("option").count(), { timeout: 10_000 }).toBeGreaterThan(1)
+    await expect(contentLangSelect).toHaveValue("")
 
-    await contentLangRow.click()
-    const dialog = page.locator("#tv-settings-choice-dialog")
-    await expect(dialog).toBeVisible()
-    await dialog.getByRole("button", { name: /German \(DE\)/ }).click()
-    await expect(dialog).toBeHidden()
-
+    await contentLangSelect.selectOption("DE")
     expect(await page.evaluate(() => localStorage.getItem("xt_content_lang"))).toBe("DE")
-    await expect(contentLangRow).toContainText("German")
+    await expect(contentLangSelect.locator("option:checked")).toContainText("German")
   })
 
   test("picking +1 h changes the stored EPG offset and shifts the live now-playing time", async ({ page }) => {
@@ -193,14 +191,14 @@ test.describe("TV settings: language grouping / audio language / EPG time zone",
     await expect.poll(readHeroMeta, { timeout: 10_000 }).toContain("Now Playing")
     const before = await readHeroMeta()
 
-    await page.goto("/tv/settings")
-    await page.waitForSelector("#tv-settings-rows [data-focus-key]")
-    const offsetRow = page.locator('[data-row-id="epg-offset"]')
-    await offsetRow.click()
-    const dialog = page.locator("#tv-settings-choice-dialog")
-    await expect(dialog).toBeVisible()
-    await dialog.getByRole("button", { name: "UTC+01:00", exact: true }).click()
-    await expect(dialog).toBeHidden()
+    await page.goto("/settings/live-tv")
+    await page.waitForSelector("#epg-tz-select")
+    const offsetSelect = page.locator("#epg-tz-select")
+    // Options populate once the active playlist is known; the select stays
+    // disabled until the active playlist sync enables it.
+    await expect.poll(async () => await offsetSelect.locator("option").count(), { timeout: 10_000 }).toBeGreaterThan(1)
+    await expect(offsetSelect).toBeEnabled({ timeout: 10_000 })
+    await offsetSelect.selectOption("60")
 
     expect(await page.evaluate((playlistId) => localStorage.getItem(`xt_epg_offset:${playlistId}`), PLAYLIST_ID)).toBe(
       "60"

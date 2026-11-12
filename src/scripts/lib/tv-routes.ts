@@ -10,7 +10,6 @@ export const TV_ROUTE_TABLE: Readonly<Record<string, string>> = {
   "/series/detail": "/tv/series/detail",
   "/search": "/tv/search",
   "/downloads": "/tv/downloads",
-  "/settings": "/tv/settings",
   "/login": "/tv/login",
   "/favorites": "/tv",
   "/watchlist": "/tv",
@@ -27,7 +26,6 @@ export const CLASSIC_ROUTE_TABLE: Readonly<Record<string, string>> = {
   "/tv/series/detail": "/series/detail",
   "/tv/search": "/search",
   "/tv/downloads": "/downloads",
-  "/tv/settings": "/settings",
   "/tv/login": "/login",
 }
 
@@ -78,7 +76,6 @@ export const TV_NAV_HREFS = [
   "/tv/series",
   "/tv/search",
   "/tv/downloads",
-  "/tv/settings",
 ] as const
 
 export function tvNavActiveHref(pathname: string): string | null {

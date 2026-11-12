@@ -1,0 +1,86 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconAlertTriangle,
+  IconRestore,
+  IconTrash,
+} from "@tabler/icons-svelte"
+---
+<SettingsShell
+  title="Danger zone"
+  titleKey="settings.group.dangerZone"
+  sub="Reset everything"
+  subKey=""
+  current="danger">
+    <section id="settings-danger" class="settings-group settings-group--danger scroll-mt-8 lg:scroll-mt-20">
+      <article class="icon-mark-host rounded-2xl border border-bad/30 bg-bad/[0.03] p-5 sm:p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+          <span class="icon-mark icon-mark--bad">
+            <IconAlertTriangle aria-hidden="true" stroke={2} />
+          </span>
+          <h3 data-i18n="settings.danger.heading" class="text-base font-semibold text-bad">Reset everything</h3>
+        </div>
+        <p data-i18n-html="settings.danger.helperLong" class="text-sm text-fg-2">
+          Wipes <span class="text-fg font-medium">all</span> app data: playlists, cached lists, favorites, recents, and locally stored EPG references. Next launch starts from a clean slate.
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+          <button id="settings-reset-all" type="button" class="btn-danger justify-start sm:justify-center">
+            <IconTrash aria-hidden="true" class="btn-icon" />
+            <span data-i18n="settings.danger.resetAll">Reset everything</span>
+          </button>
+          <button id="settings-restore-last" type="button" class="btn justify-start sm:justify-center" hidden>
+            <IconRestore aria-hidden="true" class="btn-icon" />
+            <span data-i18n="settings.danger.restoreLast">Restore last backup</span>
+          </button>
+        </div>
+        <p id="settings-restore-last-helper" data-i18n="settings.danger.restoreLastHelper" class="text-2xs text-fg-3" hidden>
+          Restores the snapshot saved automatically at your last export or right before your last reset.
+        </p>
+        <span
+          id="settings-reset-msg"
+          aria-live="polite"
+          class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+      </article>
+    </section>
+
+  <!-- Reset confirmation dialog -->
+  <dialog
+    id="settings-reset-dialog"
+    aria-labelledby="settings-reset-title"
+    aria-describedby="settings-reset-desc"
+    class="fixed inset-0 m-auto rounded-2xl border border-line bg-linear-to-b from-surface to-surface-2 text-fg p-0
+           w-[min(28rem,calc(100vw-2rem))] shadow-[0_24px_64px_-16px_var(--nylah-focus-glow)] backdrop:bg-[color-mix(in_oklch,var(--nylah-wine-deep)_72%,transparent)]">
+    <div class="icon-mark-host flex flex-col p-5 gap-4">
+      <div class="flex items-start gap-3">
+        <span class="icon-mark icon-mark--bad icon-mark--lg">
+          <IconAlertTriangle aria-hidden="true" stroke={2} />
+        </span>
+        <div class="flex flex-col gap-1 min-w-0 pt-0.5">
+          <h2 id="settings-reset-title" data-i18n="settings.danger.dialogTitle" class="font-serif text-lg">
+            Reset everything?
+          </h2>
+          <p id="settings-reset-desc" data-i18n-html="settings.danger.dialogBody" class="text-sm text-fg-2">
+            This wipes <span class="text-fg font-medium">all</span> playlists, favorites,
+            recents, and cached lists. This can't be undone.
+          </p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+        <button
+          id="settings-reset-cancel"
+          type="button"
+          class="btn justify-start sm:justify-center">
+          <span data-i18n="common.cancel">Cancel</span>
+        </button>
+        <button
+          id="settings-reset-confirm"
+          type="button"
+          class="btn-danger justify-start sm:justify-center">
+          <IconTrash aria-hidden="true" class="btn-icon" />
+          <span data-i18n="settings.danger.resetAll">Reset everything</span>
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+</SettingsShell>

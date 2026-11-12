@@ -482,11 +482,11 @@ function adjustVolume(delta: number): void {
   video.volume = Math.min(1, Math.max(0, video.volume + delta));
 }
 
+// 0.11.4 W1: one Settings only — the duplicate /tv/settings UI is gone.
 function openSettings(): void {
   const path = window.location.pathname;
   if (path === "/settings" || path.startsWith("/settings/")) return;
-  if (path === "/tv/settings" || path.startsWith("/tv/settings/")) return;
-  window.location.assign(path.startsWith("/tv") ? "/tv/settings" : "/settings");
+  window.location.assign("/settings");
 }
 
 interface HeldDirection {
