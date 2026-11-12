@@ -8,6 +8,7 @@ import {
   mergeChannelNameMaps,
   detectGzip,
   resolveTvgId,
+  stripChannelNamePrefix,
   findBestEpgChannelByName,
   buildChannelNameIndex,
   findInChannelNameIndex,
@@ -584,6 +585,45 @@ describe("resolveTvgId: per-channel override resolution", () => {
     const programmes = new Map([["bbc1.uk", []]])
     const channelNames = new Map([["bbc1.uk", "BBC One"]])
     expect(resolveTvgId(channel, {}, programmes, channelNames)).toBe("bbc1.uk")
+  })
+
+  it("matches a provider-group-prefixed name after stripping the prefix", () => {
+    // The user's case: the resume channel is listed as
+    // "Basic UK: BBC One" while the XMLTV guide carries "BBC One".
+    // The full name never matches; the stripped name does.
+    const channel = { id: 1, name: "Basic UK: BBC One", tvgId: "bbc-one.provider" }
+    const programmes = new Map([["bbconelondon.uk", []]])
+    const channelNames = new Map([["bbconelondon.uk", "BBC One"]])
+    expect(resolveTvgId(channel, {}, programmes, channelNames)).toBe("bbconelondon.uk")
+  })
+
+  it("strips a pipe-separated group prefix the same way", () => {
+    const channel = { id: 1, name: "UK | BBC Two", tvgId: "bbc-two.provider" }
+    const programmes = new Map([["bbc2.uk", []]])
+    const channelNames = new Map([["bbc2.uk", "BBC Two"]])
+    expect(resolveTvgId(channel, {}, programmes, channelNames)).toBe("bbc2.uk")
+  })
+
+  it("does not strip when the remainder cannot match (falls back to raw tvgId)", () => {
+    const channel = { id: 1, name: "Basic UK: Some Obscure Channel", tvgId: "obscure.provider" }
+    const programmes = new Map([["bbc1.uk", []]])
+    const channelNames = new Map([["bbc1.uk", "BBC One"]])
+    expect(resolveTvgId(channel, {}, programmes, channelNames)).toBe("obscure.provider")
+  })
+})
+
+describe("stripChannelNamePrefix: provider-group prefix", () => {
+  it("strips colon and pipe prefixes, keeps the channel name", () => {
+    expect(stripChannelNamePrefix("Basic UK: BBC One")).toBe("BBC One")
+    expect(stripChannelNamePrefix("UK | BBC Two")).toBe("BBC Two")
+    expect(stripChannelNamePrefix("UK: BBC One HD")).toBe("BBC One HD")
+  })
+
+  it("returns empty when there is no prefix or nothing usable after it", () => {
+    expect(stripChannelNamePrefix("BBC One")).toBe("")
+    expect(stripChannelNamePrefix("")).toBe("")
+    expect(stripChannelNamePrefix("UK:")).toBe("")
+    expect(stripChannelNamePrefix(": BBC One")).toBe("")
   })
 })
 

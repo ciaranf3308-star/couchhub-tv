@@ -52,6 +52,7 @@ import {
   dispatchLivetvTune,
   favouriteChannels,
   groupChannels,
+  isLocalChannel,
   loadLivetvHomeData,
   nowNextForChannel,
   pickResumeHero,
@@ -221,6 +222,25 @@ export interface LandingHeroModel {
  * pickResumeHero already guarantees a non-null pick whenever any
  * channel exists (featured fallback); null only with no channels.
  * Programme lines are real EPG only — never invented.
+ *
+ * 0.11.4: the pick is EPG-aware. pickResumeHero returns the
+ * last-watched channel unconditionally, so a resume channel the
+ * guide does not cover (a prefixed name the EPG cannot match,
+ * an uncovered provider channel) used to win the hero and then
+ * render the "Live TV" no-programme band — while dozens of
+ * covered channels sat one row below with real now-playing
+ * lines. When the resume pick has no current programme but
+ * another channel does, the hero shows that live channel
+ * ("On Now") instead: a programme-led hero whenever the guide
+ * covers anything. The resume channel is never lost — it stays
+ * one tap away on the Continue Watching pill and Watch Live
+ * still tunes it. Only when NO channel has a live programme
+ * does the hero keep the resume pick with its honest
+ * no-programme state. The eyebrow stays the pick's own
+ * ("Resume Watching" for the last-watched channel — the
+ * mockup's "Now Watching" is the same idea; the resume
+ * wording is the established contract, tested in
+ * livetv-landing-090).
  */
 export function buildLandingHeroModel(
   data: LivetvHomeData,
@@ -234,10 +254,22 @@ export function buildLandingHeroModel(
     atMs,
   );
   if (!pick) return null;
-  const nn = nowNextForChannel(pick.channel, data.programmes, data.playlistId, atMs);
+  let channel = pick.channel;
+  let eyebrow = pick.eyebrow;
+  let isResume = pick.eyebrow === "Resume Watching";
+  let nn = nowNextForChannel(channel, data.programmes, data.playlistId, atMs);
+  if (!nn.current) {
+    const live = pickLiveHeroChannel(data, atMs);
+    if (live) {
+      channel = live;
+      eyebrow = "On Now";
+      isResume = false;
+      nn = nowNextForChannel(channel, data.programmes, data.playlistId, atMs);
+    }
+  }
   return {
-    channel: pick.channel,
-    eyebrow: pick.eyebrow,
+    channel,
+    eyebrow,
     current: nn.current
       ? {
           title: nn.current.title,
@@ -256,8 +288,29 @@ export function buildLandingHeroModel(
           timeRange: formatTimeRange(nn.next.start, nn.next.stop),
         }
       : null,
-    isResume: pick.eyebrow === "Resume Watching",
+    isResume,
   };
+}
+
+/**
+ * First channel with a real current programme, in hero order:
+ * a favourite with a live programme, then a local (Irish & UK)
+ * channel with one, then any channel with one. Null when the
+ * guide covers nothing live right now (or is not loaded at all).
+ * Pure; the caller re-derives now/next for the returned channel.
+ */
+export function pickLiveHeroChannel(
+  data: LivetvHomeData,
+  atMs: number = Date.now(),
+): LivetvChannel | null {
+  const hasLive = (c: LivetvChannel): boolean =>
+    nowNextForChannel(c, data.programmes, data.playlistId, atMs).current != null;
+  return (
+    favouriteChannels(data.channels).find(hasLive) ??
+    data.channels.find((c) => isLocalChannel(c) && hasLive(c)) ??
+    data.channels.find(hasLive) ??
+    null
+  );
 }
 
 // ── Categories (pure) ───────────────────────────────────────────
@@ -681,6 +734,26 @@ export function fillLandingHero(
   if (watchBtn) {
     watchBtn.setAttribute("data-channel-id", String(model.channel.id));
   }
+  // Hero state classes for the no-programme / no-art compositions
+  // (couch.css): the hero is programme-led whenever there IS a
+  // current programme; otherwise it is an honest branded channel
+  // hero, never a blank band. The art class follows what the art
+  // layer actually holds right now — upgradeLandingHeroArt flips
+  // it when real artwork lands, so a re-fill never mislabels an
+  // already-enriched hero.
+  heroEl.classList.toggle(
+    "rs-livetv-landing-hero--no-programme",
+    !model.current,
+  );
+  const hasArt = !!heroEl.querySelector(
+    "[data-hero-art] img.rs-livetv-programme-art__img",
+  );
+  heroEl.classList.toggle("rs-livetv-landing-hero--no-art", !hasArt);
+  heroEl.classList.toggle("rs-livetv-landing-hero--has-art", hasArt);
+  stampHeroPlaceholderChannel(
+    heroEl,
+    model.channel.displayName || model.channel.name,
+  );
   // Stamp the programme the art layer must match; a late
   // enrichment for a superseded hero is dropped on arrival.
   const artMount = heroEl.querySelector<HTMLElement>("[data-hero-art]");
@@ -728,12 +801,16 @@ export function applyHeroArtwork(
   img.addEventListener("error", () => {
     // Broken artwork URL: fall back to the branded placeholder.
     img.remove();
+    heroEl.classList.remove("rs-livetv-landing-hero--has-art");
+    heroEl.classList.add("rs-livetv-landing-hero--no-art");
     if (placeholder && !artMount.contains(placeholder)) {
       artMount.replaceChildren(placeholder);
       placeholder.setAttribute("data-art-state", "placeholder");
     }
   });
   artMount.replaceChildren(img);
+  heroEl.classList.remove("rs-livetv-landing-hero--no-art");
+  heroEl.classList.add("rs-livetv-landing-hero--has-art");
   if (placeholder) placeholder.setAttribute("data-art-state", "artwork");
   return true;
 }
@@ -837,6 +914,41 @@ function heroLogoFallback(channel: LivetvChannel): HTMLSpanElement {
     channel.displayName || channel.name,
   );
   return fallback;
+}
+
+/**
+ * Stamp the hero channel's name into the TvProgrammeArt branded
+ * placeholder. The placeholder is SSR'd without a channel name
+ * (the hero channel is only known at runtime), so without this
+ * the no-art hero shows a blank burgundy gradient with only the
+ * "NylahBox" mark — the flat mauve slab from the user's photo.
+ * Idempotent: the brand line is created once and re-stamped on
+ * every fill, so a re-render for another channel updates it.
+ * A no-op once real artwork has replaced the placeholder layer.
+ */
+function stampHeroPlaceholderChannel(
+  heroEl: HTMLElement,
+  channelName: string,
+): void {
+  const art = heroEl.querySelector("[data-hero-art] [data-programme-art]");
+  if (!art || !channelName) return;
+  art.setAttribute("data-channel", channelName);
+  let brand = art.querySelector(".rs-livetv-programme-art__channel");
+  if (!brand) {
+    brand = document.createElement("span");
+    brand.className = "rs-livetv-programme-art__channel";
+    const placeholder = art.querySelector(
+      ".rs-livetv-programme-art__placeholder",
+    );
+    const mark = art.querySelector(".rs-livetv-programme-art__mark");
+    if (placeholder) {
+      if (mark) placeholder.insertBefore(brand, mark);
+      else placeholder.appendChild(brand);
+    } else {
+      art.appendChild(brand);
+    }
+  }
+  brand.textContent = channelName;
 }
 
 // ── Mount ───────────────────────────────────────────────────────

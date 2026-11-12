@@ -15,9 +15,11 @@ import {
   applyCategoryTileArtwork,
   applyHeroArtwork,
   buildCategoryTileElement,
+  buildLandingHeroModel,
   categoryGlyphFor,
   enrichCategoryTiles,
   fillLandingHero,
+  pickLiveHeroChannel,
   upgradeLandingHeroArt,
   type LandingCategory,
   type LandingHeroModel,
@@ -31,7 +33,8 @@ import {
   placeholderArtwork,
   prefetchProgrammes,
 } from "@/scripts/lib/livetv-enrichment";
-import type { LivetvChannel } from "@/scripts/lib/livetv-data";
+import type { LivetvChannel, LivetvHomeData } from "@/scripts/lib/livetv-data";
+import type { Programme } from "@/scripts/lib/now-next";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..");
@@ -246,6 +249,146 @@ describe("hero artwork", () => {
   });
 });
 
+// ── Hero model: EPG-aware pick (0.11.4) ─────────────────────────
+
+describe("buildLandingHeroModel (0.11.4 hero)", () => {
+  const NOW = Date.UTC(2026, 10, 10, 20, 0, 0);
+  const HOUR = 3_600_000;
+  const prog = (title: string, start: number, stop: number, desc = ""): Programme => ({
+    title,
+    start,
+    stop,
+    desc,
+  });
+  // The user's photo: resume channel "Basic UK: BBC One", listed
+  // under a group prefix, with no EPG row of its own.
+  const bbc = ch({
+    id: 1,
+    name: "Basic UK: BBC One",
+    tvgId: "bbc-one-provider",
+    categoryId: "Basic UK",
+    logo: "https://x/bbc.png",
+  });
+  const rte = ch({
+    id: 2,
+    name: "RTÉ One",
+    tvgId: "rte-one",
+    categoryId: "Ireland",
+  });
+  const sky = ch({
+    id: 3,
+    name: "Sky Sports F1",
+    tvgId: "sky-f1",
+    categoryId: "Sports",
+    favourite: true,
+  });
+  const liveProgrammes = new Map<string, Programme[]>([
+    [
+      "rte-one",
+      [
+        prog("The Six O'Clock Show", NOW - 30 * 60_000, NOW + 30 * 60_000, "Live from Dublin."),
+        prog("RTÉ News: Six One", NOW + 30 * 60_000, NOW + 90 * 60_000),
+      ],
+    ],
+    [
+      "sky-f1",
+      [
+        prog("F1: Brazilian Grand Prix — Qualifying", NOW - HOUR, NOW + HOUR, "Live from Interlagos."),
+        prog("F1: Qualifying Highlights", NOW + HOUR, NOW + 2 * HOUR),
+      ],
+    ],
+  ]);
+  const data = (programmes: Map<string, Programme[]> | null, extra: Partial<LivetvHomeData> = {}): LivetvHomeData => ({
+    playlistId: "",
+    channels: [bbc, rte, sky],
+    recents: [{ id: 1, name: "Basic UK: BBC One", logo: null, ts: NOW }],
+    programmes,
+    hasEpg: !!programmes && programmes.size > 0,
+    ...extra,
+  });
+
+  it("falls back to a live channel when the resume channel has no programme (the photo case)", () => {
+    const model = buildLandingHeroModel(data(liveProgrammes), NOW);
+    expect(model).not.toBeNull();
+    // Favourite with a live programme wins the fallback.
+    expect(model!.channel.id).toBe(3);
+    expect(model!.eyebrow).toBe("On Now");
+    expect(model!.isResume).toBe(false);
+    expect(model!.current?.title).toBe("F1: Brazilian Grand Prix — Qualifying");
+    expect(model!.current?.timeRange).toBeTruthy();
+    expect(model!.current?.description).toBe("Live from Interlagos.");
+    expect(model!.next?.title).toBe("F1: Qualifying Highlights");
+  });
+
+  it("prefers a local live channel over any other live channel", () => {
+    const plainSky = ch({ id: 3, name: "Sky Sports F1", tvgId: "sky-f1", categoryId: "Sports" });
+    const model = buildLandingHeroModel(
+      data(liveProgrammes, { channels: [bbc, rte, plainSky] }),
+      NOW,
+    );
+    expect(model!.channel.id).toBe(2);
+    expect(model!.current?.title).toBe("The Six O'Clock Show");
+  });
+
+  it("keeps the resume channel when it has a live programme, eyebrow 'Resume Watching'", () => {
+    const withBbc = new Map(liveProgrammes);
+    withBbc.set("bbc-one-provider", [
+      prog("EastEnders", NOW - 15 * 60_000, NOW + 15 * 60_000, "Walford drama."),
+      prog("BBC News at Ten", NOW + 15 * 60_000, NOW + 45 * 60_000),
+    ]);
+    const model = buildLandingHeroModel(data(withBbc), NOW);
+    expect(model!.channel.id).toBe(1);
+    expect(model!.eyebrow).toBe("Resume Watching");
+    expect(model!.isResume).toBe(true);
+    expect(model!.current?.title).toBe("EastEnders");
+    expect(model!.next?.title).toBe("BBC News at Ten");
+  });
+
+  it("keeps the resume channel with an honest no-programme state when nothing is live", () => {
+    const model = buildLandingHeroModel(data(new Map()), NOW);
+    expect(model!.channel.id).toBe(1);
+    expect(model!.current).toBeNull();
+    expect(model!.next).toBeNull();
+    expect(model!.isResume).toBe(true);
+    expect(model!.eyebrow).toBe("Resume Watching");
+  });
+
+  it("keeps the resume channel when no EPG is loaded at all", () => {
+    const model = buildLandingHeroModel(data(null), NOW);
+    expect(model!.channel.id).toBe(1);
+    expect(model!.current).toBeNull();
+  });
+
+  it("pickLiveHeroChannel returns null when nothing is live", () => {
+    expect(pickLiveHeroChannel(data(new Map()), NOW)).toBeNull();
+    expect(pickLiveHeroChannel(data(null), NOW)).toBeNull();
+  });
+
+  it("fillLandingHero stamps the channel into the no-art placeholder and marks hero state", () => {
+    const el = heroEl();
+    const model = buildLandingHeroModel(data(liveProgrammes), NOW)!;
+    expect(fillLandingHero(el, model)).toBe(true);
+    expect(el.querySelector(".rs-livetv-programme-art__channel")?.textContent).toBe("Sky Sports F1");
+    expect(el.classList.contains("rs-livetv-landing-hero--no-programme")).toBe(false);
+    expect(el.classList.contains("rs-livetv-landing-hero--no-art")).toBe(true);
+    const art = placeholderArtwork();
+    art.backdropUrl = "https://image.tmdb.org/t/p/w1280/backdrop.jpg";
+    art.source = "tmdb-series";
+    expect(applyHeroArtwork(el, art, "F1: Brazilian Grand Prix — Qualifying")).toBe(true);
+    expect(el.classList.contains("rs-livetv-landing-hero--has-art")).toBe(true);
+    expect(el.classList.contains("rs-livetv-landing-hero--no-art")).toBe(false);
+  });
+
+  it("fillLandingHero marks the no-programme state when there is no current programme", () => {
+    const el = heroEl();
+    const model = buildLandingHeroModel(data(new Map()), NOW)!;
+    expect(fillLandingHero(el, model)).toBe(true);
+    expect(el.classList.contains("rs-livetv-landing-hero--no-programme")).toBe(true);
+    expect(el.querySelector("[data-hero-programme-title]")?.textContent).toBe("Live TV");
+    expect(el.querySelector(".rs-livetv-programme-art__channel")?.textContent).toBe("Basic UK: BBC One");
+  });
+});
+
 // ── Category tile artwork ───────────────────────────────────────
 
 describe("category tile artwork", () => {
@@ -342,6 +485,17 @@ describe("landing CSS (0.11.0)", () => {
     expect(landingCss).toContain("linear-gradient(90deg");
     expect(landingCss).toContain(".rs-livetv-landing-hero__description");
     expect(landingCss).toContain(".rs-livetv-landing-hero__channel");
+  });
+
+  it("0.11.4: the hero is a tall panel-1 band with an honest no-art brand composition", () => {
+    expect(landingCss).toContain("min-height: 30rem");
+    expect(landingCss).toContain(".rs-livetv-landing-hero--no-art");
+    expect(landingCss).toContain(".rs-livetv-programme-art__channel");
+    // The hero-variant aspect-ratio must not stretch the
+    // placeholder past the band (it pushed the brand line below
+    // the clipped hero, invisible): pinned to the art layer.
+    expect(landingCss).toContain(".rs-livetv-landing-hero__art .rs-livetv-programme-art");
+    expect(landingCss).toContain("aspect-ratio: auto");
   });
 
   it("quick access has one primary pill and quieter pills", () => {
