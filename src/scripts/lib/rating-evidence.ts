@@ -239,6 +239,21 @@ export function hasReliableRating(
 }
 
 /**
+ * True when a rating is credible enough to DISPLAY as a quality
+ * badge/label on Home shelves (brief §3.2/§14.5): any evidence whose
+ * confidence is not "low". Provider ratings without vote support are
+ * always "low", so a bare provider 10 never earns a badge; a
+ * vote-supported TMDb/enrichment rating does. Display-only — filters
+ * and sorts use ratingPassesMinimum / compareByRatingEvidence.
+ */
+export function hasCredibleRating(
+  entry: RatingEvidence | RatableEntry | null | undefined,
+): boolean {
+  const evidence = evidenceOf(entry)
+  return evidence != null && evidence.confidence !== "low"
+}
+
+/**
  * Minimum-rating filter predicate. A minimum of 0 (or less) passes
  * everything; any positive minimum EXCLUDES unrated titles — they
  * must never silently pass a rating filter.

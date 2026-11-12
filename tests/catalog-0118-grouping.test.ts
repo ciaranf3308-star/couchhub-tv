@@ -59,6 +59,32 @@ describe("groupEntries", () => {
     expect(groups[0].tmdbId).toBeUndefined()
   })
 
+  it("groups language/audio suffix variants without TMDb ids (0.11.8 integration fix)", () => {
+    const groups = groupEntries(
+      [
+        { id: 50, name: "Harbour Lights (2022)" },
+        { id: 51, name: "Harbour Lights (2022) 1080p" },
+        { id: 52, name: "Harbour Lights (2022) FHD" },
+        { id: 53, name: "Harbour Lights (2022) [HINDI]" },
+        { id: 54, name: "Harbour Lights (2022) DUAL AUDIO" },
+      ],
+      "vod",
+    )
+    expect(groups).toHaveLength(1)
+    expect([...groups[0].variantIds].sort()).toEqual(["50", "51", "52", "53", "54"])
+  })
+
+  it("never strips a variant word that is not trailing", () => {
+    const groups = groupEntries(
+      [
+        { id: 60, name: "The English Patient (1996)" },
+        { id: 61, name: "The Patient (1996)" },
+      ],
+      "vod",
+    )
+    expect(groups).toHaveLength(2)
+  })
+
   it("keeps distinct films with similar titles separate", () => {
     const groups = groupEntries(
       [

@@ -100,6 +100,13 @@ export interface SelectorOptions {
   aiRecommendationsAllowed?: boolean
   /** Exclude watched/completed titles outright instead of penalising them. */
   excludeWatched?: boolean
+  /**
+   * Exclude COMPLETED titles outright, while still allowing
+   * in-progress titles (a featured film may be one the viewer is
+   * mid-way through — its primary action is Continue). Completed
+   * titles never headline Featured and never fill Worth Watching.
+   */
+  excludeCompleted?: boolean
   /** Extra cache discriminator for volatile inputs. */
   cacheKey?: string | null
   profileRevision?: string | null
@@ -243,6 +250,7 @@ interface ScoringContext {
   exposure: Map<string, number>
   aiBoost: Map<string, number>
   excludeWatched: boolean
+  excludeCompleted: boolean
 }
 
 function idSetOf(values: Iterable<string | number> | null | undefined): Set<string> {
@@ -297,7 +305,7 @@ function scoringContext(
       if (id && !aiBoost.has(id)) aiBoost.set(id, boost)
     })
   }
-  return { view, watched, completed, favourites, exposure, aiBoost, excludeWatched: !!opts.excludeWatched }
+  return { view, watched, completed, favourites, exposure, aiBoost, excludeWatched: !!opts.excludeWatched, excludeCompleted: !!opts.excludeCompleted }
 }
 
 function groupHits(ids: Set<string>, group: TitleGroupLike): boolean {
@@ -362,6 +370,7 @@ function scoreCandidate(
   if (groupHits(ctx.view.hardDislikedIds, group)) return null
   const isWatched = groupHits(ctx.watched, group)
   if (ctx.excludeWatched && isWatched) return null
+  if (ctx.excludeCompleted && groupHits(ctx.completed, group)) return null
 
   const { score: tasteScore, topGenreId } = tasteAffinity(aggregate.genreIds, index.kind, ctx.view)
   const ai = aiBoostOf(ctx, group)
@@ -584,7 +593,7 @@ function hashString(value: string): number {
 const SELECTOR_OPTION_KEYS = new Set([
   "profile", "watchedIds", "completedIds", "favouriteIds", "exposureCounts",
   "progressEntries", "rotationSeed", "cutoff", "nowMs", "aiRecommendations",
-  "aiRecommendationsAllowed", "excludeWatched", "cacheKey", "profileRevision",
+  "aiRecommendationsAllowed", "excludeWatched", "excludeCompleted", "cacheKey", "profileRevision",
 ])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1067,6 +1076,11 @@ export function selectSeriesWorthStarting(
     if (groupHits(started, group)) continue
     const aggregate = index.groupAggregates.get(group.id)
     if (!aggregate) continue
+    // Confirmed-empty series (explicit episode evidence of 0) have
+    // nothing to start — never surface them. Unknown counts (null)
+    // stay eligible: absence of cached episode data is not emptiness.
+    const primaryMeta = index.meta.get(group.primaryId)
+    if (primaryMeta?.episodeCount === 0) continue
     const candidate = scoreCandidate(index, ctx, group, aggregate, {})
     if (candidate) scored.push(candidate)
   }

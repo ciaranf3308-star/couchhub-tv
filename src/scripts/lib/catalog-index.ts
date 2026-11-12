@@ -54,6 +54,10 @@ import {
   type RatingEvidence,
 } from "@/scripts/lib/rating-evidence.ts"
 import { bayesianRating } from "@/scripts/lib/rating-confidence.ts"
+import {
+  noteCatalogIndexBuild,
+  noteCatalogIndexCacheHit,
+} from "@/scripts/lib/browse-instrumentation.ts"
 
 export type CatalogKind = "vod" | "series"
 
@@ -110,6 +114,13 @@ export interface CatalogEntryMeta {
   runtimeMinutes: number | null
   /** Season count from CACHED data only (series); always null for movies and on cache miss. */
   seasonCount: number | null
+  /**
+   * Episode count when the row carries explicit episode evidence
+   * (episodeCount field or an episodes array). 0 is PRESERVED — a
+   * confirmed-empty series is not an unknown one. Null when the row
+   * carries no episode evidence (the usual catalogue case).
+   */
+  episodeCount: number | null
   /** Canonical genre ids (movie taxonomy) or family ids (series). [] when no evidence. */
   genreIds: string[]
   genreProvenance: "verified" | "provider" | "category" | "none"
@@ -267,6 +278,19 @@ function seasonCountOf(row: CatalogRow): number | null {
   return null
 }
 
+/**
+ * Explicit episode evidence only. A numeric episodeCount >= 0 wins;
+ * otherwise an episodes array's length counts (an EMPTY array is a
+ * confirmed 0, not unknown). Anything else is null — most catalogue
+ * rows carry no episode evidence at all.
+ */
+function episodeCountOf(row: CatalogRow): number | null {
+  const direct = Number(row.episodeCount)
+  if (Number.isInteger(direct) && direct >= 0) return direct
+  if (Array.isArray(row.episodes)) return row.episodes.length
+  return null
+}
+
 const MOVIE_ID_SET = new Set<string>(CANONICAL_MOVIE_GENRES.map((g) => g.id))
 const SERIES_FAMILY_SET = new Set<string>(CANONICAL_SERIES_GENRES.map((f) => f.id))
 const MOVIE_ORDER = new Map(CANONICAL_MOVIE_GENRES.map((g, i) => [g.id, i]))
@@ -363,6 +387,7 @@ export function buildCatalogIndex(
   opts: CatalogIndexOptions = {},
 ): CatalogIndex {
   const kind = normaliseCatalogKind(kindInput)
+  noteCatalogIndexBuild()
   if (catalogueInput != null && !Array.isArray(catalogueInput)) {
     throw new TypeError("[catalog-index] catalogue must be an array of rows")
   }
@@ -479,6 +504,7 @@ export function buildCatalogIndex(
       bayesian: rating ? bayesianRating(rating.score10, rating.voteCount) : bayesianRating(null, null),
       runtimeMinutes,
       seasonCount,
+      episodeCount: episodeCountOf(row),
       genreIds,
       genreProvenance,
       providerCategoryKey,
@@ -706,7 +732,10 @@ export function getCatalogIndex(
   const catalogueRef: object = catalogue ?? EMPTY_CATALOGUE
   const inner = indexCacheByCatalogue.get(catalogueRef)
   const cached = inner?.get(key)
-  if (cached) return cached
+  if (cached) {
+    noteCatalogIndexCacheHit()
+    return cached
+  }
   const built = buildCatalogIndex(normalisedKind, catalogue, revision, opts)
   const bucket = inner ?? new Map<string, CatalogIndex>()
   bucket.set(key, built)

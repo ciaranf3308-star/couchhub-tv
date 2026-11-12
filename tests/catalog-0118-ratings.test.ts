@@ -4,6 +4,7 @@ import {
   compareByRatingEvidence,
   evidenceWeightedScore,
   hasReliableRating,
+  hasCredibleRating,
   ratingPassesMinimum,
 } from "@/scripts/lib/rating-evidence.ts"
 
@@ -118,5 +119,15 @@ describe("hasReliableRating / ratingPassesMinimum", () => {
     expect(ratingPassesMinimum({ rating: "6.9" }, 7)).toBe(false)
     expect(ratingPassesMinimum({ rating: "7" }, 7)).toBe(true)
     expect(ratingPassesMinimum({}, 0)).toBe(true)
+  })
+
+  it("hasCredibleRating: vote-supported evidence only — a bare provider 10 never earns a badge", () => {
+    expect(hasCredibleRating({ rating: "10" })).toBe(false)
+    expect(hasCredibleRating({ rating: "9.7" })).toBe(false)
+    expect(hasCredibleRating({})).toBe(false)
+    expect(hasCredibleRating(null)).toBe(false)
+    expect(hasCredibleRating({ vote_average: 7.5 })).toBe(false)
+    expect(hasCredibleRating({ vote_average: 7.5, vote_count: 150 })).toBe(true)
+    expect(hasCredibleRating({ vote_average: 7.5, vote_count: 1500 })).toBe(true)
   })
 })

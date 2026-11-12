@@ -2,6 +2,7 @@
 import { cleanProviderTitle } from "./tmdb-match"
 import { normalize } from "./text"
 import { parseNamePrefix, prefixQualityTokens } from "./language-tags"
+import { noteGroupRun } from "./browse-instrumentation"
 
 export interface GroupableEntry {
   id: number
@@ -38,6 +39,39 @@ interface EntryMeta {
   titleKey: string
 }
 
+// Trailing variant tokens (0.11.8 integration fix, brief §13.2/§13.3):
+// provider rows for the SAME title carry language/audio suffixes —
+// "Title HINDI", "Title DUAL AUDIO", "Title TAMIL" — that
+// cleanProviderTitle's quality-token strip does not remove, so the
+// variants landed in separate groups and the language-variant shelf
+// / detail behaviour split one title into several. These tokens are
+// stripped ONLY at the very end of the cleaned title, iteratively
+// ("DUAL AUDIO" strips as two passes), and only for the GROUPING
+// KEY — display titles, search variants and TMDb matching are
+// untouched. A mid-title occurrence ("The English Patient") never
+// strips, because the match is anchored to the end. Token list
+// mirrors the W5 contract's variant vocabulary.
+const TRAILING_VARIANT_TOKENS = new Set([
+  "hindi", "tamil", "telugu", "malayalam", "kannada", "punjabi",
+  "bengali", "marathi", "english", "spanish", "french", "german",
+  "dual", "audio", "multi", "dubbed", "subbed", "subs", "esub",
+  "uncut", "extended", "remux", "proper", "repack",
+])
+
+function stripTrailingVariantTokens(title: string): string {
+  let current = String(title || "").trim().replace(/\s+/g, " ")
+  for (;;) {
+    const match = current.match(/[-–—:]?\s*([A-Za-z0-9+]+)\s*$/)
+    if (!match) break
+    if (!TRAILING_VARIANT_TOKENS.has(match[1].toLowerCase())) break
+    const stripped = current.slice(0, match.index).trim()
+    if (!stripped) break
+    if (stripped === current) break
+    current = stripped
+  }
+  return current.replace(/[-–—:,\s]+$/, "").trim()
+}
+
 function computeTitleKey(
   entry: GroupableRow,
   entryId: number,
@@ -47,7 +81,7 @@ function computeTitleKey(
   // Strip the prefix via parseNamePrefix first: it handles compound prefixes ("4K-FR - ") that cleanProviderTitle's regex does not.
   const { tag, rest } = prefix
   const { variants, year } = cleanProviderTitle(tag != null ? rest : name)
-  const normalizedTitle = normalize(variants[0] || "")
+  const normalizedTitle = normalize(stripTrailingVariantTokens(variants[0] || ""))
   if (!normalizedTitle) return `e:${entryId}`
   const resolvedYear = year != null ? String(year) : entry.year || ""
   return `${normalizedTitle}|${resolvedYear}`
@@ -422,6 +456,7 @@ export function groupEntries(
   entries: GroupableEntryInput[],
   index?: GroupEntriesIndexLike,
 ): TitleGroup[] {
+  noteGroupRun()
   const defaultKind = resolveGroupKind(index)
   const rows = entries || []
 
@@ -491,17 +526,25 @@ export function groupEntries(
       if (tmdbId != null) group.tmdbId = tmdbId
       if (year != null) group.year = year
       built.push(group)
-      // memberIds are in catalogue order, so the first member's position
-      // is the group's first-appearance position.
-      orderKeyByGroupId.set(group.id, positionById.get(memberIds[0]) ?? 0)
-      const primaryRow = rowById.get(primaryNumericId)
-      if (primaryRow) primaryRowById.set(primaryId, primaryRow)
     }
-    built.sort(
+    const merged = mergeVariantSuffixSingletons(built, kind, rowById, positionById)
+    for (const group of merged) {
+      // First-appearance position: the earliest member's catalogue
+      // position (variantIds are primary-first, not catalogue order).
+      let firstPosition = Number.POSITIVE_INFINITY
+      for (const variantId of group.variantIds) {
+        const position = positionById.get(Number(variantId))
+        if (position != null && position < firstPosition) firstPosition = position
+      }
+      orderKeyByGroupId.set(group.id, Number.isFinite(firstPosition) ? firstPosition : 0)
+      const primaryRow = rowById.get(Number(group.primaryId))
+      if (primaryRow) primaryRowById.set(group.primaryId, primaryRow)
+    }
+    merged.sort(
       (a, b) => (orderKeyByGroupId.get(a.id) ?? 0) - (orderKeyByGroupId.get(b.id) ?? 0),
     )
-    registerTitleGroups(kind, built, primaryRowById)
-    groups.push(...built)
+    registerTitleGroups(kind, merged, primaryRowById)
+    groups.push(...merged)
   }
 
   // Cross-kind calls keep global catalogue order.
@@ -509,6 +552,112 @@ export function groupEntries(
     (a, b) => (orderKeyByGroupId.get(a.id) ?? 0) - (orderKeyByGroupId.get(b.id) ?? 0),
   )
   return groups
+}
+
+/**
+ * Conservative title|year merge for variant-suffix singletons
+ * (0.11.8 integration fix, brief §13.1/§13.2).
+ *
+ * buildGroupingIndex keeps untagged entries as singletons and
+ * requires 2+ distinct tags for title/year merges — the right
+ * conservatism for the legacy views that consume it, but it splits
+ * the common provider pattern "Title (2022) / Title (2022) 1080p /
+ * Title (2022) [HINDI] / Title (2022) DUAL AUDIO" into separate
+ * posters. This post-pass merges ONLY singleton groups that:
+ *   - carry no TMDb identity (TMDb-verified singletons are distinct
+ *     identities — an ambiguous bridge must never merge),
+ *   - share one cleaned title key (variant/quality suffixes stripped)
+ *     with a KNOWN year (year-less rows are uncertain — WWE Raw daily
+ *     episodes stay separate),
+ *   - and whose raw names DIFFER (a stripped variant marker explains
+ *     the difference; exact-duplicate rows stay separate).
+ * The merged group is "medium" confidence, kind-prefixed "n:", with
+ * the lowest-quality-rank member as primary (plain beats 4K).
+ */
+function mergeVariantSuffixSingletons(
+  built: TitleGroup[],
+  kind: TitleGroupKind,
+  rowById: Map<number, GroupableRow>,
+  positionById: Map<number, number>,
+): TitleGroup[] {
+  const buckets = new Map<string, TitleGroup[]>()
+  const passthrough: TitleGroup[] = []
+  for (const group of built) {
+    if (group.variantIds.length !== 1 || group.tmdbId != null) {
+      passthrough.push(group)
+      continue
+    }
+    const numericId = Number(group.primaryId)
+    const row = rowById.get(numericId)
+    if (!row) {
+      passthrough.push(group)
+      continue
+    }
+    const name = row.name || ""
+    const titleKey = computeTitleKey(row, numericId, name, parseNamePrefix(name))
+    if (titleKey.startsWith("e:")) {
+      passthrough.push(group)
+      continue
+    }
+    const yearPart = titleKey.slice(titleKey.lastIndexOf("|") + 1)
+    if (!yearPart) {
+      passthrough.push(group)
+      continue
+    }
+    const bucket = buckets.get(titleKey)
+    if (bucket) bucket.push(group)
+    else buckets.set(titleKey, [group])
+  }
+
+  const out: TitleGroup[] = [...passthrough]
+  for (const [titleKey, bucket] of buckets) {
+    if (bucket.length === 1) {
+      out.push(bucket[0])
+      continue
+    }
+    const rawNames = new Set(
+      bucket.map((group) => rowById.get(Number(group.primaryId))?.name || ""),
+    )
+    if (rawNames.size === 1) {
+      out.push(...bucket)
+      continue
+    }
+    const memberIds = bucket
+      .map((group) => Number(group.primaryId))
+      .sort((a, b) => (positionById.get(a) ?? 0) - (positionById.get(b) ?? 0))
+    const tagByEntryId = new Map<number, string | null>()
+    const qualityRankByEntryId = new Map<number, number>()
+    for (const memberId of memberIds) {
+      const name = rowById.get(memberId)?.name || ""
+      tagByEntryId.set(memberId, parseNamePrefix(name).tag)
+      qualityRankByEntryId.set(memberId, prefixQualityTokens(name).length)
+    }
+    const primaryNumericId = pickPreferredEntryId(
+      memberIds,
+      tagByEntryId,
+      [],
+      qualityRankByEntryId,
+    )
+    const primaryId = String(primaryNumericId)
+    const knownYears = memberIds
+      .map((id) => parseEntryYear(rowById.get(id)!))
+      .filter((year): year is number => year != null)
+    const year = parseEntryYear(rowById.get(primaryNumericId)!) ?? knownYears[0]
+    const group: TitleGroup = {
+      id: `${kind}:n:${titleKey}`,
+      primaryId,
+      variantIds: [
+        primaryId,
+        ...memberIds.filter((id) => id !== primaryNumericId).map((id) => String(id)),
+      ],
+      kind,
+      confidence: "medium",
+      tags: distinctTagsInOrder(memberIds, tagByEntryId),
+    }
+    if (year != null) group.year = year
+    out.push(group)
+  }
+  return out
 }
 
 /**

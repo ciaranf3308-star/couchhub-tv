@@ -90,6 +90,16 @@ describe("selectFeaturedFilm", () => {
     })
     expect(result).not.toBeNull()
   })
+
+  it("never headlines a completed title with excludeCompleted", () => {
+    const index = buildCatalogIndex("vod", movieRows(), "rev-1")
+    const result = selectFeaturedFilm(index, movieTaste(), undefined, {
+      excludeCompleted: true,
+      completedIds: ["1", "9"],
+    })
+    expect(result).not.toBeNull()
+    expect(["1", "9"]).not.toContain(result!.id)
+  })
 })
 
 describe("selectWorthWatching", () => {
@@ -113,6 +123,20 @@ describe("selectWorthWatching", () => {
     })
     expect(selectorIds(results)).not.toContain("1")
     expect(selectorIds(results)).not.toContain("9")
+  })
+
+  it("excludes completed titles outright with excludeCompleted, but keeps in-progress titles eligible", () => {
+    const index = buildCatalogIndex("vod", movieRows(), "rev-1")
+    const results = selectWorthWatching(index, null, 12, {
+      excludeCompleted: true,
+      completedIds: ["1", "9", "12"],
+      watchedIds: ["4"],
+    })
+    const ids = selectorIds(results)
+    expect(ids).not.toContain("1")
+    expect(ids).not.toContain("9")
+    expect(ids).not.toContain("12")
+    expect(ids).toContain("4")
   })
 
   it("returns [] for an empty or missing index", () => {
@@ -231,6 +255,19 @@ describe("selectSeriesWorthStarting", () => {
   it("returns [] for a movies index", () => {
     const index = buildCatalogIndex("vod", movieRows(), "rev-1")
     expect(selectSeriesWorthStarting(index, null, 5)).toEqual([])
+  })
+
+  it("never surfaces a confirmed-empty series, but keeps unknown-season-count series eligible", () => {
+    const rows: CatalogRow[] = [
+      ...seriesRows(),
+      { id: 205, name: "Empty Series", year: "2023", genre: "Drama", category: "", added: ADDED + 400, tmdb: 205, logo: "http://x/e.jpg", vote_average: 9.5, vote_count: 9000, episodeCount: 0, episodes: [] },
+      { id: 206, name: "Unknown Seasons", year: "2023", genre: "Drama", category: "", added: ADDED + 450, tmdb: 206, logo: "http://x/u.jpg", vote_average: 9.0, vote_count: 8000 },
+    ]
+    const index = buildCatalogIndex("series", rows, "rev-1")
+    const results = selectSeriesWorthStarting(index, null, 12)
+    const ids = selectorIds(results)
+    expect(ids).not.toContain("205")
+    expect(ids).toContain("206")
   })
 })
 

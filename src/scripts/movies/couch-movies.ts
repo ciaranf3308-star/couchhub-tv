@@ -36,6 +36,10 @@ export interface MovieRow {
   norm: string;
   tmdb: number | null;
   containerExt?: string | null;
+  /** Raw provider category id (0.11.8): keeps same-label categories distinct in the index. */
+  category_id?: string | null;
+  /** Raw 5-based provider rating (0.11.8): lets rating evidence double it instead of misreading it as 10-point. */
+  rating_5based?: string | null;
 }
 
 export type MovieSortMode =
@@ -107,6 +111,8 @@ export function mapMovieRow(
     norm: normalize(`${name} ${category} ${year}`),
     tmdb: Number.isFinite(tmdb) ? tmdb : null,
     containerExt: raw.container_extension || null,
+    category_id: categoryId != null ? String(categoryId) : null,
+    rating_5based: raw.rating_5based != null && raw.rating_5based !== "" ? String(raw.rating_5based) : null,
   };
 }
 

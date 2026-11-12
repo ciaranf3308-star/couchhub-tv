@@ -103,6 +103,30 @@ function getCachedSeasonState(
 }
 
 /**
+ * Synchronous read: the cached get_series_info payload for a series,
+ * or null when nothing fresh is in memory. Memory hit only, never
+ * stale, no fetch, no hydrate — the read-only payload access the
+ * Series Home continue-resolution needs (it must decide resume/next
+ * from cached episode lists without triggering requests). Added in
+ * 0.11.8 so consumers stop duplicating the `series_info_<id>` cache
+ * key; the staleness rule matches the Series Home contract (a stale
+ * payload must not decide which episode plays).
+ */
+export function getCachedSeriesInfoPayload(
+  playlistId: string,
+  seriesId: string | number,
+): unknown {
+  try {
+    if (!playlistId || seriesId == null) return null
+    const hit = getCached(playlistId, seriesInfoKind(seriesId))
+    if (!hit || hit.stale) return null
+    return hit.data
+  } catch {
+    return null
+  }
+}
+
+/**
  * Synchronous read: cached episode ids for a series, or null when the
  * series_info payload isn't in memory yet. Callers that need a network fetch
  * on miss should go through requestEpisodeIds.
