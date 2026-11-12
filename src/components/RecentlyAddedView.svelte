@@ -172,8 +172,8 @@
   }
 
   // W5 (0.11.10): X on a poster opens the title context menu.
-  // Controller X reaches here as the "x" key once W1 routes it to
-  // views; physical keyboards get it today.
+  // Controller X reaches here as the "x" key (gamepad.ts
+  // dispatch-first routing); physical keyboards get it today.
   async function openRowMenu(anchor, row) {
     const prefs = await import("@/scripts/lib/preferences.js")
     const href = buildHref(row.kind, row.item.id)

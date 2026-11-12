@@ -235,7 +235,7 @@
   // controller path to Remove from Watch Later (Contract F). This
   // view previously had no context menu at all (mouse/touch only
   // had the card itself). Controller X reaches here as the "x" key
-  // once W1 routes it to views; physical keyboards get it today.
+  // (gamepad.ts dispatch-first routing).
   function openEntryMenu(anchor, entry) {
     const extras = { name: entry.name || "", logo: entry.logo || null }
     const labels = cardContextLabels(t)

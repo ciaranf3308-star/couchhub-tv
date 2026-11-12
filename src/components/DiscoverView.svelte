@@ -1116,12 +1116,37 @@
     }
     window.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
     // Discover's OWN search (§25): Y on Discover focuses this input
-    // instead of opening global Search. W1 routes the nav-level Y
-    // here via this event; the input focus opens the keyboard.
+    // instead of opening global Search. The Y handler below routes
+    // the key here via this event; the input focus opens the keyboard.
     function onDiscoverFocusSearch() {
       inputEl?.focus()
     }
     window.addEventListener("couch:discover-focus-search", onDiscoverFocusSearch)
+    // Y wiring (0.11.10 integration): the gamepad layer dispatches
+    // the "y" key first and only falls back to global Search when
+    // no handler claims it — this handler claims it on Discover
+    // (outside editable fields, where "y" must type) and routes it
+    // through the focus-search event above. Without this, Y on
+    // Discover navigated away to /search.
+    function onDiscoverYKey(ev) {
+      if (ev.key !== "y" && ev.key !== "Y") return
+      if (ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return
+      if (ev.defaultPrevented) return
+      const target = /** @type {HTMLElement | null} */ (ev.target)
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      if (document.querySelector("dialog[open]")) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      window.dispatchEvent(new CustomEvent("couch:discover-focus-search"))
+    }
+    document.addEventListener("keydown", onDiscoverYKey)
     // Re-evaluate "just now" freshness while a validated receipt is on
     // screen; cheap, and it keeps the note honest without a new search.
     const clock = setInterval(() => {
@@ -1156,6 +1181,7 @@
       window.removeEventListener("keydown", onWindowKeyDown, true)
       window.removeEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
       window.removeEventListener("couch:discover-focus-search", onDiscoverFocusSearch)
+      document.removeEventListener("keydown", onDiscoverYKey)
       // Leaving Discover cancels any in-flight AI run.
       if (aiAbort) aiAbort.abort()
       document.removeEventListener("xt:ai-settings-changed", refreshAiStatus)

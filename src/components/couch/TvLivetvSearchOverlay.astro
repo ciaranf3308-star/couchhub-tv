@@ -161,6 +161,7 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
   // shared keyboard lifecycle: open on entry, close-first on B
   // (see the search layer's onBack veto), commit on submit.
   import {
+    COUCH_KEYBOARD_CLOSED_EVENT,
     closeCouchKeyboard,
     endCouchKeyboardSession,
     isCouchKeyboardOpen,
@@ -196,6 +197,11 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     } | null = null;
     // Last element focused inside the overlay (focus containment).
     let lastInside: HTMLElement | null = null;
+    // Reopen suppression: closeCouchKeyboard re-focuses the input,
+    // and the focusin reopen below would resurrect the session on
+    // every B press. The closed event fires before the refocus, so
+    // it arms a one-shot suppress for the next focusin.
+    let suppressKeyboardReopen = false;
 
     /** True while the user is editing: input focused or on the OSK grid. */
     function editingActive(): boolean {
@@ -449,7 +455,14 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     // Re-entering the input (after an editing exit) re-opens
     // the keyboard edit through the contract, so the record —
     // and the B hierarchy — stay truthful for the whole visit.
+    input?.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+      suppressKeyboardReopen = true;
+    });
     input?.addEventListener("focusin", () => {
+      if (suppressKeyboardReopen) {
+        suppressKeyboardReopen = false;
+        return;
+      }
       if (!isOpen || isCouchKeyboardOpen()) return;
       openCouchKeyboard(input, commitKeyboardEdit);
     });

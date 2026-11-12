@@ -478,8 +478,8 @@ function openFollowedMenu(anchor: HTMLElement, focusKey: string): void {
 }
 
 // W5 (0.11.10): X on a followed card opens its series actions.
-// Controller X reaches here as the "x" key once W1 routes it to
-// views; physical keyboards get it today.
+// Controller X reaches here as the "x" key (gamepad.ts
+// dispatch-first routing); physical keyboards get it today.
 document.addEventListener("keydown", (event) => {
   if (event.key !== "x" && event.key !== "X") return
   if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
@@ -503,7 +503,7 @@ document.addEventListener(FOLLOWED_NOTIFICATIONS_EVENT, () => void render())
 // W5 (0.11.10): controller contract — logical view + hints (Y is the
 // global gamepad search binding, hinted as Search), provenance, and
 // the one-level Back step (confirmations own B first via their
-// native dialogs; the shim dispatcher skips while one is open).
+// native dialogs and CONFIRM_DIALOG layer).
 setLogicalView("followed")
 setControllerHints({
   id: "followed",

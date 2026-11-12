@@ -695,9 +695,9 @@ installDetailBackLayers({
 // X/Y while browsing the detail (0.11.10 §23): X opens the More
 // options dialog (the contextual surface for this title), Y opens
 // Search Series. While playing, X/Y belong to the player
-// (play/pause, fullscreen). NOTE (W1 dependency): gamepad.ts must
-// dispatch "x"/"y" keys on detail pages for the controller to
-// reach these handlers; keyboard X/Y work today.
+// (play/pause, fullscreen). gamepad.ts dispatches "x"/"y" keys
+// first on detail pages (dispatch-first routing), so the
+// controller reaches these handlers; keyboard X/Y work too.
 document.addEventListener("keydown", (ev) => {
   if (ev.defaultPrevented || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
   if (playerOpen) return;

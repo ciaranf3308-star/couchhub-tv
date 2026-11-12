@@ -854,7 +854,7 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
   import { initHaptics } from "@/scripts/lib/haptics"
   import { initPlaylistAccent } from "@/scripts/lib/playlist-accent"
   import { logSessionSnapshot } from "@/scripts/lib/diagnostic-snapshot"
-  import { mountBackHandler } from "@/scripts/lib/back-handler"
+  import { mountBackCoordinator } from "@/scripts/lib/back-handler"
   import { mountTvInputGuard } from "@/scripts/lib/tv-input-guard"
   import { mountGamepad } from "@/scripts/lib/gamepad"
   import { mountNativeGamepad } from "@/scripts/lib/native-gamepad"
@@ -870,7 +870,14 @@ const appMode = import.meta.env.PUBLIC_APP_MODE || ""
     document.documentElement.dataset.tv = "1"
     try { localStorage.setItem("xt_is_tv", "1") } catch {}
   }
-  mountBackHandler()
+  // Controller 2.0 (0.11.10 integration): the Back coordinator, not
+  // the legacy-only handler — Back layers live on Layout pages too
+  // (docs, downloads, playlist editor), and controller B already
+  // resolves through the coordinator on every layout via gamepad.ts.
+  // The coordinator is a superset of the legacy handler (layers,
+  // then legacy interceptors, then dialog/fullscreen chrome), so
+  // unmigrated pages keep their existing Back behaviour.
+  mountBackCoordinator()
   mountTvInputGuard()
   // Nylah Studios: native XInput controller (primary) + Gamepad API
   // fallback + return home to CouchHub.

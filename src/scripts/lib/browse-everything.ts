@@ -59,7 +59,7 @@
 //   A/Enter opens the focused card (onOpenDetail). B/Escape pops
 //   one layer (overlay → grid → onExit) through the 0.11.10 Back
 //   layers (registerBackLayer, DRAWER/ROUTE priorities — the
-//   shim dispatcher claims the press before this controller's
+//   Back coordinator claims the press before this controller's
 //   bubble handler, so exactly one layer pops per press). X opens
 //   the REAL title context menu (Contract F, poster-menu.ts) via
 //   the `browse:card-context` event this controller dispatches
@@ -1839,13 +1839,12 @@ export function mountBrowseEverything(
     };
     searchDebounced = createDebouncedSearch((q) => applySearchQuery(q, false), 200);
     input.addEventListener("input", () => searchDebounced.queue(input.value));
-    // Editing goes through the shared keyboard seam (0.11.10):
-    // A on the input enters editing via openCouchKeyboard, never a
-    // bare input focus. W3's OSK listens for the open event; until
-    // it lands, a physical keyboard types into the focused input.
-    input.addEventListener("focus", () => {
-      if (!isCouchKeyboardOpen()) openCouchKeyboard(input);
-    });
+    // Editing goes through the shared keyboard lifecycle
+    // (0.11.10): the session opens ONCE below, with the commit
+    // callback. There is deliberately NO focus handler reopening
+    // it: closeCouchKeyboard re-focuses the input, so a focus
+    // reopen would resurrect the session on every B press (and
+    // drop the commit callback) — B could never exit editing.
     input.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") {
         ev.preventDefault();
@@ -2016,7 +2015,7 @@ export function mountBrowseEverything(
   // ── Key handling (shared pipeline: KeyboardEvents only) ─────
   const onKeyDown = (event: KeyboardEvent) => {
     if (destroyed || suspended) return;
-    // A Back layer already claimed this press (the shim dispatcher
+    // A Back layer already claimed this press (the coordinator
     // runs first and preventDefaults): never pop a second layer.
     // This matters for synthetic window-dispatched presses, where
     // stopPropagation cannot stop same-target bubble listeners.

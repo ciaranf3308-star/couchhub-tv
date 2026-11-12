@@ -207,9 +207,9 @@
 
   // W5 (0.11.10): X on a card opens the title context menu (Open
   // details without autoplay / Play-Resume / favourite / watchlist /
-  // watched). Controller X reaches here as the "x" key once W1 routes
-  // it to views (gamepad.ts currently swallows X on Home via its
-  // autoplay-URL check); physical keyboards get it today. Cards carry
+  // watched). Controller X reaches here as the "x" key (gamepad.ts
+  // dispatch-first routing; the autoplay-strip fallback runs only
+  // when no handler claims the key). Cards carry
   // explicit data-couch-detail-href / data-couch-play-href so no
   // handler ever has to parse ?autoplay out of a URL.
   function cardMenuEntry(item) {

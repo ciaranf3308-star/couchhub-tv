@@ -700,8 +700,10 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	} from "@/scripts/lib/route-origin.ts";
 	import { setLogicalView } from "@/scripts/lib/couch-focus.ts";
 	import {
+		COUCH_KEYBOARD_CLOSED_EVENT,
 		openCouchKeyboard,
 		closeCouchKeyboard,
+		endCouchKeyboardSession,
 	} from "@/scripts/lib/couch-keyboard.ts";
 	import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts";
 	import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts";
@@ -2023,12 +2025,36 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 		}
 		return null;
 	}
+	// Reopen suppression: closeCouchKeyboard re-focuses the field,
+	// and the focusin handler below would immediately reopen the
+	// session — B could never exit editing. The closed event fires
+	// before the refocus, so it arms a one-shot suppress.
+	let suppressKeyboardReopen = false;
+	loginFormEl?.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+		suppressKeyboardReopen = true;
+	});
 	loginFormEl?.addEventListener("focusin", (event) => {
 		const field = loginFieldTarget(event.target);
-		if (field) openCouchKeyboard(field);
+		if (!field) return;
+		if (suppressKeyboardReopen) {
+			suppressKeyboardReopen = false;
+			return;
+		}
+		openCouchKeyboard(field);
 	});
 	loginFormEl?.addEventListener("focusout", (event) => {
-		if (loginFieldTarget(event.target)) closeCouchKeyboard(false);
+		if (!loginFieldTarget(event.target)) return;
+		// Blur to nowhere (gamepad B) keeps the session: the keyboard
+		// Back layer owns that press. Blur to a real non-field element
+		// ends it silently (closeCouchKeyboard would refocus the field
+		// and fight the focus move) and releases the hints override.
+		// Field-to-field moves skip the end: focusin opens the new
+		// session, which ends the previous one.
+		const next = event.relatedTarget;
+		if (!(next instanceof Element)) return;
+		if (loginFieldTarget(next)) return;
+		endCouchKeyboardSession();
+		setControllerHints(null);
 	});
 	registerBackLayer({
 		id: "login-editing",

@@ -7,8 +7,7 @@
 //   - loads the catalogue through the existing loader
 //     (loadCouchCatalog + the movies adapter spec — no new network
 //     code, no new cache),
-//   - builds the curated model (movies-home.ts — pure, W1 selectors
-//     via the shim until integration),
+//   - builds the curated model (movies-home.ts — pure, W1 selectors),
 //   - paints featured / shelves / genre tiles / browse entry into
 //     the mount points in src/pages/movies/index.astro,
 //   - restores focus after paint via the shared couch-focus memory
@@ -707,10 +706,10 @@ export interface MoviesHomeControllerKeysOptions {
  * Home (Back layer, ROUTE), Y → Search Movies (the scoped header
  * entry, never global search), X → the title context menu for the
  * focused film (Contract F). D-pad/LB/RB stay with spatial nav +
- * shelf-jump. NOTE (W1 dependency): gamepad.ts today routes Y to
- * global search and X to its autoplay-strip helper on Home; W1
- * must dispatch "y"/"x" keys here (as it does for Browse) for the
- * controller to reach these handlers. Keyboard X/Y work today.
+ * shelf-jump. gamepad.ts dispatches "y"/"x" keys here first
+ * (dispatch-first routing — the global-search / autoplay-strip
+ * fallbacks run only when no handler claims the key), so the
+ * controller reaches these handlers. Keyboard X/Y work too.
  * Returns an unregister function.
  */
 export function installMoviesHomeControllerKeys(

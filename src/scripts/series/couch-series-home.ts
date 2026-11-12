@@ -635,10 +635,10 @@ document.addEventListener("click", (event) => {
 // title context menu for the focused series card. ONLY the visible
 // mode accepts input: every handler gates on currentMode ===
 // "home" and the suspended browse mount ignores its keys.
-// NOTE (W1 dependency): gamepad.ts today routes Y to global
-// search and X to its autoplay-strip helper on Home; W1 must
-// dispatch "y"/"x" keys here (as it does for Browse) for the
-// controller to reach these handlers. Keyboard X/Y work today.
+// gamepad.ts dispatches "y"/"x" keys here first (dispatch-first
+// routing — the global-search / autoplay-strip fallbacks run only
+// when no handler claims the key), so the controller reaches these
+// handlers. Keyboard X/Y work too.
 
 function seriesHomeOwnsInput(): boolean {
   if (currentMode !== "home") return false;

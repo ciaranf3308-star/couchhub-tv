@@ -825,7 +825,9 @@ const nowMs = Date.now();
   import { hintsForLivetvLayer } from "@/scripts/lib/livetv-hints.ts";
   import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts";
   import {
+    COUCH_KEYBOARD_CLOSED_EVENT,
     closeCouchKeyboard,
+    endCouchKeyboardSession,
     isCouchKeyboardOpen,
     openCouchKeyboard,
   } from "@/scripts/lib/couch-keyboard.ts";
@@ -2986,7 +2988,20 @@ const nowMs = Date.now();
       // event above. Commit lands focus on the first matching
       // item; blur-to-nowhere ends the edit without touching
       // the query or the panel.
+      // Reopen suppression: closeCouchKeyboard re-focuses the
+      // input, and this focusin handler would immediately reopen
+      // the session — B could never exit editing. The closed
+      // event fires before the refocus, so it arms a one-shot
+      // suppress for the next focusin.
+      let suppressKeyboardReopen = false;
+      searchEl.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+        suppressKeyboardReopen = true;
+      });
       searchEl.addEventListener("focusin", () => {
+        if (suppressKeyboardReopen) {
+          suppressKeyboardReopen = false;
+          return;
+        }
         if (isCouchKeyboardOpen()) return;
         openCouchKeyboard(
           searchEl,
@@ -2999,7 +3014,13 @@ const nowMs = Date.now();
       searchEl.addEventListener("focusout", (event) => {
         const next = event.relatedTarget;
         if (next instanceof Node && root.contains(next)) return;
-        closeCouchKeyboard(false);
+        // Blur to nowhere (gamepad B) keeps the session: the
+        // keyboard Back layer owns that press. Blur to a real
+        // element outside the Guide ends it silently (no refocus
+        // fight) and releases the hints override.
+        if (!(next instanceof Node)) return;
+        endCouchKeyboardSession();
+        setControllerHints(null);
       });
     }
     if (scrollEl instanceof HTMLElement) {

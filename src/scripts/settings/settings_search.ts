@@ -22,9 +22,12 @@ import {
   BACK_PRIORITY,
 } from "@/scripts/lib/back-handler.js"
 import {
+  COUCH_KEYBOARD_CLOSED_EVENT,
   openCouchKeyboard,
   closeCouchKeyboard,
+  endCouchKeyboardSession,
 } from "@/scripts/lib/couch-keyboard.js"
+import { setControllerHints } from "@/scripts/lib/couch-button-hints.js"
 import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.js"
 import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
 
@@ -262,15 +265,16 @@ function init(): void {
   //   2. Escape/B with an empty input while editing exits search
   //      and restores the setting focused before search was
   //      entered (editing layer). The gamepad path blurs the field
-  //      and dispatches a trailing Escape that the shim swallows,
-  //      so B exits editing without navigating.
+  //      and resolves Back through the coordinator, whose keyboard
+  //      layer owns the press, so B exits editing without
+  //      navigating.
   //   3. B with a query but focus elsewhere clears the query and
   //      restores the previous setting focus (active-search layer).
   //   4. Then the shell's section/home layers navigate normally.
-  // Y focuses the search input (physical "y" key today; controller
-  // Y reaches the view once W1 routes it on Settings pages instead
-  // of the global goSearch binding). Enter in the input commits to
-  // the first result.
+  // Y focuses the search input: the gamepad layer dispatches the
+  // "y" key first and this handler claims it, so controller Y
+  // reaches Settings search instead of the global goSearch
+  // fallback. Enter in the input commits to the first result.
   let lastNonSearchFocus: HTMLElement | null = null
   document.addEventListener("focusin", (event) => {
     const target = event.target as HTMLElement | null
@@ -325,11 +329,30 @@ function init(): void {
     restorePreviousFocus()
   }
 
+  // Reopen suppression: closeCouchKeyboard re-focuses the input,
+  // and the focus handler would immediately reopen the session —
+  // B could never exit editing. The closed event fires before the
+  // refocus, so it arms a one-shot suppress for the next focus.
+  let suppressKeyboardReopen = false
+  input.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+    suppressKeyboardReopen = true
+  })
   input.addEventListener("focus", () => {
+    if (suppressKeyboardReopen) {
+      suppressKeyboardReopen = false
+      return
+    }
     openCouchKeyboard(input, focusFirstResult)
   })
-  input.addEventListener("blur", () => {
-    closeCouchKeyboard(false)
+  input.addEventListener("blur", (event) => {
+    // Blur to nowhere (gamepad B) keeps the session: the keyboard
+    // Back layer owns that press. Blur to a real element ends it
+    // silently (closeCouchKeyboard would refocus the input and
+    // fight the focus move) and releases the hints override.
+    const next = (event as FocusEvent).relatedTarget
+    if (!(next instanceof Element)) return
+    endCouchKeyboardSession()
+    setControllerHints(null)
   })
 
   registerBackLayer({

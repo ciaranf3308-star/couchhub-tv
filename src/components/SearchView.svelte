@@ -849,8 +849,12 @@
     } else if (ev.key === "Escape") {
       // One Back step (§27): person -> focus input -> clear query ->
       // leave via provenance. Keyboard-open Escapes were handled
-      // above; this branch never runs two steps.
+      // above; this branch never runs two steps. stopImmediatePropagation
+      // matters: this is a window capture listener, and the Back
+      // coordinator's capture listener must not run the same step
+      // again for this press (listener order is mount order).
       ev.preventDefault()
+      ev.stopImmediatePropagation()
       searchBackStep()
     }
   }

@@ -296,8 +296,8 @@
   // W5 (0.11.10): X on a card opens the title context menu — the
   // controller path to Remove from Favourites (Contract F). The
   // right-click/long-press poster menu stays for mouse/touch.
-  // Controller X reaches here as the "x" key once W1 routes it to
-  // views; physical keyboards get it today.
+  // Controller X reaches here as the "x" key (gamepad.ts
+  // dispatch-first routing); physical keyboards get it today.
   function openEntryMenu(anchor, entry) {
     const extras = { name: entry.name || "", logo: entry.logo || null }
     const labels = cardContextLabels(t)
