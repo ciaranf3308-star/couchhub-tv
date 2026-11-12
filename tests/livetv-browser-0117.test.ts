@@ -356,6 +356,53 @@ describe("mountCategoryDrawer (standalone)", () => {
     handle.destroy();
   });
 
+  it("hover moves focus WITHOUT replacing nodes (no mouseenter/render feedback loop)", () => {
+    // Integration-found (0.11.7 harness): mouseenter used to call the
+    // full render(), which replaces every node; Chromium then re-fires
+    // mouseenter on the replacement under a stationary pointer, which
+    // snaps focus back to the hovered item (defeating arrow keys) and
+    // swallows mouse clicks. Hover must only repaint focus.
+    const handle = mountCategoryDrawer(root, {
+      groups: GROUPS,
+      selectedGroupId: "favourites",
+      onSelect: vi.fn(),
+      onBack: vi.fn(),
+    });
+    const before = drawerItems(root);
+    expect(before).toHaveLength(2);
+    const sports = before[1]!;
+    sports.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+    // Same node objects, focus ring moved, DOM focus followed.
+    expect(drawerItems(root)).toEqual(before);
+    expect(sports.classList.contains("is-focused")).toBe(true);
+    expect(before[0]!.classList.contains("is-focused")).toBe(false);
+    expect(document.activeElement).toBe(sports);
+    // A re-fired mouseenter (what Chromium does after a rebuild) is a
+    // harmless no-op, not a loop: nodes still identical.
+    sports.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+    expect(drawerItems(root)).toEqual(before);
+    handle.destroy();
+  });
+
+  it("arrow moves do not rebuild nodes either; hover then ArrowDown lands on the next item", () => {
+    const handle = mountCategoryDrawer(root, {
+      groups: GROUPS,
+      selectedGroupId: "favourites",
+      onSelect: vi.fn(),
+      onBack: vi.fn(),
+    });
+    const before = drawerItems(root);
+    before[0]!.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false }));
+    expect(handle.handleKey(new KeyboardEvent("keydown", { key: "ArrowDown" }))).toBe(true);
+    expect(drawerItems(root)).toEqual(before);
+    expect(before[1]!.classList.contains("is-focused")).toBe(true);
+    expect(document.activeElement).toBe(before[1]!);
+    // Clicking the hovered item still activates (drills into Sports).
+    before[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(handle.getLevel()).toBe("subcategories");
+    handle.destroy();
+  });
+
   it("updateGroups refreshes counts and keeps focus by id", () => {
     const handle = mountCategoryDrawer(root, {
       groups: GROUPS,

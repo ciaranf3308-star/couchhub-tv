@@ -461,10 +461,10 @@ export function mountCategoryDrawer(
           state.level === "subcategories"
             ? { ...state, subIndex: index }
             : { ...state, groupIndex: index };
-        render();
-        // render() rebuilt the list — focus the NEW node, not the
-        // detached button this handler closed over.
-        focusCurrent();
+        // paintFocus only: a full render() here replaces the node
+        // under the pointer and Chromium re-fires mouseenter on the
+        // replacement — a feedback loop (see paintFocus).
+        paintFocus();
       });
       list.appendChild(button);
     });
@@ -483,6 +483,24 @@ export function mountCategoryDrawer(
     } catch {
       // Focus still lands; scroll just doesn't follow.
     }
+  }
+
+  /**
+   * Move the focus ring + DOM focus WITHOUT rebuilding the list.
+   * Same-level moves and hover change only which item is focused;
+   * a full render() here replaces every node, and Chromium re-fires
+   * mouseenter on the replacement under a stationary pointer — a
+   * hover/render feedback loop that snaps focus back to the hovered
+   * item (defeating arrow keys) and swallows mouse clicks (the node
+   * under the pointer is replaced between mousedown and mouseup).
+   * Level changes still use render(); focus-only changes use this.
+   */
+  function paintFocus(): void {
+    if (destroyed) return;
+    const items = list.querySelectorAll<HTMLElement>("[data-category-drawer-item]");
+    const focusAt = focusedIndex();
+    items.forEach((item, index) => item.classList.toggle("is-focused", index === focusAt));
+    focusCurrent();
   }
 
   function activate(): void {
@@ -515,13 +533,11 @@ export function mountCategoryDrawer(
     switch (action) {
       case "move-up":
         state = drawerMove(state, groups, -1);
-        render();
-        focusCurrent();
+        paintFocus();
         return true;
       case "move-down":
         state = drawerMove(state, groups, 1);
-        render();
-        focusCurrent();
+        paintFocus();
         return true;
       case "move-left":
         if (state.level === "subcategories") {
@@ -541,13 +557,11 @@ export function mountCategoryDrawer(
         return true;
       case "category-prev":
         state = drawerMove(state, groups, -1);
-        render();
-        focusCurrent();
+        paintFocus();
         return true;
       case "category-next":
         state = drawerMove(state, groups, 1);
-        render();
-        focusCurrent();
+        paintFocus();
         return true;
       default:
         return false;
