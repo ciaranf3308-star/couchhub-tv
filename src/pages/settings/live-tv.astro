@@ -68,19 +68,38 @@ import ChannelOverridesEditor from "@/components/ChannelOverridesEditor.svelte"
           </div>
         </div>
 
-    <!-- W2 PLACEHOLDER — Resume last channel (0.11.4 W2 adds the control).
-         Deliberately no wiring here: no store, no invoke, no invented
-         behaviour. W2 replaces this row with the real control. -->
-    <div id="card-resume-last-channel" data-settings-item data-w2-placeholder="resume-last-channel" class="settings-row scroll-mt-6 lg:scroll-mt-20">
+    <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
+    <div id="card-resume-last-channel-livetv" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
       <div class="settings-row__text">
-        <h3 class="text-sm font-medium leading-snug">Resume last channel</h3>
-        <p class="text-xs text-fg-3">
-          Reopen the channel you were watching when the app starts. Control lands with the next pass.
+        <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
+        <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
+          When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
         </p>
       </div>
       <div class="settings-row__control">
-        <span class="text-xs text-fg-3 border border-line rounded-full px-3 py-1.5">Coming soon</span>
+        <div
+          id="settings-resume-last-livetv"
+          class="settings-seg"
+          role="radiogroup"
+          aria-label="Resume last channel on entering Live TV"
+          data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
+          <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
+          <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
+        </div>
       </div>
+      <script is:inline>
+        try {
+          var resumeLastOnTv = localStorage.getItem("xt_livetv_resume_last") === "1";
+          var resumeLastGroupTv = document.getElementById("settings-resume-last-livetv");
+          if (resumeLastGroupTv) {
+            var resumeLastBtnsTv = resumeLastGroupTv.querySelectorAll(".resume-last-btn");
+            for (var rIdxTv = 0; rIdxTv < resumeLastBtnsTv.length; rIdxTv++) {
+              var resumeLastBtnOnTv = resumeLastBtnsTv[rIdxTv].getAttribute("data-resume") === "on";
+              resumeLastBtnsTv[rIdxTv].setAttribute("aria-pressed", resumeLastBtnOnTv === resumeLastOnTv ? "true" : "false");
+            }
+          }
+        } catch (e) {}
+      </script>
     </div>
 
         <details id="card-categories" data-settings-item class="settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">

@@ -1,8 +1,6 @@
 ---
 import SettingsShell from "@/components/settings/SettingsShell.astro"
 import {
-  IconEye,
-  IconEyeOff,
   IconMovie,
   IconSparkles,
 } from "@tabler/icons-svelte"
@@ -69,6 +67,7 @@ import {
                 <p data-i18n="settings.tmdb.privacy" class="text-xs text-fg-3">
                   Optional: adds trailers, cast, and similar titles once you add a TMDB key below. Titles you open are sent to TMDB for matching.
                 </p>
+                <p id="settings-tmdb-state" aria-live="polite" class="text-xs text-fg-3"></p>
               </div>
               <div class="settings-row__control">
                 <div
@@ -121,15 +120,6 @@ import {
                     spellcheck="false"
                     class="field-input font-mono flex-1 min-w-0"
                   />
-                  <button
-                    id="settings-tmdb-reveal"
-                    type="button"
-                    class="btn flex-none w-11 justify-center p-0"
-                    aria-label="Show key"
-                    data-i18n-attr="aria-label:settings.tmdb.reveal">
-                    <IconEye aria-hidden="true" class="btn-icon" data-tmdb-reveal-icon="show" />
-                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-tmdb-reveal-icon="hide" />
-                  </button>
                   <button id="settings-tmdb-test" type="button" class="btn flex-none w-auto justify-center">
                     <span data-i18n="settings.tmdb.test">Test key</span>
                   </button>
@@ -156,7 +146,7 @@ import {
             <h3 class="text-base font-semibold">AI &amp; Recommendations</h3>
           </div>
           <p class="settings-surface__helper text-xs text-fg-3">
-            Optional AI-powered ranking for Discover. Your search text and a short list of candidate titles go to your chosen AI provider only when you ask a question. Your watch history, IPTV credentials and stream links are never sent unless you switch sharing on below. AI use is billed separately by your provider.
+            Only your question and a short list of candidate titles go to your provider — never your watch history, credentials or stream links, unless you switch sharing on below. Billed separately by your provider; a ChatGPT subscription does not cover API use.
           </p>
           <div class="settings-rows">
 
@@ -179,7 +169,7 @@ import {
               <div class="settings-row__text">
                 <h3 data-i18n="settings.ai.enable" class="text-sm font-medium leading-snug">Enable AI Discovery</h3>
                 <p data-i18n="settings.ai.enableHelper" class="text-xs text-fg-3">
-                  Off by default. Discover works fully without AI, using the local engine.
+                  Discover works fully without AI, using the local engine.
                 </p>
               </div>
               <div class="settings-row__control">
@@ -258,25 +248,31 @@ import {
                 </p>
               </div>
               <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
-                <select
-                  id="settings-ai-model"
-                  class="field-input flex-1 min-w-0"
-                  aria-label="AI model">
-                  <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
-                  <option value="gpt-4o">gpt-4o — higher quality</option>
-                  <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
-                  <option value="gpt-4.1">gpt-4.1 — higher quality</option>
-                  <option value="o4-mini">o4-mini — reasoning, low cost</option>
-                  <option value="custom">Custom…</option>
-                </select>
-                <input
-                  id="settings-ai-model-custom"
-                  type="text"
-                  autocomplete="off"
-                  spellcheck="false"
-                  placeholder="Custom model name"
-                  class="field-input font-mono flex-1 min-w-0 hidden"
-                />
+                <!-- One control: a model select with a Custom entry. Picking
+                     Custom reveals a single inline text field inside this
+                     same bordered group — never a second, separate row. -->
+                <div id="settings-ai-model-control" class="flex flex-col gap-1 rounded-xl border border-line/60 bg-surface-2/40 p-2">
+                  <select
+                    id="settings-ai-model"
+                    class="field-input flex-1 min-w-0"
+                    aria-label="AI model">
+                    <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
+                    <option value="gpt-4o">gpt-4o — higher quality</option>
+                    <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
+                    <option value="gpt-4.1">gpt-4.1 — higher quality</option>
+                    <option value="o4-mini">o4-mini — reasoning, low cost</option>
+                    <option value="custom">Custom…</option>
+                  </select>
+                  <label id="settings-ai-model-custom-label" for="settings-ai-model-custom" class="text-2xs text-fg-3 hidden">Custom model name</label>
+                  <input
+                    id="settings-ai-model-custom"
+                    type="text"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Custom model name"
+                    class="field-input font-mono flex-1 min-w-0 hidden"
+                  />
+                </div>
               </div>
             </div>
 
@@ -304,33 +300,24 @@ import {
                     spellcheck="false"
                     class="field-input font-mono flex-1 min-w-0"
                   />
-                  <button
-                    id="settings-ai-reveal"
-                    type="button"
-                    class="btn flex-none w-11 justify-center p-0"
-                    aria-label="Show key"
-                    data-i18n-attr="aria-label:settings.ai.reveal">
-                    <IconEye aria-hidden="true" class="btn-icon" data-ai-reveal-icon="show" />
-                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-ai-reveal-icon="hide" />
-                  </button>
                   <button id="settings-ai-clear" type="button" class="btn flex-none w-auto justify-center">
                     <span data-i18n="settings.ai.clearKey">Clear key</span>
                   </button>
                 </div>
+                <!-- Key-saved state, on the field itself (0.11.4): the
+                     field is empty by design (the key is never read back
+                     from the credential store), so without this the save
+                     reads as "the key disappeared". The badge + the
+                     placeholder below say the key is saved. There is no
+                     reveal button here on purpose: a secret must never
+                     render in clear text on a living-room screen. -->
+                <span
+                  id="settings-ai-key-saved-badge"
+                  class="hidden items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft/40 px-2.5 py-1 text-xs font-medium text-accent w-fit">✓ <span data-i18n="settings.ai.keySavedBadge">Key saved</span></span>
                 <span
                   id="settings-ai-key-status"
                   aria-live="polite"
                   class="text-xs text-fg-3"></span>
-              </div>
-            </div>
-
-            <!-- Cost + privacy (AI05) -->
-            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-              <div class="settings-row__text">
-                <h3 class="text-sm font-medium leading-snug">Cost</h3>
-                <p class="text-xs text-fg-3">
-                  AI questions are billed separately by your provider, per question. A ChatGPT subscription does not include API usage — API calls are charged on top, even if you already pay for ChatGPT.
-                </p>
               </div>
             </div>
 

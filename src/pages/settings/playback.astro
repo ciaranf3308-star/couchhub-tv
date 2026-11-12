@@ -147,41 +147,6 @@ import RememberedAndroidPlayerCard from "@/components/RememberedAndroidPlayerCar
               </div>
             </div>
 
-            <!-- Mono audio: downmixes embedded playback to one channel for single-earbud use -->
-            <div id="card-mono-audio" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
-              <div class="settings-row__text">
-                <h3 data-i18n="settings.monoAudio.title" class="text-sm font-medium leading-snug">Mono audio</h3>
-                <p data-i18n="settings.monoAudio.helperLong" class="text-xs text-fg-3">
-                  Play all audio in both ears as a single channel - useful with one earbud. Applies to streams played by the built-in engines; some directly played files keep their original stereo.
-                </p>
-              </div>
-              <div class="settings-row__control">
-                <div
-                  id="settings-mono-audio"
-                  class="settings-seg"
-                  role="radiogroup"
-                  aria-label="Mono audio"
-                  data-i18n-attr="aria-label:settings.monoAudio.label">
-                  <button type="button" data-mono="on"  aria-pressed="false" data-i18n="settings.monoAudio.on"  class="mono-audio-btn btn">On</button>
-                  <button type="button" data-mono="off" aria-pressed="false" data-i18n="settings.monoAudio.off" class="mono-audio-btn btn">Off</button>
-                </div>
-              </div>
-              <script is:inline>
-                try {
-                  var monoAudioRaw = localStorage.getItem("xt_mono_audio");
-                  var monoAudioOn = monoAudioRaw === "1";
-                  var monoAudioGroup = document.getElementById("settings-mono-audio");
-                  if (monoAudioGroup) {
-                    var monoAudioBtns = monoAudioGroup.querySelectorAll(".mono-audio-btn");
-                    for (var mIdx = 0; mIdx < monoAudioBtns.length; mIdx++) {
-                      var monoAudioBtnOn = monoAudioBtns[mIdx].getAttribute("data-mono") === "on";
-                      monoAudioBtns[mIdx].setAttribute("aria-pressed", monoAudioBtnOn === monoAudioOn ? "true" : "false");
-                    }
-                  }
-                } catch (e) {}
-              </script>
-            </div>
-
             <!-- Captions auto: turns on subtitles at playback start when the title has them -->
             <div id="card-captions-auto" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">
@@ -211,6 +176,40 @@ import RememberedAndroidPlayerCard from "@/components/RememberedAndroidPlayerCar
                     for (var cIdx = 0; cIdx < captionsAutoBtns.length; cIdx++) {
                       var captionsAutoBtnOn = captionsAutoBtns[cIdx].getAttribute("data-captions") === "on";
                       captionsAutoBtns[cIdx].setAttribute("aria-pressed", captionsAutoBtnOn === captionsAutoOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Resume last channel: re-enter Live TV straight into the last channel watched -->
+            <div id="card-resume-last-channel" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.livetv.resumeLastChannel" class="text-sm font-medium leading-snug">Resume last channel on entering Live TV</h3>
+                <p data-i18n="settings.livetv.resumeLastHelper" class="text-xs text-fg-3">
+                  When on, opening Live TV jumps straight back to the last channel you watched. When off, Live TV opens on its home screen instead.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-resume-last-playback"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Resume last channel on entering Live TV"
+                  data-i18n-attr="aria-label:settings.livetv.resumeLastChannel">
+                  <button type="button" data-resume="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="resume-last-btn btn">On</button>
+                  <button type="button" data-resume="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="resume-last-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var resumeLastOn = localStorage.getItem("xt_livetv_resume_last") === "1";
+                  var resumeLastGroup = document.getElementById("settings-resume-last-playback");
+                  if (resumeLastGroup) {
+                    var resumeLastBtns = resumeLastGroup.querySelectorAll(".resume-last-btn");
+                    for (var rIdx = 0; rIdx < resumeLastBtns.length; rIdx++) {
+                      var resumeLastBtnOn = resumeLastBtns[rIdx].getAttribute("data-resume") === "on";
+                      resumeLastBtns[rIdx].setAttribute("aria-pressed", resumeLastBtnOn === resumeLastOn ? "true" : "false");
                     }
                   }
                 } catch (e) {}

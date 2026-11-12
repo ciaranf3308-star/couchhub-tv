@@ -471,6 +471,45 @@ describe("rankDiscover (AI04 / AI06)", () => {
     }
   })
 
+  it("reaches the ranker for a short keyword query when explicitly forced (Ask AI)", async () => {
+    // 0.11.4: the user typed "COMEDY" with AI connected and got a rail
+    // titled "Local recommendations" — the natural-language gate vetoed
+    // the one-word query silently, so even an explicit Ask AI tap never
+    // reached the ranker. An explicit ask consents to the request.
+    let asked = ""
+    registerAIRanker({
+      rank: async (q, candidates) => {
+        asked = q
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes(), { forceAi: true })
+      expect(asked).toBe("COMEDY")
+      expect(out.source).toBe("ai")
+      expect(out.fallbackReason).toBeUndefined()
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("still keeps the natural-language gate without force", async () => {
+    let called = false
+    registerAIRanker({
+      rank: async (_q, candidates) => {
+        called = true
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes())
+      expect(called).toBe(false)
+      expect(out.source).toBe("local")
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
   it("quick picks carry one icon each (B04)", async () => {
     const { MOOD_PRESETS, EXAMPLE_PROMPTS } = await import("../src/scripts/lib/discover")
     expect(MOOD_PRESETS).toHaveLength(6)

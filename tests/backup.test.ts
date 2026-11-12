@@ -25,15 +25,14 @@ let settingsState: any = {
   playerPaths: { mpv: "", vlc: "" },
   playerExtraArgs: { mpv: [] as string[], vlc: [] as string[] },
   playerReuse: { mpv: false, vlc: false },
-  tmdbKey: "",
+  ffmpegPath: "",
+  livetvResumeLast: false,
   tmdbEnabled: false,
   tvdbEnabled: true,
   perfMode: false,
-  accent: "fuchsia",
   density: "cozy",
   hubStripIds: ["continue-watching"],
   uiSounds: true,
-  haptics: true,
   contentLanguage: "",
   languageGrouping: true,
   videoScale: "fit",
@@ -49,13 +48,72 @@ let settingsState: any = {
   autoUpdate: true,
   closeToTray: true,
   devMode: false,
-  discordClientId: "",
-  discordMuted: new Set<string>(),
+  aiEndpoint: "https://api.openai.com/v1",
+  aiModel: "",
+  aiEnabled: false,
   receiverDeviceName: "",
   receiverMode: false,
   receiverBoot: false,
   receiverEngine: "auto",
 }
+
+let aiState = {
+  provider: "openai",
+  shareTaste: false,
+  autoRequests: false,
+}
+
+vi.mock("@/scripts/lib/ai/status.ts", () => ({
+  getAiProvider: () => aiState.provider,
+  setAiProvider: (provider: string) => { aiState.provider = provider },
+  getAiShareTaste: () => aiState.shareTaste,
+  setAiShareTaste: (share: boolean) => { aiState.shareTaste = share },
+  getAiAutoRequests: () => aiState.autoRequests,
+  setAiAutoRequests: (auto: boolean) => { aiState.autoRequests = auto },
+}))
+
+let followedStoreData: {
+  subs: any[]
+  notifs: any[]
+  meta: Map<string, string>
+} = { subs: [], notifs: [], meta: new Map() }
+let followedSettings = { enabled: true, interval: 6 }
+
+vi.mock("@/scripts/lib/followed.ts", () => ({
+  getFollowedStore: () => ({
+    getAllSubscriptions: async () => [...followedStoreData.subs],
+    putSubscription: async (sub: any) => {
+      const idx = followedStoreData.subs.findIndex((s) => s.key === sub.key)
+      if (idx === -1) followedStoreData.subs.push(sub)
+      else followedStoreData.subs[idx] = sub
+    },
+    deleteSubscription: async (key: string) => {
+      followedStoreData.subs = followedStoreData.subs.filter((s) => s.key !== key)
+    },
+    getAllNotifications: async () => [...followedStoreData.notifs],
+    putNotification: async (group: any) => {
+      const idx = followedStoreData.notifs.findIndex((g) => g.id === group.id)
+      if (idx === -1) followedStoreData.notifs.push(group)
+      else followedStoreData.notifs[idx] = group
+    },
+    deleteNotification: async (id: string) => {
+      followedStoreData.notifs = followedStoreData.notifs.filter((g) => g.id !== id)
+    },
+    getMeta: async (key: string) => followedStoreData.meta.get(key) ?? null,
+    putMeta: async (key: string, value: string) => {
+      followedStoreData.meta.set(key, value)
+    },
+  }),
+  getFollowedCheckEnabled: () => followedSettings.enabled,
+  setFollowedCheckEnabled: (enabled: boolean) => { followedSettings.enabled = enabled },
+  getFollowedCheckIntervalHours: () => followedSettings.interval,
+  setFollowedCheckIntervalHours: (hours: number) => {
+    followedSettings.interval = hours
+    return true
+  },
+  getFollowedLastCheckAt: async () => followedStoreData.meta.get("lastCheckAt") ?? null,
+  FOLLOWED_LAST_CHECK_META_KEY: "lastCheckAt",
+}))
 
 vi.mock("@/scripts/lib/app-settings.js", () => ({
   getUserAgent: () => settingsState.userAgent,
@@ -73,18 +131,16 @@ vi.mock("@/scripts/lib/app-settings.js", () => ({
   setPlayerExtraArgs: (kind: "mpv" | "vlc", args: string[]) => { settingsState.playerExtraArgs[kind] = args },
   getPlayerReuseInstance: (kind: "mpv" | "vlc") => settingsState.playerReuse[kind],
   setPlayerReuseInstance: (kind: "mpv" | "vlc", on: boolean) => { settingsState.playerReuse[kind] = on },
-  getTmdbApiKey: () => settingsState.tmdbKey,
-  setTmdbApiKey: (key: string) => { settingsState.tmdbKey = key },
+  getFfmpegPath: () => settingsState.ffmpegPath,
+  setFfmpegPath: (path: string) => { settingsState.ffmpegPath = path },
+  getLivetvResumeLastChannel: () => settingsState.livetvResumeLast,
+  setLivetvResumeLastChannel: (on: boolean) => { settingsState.livetvResumeLast = on },
   getTmdbEnabled: () => settingsState.tmdbEnabled,
   setTmdbEnabled: (enabled: boolean) => { settingsState.tmdbEnabled = enabled },
   getTvdbEnabled: () => settingsState.tvdbEnabled,
   setTvdbEnabled: (enabled: boolean) => { settingsState.tvdbEnabled = enabled },
   getPerfMode: () => settingsState.perfMode,
   setPerfMode: (on: boolean) => { settingsState.perfMode = on },
-  getAccent: () => settingsState.accent,
-  setAccent: (accent: string) => { settingsState.accent = accent },
-  ACCENT_PRESETS: ["fuchsia", "rose", "ember", "emerald", "cyan", "blue", "violet"],
-  ACCENT_RANDOM_ID: "random",
   getDensity: () => settingsState.density,
   setDensity: (density: string) => { settingsState.density = density },
   DENSITY_PRESETS: { compact: 0.75, cozy: 1, comfortable: 1.3 },
@@ -92,8 +148,6 @@ vi.mock("@/scripts/lib/app-settings.js", () => ({
   setHubStripIds: (ids: string[]) => { settingsState.hubStripIds = ids },
   getUiSoundsEnabled: () => settingsState.uiSounds,
   setUiSoundsEnabled: (on: boolean) => { settingsState.uiSounds = on },
-  getHapticsEnabled: () => settingsState.haptics,
-  setHapticsEnabled: (on: boolean) => { settingsState.haptics = on },
   getContentLanguage: () => settingsState.contentLanguage,
   setContentLanguage: (tag: string) => { settingsState.contentLanguage = tag },
   getLanguageGroupingEnabled: () => settingsState.languageGrouping,
@@ -128,13 +182,12 @@ vi.mock("@/scripts/lib/app-settings.js", () => ({
   setCloseToTray: (on: boolean) => { settingsState.closeToTray = on },
   getDevModeEnabled: () => settingsState.devMode,
   setDevModeEnabled: (on: boolean) => { settingsState.devMode = on },
-  getDiscordClientId: () => settingsState.discordClientId,
-  setDiscordClientId: (id: string) => { settingsState.discordClientId = id },
-  isDiscordEnabledForPlaylist: (playlistId: string) => !settingsState.discordMuted.has(playlistId),
-  setDiscordEnabledForPlaylist: (playlistId: string, on: boolean) => {
-    if (on) settingsState.discordMuted.delete(playlistId)
-    else settingsState.discordMuted.add(playlistId)
-  },
+  getAiEndpoint: () => settingsState.aiEndpoint,
+  setAiEndpoint: (endpoint: string) => { settingsState.aiEndpoint = endpoint },
+  getAiModel: () => settingsState.aiModel,
+  setAiModel: (model: string) => { settingsState.aiModel = model },
+  getAiEnabled: () => settingsState.aiEnabled,
+  setAiEnabled: (enabled: boolean) => { settingsState.aiEnabled = enabled },
   getReceiverDeviceName: () => settingsState.receiverDeviceName,
   setReceiverDeviceName: (name: string) => { settingsState.receiverDeviceName = name },
   getReceiverModeEnabled: () => settingsState.receiverMode,
@@ -227,15 +280,14 @@ beforeEach(() => {
     playerPaths: { mpv: "", vlc: "" },
     playerExtraArgs: { mpv: [], vlc: [] },
     playerReuse: { mpv: false, vlc: false },
-    tmdbKey: "",
+    ffmpegPath: "",
+    livetvResumeLast: false,
     tmdbEnabled: false,
     tvdbEnabled: true,
     perfMode: false,
-    accent: "fuchsia",
     density: "cozy",
     hubStripIds: ["continue-watching"],
     uiSounds: true,
-    haptics: true,
     contentLanguage: "",
     languageGrouping: true,
     videoScale: "fit",
@@ -251,13 +303,17 @@ beforeEach(() => {
     autoUpdate: true,
     closeToTray: true,
     devMode: false,
-    discordClientId: "",
-    discordMuted: new Set<string>(),
+    aiEndpoint: "https://api.openai.com/v1",
+    aiModel: "",
+    aiEnabled: false,
     receiverDeviceName: "",
     receiverMode: false,
     receiverBoot: false,
     receiverEngine: "auto",
   }
+  aiState = { provider: "openai", shareTaste: false, autoRequests: false }
+  followedStoreData = { subs: [], notifs: [], meta: new Map() }
+  followedSettings = { enabled: true, interval: 6 }
   credsState = {
     entries: [
       { _id: "src-1", type: "xtream", serverUrl: "http://host", username: "u", password: "p" },
@@ -288,13 +344,12 @@ describe("exportAll", () => {
     expect(snapshot.localContent["src-1"]).toBeUndefined()
   })
 
-  it("includes the TMDb key and enabled flag", async () => {
-    settingsState.tmdbKey = "abc123"
+  it("never exports the TMDb key (0.11.4: no plaintext key in the file), but keeps the enabled flag", async () => {
     settingsState.tmdbEnabled = true
 
     const snapshot = (await exportAll()) as any
 
-    expect(snapshot.appSettings.tmdbKey).toBe("abc123")
+    expect(snapshot.appSettings.tmdbKey).toBeUndefined()
     expect(snapshot.appSettings.tmdbEnabled).toBe(true)
   })
 
@@ -306,17 +361,18 @@ describe("exportAll", () => {
     expect(snapshot.appSettings.tvdbEnabled).toBe(false)
   })
 
-  it("includes the display/UX group", async () => {
-    settingsState.accent = "rose"
+  it("includes the display/UX group without dead theme/accent/haptics stores", async () => {
     settingsState.density = "compact"
     settingsState.perfMode = true
 
     const snapshot = (await exportAll()) as any
 
-    expect(snapshot.appSettings.display.accent).toBe("rose")
     expect(snapshot.appSettings.display.density).toBe("compact")
     expect(snapshot.appSettings.display.perfMode).toBe(true)
     expect(snapshot.appSettings.display.hubStrips).toEqual(["continue-watching"])
+    expect(snapshot.appSettings.display.theme).toBeUndefined()
+    expect(snapshot.appSettings.display.accent).toBeUndefined()
+    expect(snapshot.appSettings.display.haptics).toBeUndefined()
   })
 
   it("includes only user-set EPG offsets, keyed by entry id", async () => {
@@ -336,12 +392,104 @@ describe("exportAll", () => {
     expect(snapshot.tvDevices).toEqual([sampleTvDevice])
   })
 
-  it("includes only muted discord playlist ids", async () => {
-    settingsState.discordMuted.add("src-1")
+  it("does not export the discord block (no UI sets it)", async () => {
+    const snapshot = (await exportAll()) as any
+
+    expect(snapshot.appSettings.discord).toBeUndefined()
+  })
+
+  it("includes followed subscriptions, notifications, check settings and last-check time", async () => {
+    followedStoreData.subs = [
+      {
+        key: "src-1::42",
+        playlistId: "src-1",
+        seriesId: "42",
+        seriesTitle: "Example Show",
+        posterUrl: null,
+        sourceKind: "xtream",
+        followedAt: "2026-11-01T00:00:00.000Z",
+        baseline: [{ season: 1, episode: 1, episodeId: 7, title: "Pilot" }],
+        baselineUpdatedAt: "2026-11-01T00:00:00.000Z",
+        lastCheckAt: null,
+        lastCheckStatus: "ok",
+        consecutiveFailures: 0,
+        nextCheckNotBefore: null,
+        needsRebaseline: false,
+      },
+    ]
+    followedStoreData.notifs = [
+      {
+        id: "src-1::42::2026-11-10T00:00:00.000Z",
+        seriesId: "42",
+        seriesTitle: "Example Show",
+        season: 2,
+        episode: 1,
+        detectedAt: "2026-11-10T00:00:00.000Z",
+        posterUrl: null,
+        watched: false,
+        episodes: [],
+      },
+    ]
+    followedStoreData.meta.set("lastCheckAt", "2026-11-10T12:00:00.000Z")
+    followedSettings.enabled = true
+    followedSettings.interval = 12
 
     const snapshot = (await exportAll()) as any
 
-    expect(snapshot.appSettings.discord.mutedPlaylistIds).toEqual(["src-1"])
+    expect(snapshot.followed.subscriptions).toHaveLength(1)
+    expect(snapshot.followed.subscriptions[0].seriesTitle).toBe("Example Show")
+    expect(snapshot.followed.notifications).toHaveLength(1)
+    expect(snapshot.followed.checkEnabled).toBe(true)
+    expect(snapshot.followed.checkIntervalHours).toBe(12)
+    expect(snapshot.followed.lastCheckAt).toBe("2026-11-10T12:00:00.000Z")
+  })
+
+  it("includes AI config (endpoint/model/provider/share/auto/enabled) and the FFmpeg path", async () => {
+    settingsState.aiEndpoint = "https://example.invalid/v1"
+    settingsState.aiModel = "gpt-4o-mini"
+    settingsState.aiEnabled = true
+    settingsState.ffmpegPath = "C:\\ffmpeg\\bin\\ffmpeg.exe"
+    settingsState.livetvResumeLast = true
+    aiState.provider = "other"
+    aiState.shareTaste = true
+    aiState.autoRequests = true
+
+    const snapshot = (await exportAll()) as any
+
+    expect(snapshot.ai).toEqual({
+      endpoint: "https://example.invalid/v1",
+      model: "gpt-4o-mini",
+      provider: "other",
+      shareTaste: true,
+      autoRequests: true,
+      enabled: true,
+    })
+    expect(snapshot.appSettings.playback.ffmpegPath).toBe("C:\\ffmpeg\\bin\\ffmpeg.exe")
+    expect(snapshot.appSettings.behavior.livetvResumeLast).toBe(true)
+  })
+
+  it("includes every nylah_* profiles key from localStorage", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      get length() { return [...this.store.keys()].length }
+      key(index: number) { return [...this.store.keys()][index] ?? null }
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    memoryStorage.setItem("nylah_profiles_v1", JSON.stringify({ profiles: [{ id: "shared" }] }))
+    memoryStorage.setItem("nylah_profile_active_v1", "shared")
+    memoryStorage.setItem("xt_tmdb_enabled", "")
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      const snapshot = (await exportAll()) as any
+      expect(snapshot.profiles.keys["nylah_profiles_v1"]).toContain("shared")
+      expect(snapshot.profiles.keys["nylah_profile_active_v1"]).toBe("shared")
+      expect(snapshot.profiles.keys["xt_tmdb_enabled"]).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 
@@ -377,18 +525,23 @@ describe("importAll", () => {
     await expect(importAll({ version: 1 })).rejects.toThrow(/format marker/)
   })
 
-  it("round-trips the TMDb key and enabled flag through export then import", async () => {
-    settingsState.tmdbKey = "abc123"
+  it("round-trips the TMDb enabled flag but never restores a key from an old backup", async () => {
     settingsState.tmdbEnabled = true
     const snapshot = await exportAll()
-    settingsState.tmdbKey = ""
     settingsState.tmdbEnabled = false
 
-    const summary = await importAll(snapshot)
+    await importAll(snapshot)
 
-    expect(settingsState.tmdbKey).toBe("abc123")
     expect(settingsState.tmdbEnabled).toBe(true)
-    expect(summary.appSettings).toBeGreaterThan(0)
+    // An old backup that still carries a plaintext key must not apply it.
+    await importAll({
+      format: "extreme-infinitv-backup",
+      version: 1,
+      creds: { entries: [], selectedId: "" },
+      prefs: {},
+      appSettings: { tmdbKey: "leaked-key", tmdbEnabled: false },
+    })
+    expect(settingsState.tmdbEnabled).toBe(false)
   })
 
   it("round-trips the TVDb enabled flag through export then import", async () => {
@@ -415,47 +568,51 @@ describe("importAll", () => {
     expect(settingsState.tvdbEnabled).toBe(true)
   })
 
-  it("clears the TMDb key when the backup carries an empty string", async () => {
-    settingsState.tmdbKey = "old-key"
+  it("clears the TMDb enabled flag when the backup carries false", async () => {
+    settingsState.tmdbEnabled = true
 
     await importAll({
       format: "extreme-infinitv-backup",
       version: 1,
       creds: { entries: [], selectedId: "" },
       prefs: {},
-      appSettings: { tmdbKey: "" },
+      appSettings: { tmdbEnabled: false },
     })
 
-    expect(settingsState.tmdbKey).toBe("")
+    expect(settingsState.tmdbEnabled).toBe(false)
   })
 
   it("round-trips the display/UX group", async () => {
-    settingsState.accent = "cyan"
     settingsState.density = "comfortable"
     settingsState.uiSounds = false
     settingsState.hubStripIds = ["favorites", "watchlist"]
     const snapshot = await exportAll()
-    settingsState.accent = "fuchsia"
     settingsState.density = "cozy"
     settingsState.uiSounds = true
     settingsState.hubStripIds = ["continue-watching"]
 
     await importAll(snapshot)
 
-    expect(settingsState.accent).toBe("cyan")
     expect(settingsState.density).toBe("comfortable")
     expect(settingsState.uiSounds).toBe(false)
     expect(settingsState.hubStripIds).toEqual(["favorites", "watchlist"])
   })
 
-  it("round-trips the random accent sentinel", async () => {
-    settingsState.accent = "random"
-    const snapshot = await exportAll()
-    settingsState.accent = "fuchsia"
+  it("ignores legacy theme/accent/haptics fields in old backups", async () => {
+    await importAll({
+      format: "extreme-infinitv-backup",
+      version: 1,
+      creds: { entries: [], selectedId: "" },
+      prefs: {},
+      appSettings: {
+        display: { theme: "light", accent: "violet", haptics: false },
+      },
+    })
 
-    await importAll(snapshot)
-
-    expect(settingsState.accent).toBe("random")
+    // No throw, no state to assert: the mock has no accent/haptics store
+    // because nothing reads them any more. The point is the import still
+    // succeeds and leaves the rest of the backup intact.
+    expect(settingsState.density).toBe("cozy")
   })
 
   it("round-trips the language group through the i18n setter", async () => {
@@ -468,18 +625,22 @@ describe("importAll", () => {
     expect(setLocale).toHaveBeenCalledWith("de")
   })
 
-  it("round-trips playback and behavior fields", async () => {
+  it("round-trips playback and behavior fields, including FFmpeg path and resume-last", async () => {
     settingsState.videoScale = "zoom"
     settingsState.monoAudio = true
     settingsState.externalPlayerPref = "vlc"
     settingsState.progressRetentionDays = 30
     settingsState.updateChannel = "beta"
+    settingsState.ffmpegPath = "C:\\ffmpeg\\bin\\ffmpeg.exe"
+    settingsState.livetvResumeLast = true
     const snapshot = await exportAll()
     settingsState.videoScale = "fit"
     settingsState.monoAudio = false
     settingsState.externalPlayerPref = "mpv"
     settingsState.progressRetentionDays = 90
     settingsState.updateChannel = "stable"
+    settingsState.ffmpegPath = ""
+    settingsState.livetvResumeLast = false
 
     await importAll(snapshot)
 
@@ -488,31 +649,143 @@ describe("importAll", () => {
     expect(settingsState.externalPlayerPref).toBe("vlc")
     expect(settingsState.progressRetentionDays).toBe(30)
     expect(settingsState.updateChannel).toBe("beta")
+    expect(settingsState.ffmpegPath).toBe("C:\\ffmpeg\\bin\\ffmpeg.exe")
+    expect(settingsState.livetvResumeLast).toBe(true)
   })
 
-  it("round-trips the discord client id and only restores muted ids for imported entries", async () => {
-    settingsState.discordClientId = "123456"
-    settingsState.discordMuted.add("src-1")
-    const snapshot = await exportAll()
-    settingsState.discordClientId = ""
-    settingsState.discordMuted.clear()
-
-    await importAll(snapshot)
-
-    expect(settingsState.discordClientId).toBe("123456")
-    expect(settingsState.discordMuted.has("src-1")).toBe(true)
-  })
-
-  it("ignores a muted discord playlist id absent from the imported entries", async () => {
+  it("ignores a legacy discord block in old backups", async () => {
     await importAll({
       format: "extreme-infinitv-backup",
       version: 1,
       creds: { entries: [{ _id: "src-1", type: "xtream" }], selectedId: "src-1" },
       prefs: {},
-      appSettings: { discord: { mutedPlaylistIds: ["unknown-id"] } },
+      appSettings: { discord: { clientId: "123456", mutedPlaylistIds: ["src-1"] } },
     })
 
-    expect(settingsState.discordMuted.has("unknown-id")).toBe(false)
+    expect(settingsState.updateChannel).toBe("stable")
+  })
+
+  it("round-trips followed series, check settings and last-check time through export then import", async () => {
+    followedStoreData.subs = [
+      {
+        key: "src-1::42",
+        playlistId: "src-1",
+        seriesId: "42",
+        seriesTitle: "Example Show",
+        posterUrl: null,
+        sourceKind: "xtream",
+        followedAt: "2026-11-01T00:00:00.000Z",
+        baseline: [{ season: 1, episode: 1, episodeId: 7, title: "Pilot" }],
+        baselineUpdatedAt: "2026-11-01T00:00:00.000Z",
+        lastCheckAt: null,
+        lastCheckStatus: "ok",
+        consecutiveFailures: 0,
+        nextCheckNotBefore: null,
+        needsRebaseline: false,
+      },
+    ]
+    followedStoreData.notifs = [
+      {
+        id: "src-1::42::2026-11-10T00:00:00.000Z",
+        seriesId: "42",
+        seriesTitle: "Example Show",
+        episodes: [{ seriesId: "42", season: 2, episode: 1 }],
+        detectedAt: "2026-11-10T00:00:00.000Z",
+        read: false,
+        dismissed: false,
+      },
+    ]
+    followedStoreData.meta.set("lastCheckAt", "2026-11-10T12:00:00.000Z")
+    followedSettings.enabled = false
+    followedSettings.interval = 24
+    const snapshot = await exportAll()
+    // Simulate a reset: wipe the store and the flags.
+    followedStoreData = { subs: [], notifs: [], meta: new Map() }
+    followedSettings = { enabled: true, interval: 6 }
+
+    await importAll(snapshot)
+
+    expect(followedStoreData.subs).toHaveLength(1)
+    expect(followedStoreData.subs[0].seriesTitle).toBe("Example Show")
+    expect(followedStoreData.notifs).toHaveLength(1)
+    expect(followedSettings.enabled).toBe(false)
+    expect(followedSettings.interval).toBe(24)
+    expect(followedStoreData.meta.get("lastCheckAt")).toBe("2026-11-10T12:00:00.000Z")
+  })
+
+  it("skips a malformed followed subscription instead of failing the restore", async () => {
+    await importAll({
+      format: "extreme-infinitv-backup",
+      version: 1,
+      creds: { entries: [], selectedId: "" },
+      prefs: {},
+      followed: {
+        subscriptions: [{ key: "broken" }],
+        notifications: [{ id: "also-broken" }],
+        checkEnabled: true,
+        checkIntervalHours: 6,
+        lastCheckAt: null,
+      },
+    })
+
+    expect(followedStoreData.subs).toEqual([])
+    expect(followedStoreData.notifs).toEqual([])
+    expect(followedSettings.enabled).toBe(true)
+  })
+
+  it("round-trips profiles (nylah_* keys) through export then import", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      get length() { return [...this.store.keys()].length }
+      key(index: number) { return [...this.store.keys()][index] ?? null }
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    memoryStorage.setItem("nylah_profiles_v1", JSON.stringify({ profiles: [{ id: "ciaran" }] }))
+    memoryStorage.setItem("nylah_profile_active_v1", "ciaran")
+    memoryStorage.setItem("nylah_profile_data_ciaran_v1", JSON.stringify({ history: [] }))
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      const snapshot = await exportAll()
+      memoryStorage.removeItem("nylah_profiles_v1")
+      memoryStorage.removeItem("nylah_profile_active_v1")
+      memoryStorage.removeItem("nylah_profile_data_ciaran_v1")
+
+      await importAll(snapshot)
+
+      expect(memoryStorage.getItem("nylah_profiles_v1")).toContain("ciaran")
+      expect(memoryStorage.getItem("nylah_profile_active_v1")).toBe("ciaran")
+      expect(memoryStorage.getItem("nylah_profile_data_ciaran_v1")).toContain("history")
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("round-trips AI config through export then import", async () => {
+    settingsState.aiEndpoint = "https://example.invalid/v1"
+    settingsState.aiModel = "gpt-4o-mini"
+    settingsState.aiEnabled = true
+    aiState.provider = "other"
+    aiState.shareTaste = true
+    aiState.autoRequests = true
+    const snapshot = await exportAll()
+    settingsState.aiEndpoint = "https://api.openai.com/v1"
+    settingsState.aiModel = ""
+    settingsState.aiEnabled = false
+    aiState.provider = "openai"
+    aiState.shareTaste = false
+    aiState.autoRequests = false
+
+    await importAll(snapshot)
+
+    expect(settingsState.aiEndpoint).toBe("https://example.invalid/v1")
+    expect(settingsState.aiModel).toBe("gpt-4o-mini")
+    expect(settingsState.aiEnabled).toBe(true)
+    expect(aiState.provider).toBe("other")
+    expect(aiState.shareTaste).toBe(true)
+    expect(aiState.autoRequests).toBe(true)
   })
 
   it("round-trips the receiver device name, mode and boot flag", async () => {

@@ -58,6 +58,9 @@ export interface SessionSnapshotInputs {
   locale: string | null
   playlistCount: number | null
   activePlaylistEntry: SessionSnapshotPlaylistEntry | null
+  /** Raw display-diagnostics line captured by the Settings page (0.11.4:
+   * it no longer renders on the About surface — diagnostics export only). */
+  displayDiagnostics: string | null
 }
 
 export interface SessionSnapshot {
@@ -89,6 +92,7 @@ export interface SessionSnapshot {
   activePlaylistType: string | null
   activePlaylistMirrorsConfigured: boolean | null
   activePlaylistLiveContainer: string | null
+  displayDiagnostics: string | null
 }
 
 function derivePlatformFamily(
@@ -143,6 +147,7 @@ export function buildSessionSnapshot(inputs: SessionSnapshotInputs): SessionSnap
       isXtream && typeof activeEntry?.liveContainer === "string"
         ? activeEntry.liveContainer
         : null,
+    displayDiagnostics: inputs.displayDiagnostics ?? null,
   }
 }
 
@@ -245,6 +250,12 @@ async function gatherInputs(): Promise<SessionSnapshotInputs> {
     locale: safeSync(() => getActiveLocale(), null),
     playlistCount: Array.isArray(entries) ? entries.length : null,
     activePlaylistEntry: activeEntry as SessionSnapshotPlaylistEntry | null,
+    // Set by the Settings page (window.__xtDisplayDiagnostics); null on
+    // pages that never ran it — the export still carries everything else.
+    displayDiagnostics: safeSync(
+      () => (window as any).__xtDisplayDiagnostics ?? null,
+      null
+    ),
   }
 }
 

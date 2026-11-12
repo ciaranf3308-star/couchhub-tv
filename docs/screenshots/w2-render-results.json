@@ -1,0 +1,73 @@
+{
+  "w2-checks": {
+    "monoRowGone": true,
+    "tmdbState": "On, no key — enrichment inactive. Add a key below.",
+    "tmdbStateVisible": true,
+    "aiHeader": "Only your question and a short list of candidate titles go to your provider — never your watch history, credentials or stream links, unless you switch sharing on below. Billed separately by your provider; a ChatGPT subscription does not cover API use.",
+    "costRowGone": true,
+    "setupStepsGone": true,
+    "modelControlPresent": true,
+    "modelCustomHiddenInitially": false,
+    "uaOverrideNotePresent": true,
+    "displayDiagGone": true,
+    "resumeLiveTv": true,
+    "resumePlayback": true,
+    "resumeOnPressed": "true",
+    "followedErrorPresent": true,
+    "forkBugLink": true,
+    "forkFeedbackLink": true,
+    "upstreamIssueLink": false,
+    "resetDialogBody": "This wipes all playlists, favorites, recents, watched progress, profiles, app settings and cached lists. A snapshot is saved just before the reset: Restore last backup brings back everything above except the TMDb key (never stored in a backup — re-enter it) and cached lists (they rebuild on the next refresh). Without that snapshot, the wipe is permanent.",
+    "backupHelper": "Save playlists, favorites, recents, watched progress, hidden categories, followed series, profiles and app settings to a file. The TMDb key and the AI key are never included — keep them safe separately. Cache and the downloads queue are not exported.",
+    "aiBadgePresent": true,
+    "aiBadgeHiddenWhenNoKey": true,
+    "aiKeyInputType": "password",
+    "aiKeyInputValue": "",
+    "tmdbKeyInputType": "password",
+    "noAiReveal": true,
+    "noTmdbReveal": true,
+    "aiStatusLine": "AI not set up",
+    "aiKeyStatusLine": "No key saved.",
+    "aiTestMsgEmpty": true,
+    "noNotSetUpLie": true
+  },
+  "scroll:w2-01-ai-discovery": {
+    "target": "#card-ai-discovery",
+    "found": true
+  },
+  "scroll:w2-02-tmdb": {
+    "target": "#card-tmdb",
+    "found": true
+  },
+  "scroll:w2-03-network-ua": {
+    "target": "#card-network",
+    "found": true
+  },
+  "scroll:w2-04-followed": {
+    "target": "#card-followed",
+    "found": true
+  },
+  "scroll:w2-05-playback-resume": {
+    "target": "#playback-section",
+    "found": true
+  },
+  "scroll:w2-06-livetv-resume": {
+    "target": "#card-livetv",
+    "found": true
+  },
+  "scroll:w2-07-backup": {
+    "target": "#card-backup",
+    "found": true
+  },
+  "scroll:w2-08-about": {
+    "target": "#update-section",
+    "found": true
+  },
+  "scroll:w2-09-danger": {
+    "target": "#settings-danger",
+    "found": true
+  },
+  "reset-dialog-open": {
+    "dialogOpen": true
+  }
+}

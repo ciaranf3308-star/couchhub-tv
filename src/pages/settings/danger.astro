@@ -21,7 +21,7 @@ import {
           <h3 data-i18n="settings.danger.heading" class="text-base font-semibold text-bad">Reset everything</h3>
         </div>
         <p data-i18n-html="settings.danger.helperLong" class="text-sm text-fg-2">
-          Wipes <span class="text-fg font-medium">all</span> app data: playlists, cached lists, favorites, recents, and locally stored EPG references. Next launch starts from a clean slate.
+          Wipes <span class="text-fg font-medium">all</span> app data: playlists, favorites, recents, watched progress, profiles, app settings and cached lists. A snapshot is saved first — Restore last backup below brings it back, except the TMDb key and cached lists.
         </p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
           <button id="settings-reset-all" type="button" class="btn-danger justify-start sm:justify-center">
@@ -34,7 +34,7 @@ import {
           </button>
         </div>
         <p id="settings-restore-last-helper" data-i18n="settings.danger.restoreLastHelper" class="text-2xs text-fg-3" hidden>
-          Restores the snapshot saved automatically at your last export or right before your last reset.
+          Restores the snapshot saved automatically at your last export or right before your last reset: playlists, favorites, recents, progress, followed series, profiles and app settings. It does not restore the TMDb key or cached lists.
         </p>
         <span
           id="settings-reset-msg"
@@ -60,8 +60,7 @@ import {
             Reset everything?
           </h2>
           <p id="settings-reset-desc" data-i18n-html="settings.danger.dialogBody" class="text-sm text-fg-2">
-            This wipes <span class="text-fg font-medium">all</span> playlists, favorites,
-            recents, and cached lists. This can't be undone.
+            This wipes <span class="text-fg font-medium">all</span> playlists, favorites, recents, watched progress, profiles, app settings and cached lists. A snapshot is saved just before the reset: Restore last backup brings back everything above except the TMDb key (never stored in a backup — re-enter it) and cached lists (they rebuild on the next refresh). Without that snapshot, the wipe is permanent.
           </p>
         </div>
       </div>

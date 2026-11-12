@@ -83,7 +83,7 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
       { label: "HEVC video", keywords: "hevc h265 video extension install", anchor: "card-hevc" },
       { label: "Preferred audio language", keywords: "preferred audio language content", anchor: "card-content-language" },
       { label: "Group language variants", keywords: "group language variants channels", anchor: "card-lang-grouping" },
-      { label: "Mono audio", keywords: "mono audio downmix single earbud", anchor: "card-mono-audio" },
+      { label: "Resume last channel", keywords: "resume last channel reopen start", anchor: "card-resume-last-channel" },
       { label: "Captions on by default", keywords: "captions subtitles default", anchor: "card-captions-auto" },
       { label: "Continue watching", keywords: "continue watching retention keep paused", anchor: "card-progress-retention" },
     ],
@@ -96,7 +96,7 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     desc: "Channels, EPG, categories and favourites",
     keywords: "live tv channels epg time zone column width categories hidden channel edits favorites reorder resume last channel",
     items: [
-      { label: "Resume last channel", keywords: "resume last channel reopen start", anchor: "card-resume-last-channel" },
+      { label: "Resume last channel", keywords: "resume last channel reopen start", anchor: "card-resume-last-channel-livetv" },
       { label: "Channel column width", keywords: "channel column width layout", anchor: "card-livetv-layout" },
       { label: "EPG time zone", keywords: "epg time zone offset", anchor: "epg-tz-section" },
       { label: "Categories", keywords: "categories hidden hide", anchor: "card-categories" },

@@ -379,6 +379,9 @@ const META_STORE = "meta"
 const META_LAST_CHECK = "lastCheckAt"
 const META_CHECK_LOCK = "checkLock"
 
+/** IndexedDB meta key for the last followed-check timestamp (shared with backup.js). */
+export const FOLLOWED_LAST_CHECK_META_KEY = META_LAST_CHECK
+
 export function createMemoryFollowedStore(): FollowedStore {
   const subs = new Map<string, FollowedSubscription>()
   const notifs = new Map<string, FollowedNotificationGroup>()

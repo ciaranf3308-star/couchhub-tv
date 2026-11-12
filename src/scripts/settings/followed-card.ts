@@ -25,19 +25,37 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   return tauriInvoke<T>(command, args)
 }
 
-/** Push the current setting to the Windows Scheduled Task (no-op elsewhere). */
-async function syncScheduledTask(): Promise<void> {
-  if (!isTauri || !isWindows) return
+/** Push the current setting to the Windows Scheduled Task (no-op elsewhere).
+ * Returns true when the task is in the requested state. On failure the
+ * toggle must SHOW it (0.11.4): a toast alone leaves the toggle claiming
+ * On while the while-closed checks never run. */
+async function syncScheduledTask(): Promise<boolean> {
+  if (!isTauri || !isWindows) return true
   try {
     await invoke("followed_schedule_set", {
       enabled: getFollowedCheckEnabled(),
       intervalHours: getFollowedCheckIntervalHours(),
     })
+    setTaskError(null)
+    return true
   } catch (err) {
     // Startup repair retries on the next launch; never block Settings on it.
     log.warn("[xt:followed] scheduled-task sync failed (will retry on next launch):", err)
     toastError(t("settings.followed.taskSyncFailed"))
+    setTaskError(t("settings.followed.taskSyncFailed"))
+    return false
   }
+}
+
+/** Persistent inline failure line next to the scheduled-checks toggle.
+ * Null clears it. The toggle stays where the user put it (in-app checks
+ * follow the stored flag); this line is what says the Windows task — the
+ * while-closed part — did not update. */
+function setTaskError(message: string | null): void {
+  const errorEl = document.getElementById("settings-followed-task-error")
+  if (!errorEl) return
+  errorEl.textContent = message ?? ""
+  errorEl.classList.toggle("hidden", !message)
 }
 
 function paintSeg(
@@ -76,6 +94,15 @@ function init(): void {
   const scheduledGroup = document.getElementById("settings-followed-scheduled")
   const intervalGroup = document.getElementById("settings-followed-interval")
   const checkNowBtn = document.getElementById("settings-followed-check-now")
+
+  // The Windows Scheduled Task only exists on the Windows desktop app.
+  // Elsewhere the copy must not promise one: checks run while the app is
+  // open, and the task note (Windows-only) is hidden.
+  if (!isTauri || !isWindows) {
+    const hintEl = document.getElementById("settings-followed-scheduled-hint")
+    if (hintEl) hintEl.textContent = t("settings.followed.scheduledHintNonWindows")
+    document.getElementById("settings-followed-task-note")?.classList.add("hidden")
+  }
 
   const paint = () => {
     paintSeg(

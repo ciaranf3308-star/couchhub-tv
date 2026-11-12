@@ -15,10 +15,12 @@
  *    branch), NOT a fix for the purple report: nothing here claims the
  *    report's cause is found.
  * 2. The packaged build's live theme values were unobservable without
- *    devtools, so Settings now surfaces them in the App update card
+ *    devtools, so Settings captured them for a one-photo check on the PC
  *    (computed scheme, painted html background, --color-bg token, OS
- *    scheme, linked-stylesheet load count, WebView Chrome version) for a
- *    one-photo check on the PC.
+ *    scheme, linked-stylesheet load count, WebView Chrome version).
+ *    0.11.4 moved that raw line off the About surface into the
+ *    diagnostics export only (window.__xtDisplayDiagnostics, carried by
+ *    diagnostic-snapshot.ts into snapshot.json).
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -64,9 +66,20 @@ describe("CouchLayout pre-paint theme pin (0.11.2 W2)", () => {
   });
 });
 
-describe("Settings display diagnostics (0.11.2 W2)", () => {
-  it("renders a diagnostics line in the App update card", () => {
-    expect(settings).toContain('id="update-display-diag"');
+describe("Settings display diagnostics (0.11.2 W2, moved 0.11.4)", () => {
+  it("no longer renders the raw diagnostics line on the About surface", () => {
+    expect(settings).not.toContain('id="update-display-diag"');
+    expect(settings).not.toContain("Display: checking…");
+  });
+
+  it("captures the line for the diagnostics export instead", () => {
+    expect(settings).toContain("window.__xtDisplayDiagnostics");
+    const snapshot = readFileSync(
+      join(repo, "src/scripts/lib/diagnostic-snapshot.ts"),
+      "utf8",
+    );
+    expect(snapshot).toContain("displayDiagnostics");
+    expect(snapshot).toContain("__xtDisplayDiagnostics");
   });
 
   it("fills it with the live computed theme values", () => {

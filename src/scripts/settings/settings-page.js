@@ -60,6 +60,7 @@
     import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
     import {
       UA_PRESETS,
+      resolveUserAgentSelection,
       getUserAgent,
       setUserAgent,
       getDownloadDir,
@@ -72,10 +73,10 @@
       setPerfMode,
       getUiSoundsEnabled,
       setUiSoundsEnabled,
-      getMonoAudioEnabled,
-      setMonoAudioEnabled,
       getCaptionsAutoEnabled,
       setCaptionsAutoEnabled,
+      getLivetvResumeLastChannel,
+      setLivetvResumeLastChannel,
       getDensity,
       setDensity,
       getProgressRetentionDays,
@@ -114,6 +115,7 @@
       setTmdbApiKey,
       getTmdbEnabled,
       setTmdbEnabled,
+      getTmdbEnrichmentState,
       getTvdbEnabled,
       setTvdbEnabled,
       getAiEndpoint,
@@ -136,6 +138,7 @@
       setAiAutoRequests,
       getAiProvider,
       setAiProvider,
+      resolveAiModelControl,
       AI_MODE_LABELS,
       OPENAI_ENDPOINT,
       OPENAI_KEYS_URL,
@@ -1235,24 +1238,33 @@
     initRenderingCard()
 
     // ---------------------------------------------------------------------
-    // Mono audio
+    // Resume last channel on entering Live TV (0.11.4). One store
+    // (xt_livetv_resume_last), two copies of the control — the Live TV
+    // surface and the Playback surface — kept in sync here.
     // ---------------------------------------------------------------------
-    const monoAudioGroup = document.getElementById("settings-mono-audio")
-    function syncMonoAudioButtons() {
-      const current = getMonoAudioEnabled()
-      for (const btn of monoAudioGroup?.querySelectorAll(".mono-audio-btn") || []) {
-        const isOn = btn.dataset.mono === "on"
-        btn.setAttribute("aria-pressed", String(isOn === current))
+    const resumeLastGroups = [
+      document.getElementById("settings-resume-last-livetv"),
+      document.getElementById("settings-resume-last-playback"),
+    ]
+    function syncResumeLastButtons() {
+      const current = getLivetvResumeLastChannel()
+      for (const group of resumeLastGroups) {
+        for (const btn of group?.querySelectorAll(".resume-last-btn") || []) {
+          const isOn = btn.dataset.resume === "on"
+          btn.setAttribute("aria-pressed", String(isOn === current))
+        }
       }
     }
-    monoAudioGroup?.addEventListener("click", (event) => {
-      const target = /** @type {HTMLElement} */ (event.target)
-      const btn = target.closest(".mono-audio-btn")
-      if (!btn) return
-      setMonoAudioEnabled(btn.dataset.mono === "on")
-      syncMonoAudioButtons()
-    })
-    syncMonoAudioButtons()
+    for (const group of resumeLastGroups) {
+      group?.addEventListener("click", (event) => {
+        const target = /** @type {HTMLElement} */ (event.target)
+        const btn = target.closest(".resume-last-btn")
+        if (!btn) return
+        setLivetvResumeLastChannel(btn.dataset.resume === "on")
+        syncResumeLastButtons()
+      })
+    }
+    syncResumeLastButtons()
 
     // ---------------------------------------------------------------------
     // Captions on by default
@@ -1609,6 +1621,21 @@
     )
     const uaMsgEl = document.getElementById("ua-msg")
 
+    // A non-empty custom string overrides the preset — the override must
+    // be visible, never silent (0.11.4). The note is persistent (not a
+    // fading flashMsg) because it describes the live effective value.
+    const uaOverrideNoteEl = document.getElementById("ua-override-note")
+    function syncUaOverrideNote() {
+      if (!uaOverrideNoteEl) return
+      const { overriddenByCustom } = resolveUserAgentSelection(
+        uaPresetEl?.value ?? "",
+        uaCustomEl?.value ?? ""
+      )
+      uaOverrideNoteEl.textContent = overriddenByCustom
+        ? "Custom override is active — it overrides the preset above. Clear it to use the preset."
+        : ""
+    }
+
     if (uaPresetEl) {
       for (const p of UA_PRESETS) {
         const opt = document.createElement("option")
@@ -1634,12 +1661,32 @@
 
     function readUaFromForm() {
       if (!uaPresetEl) return ""
-      const custom = (uaCustomEl?.value || "").trim()
-      if (custom) return custom
-      if (uaPresetEl.value === "custom") return ""
-      const preset = UA_PRESETS.find((p) => p.id === uaPresetEl.value)
-      return preset ? preset.value : ""
+      return resolveUserAgentSelection(uaPresetEl.value, uaCustomEl?.value ?? "")
+        .value
     }
+
+    // Picking a preset applies it on selection (0.11.4) — no Save tap
+    // needed. With a custom override typed, the preset is recorded as the
+    // fallback but the override stays effective and the note says so.
+    uaPresetEl?.addEventListener("change", () => {
+      const { value, overriddenByCustom } = resolveUserAgentSelection(
+        uaPresetEl.value,
+        uaCustomEl?.value ?? ""
+      )
+      if (!overriddenByCustom) {
+        setUserAgent(value)
+        flashMsg(
+          uaMsgEl,
+          isTauri
+            ? "Saved. Reload pages to apply."
+            : "Saved. Active in the desktop build only."
+        )
+      }
+      syncUaOverrideNote()
+    })
+
+    uaCustomEl?.addEventListener("input", syncUaOverrideNote)
+    syncUaOverrideNote()
 
     uaSaveBtn?.addEventListener("click", () => {
       setUserAgent(readUaFromForm())
@@ -1650,6 +1697,7 @@
           : "Saved. Active in the desktop build only."
       )
       flashSuccess(uaSaveBtn)
+      syncUaOverrideNote()
     })
 
     // ---------------------------------------------------------------------
@@ -2084,15 +2132,16 @@
     // could not be reproduced from the bundle: the built Settings page
     // renders burgundy headless under every combination tried (default,
     // OS light scheme, couch.css blocked, forced light + violet accent),
-    // so the packaged build's LIVE values are surfaced here for a
+    // so the packaged build's LIVE values are captured here for a
     // one-photo check on the PC — no devtools needed. Read it as:
     // computed colour scheme, the html background actually painted, the
     // --color-bg token as specified (its hue decides burgundy vs
     // purple), the OS scheme, how many of the 3 linked stylesheets
     // loaded, and the WebView Chrome version.
+    // 0.11.4: the raw line no longer sits on the About surface — it goes
+    // into the diagnostics export only (see diagnostic-snapshot.ts,
+    // `displayDiagnostics`, surfaced via Export diagnostics).
     function fillDisplayDiagnostics() {
-      const el = document.getElementById("update-display-diag")
-      if (!el) return
       try {
         const root = document.documentElement
         const cs = getComputedStyle(root)
@@ -2110,10 +2159,10 @@
         const osScheme = window.matchMedia("(prefers-color-scheme: dark)").matches
           ? "dark"
           : "light"
-        el.textContent =
+        window.__xtDisplayDiagnostics =
           `Display: scheme ${cs.colorScheme} · html ${cs.backgroundColor} · bg ${cs.getPropertyValue("--color-bg").trim() || "?"} · OS ${osScheme} · css ${loaded}/${linkSheets.length} · Chrome ${chrome}`
       } catch {
-        el.textContent = "Display: unavailable"
+        window.__xtDisplayDiagnostics = "Display: unavailable"
       }
     }
     fillDisplayDiagnostics()
@@ -2493,13 +2542,24 @@
     const tmdbKeyInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-tmdb-key")
     )
-    const tmdbRevealBtn = /** @type {HTMLButtonElement|null} */ (
-      document.getElementById("settings-tmdb-reveal")
-    )
     const tmdbTestBtn = /** @type {HTMLButtonElement|null} */ (
       document.getElementById("settings-tmdb-test")
     )
     const tmdbMsgEl = document.getElementById("settings-tmdb-msg")
+    const tmdbStateEl = document.getElementById("settings-tmdb-state")
+
+    /** Honest toggle state (0.11.4): with no key, On and Off are
+     * indistinguishable unless the line below says the key is missing. */
+    function syncTmdbState() {
+      if (!tmdbStateEl) return
+      const state = getTmdbEnrichmentState()
+      tmdbStateEl.textContent =
+        state === "active"
+          ? "Enrichment active."
+          : state === "on-no-key"
+            ? "On, no key — enrichment inactive. Add a key below."
+            : "Off — enrichment disabled."
+    }
 
     function syncTmdbEnabled() {
       if (!tmdbEnabledGroup) return
@@ -2508,6 +2568,7 @@
         const isOn = btn.getAttribute("data-tmdb") === "on"
         btn.setAttribute("aria-pressed", isOn === enabled ? "true" : "false")
       }
+      syncTmdbState()
     }
     syncTmdbEnabled()
 
@@ -2556,9 +2617,11 @@
       }
       tmdbKeyInput.addEventListener("input", () => {
         syncTmdbTestDisabled()
+        syncTmdbState()
         if (tmdbSaveTimer) window.clearTimeout(tmdbSaveTimer)
         tmdbSaveTimer = window.setTimeout(() => {
           saveTmdbKey()
+          syncTmdbState()
         }, 350)
       })
       tmdbKeyInput.addEventListener("blur", () => {
@@ -2567,18 +2630,10 @@
           tmdbSaveTimer = null
         }
         if (tmdbKeyInput.value !== getTmdbApiKey()) saveTmdbKey()
+        syncTmdbState()
       })
       syncTmdbTestDisabled()
     }
-
-    tmdbRevealBtn?.addEventListener("click", () => {
-      if (!tmdbKeyInput) return
-      const revealed = tmdbKeyInput.type === "text"
-      tmdbKeyInput.type = revealed ? "password" : "text"
-      tmdbRevealBtn.setAttribute("aria-label", t(revealed ? "settings.tmdb.reveal" : "settings.tmdb.conceal"))
-      tmdbRevealBtn.querySelector('[data-tmdb-reveal-icon="show"]')?.classList.toggle("hidden", !revealed)
-      tmdbRevealBtn.querySelector('[data-tmdb-reveal-icon="hide"]')?.classList.toggle("hidden", revealed)
-    })
 
     tmdbTestBtn?.addEventListener("click", async () => {
       // Save the typed key first (mirrors the AI Test button): a key typed
@@ -2626,9 +2681,6 @@
     const aiKeyInput = /** @type {HTMLInputElement|null} */ (
       document.getElementById("settings-ai-key")
     )
-    const aiRevealBtn = /** @type {HTMLButtonElement|null} */ (
-      document.getElementById("settings-ai-reveal")
-    )
     const aiClearBtn = /** @type {HTMLButtonElement|null} */ (
       document.getElementById("settings-ai-clear")
     )
@@ -2636,6 +2688,7 @@
       document.getElementById("settings-ai-test")
     )
     const aiKeyStatusEl = document.getElementById("settings-ai-key-status")
+    const aiKeySavedBadgeEl = document.getElementById("settings-ai-key-saved-badge")
     const aiMsgEl = document.getElementById("settings-ai-msg")
     const aiTestDetailEl = document.getElementById("settings-ai-test-detail")
     const aiStatusEl = document.getElementById("settings-ai-status")
@@ -2749,6 +2802,18 @@
       const has = await hasAiKey()
       aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
       if (aiClearBtn) aiClearBtn.disabled = !has
+      // Saved state on the field itself (0.11.4): the input stays empty
+      // by design (the key is never read back), so the placeholder +
+      // badge say the key is saved — an empty box must never read as
+      // "nothing saved". There is no reveal anywhere on this card: the
+      // key is never shown back in full.
+      if (aiKeyInput) {
+        aiKeyInput.placeholder = has ? t("settings.ai.keySavedPlaceholder") : ""
+      }
+      if (aiKeySavedBadgeEl) {
+        aiKeySavedBadgeEl.classList.toggle("hidden", !has)
+        aiKeySavedBadgeEl.classList.toggle("inline-flex", has)
+      }
     }
     syncAiKeyStatus()
 
@@ -2770,22 +2835,18 @@
     }
     bindAiTextInput(aiEndpointInput, getAiEndpoint, setAiEndpoint)
 
-    // Model: a select of supported models, with a free-text box for
-    // anything else (other providers, newer models).
+    // Model: one control — a select of supported models, with a free-text
+    // box for anything else (other providers, newer models). The text
+    // field + its label live inside the same bordered group as the
+    // select, so it reads as one control, never two stacked rows.
+    const aiModelCustomLabel = document.getElementById("settings-ai-model-custom-label")
     function syncAiModel() {
       if (!aiModelSelect) return
-      const current = getAiModel()
-      const known = [...aiModelSelect.options].some((opt) => opt.value === current)
-      if (known && current) {
-        aiModelSelect.value = current
-        aiModelCustomInput?.classList.add("hidden")
-      } else {
-        aiModelSelect.value = "custom"
-        if (aiModelCustomInput) {
-          aiModelCustomInput.classList.remove("hidden")
-          aiModelCustomInput.value = current
-        }
-      }
+      const { selectValue, showCustom, customValue } = resolveAiModelControl(getAiModel())
+      aiModelSelect.value = selectValue
+      aiModelCustomInput?.classList.toggle("hidden", !showCustom)
+      aiModelCustomLabel?.classList.toggle("hidden", !showCustom)
+      if (showCustom && aiModelCustomInput) aiModelCustomInput.value = customValue
     }
     syncAiModel()
 
@@ -2793,25 +2854,18 @@
       const value = aiModelSelect.value
       if (value === "custom") {
         aiModelCustomInput?.classList.remove("hidden")
+        aiModelCustomLabel?.classList.remove("hidden")
         aiModelCustomInput?.focus()
         return
       }
       aiModelCustomInput?.classList.add("hidden")
+      aiModelCustomLabel?.classList.add("hidden")
       setAiModel(value)
       void syncAiStatus()
     })
     bindAiTextInput(aiModelCustomInput, getAiModel, (value) => {
       setAiModel(value)
       void syncAiStatus()
-    })
-
-    aiRevealBtn?.addEventListener("click", () => {
-      if (!aiKeyInput) return
-      const revealed = aiKeyInput.type === "text"
-      aiKeyInput.type = revealed ? "password" : "text"
-      aiRevealBtn.setAttribute("aria-label", t(revealed ? "settings.ai.reveal" : "settings.ai.conceal"))
-      aiRevealBtn.querySelector('[data-ai-reveal-icon="show"]')?.classList.toggle("hidden", !revealed)
-      aiRevealBtn.querySelector('[data-ai-reveal-icon="hide"]')?.classList.toggle("hidden", revealed)
     })
 
     // Save on blur (and on Test): the field is cleared on success so the
@@ -2870,8 +2924,10 @@
           flashAiSaveFailed(error)
           return
         }
-        // Real verification (C4): endpoint + key + model, via the
-        // status model. A stored key alone is not proof AI works.
+        // Real verification (C4): endpoint + stored key + model, via the
+        // status model. A stored key alone is not proof AI works. The
+        // test runs against the STORED key whatever the Enable toggle
+        // says (0.11.4) — the toggle gates use, never verification.
         const result = await testAiConnection()
         await syncAiStatus()
         if (result.ok) {
@@ -2882,6 +2938,23 @@
               : "Endpoint and key verified."
           }
           flashSuccess(aiTestBtn)
+        } else if (result.error === "not_configured") {
+          // Defensive: testAiConnection no longer returns this, but if
+          // it ever did, "isn't set up yet" must name what is missing —
+          // never fire while a key is saved without saying the toggle
+          // is the missing piece.
+          const missing = []
+          if (!getAiEnabled()) missing.push("turn on AI Discovery")
+          if (!(await hasAiKey().catch(() => false))) missing.push("save an API key")
+          if (!getAiEndpoint().trim()) missing.push("set an endpoint")
+          if (!getAiModel().trim()) missing.push("pick a model")
+          flashMsg(
+            aiMsgEl,
+            missing.length
+              ? `Not set up yet: ${missing.join(", ")}.`
+              : "AI Discovery isn't set up yet."
+          )
+          if (aiTestDetailEl) aiTestDetailEl.textContent = ""
         } else {
           flashMsg(aiMsgEl, aiStatusMessage(result.error))
           if (aiTestDetailEl) aiTestDetailEl.textContent = ""
