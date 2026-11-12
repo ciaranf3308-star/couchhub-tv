@@ -1,0 +1,157 @@
+{
+  "discover-loaded": {
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "browseRows": [
+      "Highly Rated in Your Library",
+      "New and Worth Watching"
+    ]
+  },
+  "local-comedy": {
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "railTitle": "Local recommendations for “COMEDY”",
+    "stateNote": "Local search — AI wasn't asked.",
+    "localNote": "Local results so far — Ask AI below for AI picks.",
+    "askAiVisible": true,
+    "askAiText": "Ask AI about “COMEDY”",
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": false,
+    "diag": {
+      "engine": null,
+      "phase": null,
+      "model": null,
+      "queryType": null,
+      "catalogue": null,
+      "retrieved": null,
+      "sent": null,
+      "accepted": null,
+      "rejected": null,
+      "cache": null,
+      "duration": null,
+      "fallback": null
+    },
+    "cards": [
+      "Stand-Up Night",
+      "...And Justice for All",
+      ".com for Murder",
+      ".raw",
+      "'71",
+      "'G' Men",
+      "A Funny Thing",
+      "Big Laughs",
+      "Comedy of Errors",
+      "Laugh Track",
+      "Slapstick Comedy",
+      "The Funny Bone",
+      "The Pranksters"
+    ],
+    "browseRows": []
+  },
+  "diagnostics-local": {
+    "engine": "Local engine",
+    "phase": "Local search",
+    "model": "—",
+    "queryType": "Keyword / title search — Moods: Easy Watching",
+    "catalogue": "20 titles",
+    "retrieved": "Not reported yet",
+    "sent": "Not reported yet",
+    "accepted": "13",
+    "rejected": "0",
+    "cache": "Not used",
+    "duration": "0.0s",
+    "fallback": "—"
+  },
+  "ai-comedy": {
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "railTitle": "AI picks for “COMEDY”",
+    "stateNote": "AI answered just now · gpt-4o-mini · 0.0s",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": false,
+    "diag": {
+      "engine": null,
+      "phase": null,
+      "model": null,
+      "queryType": null,
+      "catalogue": null,
+      "retrieved": null,
+      "sent": null,
+      "accepted": null,
+      "rejected": null,
+      "cache": null,
+      "duration": null,
+      "fallback": null
+    },
+    "cards": [
+      "The Funny Bone",
+      "Slapstick Comedy",
+      "A Funny Thing",
+      "Stand-Up Night",
+      "Big Laughs"
+    ],
+    "browseRows": []
+  },
+  "diagnostics-ai": {
+    "engine": "AI — live request",
+    "phase": "AI result validated",
+    "model": "gpt-4o-mini",
+    "queryType": "Keyword / title search — Moods: Easy Watching",
+    "catalogue": "20 titles",
+    "retrieved": "Not reported yet",
+    "sent": "Not reported yet",
+    "accepted": "5",
+    "rejected": "0",
+    "cache": "Miss — live request",
+    "duration": "0.0s",
+    "fallback": "—"
+  },
+  "ai-cached": {
+    "modeBadge": "AI connected",
+    "modeDetail": "Connected — endpoint, key and model verified.",
+    "railTitle": "Cached AI picks for “COMEDY”",
+    "stateNote": "Cached AI answer — no new request was sent.",
+    "localNote": null,
+    "askAiVisible": false,
+    "askAiText": null,
+    "fallback": null,
+    "diagToggleVisible": true,
+    "diagOpen": false,
+    "diag": {
+      "engine": null,
+      "phase": null,
+      "model": null,
+      "queryType": null,
+      "catalogue": null,
+      "retrieved": null,
+      "sent": null,
+      "accepted": null,
+      "rejected": null,
+      "cache": null,
+      "duration": null,
+      "fallback": null
+    },
+    "cards": [
+      "The Funny Bone",
+      "Slapstick Comedy",
+      "A Funny Thing",
+      "Stand-Up Night",
+      "Big Laughs"
+    ],
+    "browseRows": []
+  },
+  "controller-focus": {
+    "askAi": true,
+    "toggle": true
+  },
+  "network": {
+    "openAiChatCalls": 1,
+    "openAiOther": 0,
+    "openAiLastModel": "gpt-4o-mini"
+  }
+}

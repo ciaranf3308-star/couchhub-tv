@@ -134,6 +134,78 @@ describe("getAiStatus", () => {
     expect(status.detail).toMatch(/Not tested yet/)
   })
 
+  it("canAskAi is true when configured but never tested — Ask AI IS the test", async () => {
+    // 0.11.5: the 0.11.2 film showed Discover with no Ask AI anywhere
+    // while Settings said "AI connected". The button gates on whether
+    // an attempt can run, not on whether one already passed: an
+    // untested-but-configured AI is offered, and a failure surfaces
+    // through the fallback reason.
+    hoisted.enabled.value = true
+    hoisted.keyPresent.value = true
+    const status = await getAiStatus()
+    expect(status.mode).toBe("local")
+    expect(status.keySaved).toBe(true)
+    expect(status.canAskAi).toBe(true)
+  })
+
+  it("canAskAi is false when AI is off even with a key saved", async () => {
+    hoisted.keyPresent.value = true
+    const status = await getAiStatus()
+    expect(status.mode).toBe("local")
+    expect(status.keySaved).toBe(true)
+    expect(status.canAskAi).toBe(false)
+  })
+
+  it("canAskAi is false with no key saved", async () => {
+    hoisted.enabled.value = true
+    const status = await getAiStatus()
+    expect(status.mode).toBe("not-configured")
+    expect(status.keySaved).toBe(false)
+    expect(status.canAskAi).toBe(false)
+  })
+
+  it("canAskAi is false when enabled but no model is set", async () => {
+    hoisted.enabled.value = true
+    hoisted.keyPresent.value = true
+    hoisted.model.value = ""
+    const status = await getAiStatus()
+    expect(status.mode).toBe("not-configured")
+    expect(status.keySaved).toBe(true)
+    expect(status.canAskAi).toBe(false)
+  })
+
+  it("canAskAi is true when connected", async () => {
+    hoisted.enabled.value = true
+    hoisted.keyPresent.value = true
+    seedLastTest({
+      ok: true,
+      at: 1700000000000,
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+      modelVerified: true,
+    })
+    const status = await getAiStatus()
+    expect(status.mode).toBe("connected")
+    expect(status.keySaved).toBe(true)
+    expect(status.canAskAi).toBe(true)
+  })
+
+  it("canAskAi stays true when unavailable — Ask AI is still offered, the failure surfaces on ask", async () => {
+    hoisted.enabled.value = true
+    hoisted.keyPresent.value = true
+    seedLastTest({
+      ok: false,
+      at: 1700000000000,
+      error: "invalid_key",
+      endpoint: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    })
+    const status = await getAiStatus()
+    expect(status.mode).toBe("unavailable")
+    expect(status.keySaved).toBe(true)
+    expect(status.canAskAi).toBe(true)
+  })
+
   it("is connected after a passing test against the current config", async () => {
     hoisted.enabled.value = true
     hoisted.keyPresent.value = true

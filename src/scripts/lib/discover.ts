@@ -743,6 +743,30 @@ export interface DiscoverSearchResult {
   source: "ai" | "local"
   /** Set when AI was attempted but the local engine answered instead. */
   fallbackReason?: string
+  /**
+   * Per-search diagnostics for the Discover receipt (0.11.5, W3).
+   * Additive reporting only — nothing here changes what is ranked or
+   * cached. `retrievedCount` / `sentToModelCount` / `cacheHit` are
+   * W1/W2-owned and stay undefined until their layer reports them; the
+   * UI renders those as "Not reported yet", never a guessed number.
+   */
+  diagnostics?: DiscoverSearchDiagnostics
+}
+
+/**
+ * What rankDiscover itself can report honestly: the catalogue it ranked
+ * over, how many results survived ITS validation, and how many
+ * model-ranked ids ITS validation dropped. The production ranker also
+ * validates internally (parseAiRankResponse), so its own drops never
+ * reach this count — see AiSearchDiagnostics.rejectedCount in ai/status.ts.
+ */
+export interface DiscoverSearchDiagnostics {
+  catalogueSize: number
+  acceptedCount: number
+  rejectedCount: number
+  retrievedCount?: number
+  sentToModelCount?: number
+  cacheHit?: boolean
 }
 
 function aiFallbackReason(error: unknown): string {
@@ -776,25 +800,55 @@ export async function rankDiscover(
     try {
       const summary = summarizeTaste(taste) as TasteSummary
       const ranked = await ranker.rank(query, candidates, summary)
-      const valid = validateRankedCandidates(
-        Array.isArray(ranked) ? ranked : [],
-        candidates
-      )
-      if (valid.length) return { results: valid, source: "ai" }
+      const rankedList = Array.isArray(ranked) ? ranked : []
+      const valid = validateRankedCandidates(rankedList, candidates)
+      if (valid.length)
+        return {
+          results: valid,
+          source: "ai",
+          diagnostics: {
+            catalogueSize: candidates.length,
+            acceptedCount: valid.length,
+            rejectedCount: rankedList.length - valid.length,
+          },
+        }
+      const localResults = searchDiscover(query, candidates, taste)
       return {
-        results: searchDiscover(query, candidates, taste),
+        results: localResults,
         source: "local",
         fallbackReason: "AI didn't rank any titles in your library, so these are local picks.",
+        diagnostics: {
+          catalogueSize: candidates.length,
+          acceptedCount: localResults.length,
+          // The model ranked nothing usable: every returned id was
+          // dropped by validation (or it returned an empty list).
+          rejectedCount: rankedList.length,
+        },
       }
     } catch (error) {
+      const localResults = searchDiscover(query, candidates, taste)
       return {
-        results: searchDiscover(query, candidates, taste),
+        results: localResults,
         source: "local",
         fallbackReason: aiFallbackReason(error),
+        diagnostics: {
+          catalogueSize: candidates.length,
+          acceptedCount: localResults.length,
+          rejectedCount: 0,
+        },
       }
     }
   }
-  return { results: searchDiscover(query, candidates, taste), source: "local" }
+  const localResults = searchDiscover(query, candidates, taste)
+  return {
+    results: localResults,
+    source: "local",
+    diagnostics: {
+      catalogueSize: candidates.length,
+      acceptedCount: localResults.length,
+      rejectedCount: 0,
+    },
+  }
 }
 
 export async function rankWithAI(
