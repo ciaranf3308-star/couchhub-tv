@@ -177,7 +177,6 @@ async function saveZoomedCorner(
 }
 
 const RAIL_ITEMS = "#tv-nav [data-tv-nav-item]"
-const SETTINGS_ROWS = "#tv-settings-rows [data-focus-key]"
 const CHANNEL_ROWS = '[data-focus-key^="ch:"]'
 
 async function mockProvider(page: Page) {
@@ -437,11 +436,14 @@ function activeIsInRail(page: Page) {
   }))
 }
 
+// 0.11.4 W1: the duplicate /tv/settings view is gone — the rail tests run
+// on /tv/live now; the rail behaviour under test is layout-level, not
+// settings-specific.
 test("D-pad Up/Down stays inside the TV nav rail", async ({ page }) => {
   await mockProvider(page)
   await seedTvState(page)
-  await page.goto("/tv/settings")
-  await page.waitForSelector(SETTINGS_ROWS)
+  await page.goto("/tv/live")
+  await page.waitForSelector(CHANNEL_ROWS)
 
   const railCount = await page.locator(RAIL_ITEMS).count()
   expect(railCount).toBeGreaterThan(2)
@@ -459,8 +461,8 @@ test("D-pad Up/Down stays inside the TV nav rail", async ({ page }) => {
 test("Right leaves the rail into the page, Left returns to the rail", async ({ page }) => {
   await mockProvider(page)
   await seedTvState(page)
-  await page.goto("/tv/settings")
-  await page.waitForSelector(SETTINGS_ROWS)
+  await page.goto("/tv/live")
+  await page.waitForSelector(CHANNEL_ROWS)
 
   await focusRailItem(page, 0)
   await page.keyboard.press("ArrowRight")
@@ -501,10 +503,10 @@ test("runtime <html> attributes survive a ClientRouter swap", async ({ page }) =
   }))
 
   await page.evaluate(() => {
-    document.querySelector<HTMLAnchorElement>('#tv-nav a[href="/tv/settings"]')?.click()
+    document.querySelector<HTMLAnchorElement>('#tv-nav a[href="/tv/live"]')?.click()
   })
-  await page.waitForFunction(() => location.pathname.replace(/\/$/, "") === "/tv/settings")
-  await page.waitForSelector(SETTINGS_ROWS)
+  await page.waitForFunction(() => location.pathname.replace(/\/$/, "") === "/tv/live")
+  await page.waitForSelector(CHANNEL_ROWS)
 
   const after = await page.evaluate(() => ({
     fontSize: getComputedStyle(document.documentElement).fontSize,
@@ -537,14 +539,14 @@ test("Left reaches the nav rail from a home rail's first card", async ({ page })
   }
 })
 
-test("Left reaches the nav rail from a settings row", async ({ page }) => {
+test("Left reaches the nav rail from a live channel row", async ({ page }) => {
   await page.setViewportSize(TV_VIEWPORT)
   await mockProvider(page)
   await seedTvState(page)
-  await page.goto("/tv/settings")
-  await page.waitForSelector(SETTINGS_ROWS)
+  await page.goto("/tv/live")
+  await page.waitForSelector(CHANNEL_ROWS)
 
-  await page.locator(SETTINGS_ROWS).first().focus()
+  await page.locator(CHANNEL_ROWS).first().focus()
   await page.keyboard.press("ArrowLeft")
   expect((await activeIsInRail(page)).inRail).toBe(true)
 })

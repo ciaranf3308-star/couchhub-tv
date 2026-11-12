@@ -348,11 +348,13 @@ function buildRouteCases(): RouteCase[] {
       },
     },
     {
+      // 0.11.4 W1: the duplicate /tv/settings view is gone — the overflow
+      // check runs against the Couch Settings home instead.
       key: "settings",
-      path: "/tv/settings",
+      path: "/settings",
       ready: async (page) => {
-        await page.goto("/tv/settings")
-        await page.waitForSelector("#tv-settings-rows [data-focus-key]")
+        await page.goto("/settings")
+        await page.waitForSelector("#settings-home-list .settings-home-row")
       },
     },
     {

@@ -1,0 +1,404 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconEye,
+  IconEyeOff,
+  IconMovie,
+  IconSparkles,
+} from "@tabler/icons-svelte"
+---
+<SettingsShell
+  title="Discover & AI"
+  titleKey=""
+  sub="Recommendations, metadata and AI"
+  subKey=""
+  current="discover-ai">
+  <section id="settings-discover-ai" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div id="card-tmdb" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconMovie aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.tmdb.title" class="text-base font-semibold">Metadata enrichment</h3>
+          </div>
+          <p data-i18n="settings.tmdb.helper" class="settings-surface__helper text-xs text-fg-3">
+            TheTVDB works out of the box for posters, cast, and episode details. Add a TMDb key to also unlock trailers and similar titles.
+          </p>
+          <div class="settings-rows">
+
+            <!-- TheTVDB enrichment: separate service, so it gets its own opt-out. -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.tvdb.enable" class="text-sm font-medium leading-snug">TheTVDB metadata</h3>
+                <p data-i18n="settings.tmdb.tvdbPrivacy" class="text-xs text-fg-3">
+                  Titles you open are sent to TheTVDB through our proxy to look up artwork and episode details. No account or key is needed.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-tvdb-enabled"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="TheTVDB metadata"
+                  data-i18n-attr="aria-label:settings.tvdb.enable">
+                  <button type="button" data-tvdb="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="tvdb-enabled-btn btn">On</button>
+                  <button type="button" data-tvdb="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="tvdb-enabled-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var tvdbEnabledRaw = localStorage.getItem("xt_tvdb_enabled");
+                  var tvdbEnabledOn = tvdbEnabledRaw !== "0";
+                  var tvdbEnabledGroup = document.getElementById("settings-tvdb-enabled");
+                  if (tvdbEnabledGroup) {
+                    var tvdbEnabledBtns = tvdbEnabledGroup.querySelectorAll(".tvdb-enabled-btn");
+                    for (var vIdx = 0; vIdx < tvdbEnabledBtns.length; vIdx++) {
+                      var tvdbEnabledBtnOn = tvdbEnabledBtns[vIdx].getAttribute("data-tvdb") === "on";
+                      tvdbEnabledBtns[vIdx].setAttribute("aria-pressed", tvdbEnabledBtnOn === tvdbEnabledOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Enable enrichment -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.tmdb.enable" class="text-sm font-medium leading-snug">Enable enrichment</h3>
+                <p data-i18n="settings.tmdb.privacy" class="text-xs text-fg-3">
+                  Optional: adds trailers, cast, and similar titles once you add a TMDB key below. Titles you open are sent to TMDB for matching.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-tmdb-enabled"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Enable enrichment"
+                  data-i18n-attr="aria-label:settings.tmdb.enable">
+                  <button type="button" data-tmdb="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="tmdb-enabled-btn btn">On</button>
+                  <button type="button" data-tmdb="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="tmdb-enabled-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var tmdbEnabledRaw = localStorage.getItem("xt_tmdb_enabled");
+                  var tmdbEnabledOn = tmdbEnabledRaw !== "0";
+                  var tmdbEnabledGroup = document.getElementById("settings-tmdb-enabled");
+                  if (tmdbEnabledGroup) {
+                    var tmdbEnabledBtns = tmdbEnabledGroup.querySelectorAll(".tmdb-enabled-btn");
+                    for (var tIdx = 0; tIdx < tmdbEnabledBtns.length; tIdx++) {
+                      var tmdbEnabledBtnOn = tmdbEnabledBtns[tIdx].getAttribute("data-tmdb") === "on";
+                      tmdbEnabledBtns[tIdx].setAttribute("aria-pressed", tmdbEnabledBtnOn === tmdbEnabledOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- API key -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.tmdb.apiKey" class="text-sm font-medium leading-snug">API key</h3>
+                <p class="text-xs text-fg-3">
+                  <span data-i18n="settings.tmdb.apiKeyHelper">Paste a free TMDB API key or v4 access token.</span>
+                  <a
+                    href="https://www.themoviedb.org/settings/api"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-external
+                    data-i18n="settings.tmdb.getKey"
+                    class="text-accent underline ms-1">Get a key at themoviedb.org</a>
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <input
+                    id="settings-tmdb-key"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="field-input font-mono flex-1 min-w-0"
+                  />
+                  <button
+                    id="settings-tmdb-reveal"
+                    type="button"
+                    class="btn flex-none w-11 justify-center p-0"
+                    aria-label="Show key"
+                    data-i18n-attr="aria-label:settings.tmdb.reveal">
+                    <IconEye aria-hidden="true" class="btn-icon" data-tmdb-reveal-icon="show" />
+                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-tmdb-reveal-icon="hide" />
+                  </button>
+                  <button id="settings-tmdb-test" type="button" class="btn flex-none w-auto justify-center">
+                    <span data-i18n="settings.tmdb.test">Test key</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-tmdb-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+          </div>
+          <p class="text-2xs text-fg-3 px-5 sm:px-6 pb-5 sm:pb-6 -mt-1">
+            This product uses the TMDB API but is not endorsed or certified by TMDB.
+          </p>
+        </div>
+
+
+        <div id="card-ai-discovery" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconSparkles aria-hidden="true" stroke={2} />
+            </span>
+            <h3 class="text-base font-semibold">AI &amp; Recommendations</h3>
+          </div>
+          <p class="settings-surface__helper text-xs text-fg-3">
+            Optional AI-powered ranking for Discover. Your search text and a short list of candidate titles go to your chosen AI provider only when you ask a question. Your watch history, IPTV credentials and stream links are never sent unless you switch sharing on below. AI use is billed separately by your provider.
+          </p>
+          <div class="settings-rows">
+
+            <!-- Connection status (AI03) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Connection status</h3>
+                <p class="text-xs text-fg-3">
+                  <span id="settings-ai-status-detail">Checking…</span>
+                  <span id="settings-ai-last-tested" class="block"></span>
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <span id="settings-ai-status" aria-live="polite" class="text-sm font-medium">Checking…</span>
+              </div>
+            </div>
+
+            <!-- Enable AI Discovery -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.enable" class="text-sm font-medium leading-snug">Enable AI Discovery</h3>
+                <p data-i18n="settings.ai.enableHelper" class="text-xs text-fg-3">
+                  Off by default. Discover works fully without AI, using the local engine.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-enabled"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Enable AI Discovery"
+                  data-i18n-attr="aria-label:settings.ai.enable">
+                  <button type="button" data-ai="on"  aria-pressed="false" data-i18n="settings.tmdb.on"  class="ai-enabled-btn btn">On</button>
+                  <button type="button" data-ai="off" aria-pressed="false" data-i18n="settings.tmdb.off" class="ai-enabled-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var aiEnabledRaw = localStorage.getItem("xt_ai_enabled");
+                  var aiEnabledOn = aiEnabledRaw === "1";
+                  var aiEnabledGroup = document.getElementById("settings-ai-enabled");
+                  if (aiEnabledGroup) {
+                    var aiEnabledBtns = aiEnabledGroup.querySelectorAll(".ai-enabled-btn");
+                    for (var aIdx = 0; aIdx < aiEnabledBtns.length; aIdx++) {
+                      var aiEnabledBtnOn = aiEnabledBtns[aIdx].getAttribute("data-ai") === "on";
+                      aiEnabledBtns[aIdx].setAttribute("aria-pressed", aiEnabledBtnOn === aiEnabledOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Provider (AI02) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Provider</h3>
+                <p class="text-xs text-fg-3">
+                  OpenAI, or any OpenAI-compatible API. Picking OpenAI fills in its endpoint below.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-provider"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="AI provider">
+                  <button type="button" data-provider="openai" aria-pressed="false" class="ai-provider-btn btn">OpenAI</button>
+                  <button type="button" data-provider="other" aria-pressed="false" class="ai-provider-btn btn">Other provider</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Provider endpoint -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.endpoint" class="text-sm font-medium leading-snug">Provider endpoint</h3>
+                <p data-i18n="settings.ai.endpointHelper" class="text-xs text-fg-3">
+                  OpenAI-compatible API base URL.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <input
+                  id="settings-ai-endpoint"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="https://api.openai.com/v1"
+                  class="field-input font-mono flex-1 min-w-0"
+                />
+              </div>
+            </div>
+
+            <!-- Model (AI02) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Model</h3>
+                <p class="text-xs text-fg-3">
+                  Model on your provider. Smaller models cost less per question.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <select
+                  id="settings-ai-model"
+                  class="field-input flex-1 min-w-0"
+                  aria-label="AI model">
+                  <option value="gpt-4o-mini">gpt-4o-mini — fast, low cost</option>
+                  <option value="gpt-4o">gpt-4o — higher quality</option>
+                  <option value="gpt-4.1-mini">gpt-4.1-mini — fast, low cost</option>
+                  <option value="gpt-4.1">gpt-4.1 — higher quality</option>
+                  <option value="o4-mini">o4-mini — reasoning, low cost</option>
+                  <option value="custom">Custom…</option>
+                </select>
+                <input
+                  id="settings-ai-model-custom"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="Custom model name"
+                  class="field-input font-mono flex-1 min-w-0 hidden"
+                />
+              </div>
+            </div>
+
+            <!-- API key -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.apiKey" class="text-sm font-medium leading-snug">API key</h3>
+                <p class="text-xs text-fg-3">
+                  <span data-i18n="settings.ai.apiKeyHelper">Stored in your device's credential store (Windows Credential Manager on this PC), never in the app's files. It is never shown back in full.</span>
+                  <a
+                    id="settings-ai-keys-link"
+                    href="https://platform.openai.com/api-keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    class="underline underline-offset-2">Get a key at platform.openai.com</a>
+                  <span id="settings-ai-keys-note" class="hidden">Get a key from your provider's dashboard.</span>
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <input
+                    id="settings-ai-key"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="field-input font-mono flex-1 min-w-0"
+                  />
+                  <button
+                    id="settings-ai-reveal"
+                    type="button"
+                    class="btn flex-none w-11 justify-center p-0"
+                    aria-label="Show key"
+                    data-i18n-attr="aria-label:settings.ai.reveal">
+                    <IconEye aria-hidden="true" class="btn-icon" data-ai-reveal-icon="show" />
+                    <IconEyeOff aria-hidden="true" class="btn-icon hidden" data-ai-reveal-icon="hide" />
+                  </button>
+                  <button id="settings-ai-clear" type="button" class="btn flex-none w-auto justify-center">
+                    <span data-i18n="settings.ai.clearKey">Clear key</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-ai-key-status"
+                  aria-live="polite"
+                  class="text-xs text-fg-3"></span>
+              </div>
+            </div>
+
+            <!-- Cost + privacy (AI05) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Cost</h3>
+                <p class="text-xs text-fg-3">
+                  AI questions are billed separately by your provider, per question. A ChatGPT subscription does not include API usage — API calls are charged on top, even if you already pay for ChatGPT.
+                </p>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Share viewing history &amp; preferences</h3>
+                <p class="text-xs text-fg-3">
+                  Off by default. When on, Discover also sends a short taste summary (favourite genres, liked and disliked titles) so picks fit you better. Your full watch history, IPTV credentials and stream links are never sent.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-share-taste"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Share viewing history and preferences with the AI provider">
+                  <button type="button" data-share="on" aria-pressed="false" class="ai-share-btn btn">On</button>
+                  <button type="button" data-share="off" aria-pressed="false" class="ai-share-btn btn">Off</button>
+                </div>
+              </div>
+            </div>
+
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">When AI is asked</h3>
+                <p class="text-xs text-fg-3">
+                  Manual (recommended): searching runs locally and you tap “Ask AI” for one question at a time. Automatic: submitting a question in Discover sends it to AI straight away. AI is never asked while browsing, scrolling or changing focus.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ai-auto"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="When AI is asked">
+                  <button type="button" data-auto="manual" aria-pressed="false" class="ai-auto-btn btn">Manual</button>
+                  <button type="button" data-auto="auto" aria-pressed="false" class="ai-auto-btn btn">Automatic</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Test connection (AI03) -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.ai.test" class="text-sm font-medium leading-snug">Test connection</h3>
+                <p data-i18n="settings.ai.testHelper" class="text-xs text-fg-3">
+                  Checks the saved key against the endpoint above.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <button id="settings-ai-test" type="button" class="btn flex-none w-auto justify-center">
+                    <span data-i18n="settings.ai.test">Test connection</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-ai-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+                <span
+                  id="settings-ai-test-detail"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 empty:hidden"></span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+    </div>
+  </section>
+</SettingsShell>

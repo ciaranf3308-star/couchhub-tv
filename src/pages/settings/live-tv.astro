@@ -1,0 +1,150 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconChevronDown,
+  IconFilter,
+  IconLayoutSidebar,
+  IconPencil,
+  IconStar,
+} from "@tabler/icons-svelte"
+import HiddenCategoriesEditor from "@/components/HiddenCategoriesEditor.svelte"
+import FavoritesReorder from "@/components/FavoritesReorder.svelte"
+import ChannelOverridesEditor from "@/components/ChannelOverridesEditor.svelte"
+---
+<SettingsShell
+  title="Live TV"
+  titleKey="nav.livetv"
+  sub="Channels, EPG, categories and favourites"
+  subKey=""
+  current="live-tv">
+  <section id="settings-livetv" class="settings-group">
+    <div class="flex flex-col gap-4">
+        <div id="card-livetv" class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconLayoutSidebar aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="nav.livetv" class="text-base font-semibold">Live TV</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- Live TV layout: channel column width -->
+            <div id="card-livetv-layout" data-settings-item class="scroll-mt-6 lg:scroll-mt-20 settings-rows">
+              <div class="settings-row">
+                <span data-i18n="settings.livetvLayout.columnWidth" class="text-sm font-medium leading-snug">Channel column width</span>
+                <div class="settings-row__control">
+                  <div
+                    id="settings-channel-width"
+                    class="settings-seg"
+                    role="radiogroup"
+                    aria-label="Channel column width" data-i18n-attr="aria-label:aria.channelColumnWidth">
+                    <button type="button" data-width="22" aria-pressed="false" data-i18n="settings.livetvLayout.width.compact" class="channel-width-btn btn">Compact</button>
+                    <button type="button" data-width="28" aria-pressed="false" data-i18n="settings.livetvLayout.width.default" class="channel-width-btn btn">Default</button>
+                    <button type="button" data-width="34" aria-pressed="false" data-i18n="settings.livetvLayout.width.wide" class="channel-width-btn btn">Wide</button>
+                    <button type="button" data-width="42" aria-pressed="false" data-i18n="settings.livetvLayout.width.xWide" class="channel-width-btn btn">X-Wide</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- EPG: time zone offset (per active playlist) -->
+            <div id="epg-tz-section" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.epgTimezone.title" class="text-sm font-medium leading-snug">EPG time zone</h3>
+                <p data-i18n="epg.timezoneHelper" class="text-xs text-fg-3">
+                  Some providers ship XMLTV with timestamps already shifted to the server's local time, so EPG times look off. Auto-detect picks the offset where the most channels have a programme airing right now.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-64 flex-col items-stretch gap-1">
+                <select id="epg-tz-select" disabled class="field-input" data-i18n-attr="aria-label:settings.epgTimezone.offsetLabel">
+                  <option value="auto" data-i18n="epg.timezoneAutoDetect">Auto-detect</option>
+                </select>
+                <div
+                  id="epg-tz-status"
+                  aria-live="polite"
+                  class="text-xs text-fg-3"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+    <!-- W2 PLACEHOLDER — Resume last channel (0.11.4 W2 adds the control).
+         Deliberately no wiring here: no store, no invoke, no invented
+         behaviour. W2 replaces this row with the real control. -->
+    <div id="card-resume-last-channel" data-settings-item data-w2-placeholder="resume-last-channel" class="settings-row scroll-mt-6 lg:scroll-mt-20">
+      <div class="settings-row__text">
+        <h3 class="text-sm font-medium leading-snug">Resume last channel</h3>
+        <p class="text-xs text-fg-3">
+          Reopen the channel you were watching when the app starts. Control lands with the next pass.
+        </p>
+      </div>
+      <div class="settings-row__control">
+        <span class="text-xs text-fg-3 border border-line rounded-full px-3 py-1.5">Coming soon</span>
+      </div>
+    </div>
+
+        <details id="card-categories" data-settings-item class="settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header flex-wrap pb-5 sm:pb-6 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+            <span class="flex items-center gap-3 min-w-0 w-full">
+              <span class="icon-mark">
+                <IconFilter aria-hidden="true" stroke={2} />
+              </span>
+              <h3 data-i18n="settings.categories.title" class="text-base font-semibold">Categories</h3>
+              <span class="ms-auto shrink-0">
+                <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+              </span>
+            </span>
+            <span data-i18n="settings.categories.helperLong" class="text-xs text-fg-3 block mt-1.5">
+              Per-playlist mute list. Hidden categories are hidden from
+              the picker and the main grid on Live TV, Movies, and Series.
+            </span>
+          </summary>
+          <div class="px-5 sm:px-6 pb-5 sm:pb-6 pt-1">
+            <HiddenCategoriesEditor client:load />
+          </div>
+        </details>
+
+        <details id="card-channel-overrides" data-settings-item class="settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header flex-wrap pb-5 sm:pb-6 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+            <span class="flex items-center gap-3 min-w-0 w-full">
+              <span class="icon-mark">
+                <IconPencil aria-hidden="true" stroke={2} />
+              </span>
+              <h3 data-i18n="settings.channelOverrides.title" class="text-base font-semibold">Channel edits</h3>
+              <span class="ms-auto shrink-0">
+                <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+              </span>
+            </span>
+            <span data-i18n="settings.channelOverrides.helperLong" class="text-xs text-fg-3 block mt-1.5">
+              Custom names, logos and numbers you set from a channel's right-click menu on Live TV,
+              plus the channels you hid. Provider data is never changed, so any edit can be reset.
+            </span>
+          </summary>
+          <div class="px-5 sm:px-6 pb-5 sm:pb-6 pt-1">
+            <ChannelOverridesEditor client:load />
+          </div>
+        </details>
+
+        <details id="card-favorites" data-settings-item class="settings-surface icon-mark-host group scroll-mt-6 lg:scroll-mt-20">
+          <summary class="settings-surface__header flex-wrap pb-5 sm:pb-6 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+            <span class="flex items-center gap-3 min-w-0 w-full">
+              <span class="icon-mark">
+                <IconStar aria-hidden="true" stroke={2} />
+              </span>
+              <h3 data-i18n="settings.favoritesSection.title" class="text-base font-semibold">Favorites</h3>
+              <span class="ms-auto shrink-0">
+                <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+              </span>
+            </span>
+            <span data-i18n="settings.favoritesSection.helperLong" class="text-xs text-fg-3 block mt-1.5">
+              Reorder your favorites per kind. The hub Favorites strip and
+              the per-page favorites filter follow this order.
+            </span>
+          </summary>
+          <div class="px-5 sm:px-6 pb-5 sm:pb-6 pt-1">
+            <FavoritesReorder client:load />
+          </div>
+        </details>
+    </div>
+  </section>
+</SettingsShell>

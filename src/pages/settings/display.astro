@@ -1,0 +1,279 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import {
+  IconBolt,
+  IconChevronDown,
+  IconLayoutDashboard,
+  IconPalette,
+} from "@tabler/icons-svelte"
+import LocalePicker from "@/components/LocalePicker.svelte"
+import HubStripsEditor from "@/components/HubStripsEditor.svelte"
+import TvOverscanCard from "@/components/TvOverscanCard.svelte"
+import CloseToTrayCard from "@/components/CloseToTrayCard.svelte"
+---
+<SettingsShell
+  title="Display"
+  titleKey="settings.section.display"
+  sub="Language, text size, sounds and home sections"
+  subKey=""
+  current="display">
+    <section id="settings-appearance" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <div class="flex flex-col gap-4">
+
+        <!-- Surface: Display -->
+        <div id="card-display" class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconPalette aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.section.display" class="text-base font-semibold">Display</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- Language -->
+            <div id="card-language" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.section.language" class="text-sm font-medium leading-snug">Language</h3>
+                <p data-i18n="settings.language.cardHelper" class="text-xs text-fg-3">
+                  Pick a language for the interface. Translations are community-driven - missing strings fall back to English.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-64">
+                <LocalePicker client:load />
+              </div>
+            </div>
+
+            <!-- Font scale + density -->
+            <div data-settings-item class="scroll-mt-6 lg:scroll-mt-20 settings-rows">
+              <div class="settings-row">
+                <div class="settings-row__text">
+                  <span data-i18n="settings.fontScale.label" class="text-sm font-medium leading-snug">Font scale</span>
+                  <p data-i18n="settings.fontScale.helper" class="text-xs text-fg-3">
+                    Bumps the base font size. Use Large or X-Large when viewing on a TV from across the room.
+                  </p>
+                </div>
+                <div class="settings-row__control">
+                  <div
+                    id="settings-font-scale"
+                    class="settings-seg"
+                    role="radiogroup"
+                    data-i18n-attr="aria-label:settings.fontScale.label"
+                    aria-label="Font scale">
+                    <button type="button" data-scale="0.875" aria-pressed="false" data-i18n="settings.fontScale.small" class="font-scale-btn btn">Small</button>
+                    <button type="button" data-scale="1"     aria-pressed="false" data-i18n="settings.fontScale.default" class="font-scale-btn btn">Default</button>
+                    <button type="button" data-scale="1.125" aria-pressed="false" data-i18n="settings.fontScale.medium" class="font-scale-btn btn">Medium</button>
+                    <button type="button" data-scale="1.25"  aria-pressed="false" data-i18n="settings.fontScale.large" class="font-scale-btn btn">Large</button>
+                    <button type="button" data-scale="1.5"   aria-pressed="false" data-i18n="settings.fontScale.xlarge" class="font-scale-btn btn">X-Large</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-row">
+                <div class="settings-row__text">
+                  <span data-i18n="settings.density.label" class="text-sm font-medium leading-snug">Density</span>
+                  <p data-i18n="settings.density.helper" class="text-xs text-fg-3">
+                    Tightens or loosens spacing in lists and menus. Independent of font scale.
+                  </p>
+                </div>
+                <div class="settings-row__control">
+                  <div
+                    id="settings-density"
+                    class="settings-seg"
+                    role="radiogroup"
+                    data-i18n-attr="aria-label:settings.density.label"
+                    aria-label="Density">
+                    <button type="button" data-density="compact"     aria-pressed="false" data-i18n="settings.density.compact" class="density-btn btn">Compact</button>
+                    <button type="button" data-density="cozy"        aria-pressed="false" data-i18n="settings.density.cozy" class="density-btn btn">Cozy</button>
+                    <button type="button" data-density="comfortable" aria-pressed="false" data-i18n="settings.density.comfortable" class="density-btn btn">Comfortable</button>
+                  </div>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var savedFontScale = parseFloat(localStorage.getItem("xt_font_scale") || "1");
+                  if (!isFinite(savedFontScale) || savedFontScale < 0.75 || savedFontScale > 2) savedFontScale = 1;
+                  var fontScaleGroup = document.getElementById("settings-font-scale");
+                  if (fontScaleGroup) {
+                    var fontScaleBtns = fontScaleGroup.querySelectorAll(".font-scale-btn");
+                    for (var i = 0; i < fontScaleBtns.length; i++) {
+                      var btnScale = parseFloat(fontScaleBtns[i].getAttribute("data-scale") || "1");
+                      fontScaleBtns[i].setAttribute("aria-pressed", Math.abs(btnScale - savedFontScale) < 0.001 ? "true" : "false");
+                    }
+                  }
+                  var savedDensity = localStorage.getItem("xt_density") || "cozy";
+                  if (savedDensity !== "compact" && savedDensity !== "cozy" && savedDensity !== "comfortable") savedDensity = "cozy";
+                  var densityGroup = document.getElementById("settings-density");
+                  if (densityGroup) {
+                    var densityBtns = densityGroup.querySelectorAll(".density-btn");
+                    for (var densityIndex = 0; densityIndex < densityBtns.length; densityIndex++) {
+                      densityBtns[densityIndex].setAttribute("aria-pressed", densityBtns[densityIndex].getAttribute("data-density") === savedDensity ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- Performance mode: skip decorative animations + focus-glide for low-end TV WebViews -->
+            <div id="card-perf-mode" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.perfMode.title" class="text-sm font-medium leading-snug">Performance mode</h3>
+                <p data-i18n="settings.perfMode.helperLong" class="text-xs text-fg-3">
+                  Disables decorative animations (the comet in the sidebar, hub entry stagger, sliding focus ring) for smoother scrolling and D-pad navigation on TV boxes and low-end devices.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-perf-mode"
+                  class="settings-seg shrink-0"
+                  role="radiogroup"
+                  aria-label="Performance mode"
+                  data-i18n-attr="aria-label:settings.perfMode.label">
+                  <button type="button" data-perf="on"  aria-pressed="false" data-i18n="settings.perfMode.on"  class="perf-mode-btn btn">On</button>
+                  <button type="button" data-perf="off" aria-pressed="false" data-i18n="settings.perfMode.off" class="perf-mode-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var perfOn = localStorage.getItem("xt_perf_mode") === "1";
+                  var perfGroup = document.getElementById("settings-perf-mode");
+                  if (perfGroup) {
+                    var perfBtns = perfGroup.querySelectorAll(".perf-mode-btn");
+                    for (var pIdx = 0; pIdx < perfBtns.length; pIdx++) {
+                      var perfBtnOn = perfBtns[pIdx].getAttribute("data-perf") === "on";
+                      perfBtns[pIdx].setAttribute("aria-pressed", perfBtnOn === perfOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Surface: Behavior -->
+        <div id="card-behavior" class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconBolt aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.appearance.behavior" class="text-base font-semibold">Behavior</h3>
+          </div>
+          <div class="settings-rows">
+
+            <!-- Interface sounds: launch chime + D-pad navigation ticks -->
+            <div id="card-ui-sounds" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.uiSounds.title" class="text-sm font-medium leading-snug">Interface sounds</h3>
+                <p data-i18n="settings.uiSounds.helperLong" class="text-xs text-fg-3">
+                  A soft chime when the app starts and gentle ticks when moving around with a remote or keyboard. Mouse and touch stay silent.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-ui-sounds"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Interface sounds"
+                  data-i18n-attr="aria-label:settings.uiSounds.label">
+                  <button type="button" data-sounds="on"  aria-pressed="false" data-i18n="settings.uiSounds.on"  class="ui-sounds-btn btn">On</button>
+                  <button type="button" data-sounds="off" aria-pressed="false" data-i18n="settings.uiSounds.off" class="ui-sounds-btn btn">Off</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var uiSoundsRaw = localStorage.getItem("xt_ui_sounds");
+                  var uiSoundsOn =
+                    uiSoundsRaw === "1" ||
+                    (uiSoundsRaw !== "0" &&
+                      !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+                  var uiSoundsGroup = document.getElementById("settings-ui-sounds");
+                  if (uiSoundsGroup) {
+                    var uiSoundsBtns = uiSoundsGroup.querySelectorAll(".ui-sounds-btn");
+                    for (var sIdx = 0; sIdx < uiSoundsBtns.length; sIdx++) {
+                      var uiSoundsBtnOn = uiSoundsBtns[sIdx].getAttribute("data-sounds") === "on";
+                      uiSoundsBtns[sIdx].setAttribute("aria-pressed", uiSoundsBtnOn === uiSoundsOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
+            <!-- TV safe area -->
+            <div id="card-tv-overscan" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.tvOverscan.title" class="text-sm font-medium leading-snug">TV safe area</h3>
+                <p data-i18n="settings.tvOverscan.helperLong" class="text-xs text-fg-3">
+                  Most TVs hide a small band at each edge of the picture (overscan). If sidebar icons or version text look cut off, increase this to inset the whole UI by a few percent.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <TvOverscanCard client:load />
+              </div>
+            </div>
+
+            <CloseToTrayCard client:load />
+
+            <!-- Rendering: Linux WebKitGTK DMA-BUF safe mode -->
+            <details id="card-rendering" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">
+              <summary class="settings-row cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+                <span class="settings-row__text">
+                  <h3 data-i18n="settings.rendering.title" class="text-sm font-medium leading-snug">Rendering</h3>
+                  <span data-i18n="settings.rendering.helperLong" class="text-xs text-fg-3 block">
+                    Some Linux graphics drivers (Raspberry Pi, Nvidia proprietary, virtual machines) show a garbled screen or crash on launch with the default renderer. Safe mode works around this at a small performance cost.
+                  </span>
+                  <span id="rendering-status" aria-live="polite" class="text-xs text-fg-3 block mt-1 empty:hidden"></span>
+                </span>
+                <span class="settings-row__control">
+                  <IconChevronDown aria-hidden="true" stroke={2} class="size-4 text-fg-3 transition-transform group-open:rotate-180" />
+                </span>
+              </summary>
+              <div class="px-5 sm:px-6 pb-4 pt-1 flex flex-col gap-3">
+                <div class="flex flex-col gap-2">
+                  <span data-i18n="settings.rendering.label" class="text-eyebrow font-medium uppercase text-fg-3">Rendering mode</span>
+                  <select id="rendering-select" class="field-input" aria-describedby="rendering-hint">
+                    <option value="auto" data-i18n="settings.rendering.auto">Auto (recommended)</option>
+                    <option value="fast" data-i18n="settings.rendering.fast">Faster</option>
+                    <option value="safe" data-i18n="settings.rendering.safe">Safe</option>
+                  </select>
+                </div>
+                <p id="rendering-hint" data-i18n="settings.rendering.hint" class="text-xs text-fg-3">
+                  Auto turns on safe mode only on hardware known to have problems. Faster is applied as a trial after a restart: if you do not confirm keeping it, the app switches back on the next launch.
+                </p>
+
+                <p id="rendering-env-override-note" hidden data-i18n="settings.rendering.envOverrideNote" class="text-xs text-fg-3">
+                  A WebKit rendering variable is set outside the app, so this control is disabled.
+                </p>
+
+                <p id="rendering-restart-note" hidden aria-live="polite" class="text-xs text-fg-3"></p>
+                <button id="rendering-restart" type="button" hidden class="btn justify-start sm:justify-center">
+                  <span data-i18n="settings.about.restartNow">Restart now</span>
+                </button>
+
+                <p data-i18n-html="settings.rendering.escapeHatches" class="text-xs text-fg-3 border-t border-line/60 pt-3">
+                  If the app becomes unusable, run it once with <code class="font-mono text-[0.7rem] px-1 py-0.5 rounded bg-surface-2 border border-line/60">--safe-rendering</code> from a terminal to switch back to safe rendering permanently.
+                </p>
+              </div>
+            </details>
+
+          </div>
+        </div>
+
+        <!-- Surface: Home page sections -->
+        <div id="card-hub-strips" data-settings-item class="settings-surface scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconLayoutDashboard aria-hidden="true" stroke={2} />
+            </span>
+            <h3 data-i18n="settings.hubStrips.title" class="text-base font-semibold">Home page sections</h3>
+          </div>
+          <p data-i18n="settings.hubStrips.helper" class="settings-surface__helper text-xs text-fg-3">
+            Choose which sections appear on your home page and what order they're in.
+          </p>
+          <div class="px-5 sm:px-6 pb-5 sm:pb-6">
+            <HubStripsEditor client:load />
+          </div>
+        </div>
+
+      </div>
+    </section>
+</SettingsShell>

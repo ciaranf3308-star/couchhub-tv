@@ -1,0 +1,16 @@
+---
+import SettingsShell from "@/components/settings/SettingsShell.astro"
+import ProfileSwitcher from "@/components/ProfileSwitcher.astro"
+---
+<SettingsShell
+  title="Profile"
+  titleKey="settings.group.profile"
+  sub="Who is watching"
+  subKey=""
+  current="profile">
+    <section id="settings-profile" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <ProfileSwitcher />
+      </div>
+    </section>
+</SettingsShell>

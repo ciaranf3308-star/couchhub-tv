@@ -34,7 +34,9 @@ const navItems = [
   { href: "/tv/series",    key: "nav.series",    label: "Series",    Icon: IconStack2 },
   { href: "/tv/search",    key: "nav.search",    label: "Search",    Icon: IconSearch },
   { href: "/tv/downloads", key: "nav.downloads", label: "Downloads", Icon: IconDownload },
-  { href: "/tv/settings",  key: "nav.settings",  label: "Settings",  Icon: IconSettings },
+  // 0.11.4 W1: one Settings only — the duplicate /tv/settings UI is gone,
+  // so the TV shell's Settings entry points at the Couch Settings pages.
+  { href: "/settings",     key: "nav.settings",  label: "Settings",  Icon: IconSettings },
 ]
 ---
 

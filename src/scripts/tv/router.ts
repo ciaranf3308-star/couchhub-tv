@@ -29,7 +29,6 @@ const VIEW_LOADERS: Record<string, ViewLoader> = {
   "series-detail": () => import("./views/series-detail"),
   search: () => import("./views/search"),
   downloads: () => import("./views/downloads"),
-  settings: () => import("./views/settings"),
   login: () => import("./views/login"),
 }
 
@@ -44,7 +43,6 @@ const PATH_TO_VIEW: Record<string, string> = {
   "/tv/series/detail": "series-detail",
   "/tv/search": "search",
   "/tv/downloads": "downloads",
-  "/tv/settings": "settings",
   "/tv/login": "login",
 }
 

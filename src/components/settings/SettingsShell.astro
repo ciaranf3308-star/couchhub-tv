@@ -1,0 +1,661 @@
+---
+// SettingsShell — shared shell for every Settings page (0.11.4 W1).
+//
+// Replaces the single 9,608px settings.astro: each section is now its own
+// short page (one or two viewports) under /settings/*, reached from the
+// Settings home. The shell owns what the old page got wrong:
+//
+//  (a) Sticky nav + sticky search that actually stick. Root cause of the
+//      old failure: the page nested its own scrolling <main> inside
+//      CouchLayout's <main>, so the document never scrolled and sticky
+//      positioning had no viewport scroll to stick against. This shell
+//      has NO inner scroll container — the document scrolls, the topnav
+//      sticks (CouchLayout), and the section nav + search stick under it.
+//  (b) scroll-mt: every in-page anchor target gets a 12rem scroll margin
+//      (topnav + sticky subheader), so no heading lands under the header.
+//  (c) Scroll-spy is gone — deleted, not fixed. A lying indicator is
+//      worse than none. Navigation is page-based now, so the current
+//      section is marked server-side with aria-current and cannot lie.
+//  (d) The floating controller pill (TvButtonHints, fixed bottom) gets a
+//      reserved footer spacer, so it never covers live content.
+//  (e) Helper text is enlarged + contrast raised (see CSS below).
+//  (f) Booleans are On/Off pills everywhere (net-log checkbox converted;
+//      PlayerPicker reuse checkboxes converted to pills too).
+//  (i) Search is in this shell on every page: on the home it filters the
+//      section list in place; on a section page it filters that page's
+//      rows in place AND shows cross-page hits from settings-index.
+//
+// DO NOT regress the 0.11.3 Nylah icon: the nav lockup lives in
+// CouchLayout/TvLogo and is untouched by this shell.
+import CouchLayout from "@/layouts/CouchLayout.astro"
+import { IconSearch, IconX } from "@tabler/icons-svelte"
+import { SETTINGS_SECTIONS } from "@/scripts/settings/settings-index.ts"
+
+interface Props {
+  title: string
+  titleKey?: string
+  sub: string
+  subKey?: string
+  /** "home" or a section slug from settings-index. */
+  current: string
+}
+
+const { title, titleKey, sub, subKey, current } = Astro.props
+---
+
+<CouchLayout pageTitle={title} activeNav="settings" view="settings">
+  <div class="settings-page">
+    <header class="route-hero settings-pagehead">
+      {
+        current !== "home" && (
+          <a class="settings-back" href="/settings" data-nylah-item>
+            ← <span>All settings</span>
+          </a>
+        )
+      }
+      <h1 data-i18n={titleKey || undefined} class="route-hero__title">{title}</h1>
+      <p data-i18n={subKey || undefined} class="route-hero__sub">{sub}</p>
+    </header>
+
+    <div class="settings-subheader">
+      <div class="settings-nav-scroller">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <a
+            href="/settings"
+            class="settings-nav-link"
+            aria-current={current === "home" ? "true" : undefined}>
+            All settings
+          </a>
+          {
+            SETTINGS_SECTIONS.map((section) => (
+              <a
+                href={section.href}
+                data-i18n={section.titleKey || undefined}
+                class="settings-nav-link"
+                {...(section.danger ? { "data-danger": "true" } : {})}
+                aria-current={current === section.slug ? "true" : undefined}>
+                {section.title}
+              </a>
+            ))
+          }
+        </nav>
+      </div>
+
+      <div class="settings-searchbar">
+        <div class="relative">
+          <span
+            class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-3 pointer-events-none inline-flex">
+            <IconSearch aria-hidden="true" stroke={2} size={16} />
+          </span>
+          <input
+            id="settings-search-input"
+            type="search"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            enterkeyhint="search"
+            data-i18n-attr="placeholder:settings.search.placeholder;aria-label:settings.search.placeholder"
+            placeholder="Search settings"
+            class="w-full h-11 rounded-xl border border-accent bg-surface text-fg
+              pl-10 pr-11 text-sm placeholder:text-fg-3
+              focus-visible:border-accent outline-none
+              transition-colors"
+          />
+          <button
+            id="settings-search-clear"
+            type="button"
+            data-i18n-attr="aria-label:settings.search.clear"
+            aria-label="Clear search"
+            class="absolute right-1 top-1/2 -translate-y-1/2 size-9 rounded-md
+              text-fg-3 hover:text-fg hover:bg-surface-2
+              focus-visible:text-fg focus-visible:bg-surface-2
+              inline-flex items-center justify-center transition-colors"
+            hidden>
+            <IconX aria-hidden="true" stroke={2} size={16} />
+          </button>
+        </div>
+        <p
+          id="settings-search-empty"
+          data-i18n="settings.search.noMatches"
+          class="mt-3 text-sm text-fg-3 px-1"
+          role="status"
+          aria-live="polite"
+          hidden>
+          No settings match your search.
+        </p>
+        <div id="settings-search-xpage" class="settings-xpage" hidden></div>
+      </div>
+    </div>
+
+    <div class="settings-stack">
+      <slot />
+    </div>
+
+    <!-- (d) Reserved footer: the fixed controller pill sits in this
+         clearance and can never cover the last row of settings. -->
+    <div class="settings-footer-spacer" aria-hidden="true"></div>
+  </div>
+
+  <script>
+    import "@/scripts/settings/settings-page.js"
+    import "@/scripts/settings/settings_effects.ts"
+    import "@/scripts/settings/settings_search.ts"
+    import "@/scripts/settings/receiver-card.ts"
+    import "@/scripts/settings/play-on-tv-card.ts"
+    import "@/scripts/settings/followed-card.ts"
+
+    // Sticky offsets, measured live (0.11.4 W1): the topnav height moves
+    // with font scale, so the subheader's `top` and the anchor
+    // scroll-margin are set from the real layout, not a hardcoded rem.
+    // Fallbacks (101px topnav + 131px subheader at 1920x1080) cover the
+    // first paint before this runs.
+    function syncSettingsStickyOffsets() {
+      try {
+        const topnav = document.querySelector(".rs-topnav")
+        const sub = document.querySelector(".settings-subheader")
+        if (!topnav || !sub) return
+        const top = Math.round(topnav.getBoundingClientRect().height)
+        const bottom = top + Math.round(sub.getBoundingClientRect().height)
+        const root = document.documentElement
+        root.style.setProperty("--settings-stick-top", `${top}px`)
+        root.style.setProperty("--settings-header-bottom", `${bottom}px`)
+      } catch {}
+    }
+    syncSettingsStickyOffsets()
+    window.addEventListener("resize", syncSettingsStickyOffsets)
+    window.addEventListener("load", () => {
+      syncSettingsStickyOffsets()
+      window.setTimeout(syncSettingsStickyOffsets, 500)
+    })
+    try {
+      document.fonts?.ready?.then(syncSettingsStickyOffsets)
+    } catch {}
+  </script>
+
+  <style is:global>
+    /* Mobile chip rail wraps the nav in a scroll container so the nav
+       itself can be content-width (w-max) while the wrapper is parent
+       width with overflow-x:auto. On lg+ the wrapper becomes
+       display:contents and the nav takes over as the sticky vertical
+       rail directly inside the flex-row parent. */
+    .settings-page .settings-nav-scroller {
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      max-width: 100vw;
+    }
+
+    .settings-page .settings-nav-scroller::-webkit-scrollbar { display: none; }
+
+
+    /* Item styling: ghost text-only link with bg-tint hover/active. No
+       border outlines - both the chip pill border and the rail's left bar
+       are gone, since those were the visuals that read as "two navs".
+       No `outline: none` - the global `:focus-visible` rule in Layout
+       paints a 2px accent outline for keyboard focus. */
+    .settings-page .settings-nav-link {
+      display: inline-flex;
+      align-items: center;
+      white-space: nowrap;
+      flex-shrink: 0;
+      color: var(--color-fg-3);
+      font-size: 0.8125rem;
+      font-weight: 500;
+      text-decoration: none;
+      padding: 0.5rem 0.875rem;
+      border-radius: 0.5rem;
+      min-height: 2.75rem;
+      transition:
+        color 150ms cubic-bezier(0.16, 1, 0.3, 1),
+        background-color 150ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @media (min-width: 64em) {
+
+      .settings-page .settings-nav-link {
+        padding: 0.45rem 0.75rem;
+        min-height: 0;
+      }
+}
+
+    .settings-page .settings-nav-link:hover, .settings-page .settings-nav-link:focus-visible {
+      color: var(--color-fg);
+      background: var(--color-surface-2);
+    }
+
+    .settings-page .settings-nav-link[aria-current="true"] {
+      color: var(--color-accent);
+      background: var(--color-accent-soft);
+    }
+
+
+    /* Danger-zone entry uses the bad token so it reads as destructive. */
+    .settings-page .settings-nav-link[data-danger="true"] {
+      color: color-mix(in oklab, var(--color-bad) 65%, var(--color-fg-3));
+    }
+
+    .settings-page .settings-nav-link[data-danger="true"]:hover, .settings-page .settings-nav-link[data-danger="true"]:focus-visible {
+      color: var(--color-bad);
+    }
+
+    .settings-page .settings-nav-link[data-danger="true"][aria-current="true"] {
+      color: var(--color-bad);
+      background: color-mix(in oklch, var(--color-bad) 10%, transparent);
+    }
+
+
+    .settings-page .settings-stack[data-search-active] section[data-search="miss"], .settings-page .settings-stack[data-search-active] article[data-search="miss"], .settings-page .settings-stack[data-search-active] [data-settings-item][data-search="miss"] {
+      display: none;
+    }
+
+    .settings-page .settings-stack[data-search-active]
+      .settings-surface:not([data-settings-item]):not(
+        :has([data-settings-item]:not([data-search="miss"]))
+      ) {
+      display: none;
+    }
+
+    .settings-page .settings-nav-link[data-search-miss], .settings-page .settings-subnav-link[data-search-miss] {
+      display: none;
+    }
+
+
+    /* Card-level subnav (lg+ rail only). Each section's cards are listed
+       directly after its nav link in the DOM (no wrapper, so the mobile
+       horizontal chip rail keeps scrolling cleanly). Visible only when
+       the preceding section link is active. */
+    @media (min-width: 64em) {
+
+      .settings-page .settings-subnav {
+        display: none;
+        margin: 0.1rem 0 0.6rem 0.6rem;
+        padding-left: 0.7rem;
+        border-left: 1px solid var(--color-line-soft);
+        gap: 0.05rem;
+      }
+
+      .settings-page .settings-nav-link[aria-current="true"] + .settings-subnav {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .settings-page .settings-subnav-link {
+        position: relative;
+        display: block;
+        color: var(--color-fg-3);
+        font-size: 0.78rem;
+        line-height: 1.4;
+        font-weight: 400;
+        text-decoration: none;
+        padding: 0.3rem 0 0.3rem 0.5rem;
+        border-radius: 0.25rem;
+        transition: color 120ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      .settings-page .settings-subnav-link:hover, .settings-page .settings-subnav-link:focus-visible {
+        color: var(--color-fg);
+      }
+
+      .settings-page .settings-subnav-link[aria-current="true"] {
+        color: var(--color-accent);
+        font-weight: 500;
+      }
+
+      .settings-page .settings-subnav-link[aria-current="true"]::before {
+        content: "";
+        position: absolute;
+        left: calc(-0.7rem - 1px);
+        top: 0.45rem;
+        bottom: 0.45rem;
+        width: 2px;
+        background: var(--color-accent);
+        border-radius: 1px;
+      }
+}
+
+
+    /* ── NylahBox Studios RedSilk reskin (scoped to this page) ──────────
+       Deep wine burgundy + warm beige come from the burgundy accent
+       preset in global.css; these rules only dress this page in that
+       family — Instrument Serif display titles, accent first letters,
+       warm depth on surfaces, and a glowing focus halo on the nav.
+       No setting is moved, renamed, or rewired here. */
+    .settings-page .route-hero__title {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+    }
+
+    .settings-page .settings-group__title {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: clamp(1.5rem, 0.8vw + 1.2rem, 2rem);
+      letter-spacing: -0.02em;
+    }
+
+    .settings-page .settings-group__title::first-letter {
+      color: var(--color-accent);
+    }
+
+    /* v0.3.0: cards are warm gradients, never flat fills, with layered
+       wine depth. The inset hairline keeps the top edge lit like the
+       launcher's tiles. */
+    .settings-page .settings-surface, .settings-page .settings-group > .rounded-2xl {
+      background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
+      box-shadow:
+        inset 0 1px 0 0 color-mix(in oklch, var(--color-accent) 12%, transparent),
+        0 10px 30px -14px var(--nylah-focus-halo),
+        0 20px 45px -30px
+          color-mix(in oklch, var(--color-accent) 55%, transparent);
+    }
+
+    /* Card titles (Display, Playback, …) read as serif display type,
+       like the launcher's tile titles. Row labels stay sans. */
+    .settings-page .settings-surface__header h3 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
+      font-size: 1.125rem;
+      letter-spacing: -0.01em;
+    }
+
+    /* Segmented controls: the selected segment is lit wine, not just a
+       flat tint — gradient + glow so the choice reads at 3 m. */
+    .settings-page .settings-seg > .btn[aria-checked="true"], .settings-page .settings-seg > .btn[aria-pressed="true"] {
+      background: linear-gradient(
+        180deg,
+        var(--color-accent-soft),
+        color-mix(in oklch, var(--color-accent) 22%, transparent)
+      );
+      border-color: var(--color-accent);
+      box-shadow: 0 0 16px var(--nylah-focus-glow);
+    }
+
+    /* Accent swatches: the checked swatch glows wine. */
+    .settings-page .accent-btn[aria-checked="true"] {
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-halo),
+        0 0 18px var(--nylah-focus-glow);
+    }
+
+    /* Inputs + selects: focus is a wine glow, not a bare ring. */
+    .settings-page .field-input:focus {
+      border-color: var(--nylah-focus-ring, var(--color-accent));
+      box-shadow:
+        0 0 0 2px var(--nylah-focus-halo),
+        0 0 18px var(--nylah-focus-glow);
+    }
+
+    /* Native checkboxes (toggles): a visible wine halo on focus. */
+    .settings-page input[type="checkbox"]:focus-visible {
+      outline: 2px solid var(--nylah-focus-ring, var(--color-accent));
+      outline-offset: 2px;
+      box-shadow: 0 0 12px var(--nylah-focus-glow);
+    }
+
+    /* Buttons on this page lift with a wine glow on focus. */
+    .settings-page .btn:focus-visible, .settings-page .btn-danger:focus-visible {
+      box-shadow: 0 0 18px var(--nylah-focus-glow);
+    }
+
+    /* Active nav link glows instead of only tinting. */
+    .settings-page .settings-nav-link[aria-current="true"] {
+      box-shadow: 0 0 14px var(--nylah-focus-glow);
+    }
+
+    /* Danger zone: the card carries a warm bad tint + red depth, and its
+       heading is serif like every other card title. */
+    .settings-page .settings-group--danger article {
+      background: linear-gradient(
+        165deg,
+        color-mix(in oklch, var(--color-bad) 7%, var(--color-surface)),
+        var(--color-surface-2)
+      );
+      box-shadow:
+        0 10px 30px -14px
+          color-mix(in oklch, var(--color-bad) 35%, transparent);
+    }
+
+    .settings-page .settings-group--danger h3 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
+      font-size: 1.125rem;
+      letter-spacing: -0.01em;
+    }
+
+    /* Changelog markdown (What's new + Licenses): release headings are
+       serif display type; body stays sans. */
+    .settings-page .changelog-md h1, .settings-page .changelog-md h2, .settings-page .changelog-md h3, .settings-page .changelog-md h4, .settings-page .changelog-md h5, .settings-page .changelog-md h6 {
+      font-family: var(--nylah-font-display, var(--font-serif, Georgia, serif));
+      font-weight: 400;
+    }
+
+    .settings-page .settings-nav-link:focus-visible, .settings-page .settings-subnav-link:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--color-accent-soft),
+        0 0 16px var(--color-accent-soft);
+    }
+
+    /* TV-sized controls across the retained settings: bigger targets,
+       same behaviour. */
+    .settings-page .settings-stack .btn, .settings-page .settings-stack .btn-primary, .settings-page .settings-stack .btn-danger {
+      min-height: 3.25rem;
+      font-size: 1.125rem;
+    }
+
+    .settings-page .settings-nav-link {
+      min-height: 3rem;
+      font-size: 1.125rem;
+    }
+
+    .settings-page .settings-stack .field-input, .settings-page .settings-stack select.field-input {
+      min-height: 3.25rem;
+      font-size: 1.25rem;
+    }
+
+    .settings-page .settings-stack .settings-seg > .btn {
+      min-height: 3rem;
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }
+
+    /* ── 0.11.4 W1: split-page fixes ─────────────────────────────── */
+    /* (a) One scroll container: the document. No nested scrolling
+       <main> anywhere on Settings pages, so sticky works. */
+    .settings-page {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 60rem;
+      margin-inline: auto;
+    }
+    .settings-pagehead {
+      flex: none;
+    }
+    .settings-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      margin-bottom: 0.5rem;
+      color: var(--color-fg-2);
+      font-size: 1rem;
+      font-weight: 500;
+      text-decoration: none;
+      min-height: 2.75rem;
+    }
+    .settings-back:hover,
+    .settings-back:focus-visible {
+      color: var(--color-fg);
+    }
+    /* Sticky subheader: section nav + search, pinned under the sticky
+       topnav. Opaque background so scrolled content never shows
+       through; the top offset is the measured topnav height
+       (--settings-stick-top, set by the shell script; 101px fallback
+       is the 1920x1080 measurement). */
+    .settings-subheader {
+      position: sticky;
+      top: var(--settings-stick-top, 101px);
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      padding: 0.75rem 0.75rem 0.9rem;
+      margin-inline: -0.75rem;
+      background: var(--color-bg);
+      border-bottom: 1px solid var(--color-line-soft);
+    }
+    .settings-page .settings-nav {
+      position: relative;
+      display: flex;
+      flex-direction: row;
+      gap: 0.25rem;
+      width: max-content;
+      min-width: 100%;
+    }
+    .settings-page .settings-searchbar {
+      flex: none;
+    }
+    .settings-page .settings-searchbar .relative {
+      max-width: 40rem;
+    }
+    /* (b) No heading ever lands under the fixed header: every anchor
+       target on a Settings page carries a scroll margin for topnav +
+       sticky subheader (measured: 101px + 131px at 1920x1080, +8px
+       breathing room). Unlayered author CSS beats Tailwind's
+       scroll-mt-* utilities (Tailwind v4 layers its utilities). */
+    .settings-page [id] {
+      scroll-margin-top: calc(var(--settings-header-bottom, 232px) + 8px);
+    }
+    html:has(.settings-page) {
+      scroll-padding-top: calc(var(--settings-header-bottom, 232px) + 8px);
+    }
+    /* (d) Reserved footer so the fixed controller pill never covers
+       live content. .rs-main already adds 3rem; this spacer is the
+       Settings-owned clearance on top of it. */
+    .settings-page .settings-footer-spacer {
+      flex: none;
+      height: 5.5rem;
+    }
+    /* (e) Helper text does all the explaining and was the least
+       legible text on the page (text-xs in fg-3, oklch lightness
+       0.60). It is now text-sm-ish in fg-2 (0.78) with roomier
+       leading. Scoped to helper copy inside settings rows/cards so
+       genuinely tiny meta (badges, counts) is untouched. */
+    .settings-page [data-settings-item] p.text-xs,
+    .settings-page [data-settings-item] span.text-xs,
+    .settings-page .settings-surface__helper,
+    .settings-page .settings-row__text p {
+      font-size: 0.875rem;
+      line-height: 1.55;
+    }
+    .settings-page [data-settings-item] p.text-xs,
+    .settings-page [data-settings-item] span.text-xs,
+    .settings-page .settings-surface__helper,
+    .settings-page .settings-row__text p,
+    .settings-page [data-settings-item] .text-fg-3 {
+      color: var(--color-fg-2);
+    }
+    /* (i) Home search: filtered rows hide in place; the list is never
+       yanked to the top. */
+    .settings-page #settings-home-list[data-search-active] [data-search="miss"] {
+      display: none;
+    }
+    /* Cross-page search hits (section pages only). */
+    .settings-page .settings-xpage {
+      margin-top: 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      max-width: 40rem;
+    }
+    .settings-page .settings-xpage[hidden] {
+      display: none;
+    }
+    .settings-page .settings-xpage__label {
+      font-size: 0.8125rem;
+      font-weight: 600;
+      color: var(--color-fg-2);
+      padding: 0 0.25rem;
+    }
+    .settings-page .settings-xpage__hit {
+      display: flex;
+      align-items: baseline;
+      gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.625rem;
+      color: var(--color-fg);
+      text-decoration: none;
+      background: var(--color-surface);
+      border: 1px solid var(--color-line-soft);
+      min-height: 2.75rem;
+    }
+    .settings-page .settings-xpage__hit:hover,
+    .settings-page .settings-xpage__hit:focus-visible {
+      border-color: var(--color-accent);
+    }
+    .settings-page .settings-xpage__hit-section {
+      font-size: 0.8125rem;
+      color: var(--color-fg-2);
+      white-space: nowrap;
+    }
+    /* Home section rows. */
+    .settings-page .settings-home-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      width: 100%;
+      padding: 1.1rem 1.25rem;
+      border-radius: 1rem;
+      border: 1px solid var(--color-line);
+      background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
+      color: var(--color-fg);
+      text-decoration: none;
+      text-align: left;
+      min-height: 4.5rem;
+    }
+    .settings-page a.settings-home-row:hover,
+    .settings-page a.settings-home-row:focus-visible {
+      border-color: var(--color-accent);
+    }
+    .settings-page .settings-home-row__text {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .settings-page .settings-home-row__title {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: 1.35rem;
+      line-height: 1.2;
+    }
+    .settings-page .settings-home-row__desc {
+      font-size: 0.9375rem;
+      line-height: 1.45;
+      color: var(--color-fg-2);
+    }
+    .settings-page .settings-home-row__chev {
+      flex: none;
+      color: var(--color-fg-3);
+      font-size: 1.25rem;
+    }
+    .settings-page .settings-home-row--exit {
+      border-color: color-mix(in oklch, var(--color-bad) 35%, var(--color-line));
+    }
+    .settings-page .settings-home-row--exit .settings-home-row__title {
+      color: var(--color-bad);
+    }
+    .settings-page .settings-home-row--exit .settings-home-row__note {
+      font-size: 0.8125rem;
+      color: var(--color-fg-3);
+    }
+    /* One control pattern per kind (f): the segmented On/Off pill
+       groups are the boolean pattern; keep them from wrapping awkwardly. */
+    .settings-page .settings-seg {
+      flex-wrap: wrap;
+    }
+  </style>
+</CouchLayout>
