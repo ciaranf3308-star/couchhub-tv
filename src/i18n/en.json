@@ -1498,7 +1498,7 @@
   "search.warmingResultsHint": "Results will fill in as data arrives.",
   "search.helpHeading": "Search the active playlist.",
   "search.helpKbd": "Enter to open the top result · ↑↓ to move · Esc to clear",
-  "search.keyboardHint": "On-screen keyboard: A types · B deletes · X clears",
+  "search.keyboardHint": "On-screen keyboard: A types · B closes · ⌫ deletes",
   "search.keyboard.backspace": "Backspace",
   "search.keyboard.clear": "Clear",
   "search.keyboard.space": "Space",

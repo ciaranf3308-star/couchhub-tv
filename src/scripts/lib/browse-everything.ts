@@ -181,27 +181,27 @@ import {
   resolveSearchScope,
   searchScopeOptions,
 } from "@/scripts/lib/browse-search.ts";
-import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
+import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts";
 import {
   BACK_PRIORITY,
-  closeCouchKeyboard,
-  isCouchKeyboardOpen,
-  openCouchKeyboard,
-  recordRouteOrigin,
   registerBackLayer,
-  setControllerHints,
-  setLogicalView,
-} from "@/scripts/lib/controller-0110-seams.ts";
-// SHIM-0110: seam imports come from controller-0110-seams.ts until
-// W1/W3 land the real modules (integration re-points them).
+} from "@/scripts/lib/back-handler.ts";
 import {
   RETURN_HOME_HINT,
+  setControllerHints,
   type HintConfig,
 } from "@/scripts/lib/couch-button-hints.ts";
+import {
+  closeCouchKeyboard,
+  endCouchKeyboardSession,
+  isCouchKeyboardOpen,
+  openCouchKeyboard,
+} from "@/scripts/lib/couch-keyboard.ts";
 import {
   openTitleContextMenu,
   titleContextActionsForEntry,
 } from "@/scripts/lib/poster-menu.ts";
+import { recordRouteOrigin } from "@/scripts/lib/route-origin.ts";
 import {
   browseStateFromMode,
   modeFromBrowseState,
@@ -1873,9 +1873,24 @@ export function mountBrowseEverything(
       }
     });
     input.focus();
+    // Contract E (0.11.10, W3 invocation only): shared keyboard
+    // session for the overlay input — Back layer + B-close semantics.
+    // No OSK is mounted in this overlay, so no grid focus is taken;
+    // commit mirrors the Enter handler above.
+    openCouchKeyboard(
+      input,
+      (query) => {
+        searchDebounced.flush();
+        closeOverlay(false);
+        state = setSearch(state, query, searchScope);
+        applyDatasetChange();
+      },
+      { focusGrid: false },
+    );
   };
 
   const cancelSearch = () => {
+    endCouchKeyboardSession();
     // Cancelling preserves the browse position: restore the
     // exact pre-search state (query, scope, page, focus).
     const restore = preSearchState;

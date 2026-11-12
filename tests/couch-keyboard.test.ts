@@ -323,16 +323,28 @@ describe("TvSearchAction: Browse search entry", () => {
   });
 });
 
-describe("OSK X-clears (W6 audit): the poll must match a class that exists", () => {
-  it("clears when focus is on the keyboard itself, in every render context", () => {
+describe("OSK X shortcut removed (0.11.10 §28): no Gamepad API poll", () => {
+  it("has no X poll — the Clear KEY is the clear path", () => {
     const src = pageSource("src/components/OnScreenKeyboard.svelte");
-    // The TvKeyboard wrapper ([data-couch-keyboard]) exists everywhere
-    // the OSK renders — Search, Discover, Movies/Series dialogs — so
-    // X clears wherever the keyboard is. The old `.search-view` guard
-    // matched no element anywhere, so X never cleared.
-    expect(src).toContain('closest?.("[data-couch-keyboard]")');
+    // The old rAF poll read navigator.getGamepads()[0] only (the exact
+    // slot-0 bug gamepad.ts fixed for its own loop) and was invisible
+    // to the native XInput path, which never implements X-clear. The
+    // Clear key below is the clear path; X has no OSK shortcut.
+    expect(src).not.toContain("getGamepads");
+    expect(src).not.toContain("pollGamepadX");
+    expect(src).not.toContain("BTN_X");
+    expect(src).toContain('data-osk-action="clear"');
+    expect(src).toContain("clearAll()");
     expect(src).not.toContain(".search-view");
     expect(src).not.toContain("search-view");
+  });
+
+  it("B/Escape dismisses via the shared lifecycle; Backspace deletes", () => {
+    const src = pageSource("src/components/OnScreenKeyboard.svelte");
+    expect(src).toContain("oskKeyAction(ev.key)");
+    expect(src).toContain("closeCouchKeyboard(false)");
+    expect(src).toContain("backspace()");
+    expect(src).toContain('data-osk-action="backspace"');
   });
 });
 

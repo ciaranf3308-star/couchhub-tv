@@ -6,42 +6,38 @@
   // Keys are plain <button>s, so D-pad / spatial navigation moves between
   // them and A (click) types — no new navigation system is invented.
   //
-  // Controller mapping (the gamepad layer turns buttons into the events
-  // below; physical keys do the same thing):
+  // Controller mapping (0.11.10, Controller 2.0 §28 — B NEVER deletes):
   //   A / Enter .......... type the focused character
-  //   B / Escape ......... backspace (the keydown handler below; the
-  //                        search view skips its own Escape handling while
-  //                        focus is inside [data-osk])
-  //   X (controller) ..... clear — polled here, because the gamepad layer
-  //                        maps X to play/pause and never emits a key for
-  //                        it. Scoped to the keyboard itself
-  //                        ([data-couch-keyboard], the TvKeyboard wrapper):
-  //                        the OSK renders on Search, Discover and inside
-  //                        the Movies/Series search dialogs, and no view
-  //                        root carries a shared class — the old
-  //                        guard named a class no element carries, so X
-  //                        never cleared (W6 audit). There is no video
-  //                        under any of those keyboards, so hijacking X
-  //                        while the keyboard owns focus is safe.
+  //   B / Escape ......... CLOSE the keyboard, focus returns to the
+  //                        input (the shared lifecycle: closeCouchKeyboard;
+  //                        the dismiss fallback is the onDismiss prop).
+  //                        Deletion is the ⌫ KEY's job, never B's.
+  //   Backspace (physical)  delete one character (as before).
+  //   X (controller) ..... NO shortcut: the old rAF Gamepad API poll
+  //                        (slot-0-only, invisible to the native XInput
+  //                        path) was removed in 0.11.10 — the Clear KEY
+  //                        below is the clear path. The gamepad layer
+  //                        maps X to details/play-pause elsewhere and
+  //                        never emits a key for it on search surfaces.
   //   D-pad / stick ...... move between keys (spatial navigation)
   //
   // The value is bound to the parent search query, so typing here and
   // typing in the physical input stay in sync.
   import { onMount } from "svelte"
   import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
+  import {
+    closeCouchKeyboard,
+    isCouchKeyboardOpen,
+    oskKeyAction,
+  } from "@/scripts/lib/couch-keyboard.ts"
 
-  /** @type {{ value?: string, onInput?: (value: string) => void, onCommit?: () => void }} */
-  let { value = $bindable(""), onInput, onCommit } = $props()
+  /** @type {{ value?: string, onInput?: (value: string) => void, onCommit?: () => void, onDismiss?: () => void }} */
+  let { value = $bindable(""), onInput, onCommit, onDismiss } = $props()
 
   const ROWS = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
-  // Standard-mapping X button index (see gamepad.ts).
-  const BTN_X = 2
 
   let locale = $state(0)
   const tr = (key, params) => (locale, t(key, params))
-
-  let rafId = 0
-  let prevX = false
 
   function emit(next) {
     value = next
@@ -57,32 +53,26 @@
     emit("")
   }
 
+  function dismiss() {
+    // Shared lifecycle first (it owns the Back layer + focus return);
+    // owners without a session fall back to the dismiss prop.
+    if (isCouchKeyboardOpen()) closeCouchKeyboard(false)
+    else onDismiss?.()
+  }
+
   function onKeyDown(ev) {
-    // B on the controller arrives as Escape; physical Backspace does the
-    // same. Never let it reach the search view's clear-query handler.
-    if (ev.key === "Escape" || ev.key === "Backspace") {
+    // B (Escape) dismisses; physical Backspace deletes. Never let
+    // either reach the search view's clear-query handler.
+    const action = oskKeyAction(ev.key)
+    if (action === "dismiss") {
+      ev.preventDefault()
+      ev.stopPropagation()
+      dismiss()
+    } else if (action === "backspace") {
       ev.preventDefault()
       ev.stopPropagation()
       backspace()
     }
-  }
-
-  function pollGamepadX() {
-    rafId = requestAnimationFrame(pollGamepadX)
-    if (document.hidden) return
-    let pressed = false
-    try {
-      const pads = navigator.getGamepads ? navigator.getGamepads() : []
-      const gp = pads ? pads[0] ?? null : null
-      pressed = !!(gp?.connected && gp.buttons?.[BTN_X]?.pressed)
-    } catch {
-      pressed = false
-    }
-    if (pressed && !prevX) {
-      const active = document.activeElement
-      if (active?.closest?.("[data-couch-keyboard]")) clearAll()
-    }
-    prevX = pressed
   }
 
   onMount(() => {
@@ -90,10 +80,8 @@
       locale++
     }
     document.addEventListener(LOCALE_EVENT, onLocale)
-    rafId = requestAnimationFrame(pollGamepadX)
     return () => {
       document.removeEventListener(LOCALE_EVENT, onLocale)
-      cancelAnimationFrame(rafId)
     }
   })
 </script>
