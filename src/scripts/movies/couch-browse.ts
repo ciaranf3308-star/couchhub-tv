@@ -21,6 +21,22 @@
 //     return from a detail page — or a fresh load — keeps the
 //     viewer's filters. The list tab and search query are not
 //     persisted (a reload starts on All with an empty search).
+//   - Reset Filters (0.11.6, W4): ONE obvious action in the filter
+//     row that clears genre, decade, rating, runtime, sort, the text
+//     query and the list tab — and the persisted entry — in one
+//     press. Genre selection REPLACES via selectGenreFilter (the one
+//     funnel): the reported Comedy→Horror progressive sub-filter was
+//     composition, not accumulation — a genre word left in the search
+//     box matches the provider category (filterMovies/filterSeries
+//     haystack) and intersected the new genre, and persisted filters
+//     restored with no way to clear them all at once.
+//   - Back rule (0.11.6, W4 — documented, no new handler): Back is
+//     browser history. Detail pages history.back() into this grid,
+//     and the persisted state + focus memory restore the exact
+//     filtered view the viewer came from — Back never silently
+//     un-filters or re-filters. Reset Filters is the explicit clear,
+//     and it wipes the persisted entry too, so Back after a reset
+//     cannot resurrect a cleared filter.
 //   - the full catalogue grid, windowed with computeVisibleWindow +
 //     gridColumnsForWidth so a 10,000-title catalogue never builds
 //     10,000 card nodes. The focused card is pinned into the window
@@ -34,8 +50,9 @@
 //   couch-browse-status, couch-browse-hero-count, couch-browse-tabs,
 //   couch-browse-genres, couch-browse-runtime, couch-browse-year,
 //   couch-browse-rating, couch-browse-sort, couch-browse-search,
-//   couch-search-open, couch-browse-rails, couch-browse-grid,
-//   couch-browse-skeleton, couch-browse-empty, couch-browse-error.
+//   couch-browse-reset, couch-search-open, couch-browse-rails,
+//   couch-browse-grid, couch-browse-skeleton, couch-browse-empty,
+//   couch-browse-error.
 
 import { computeVisibleWindow, gridColumnsForWidth } from "@/scripts/lib/couch-grid.ts";
 import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
@@ -43,9 +60,14 @@ import {
   computeFilterAvailability,
   loadBrowseFilterState,
   saveBrowseFilterState,
+  clearBrowseFilterState,
+  selectGenreFilter,
+  resetBrowseFilters,
+  isDefaultBrowseFilterState,
   RUNTIME_OPTIONS,
   RUNTIME_OPTION_LABELS,
   type BrowseFilterEntry,
+  type BrowseFilterState,
   type BrowseSortId,
 } from "@/scripts/lib/browse-filters.ts";
 import { buildCouchCard, type CouchCardView } from "@/scripts/movies/couch-cards.ts";
@@ -142,6 +164,7 @@ export function mountCouchBrowse<T>(
   const ratingEl = $(`${prefix}couch-browse-rating`) as HTMLSelectElement | null;
   const sortEl = $(`${prefix}couch-browse-sort`) as HTMLSelectElement | null;
   const searchEl = $(`${prefix}couch-browse-search`) as HTMLInputElement | null;
+  const resetEl = $(`${prefix}couch-browse-reset`);
   const railsEl = $(`${prefix}couch-browse-rails`);
   const gridEl = $(`${prefix}couch-browse-grid`);
   const skeletonEl = $(`${prefix}couch-browse-skeleton`);
@@ -176,6 +199,20 @@ export function mountCouchBrowse<T>(
     sort: restoredFilters?.sort || "default",
     list: "all",
   };
+
+  // The controller's filter as a shared BrowseFilterState: the query
+  // and list tab are view-local (never persisted), contentType is
+  // always "" here (each page is one kind). Used by the genre funnel
+  // and the Reset state check; the persistence save below keeps its
+  // literal object shape (pinned by tests/browse-010-runtime-filter).
+  const toBrowseFilterState = (f: CouchBrowseFilter): BrowseFilterState => ({
+    genre: f.genre,
+    contentType: "",
+    year: f.year,
+    minRating: f.minRating,
+    maxRuntime: f.maxRuntime,
+    sort: f.sort as BrowseSortId,
+  });
 
   // Sync the static selects with any restored state (the genre
   // select is built by renderGenres, which reads filter.genre
@@ -370,7 +407,13 @@ export function mountCouchBrowse<T>(
       built.id = `${prefix}couch-browse-genre`;
       built.setAttribute("aria-label", "Filter by genre");
       built.addEventListener("change", () => {
-        filter.genre = (built.value || "") as GenreId | "";
+        // 0.11.6 (W4): genre selection REPLACES — selectGenreFilter
+        // is the one funnel, so the previous genre can never survive
+        // alongside the new one (the reported Comedy AND Horror).
+        // The <select> clears via its "All genres" option (""); the
+        // same-genre toggle-off in the funnel is for chip/button UIs.
+        const next = selectGenreFilter(toBrowseFilterState(filter), built.value || null);
+        filter.genre = (next.genre || "") as GenreId | "";
         applyFilterAndRender();
       });
       genresEl.append(label, built);
@@ -436,6 +479,70 @@ export function mountCouchBrowse<T>(
     select.value = String(filter.maxRuntime);
   };
 
+  // Reset Filters (0.11.6, W4): ONE obvious action that clears
+  // everything — genre, decade, rating, runtime, sort, the text
+  // query and the list tab — plus the persisted entry, so a later
+  // return trip cannot resurrect a cleared filter. The button is
+  // built once (like the genre/runtime selects) and lives last in
+  // the filter row, after the Length select, in normal DOM order so
+  // controller focus reaches it after the selects and before the
+  // list tabs. It is disabled while the view is already unfiltered,
+  // so its state always says whether anything is active; whenever
+  // a filter IS active it is enabled and controller-reachable with
+  // the standard focus ring. No filter pills: one button, one press.
+  let resetButton: HTMLButtonElement | null = null;
+  const syncResetState = () => {
+    if (!resetButton) return;
+    const active =
+      !isDefaultBrowseFilterState(toBrowseFilterState(filter)) ||
+      filter.query.trim() !== "" ||
+      filter.list !== "all";
+    resetButton.disabled = !active;
+  };
+  const resetFilters = () => {
+    const defaults = resetBrowseFilters();
+    filter.genre = "";
+    filter.year = defaults.year;
+    filter.minRating = defaults.minRating;
+    filter.maxRuntime = defaults.maxRuntime;
+    filter.sort = defaults.sort;
+    filter.query = "";
+    filter.list = "all";
+    if (searchEl) searchEl.value = "";
+    if (yearEl) yearEl.value = filter.year;
+    if (ratingEl) ratingEl.value = String(filter.minRating);
+    if (sortEl) sortEl.value = filter.sort;
+    // Clear the persisted entry outright; the funnel below re-saves
+    // the defaults, so either way a later load/return lands clean.
+    clearBrowseFilterState(filterScope);
+    renderTabs();
+    renderGenres();
+    renderRuntime();
+    applyFilterAndRender();
+    // The button just disabled itself under focus; land focus on the
+    // Genre select — the head of the filter row — so controller
+    // users are never stranded on a disabled control.
+    genresEl?.querySelector("select")?.focus();
+  };
+  const renderReset = () => {
+    if (!resetEl) return;
+    if (!resetButton) {
+      resetEl.replaceChildren();
+      const built = document.createElement("button");
+      built.type = "button";
+      built.id = `${prefix}couch-browse-reset-button`;
+      built.className = "rs-hero__action rs-hero__action--secondary";
+      built.textContent = "Reset filters";
+      built.setAttribute("aria-label", "Reset all filters");
+      built.addEventListener("click", () => {
+        resetFilters();
+      });
+      resetEl.appendChild(built);
+      resetButton = built;
+    }
+    syncResetState();
+  };
+
   const applyFilterAndRender = () => {
     const base = adapter.applyFilter(all, filter, playlistId);
     filtered = adapter.applySort(base, filter);
@@ -450,6 +557,7 @@ export function mountCouchBrowse<T>(
       maxRuntime: filter.maxRuntime,
       sort: filter.sort as BrowseSortId,
     });
+    syncResetState();
     if (heroCountEl) heroCountEl.textContent = adapter.countLabel(filtered.length);
     if (statusEl) {
       statusEl.textContent =
@@ -567,6 +675,7 @@ export function mountCouchBrowse<T>(
     }
     renderGenres();
     renderRuntime();
+    renderReset();
     applyFilterAndRender();
     // Focus memory: after the first paint, restore where the viewer was.
     restoreCouchFocus();
