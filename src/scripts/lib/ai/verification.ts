@@ -155,7 +155,12 @@ export type ExternalIdResolver = (
 
 export interface VerifyRecommendationsDeps {
   searchTmdb: TmdbSearchFn
-  catalogue: DiscoverCandidate[]
+  /**
+   * Optional: an absent catalogue means availability is unknown
+   * (matches stay null), never "not in library". The implementation
+   * already tolerates absence; the type says so too.
+   */
+  catalogue?: DiscoverCandidate[]
   fetchDetails?: TmdbDetailsFn
   concurrency?: number
   /**
