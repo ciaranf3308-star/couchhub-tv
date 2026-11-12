@@ -3519,6 +3519,7 @@ html[data-couch] .rs-guide-list {
    scrollable area so every row can clear the bar. */
 html[data-couch] .rs-guide-list,
 html[data-couch] .rs-guide-tonight-sections,
+html[data-couch] .rs-guide-tonight-fallback,
 html[data-couch] .rs-guide-now-featured {
   padding-bottom: 4.5rem;
 }
@@ -4073,6 +4074,186 @@ html[data-couch] .rs-guide-channel-pick__now {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Live TV 0.11.7 — Guide virtual lists (W3) ────────────────────
+ * On Now rows and channel picks are FIXED HEIGHT: the spacer
+ * windowing math (livetv-guide-virtual.ts) mounts rows by
+ * scrollTop / rowHeight, so the CSS height and the fallback
+ * constants in TvGuideView.astro must agree (7rem / 5rem at the
+ * 1080p root size); the first mounted row is measured after paint
+ * and the lists re-window on the measured height, so font scaling
+ * never desyncs them. Content is single-line by construction
+ * (titles/names ellipsis, one progress bar), so nothing clips. */
+/* 0.11.7 virtual lists: scroll anchoring MUST stay off. The
+   spacer heights change on every re-window; with anchoring on,
+   the browser compensates by marching scrollTop forward one row
+   per frame (spacer grows → anchor adjust → re-window → spacer
+   grows …), sliding the window past the focused row until focus
+   is lost. overflow-anchor:none breaks the feedback loop: the
+   virtual list owns scrollTop outright. */
+html[data-couch] [data-guide-now-list],
+html[data-couch] [data-guide-channel-list],
+html[data-couch] [data-guide-tonight-fallback] {
+  overflow-anchor: none;
+}
+
+html[data-couch] .rs-guide-virtual-spacer {
+  flex: none;
+  width: 100%;
+  pointer-events: none;
+}
+html[data-couch] .rs-guide-row--nownav {
+  height: 7rem;
+  /* flex-shrink:0 is load-bearing: overflow:hidden zeroes the
+     automatic minimum size, so without it the flex column crushes
+     fixed-height rows to fit (0.11.7 harness: rows rendered ~30px
+     tall with sliced titles). Rows must never shrink; the list
+     scrolls instead. */
+  flex-shrink: 0;
+  overflow: hidden;
+}
+html[data-couch] .rs-guide-channel-pick {
+  height: 5rem;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+html[data-couch] .rs-guide-tonight-fallback .rs-guide-row {
+  flex-shrink: 0;
+}
+/* Tonight chronological fallback: its own scroll container (the
+   focus-window list owns it). When it is active the sections
+   container shrinks to just its heading. */
+html[data-couch] .rs-guide-tonight-fallback {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+html[data-couch] .rs-guide-tonight-fallback[hidden] {
+  display: none;
+}
+html[data-couch] .rs-guide-tonight-sections--heading-only {
+  flex: none;
+  overflow: visible;
+  padding-bottom: 0;
+}
+/* Category drawer (0.11.7): controller-first replacement for the
+   old <select>. The mount is display:contents so the panel
+   positions against the Guide root (position:relative, scoped in
+   TvGuideView.astro). SWAP TARGET: W2's TvCategoryDrawer keeps
+   these hooks/classes where it can. */
+html[data-couch] [data-guide-category-drawer] {
+  display: contents;
+}
+html[data-couch] .rs-guide-catdrawer {
+  position: absolute;
+  top: 4.5rem;
+  left: 0;
+  z-index: 40;
+  width: min(42rem, 92vw);
+  /* 40rem shows a 10-group catalogue + header at 1080p without
+     scrolling (34rem cut the last groups — harness a8/a9); the
+     vh cap keeps the panel off the detail bar on short views. */
+  max-height: min(40rem, calc(100vh - 14rem));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rs-line);
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, var(--rs-surface), var(--rs-bg-2));
+  box-shadow: var(--rs-shadow);
+  overflow: hidden;
+}
+html[data-couch] .rs-guide-catdrawer[hidden] {
+  display: none;
+}
+html[data-couch] .rs-guide-catdrawer__head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--rs-line);
+  flex-shrink: 0;
+}
+html[data-couch] .rs-guide-catdrawer__title {
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-guide-catdrawer__hint {
+  font-size: 1rem;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-guide-catdrawer__cols {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+html[data-couch] .rs-guide-catdrawer__col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 1rem;
+}
+html[data-couch] .rs-guide-catdrawer__col[hidden] {
+  display: none;
+}
+html[data-couch] .rs-guide-catdrawer__subs {
+  border-left: 1px solid var(--rs-line);
+}
+html[data-couch] .rs-guide-catdrawer__item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0.6rem 1.25rem;
+  border: none;
+  border-bottom: 1px solid var(--rs-line);
+  background: transparent;
+  color: var(--rs-text);
+  font-family: var(--rs-font-body);
+  font-size: 1.2rem;
+  text-align: left;
+  cursor: pointer;
+}
+html[data-couch] .rs-guide-catdrawer__item:hover {
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-guide-catdrawer__item--selected {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--rs-accent) 14%, transparent),
+    transparent
+  );
+  box-shadow: inset 3px 0 0 var(--rs-accent);
+}
+html[data-couch] .rs-guide-catdrawer__item:focus-visible {
+  outline: none;
+  box-shadow: inset 3px 0 0 var(--rs-accent), 0 0 0 2px var(--rs-focus);
+}
+html[data-couch] .rs-guide-catdrawer__label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-guide-catdrawer__count {
+  flex-shrink: 0;
+  font-size: 1.05rem;
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-guide-catdrawer__chev {
+  flex-shrink: 0;
+  font-size: 1.3rem;
+  color: var(--rs-text-2);
 }
 @media (max-width: 75rem) {
   html[data-couch] .rs-guide-now {
