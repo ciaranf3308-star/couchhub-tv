@@ -167,6 +167,22 @@ describe("searchDiscover", () => {
     expect(binge[0].candidate.kind).toBe("series")
   })
 
+  it("an explicit comedy request returns only comedies, never easy-watching neighbours (Bug 4)", () => {
+    // 0.11.5: "comedy" used to map to the "Easy Watching" preset, so a
+    // comedy search admitted family / animation / romance / musical
+    // titles — often higher-rated ones first. It is a hard genre
+    // requirement now; the neighbours stay out whatever their rating.
+    const mixed = [
+      candidate({ id: "c1", title: "Funny One", genres: ["Comedy"], rating: 6.0, voteCount: 100 }),
+      candidate({ id: "f1", title: "Family One", genres: ["Family"], rating: 9.0, voteCount: 1000 }),
+      candidate({ id: "a1", title: "Animated One", genres: ["Animation"], rating: 9.0, voteCount: 1000 }),
+      candidate({ id: "r1", title: "Romance One", genres: ["Romance"], rating: 9.0, voteCount: 1000 }),
+      candidate({ id: "m1", title: "Musical One", genres: ["Musical"], rating: 9.0, voteCount: 1000 }),
+    ]
+    const results = searchDiscover("comedy", mixed, emptyTasteModel("shared", "pl1"))
+    expect(results.map((r) => r.candidate.id)).toEqual(["c1"])
+  })
+
   it("hidden gems are highly rated but never watched titles", () => {
     const preset = moodPreset("hidden-gems")!
     expect(preset.minRating).toBe(7.5)
@@ -410,28 +426,36 @@ describe("catalogue mapping", () => {
 
 describe("rankDiscover (AI04 / AI06)", () => {
   it("reports source 'ai' and only catalogue titles when the ranker answers", async () => {
+    // 0.11.5: the ranker receives the retrieval shortlist, not the raw
+    // catalogue — so the test captures what the ranker was handed and
+    // asserts the invented id is dropped and the real one kept.
+    let received: DiscoverCandidate[] = []
     registerAIRanker({
-      rank: async (_q, candidates) => [
-        { candidate: candidates[0], score: 1, reason: "Cosy and funny." },
-        // Invented id: must be dropped, never surfaced.
-        {
-          candidate: {
-            id: "invented",
-            kind: "movie",
-            title: "Made Up Film",
-            genres: [],
-            cast: [],
-            source: "catalog",
-          } as DiscoverCandidate,
-          score: 0.9,
-          reason: "Hallucinated.",
-        },
-      ],
+      rank: async (_q, candidates) => {
+        received = candidates
+        return [
+          { candidate: candidates[0], score: 1, reason: "Cosy and funny." },
+          // Invented id: must be dropped, never surfaced.
+          {
+            candidate: {
+              id: "invented",
+              kind: "movie",
+              title: "Made Up Film",
+              genres: [],
+              cast: [],
+              source: "catalog",
+            } as DiscoverCandidate,
+            score: 0.9,
+            reason: "Hallucinated.",
+          },
+        ]
+      },
     })
     try {
       const out = await rankDiscover("something cosy for tonight please", CATALOG, tasteWithLikes())
       expect(out.source).toBe("ai")
-      expect(out.results.map((r) => r.candidate.id)).toEqual([CATALOG[0].id])
+      expect(received.length).toBeGreaterThan(0)
+      expect(out.results.map((r) => r.candidate.id)).toEqual([received[0].id])
       expect(out.fallbackReason).toBeUndefined()
     } finally {
       registerAIRanker(null)
@@ -493,7 +517,11 @@ describe("rankDiscover (AI04 / AI06)", () => {
     }
   })
 
-  it("still keeps the natural-language gate without force", async () => {
+  it("still keeps the natural-language gate without force — for bare title searches", async () => {
+    // 0.11.5 (Bug 3): the gate now distinguishes a bare title lookup
+    // ("Space Heist" — no intent, no question) from a category
+    // question ("COMEDY" — a parsed genre constraint, see the next
+    // test). Only the title lookup stays local without an explicit ask.
     let called = false
     registerAIRanker({
       rank: async (_q, candidates) => {
@@ -502,9 +530,118 @@ describe("rankDiscover (AI04 / AI06)", () => {
       },
     })
     try {
-      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes())
+      const out = await rankDiscover("Space Heist", CATALOG, tasteWithLikes())
       expect(called).toBe(false)
       expect(out.source).toBe("local")
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("reaches the ranker for a short category query without force (Bug 3)", async () => {
+    // "COMEDY" is a genre question, not a title lookup: the parsed
+    // intent carries a hard genre constraint, so the model is eligible
+    // even without an explicit Ask AI tap.
+    let asked = ""
+    let receivedCount = 0
+    registerAIRanker({
+      rank: async (q, candidates) => {
+        asked = q
+        receivedCount = candidates.length
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes())
+      expect(asked).toBe("COMEDY")
+      expect(out.source).toBe("ai")
+      // …and it only ever receives the hard-filtered shortlist:
+      // the one comedy in the fixture catalogue.
+      expect(receivedCount).toBe(1)
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("hands the ranker the retrieval shortlist, never catalogue order (Bug 2)", async () => {
+    // 25 irrelevant punctuation-first films, then the dark anime at
+    // position 26: the ranker must see the anime first, within a
+    // 20-item shortlist — never the raw catalogue order.
+    const big: DiscoverCandidate[] = Array.from({ length: 25 }, (_, i) =>
+      candidate({
+        id: `early-${i}`,
+        title: `!Film ${i}`,
+        genres: ["Comedy"],
+        rating: 9.9,
+        voteCount: 50000,
+      })
+    )
+    big.push(
+      candidate({
+        id: "anime-1",
+        title: "Perfect Blue",
+        genres: ["Anime", "Horror", "Thriller"],
+        rating: 7.5,
+        voteCount: 9000,
+        overview: "A dark, disturbing psychological nightmare.",
+      })
+    )
+    let received: DiscoverCandidate[] = []
+    registerAIRanker({
+      rank: async (_q, candidates) => {
+        received = candidates
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const out = await rankDiscover(
+        "some fucked up dark anime",
+        big,
+        emptyTasteModel("shared", "pl1")
+      )
+      expect(out.source).toBe("ai")
+      expect(received.length).toBeLessThanOrEqual(20)
+      expect(received[0].id).toBe("anime-1")
+      expect(received.every((c) => c.title === "Perfect Blue" || c.genres.includes("Animation"))).toBe(true)
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("never spends a request on an empty query, and honours taste opt-out", async () => {
+    let called = false
+    let receivedSummary: unknown = null
+    registerAIRanker({
+      rank: async (_q, candidates, summary) => {
+        called = true
+        receivedSummary = summary
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      const empty = await rankDiscover("", CATALOG, tasteWithLikes())
+      expect(called).toBe(false)
+      expect(empty.source).toBe("local")
+      const out = await rankDiscover("COMEDY", CATALOG, tasteWithLikes(), { shareTaste: false })
+      expect(called).toBe(true)
+      expect(out.source).toBe("ai")
+      expect(receivedSummary).toEqual({ favouriteGenres: [], likedTitles: [], dislikedTitles: [] })
+    } finally {
+      registerAIRanker(null)
+    }
+  })
+
+  it("rankWithAI forwards the explicit-ask option", async () => {
+    let called = false
+    registerAIRanker({
+      rank: async (_q, candidates) => {
+        called = true
+        return candidates.map((c) => ({ candidate: c, score: 1, reason: "" }))
+      },
+    })
+    try {
+      await rankWithAI("Space Heist", CATALOG, tasteWithLikes(), { forceAi: true })
+      expect(called).toBe(true)
     } finally {
       registerAIRanker(null)
     }
