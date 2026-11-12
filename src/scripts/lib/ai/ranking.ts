@@ -597,7 +597,7 @@ export function sanitizeReason(reason: string, candidate: DiscoverCandidate): st
   // Word-boundary split that KEEPS hyphenated words ("sci-fi" stays one
   // word), so a genre claim is never matched inside another word
   // ("satisfaction" must not read as "action").
-  const reasonWords = new Set(text.split(/[\s,.;:!?()"\[\]]+/).filter(Boolean))
+  const reasonWords = new Set(text.split(/[\s,.;:!?()"[\]]+/).filter(Boolean))
   const hasGenreWord = (word: string) =>
     word.includes(" ")
       ? word.split(" ").every((part) => reasonWords.has(part))
