@@ -1295,8 +1295,8 @@
           {/if}
           {#if visibleAiResults.length}
             <div class="rs-ai-grid" data-ai-results>
-              {#each visibleAiResults as rec (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${rec.generated}`)}
-                {@render aiRecommendationCard(rec)}
+              {#each visibleAiResults as rec, aiIndex (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${aiIndex}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
+                {@render aiRecommendationCard(rec, aiIndex)}
               {/each}
             </div>
           {:else if !searching}
@@ -1548,9 +1548,9 @@
   </span>
 {/snippet}
 
-{#snippet aiRecommendationCard(rec)}
+{#snippet aiRecommendationCard(rec, index)}
   {@const href = recommendationDetailHref(rec)}
-  {@const key = rec.match?.catalogueKey ?? `ai:${rec.generated}`}
+  {@const key = rec.match?.catalogueKey ?? (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${index}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
   {@const kindLabel = rec.kind === "series" ? "Series" : "Film"}
   {#if href}
     <a

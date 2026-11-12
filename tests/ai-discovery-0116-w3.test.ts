@@ -715,3 +715,31 @@ describe("debounce timer (0.11.6 P0 regression)", () => {
     expect(matches).toHaveLength(1)
   })
 })
+
+describe("unverified card keys (0.11.6 integration regression)", () => {
+  // W3's shim typed `generated` as a bare string, so `gen:${rec.generated}`
+  // was a unique key. The real GeneratedRecommendation is an OBJECT, so
+  // that interpolation collapsed to `gen:[object Object]` for EVERY
+  // unverified card — Svelte threw each_key_duplicate and the unverified
+  // state never rendered. Keys must interpolate the object's fields.
+  const discoverView = readFileSync(
+    new URL("../src/components/DiscoverView.svelte", import.meta.url),
+    "utf8"
+  )
+
+  it("never interpolates the generated object itself into a key", () => {
+    expect(discoverView).not.toContain("`${rec.generated}`")
+    expect(discoverView).not.toContain("ai:${rec.generated}")
+    expect(discoverView).not.toContain("gen:${rec.generated}")
+  })
+
+  it("keys unverified cards by index + generated title/kind/year", () => {
+    expect(discoverView).toContain("rec.generated.title")
+    expect(discoverView).toContain("rec.generated.kind")
+    expect(discoverView).toContain("rec.generated.year")
+    const eachLine = discoverView
+      .split("\n")
+      .find((line) => line.includes("{#each visibleAiResults"))
+    expect(eachLine).toContain("aiIndex")
+  })
+})
