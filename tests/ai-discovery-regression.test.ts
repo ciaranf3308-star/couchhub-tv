@@ -114,9 +114,13 @@ function promptOf(callIndex: number): string {
   return user?.content ?? ""
 }
 
-/** Candidate ids the model was shown on the nth call. */
+/** Candidate ids the model was shown on the nth call. Composite ids
+ * ("movie:123") are normalised to bare provider ids ("123") here:
+ * the pool assertions compare against the fixture's bare id sets,
+ * and the id FORMAT is the ranker's business, not the pool's. */
 function poolOf(callIndex: number): Set<string> {
-  return new Set(promptCandidateIds(promptOf(callIndex)))
+  const ids = promptCandidateIds(promptOf(callIndex))
+  return new Set(ids.map((id) => (id.includes(":") ? (id.split(":").pop() ?? id) : id)))
 }
 
 function candidate(partial: Partial<DiscoverCandidate> & { id: string; title: string }): DiscoverCandidate {
@@ -527,7 +531,10 @@ describe("T7 — missing metadata", () => {
       cast: [],
       source: "catalog",
     } as unknown as DiscoverCandidate
-    const out = await rankDiscover("anime", [broken, ...sparseCatalogue], plainTaste())
+    // forceAi: the one-word query would otherwise never reach the
+    // ranker at all (plain title search), so there would be no
+    // fallback to exercise.
+    const out = await rankDiscover("anime", [broken, ...sparseCatalogue], plainTaste(), { forceAi: true })
     expect(out.source).toBe("local")
     expect(out.fallbackReason).toBeTruthy()
   })
