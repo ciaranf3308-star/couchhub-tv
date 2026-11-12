@@ -58,6 +58,12 @@ export interface DrawerSubcategory {
   id: string;
   label: string;
   count: number;
+  /**
+   * Raw provider category (verbatim), when the caller knows it.
+   * Carried so hosts can resolve legacy verbatim subcategory
+   * references to the canonical id; the drawer never renders it.
+   */
+  rawName?: string;
 }
 
 /** One top-level drawer entry. */

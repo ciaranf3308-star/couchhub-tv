@@ -59,11 +59,14 @@ import TvLiveLanding from "@/components/couch/TvLiveLanding.astro";
 import TvChannelBrowser from "@/components/couch/TvChannelBrowser.astro";
 import TvPlaybackShell from "@/components/couch/TvPlaybackShell.astro";
 import TvGuideView from "@/components/couch/TvGuideView.astro";
+import TvLivetvSearchOverlay from "@/components/couch/TvLivetvSearchOverlay.astro";
+import TvLivetvSortOverlay from "@/components/couch/TvLivetvSortOverlay.astro";
+import TvLivetvHints from "@/components/couch/TvLivetvHints.astro";
 import { livetvEmptyProps } from "@/scripts/lib/livetv-data";
 const providerEmpty = livetvEmptyProps("provider-lost");
 ---
 
-<CouchLayout pageTitle="Live TV" view="livetv">
+<CouchLayout pageTitle="Live TV" view="livetv" hideButtonHints>
 	<script is:inline>
 		try {
 			var raw = localStorage.getItem("xt_playlists") || "";
@@ -86,11 +89,14 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 		<header class="rs-livetv-home__head">
 			<h1 class="rs-page-title">Live TV</h1>
 			<p class="rs-meta">Live channels from your playlist — pick a channel to start watching.</p>
-			<!-- The Xbox button-hint legend is the layout-level
-			     TvButtonHints (CouchLayout), NOT a mount here: the
+			<!-- The Xbox button-hint legend is the page-level
+			     TvLivetvHints mount (after the mode mounts
+			     below), NOT a mount here: the
 			     [data-livetv-legend] div that used to sit in this
 			     header was never filled by anything (0.11.0 W1
-			     removed it). -->
+			     removed it), and the layout-level TvButtonHints
+			     is hidden via hideButtonHints so exactly one
+			     hints bar renders. -->
 		</header>
 
 		<section
@@ -263,6 +269,15 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 				<TvGuideView />
 			</div>
 		</div>
+
+		<!-- Live TV 2.0 (0.11.7) overlays + hints — mounted ONCE
+		     for the whole page, after the mode mounts: the search
+		     and sort overlays listen for the W4 open events
+		     (dispatched by the browser), and the hints bar follows
+		     the shared nav stack. -->
+		<TvLivetvSearchOverlay />
+		<TvLivetvSortOverlay />
+		<TvLivetvHints context="browser" />
 	</div>
 
 	<style>
@@ -420,6 +435,7 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 		import { getLivetvResumeLastChannel } from "../scripts/lib/app-settings.js";
 		import { restoreLivetvState, parseLivetvModeParam } from "../scripts/lib/livetv-state.ts";
 		import { persistLivetvMode } from "../scripts/lib/livetv-state.ts";
+		import { livetvNav } from "../scripts/lib/livetv-nav.ts";
 
 		// ── Mode shell (0.9.0: four modes + "home" alias) ─────────
 		// Listens for livetv:mode {mode, browserFilter?, guideMode?,
@@ -456,6 +472,18 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 			for (const [key, mount] of Object.entries(modeMounts)) {
 				if (!mount) continue;
 				mount.toggleAttribute("hidden", key !== mode);
+			}
+			// 0.11.7: mirror the mode onto W4's nav stack as a
+			// hook-free marker layer (key "shell:<mode>"):
+			// surfaces gate B on isTop(), and a mode change pops
+			// overlay layers above it (their onExit hooks close
+			// the overlay UI — correct). Deliberately NO
+			// installBackRouting: playback owns its own B
+			// handling, and a global back router would pop the
+			// playback marker and break it.
+			livetvNav.popTo("landing");
+			if (mode !== "landing") {
+				livetvNav.push({ id: mode, key: `shell:${mode}` });
 			}
 			document.documentElement.dataset.livetvMode = mode;
 			// 0.11.0 W1: the shell is the single writer of the

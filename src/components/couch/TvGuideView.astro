@@ -93,9 +93,10 @@
 // Categories come ONLY from the shared category index, through
 // the single adapter in livetv-guide-categories.ts — the old
 // raw-category <select> (a second, contradictory categorisation)
-// is replaced by the controller-first category drawer wrapper
-// (livetv-guide-category-picker.ts, SWAP TARGET for W2's
-// TvCategoryDrawer.astro). A channel selected in the Guide is
+// is replaced by the controller-first category drawer
+// (livetv-guide-category-picker.ts, built on W2's shared drawer
+// module livetv-category-drawer.ts — the same drawer the Channel
+// Browser uses). A channel selected in the Guide is
 // identifiable in the Browser via the `livetv:guide-channel`
 // event (see selectProgramme) — highlight-only, never tunes.
 import TvProgrammeMeta from "./TvProgrammeMeta.astro";
@@ -189,8 +190,8 @@ const nowMs = Date.now();
   </div>
 
   <!-- Category drawer mount (0.11.7): the drawer panel is rendered
-       here by livetv-guide-category-picker.ts (SWAP TARGET for
-       W2's TvCategoryDrawer.astro) — the mount is display:contents
+       here by livetv-guide-category-picker.ts (W2's shared drawer
+       module) — the mount is display:contents
        so the panel positions against the Guide root. -->
   <div data-guide-category-drawer></div>
 
@@ -821,6 +822,7 @@ const nowMs = Date.now();
     resolveGuideCategory,
   } from "@/scripts/lib/livetv-guide-categories.ts";
   import { mountGuideCategoryPicker } from "@/scripts/lib/livetv-guide-category-picker.ts";
+  import { livetvNav } from "@/scripts/lib/livetv-nav.ts";
 
   const PX_PER_HOUR = 200;
   const ROW_HEIGHT_PX = 76;
@@ -906,8 +908,10 @@ const nowMs = Date.now();
     let pendingListReset = false;
     /** Channel id last announced on the Browser seam (dedupe). */
     let lastGuideChannelId = null;
-    /** Category drawer controller (SWAP TARGET wrapper), or null. */
+    /** Category drawer controller (shared drawer module), or null. */
     let categoryPicker = null;
+    /** B coalescing: one handleBack per press (250ms, browser parity). */
+    let lastGuideBackMs = 0;
     let searchQuery = "";
     let viewStartMs = jumpToNowWindow(Date.now()).viewStartMs;
     let selectedKey = liveState.guideProgrammeKey;
@@ -1200,19 +1204,37 @@ const nowMs = Date.now();
 
     /** Open the category drawer (trigger + Menu/Y action). */
     function openCategoryDrawer() {
-      if (!categoryPicker) return;
+      if (!categoryPicker || categoryPicker.isOpen()) return;
       categoryPicker.update({
         groups: categoryGroups,
         ...guideCategoryValueToDrawer(categorySelection),
       });
       categoryPicker.open();
+      // The drawer is a nav layer: B pops exactly one layer
+      // through the shared stack. At the subcategories level the
+      // layer vetoes the pop (steps up to groups instead); at the
+      // top level the pop closes the drawer UI via onExit.
+      livetvNav.push({
+        id: "drawer",
+        key: "guide-drawer",
+        onBack: () => {
+          if (categoryPicker && categoryPicker.getLevel() === "subcategories") {
+            categoryPicker.handleBack();
+            return false;
+          }
+          return true;
+        },
+        onExit: () => {
+          closeDrawerUI();
+        },
+      });
       if (categoryTriggerEl instanceof HTMLElement) {
         categoryTriggerEl.setAttribute("aria-expanded", "true");
       }
     }
 
-    /** Close the category drawer and return focus to the trigger. */
-    function closeCategoryDrawer() {
+    /** Close the drawer DOM only (runs from the layer's onExit). */
+    function closeDrawerUI() {
       if (!categoryPicker) return;
       categoryPicker.close();
       if (categoryTriggerEl instanceof HTMLElement) {
@@ -1220,11 +1242,21 @@ const nowMs = Date.now();
       }
     }
 
-    // Mount the category drawer wrapper (SWAP TARGET: integration
-    // replaces the wrapper's internals with W2's TvCategoryDrawer;
-    // these props are the drawer contract). Selection replaces the
-    // filter and closes the drawer; B is handled by handleBack's
-    // one-layer section, which calls picker.handleBack() first.
+    /** Close the category drawer and return focus to the trigger. */
+    function closeCategoryDrawer() {
+      if (!categoryPicker) return;
+      if (livetvNav.isTop("drawer", "guide-drawer")) {
+        livetvNav.pop();
+        return;
+      }
+      closeDrawerUI();
+    }
+
+    // Mount the category drawer (shared drawer module, via the
+    // picker controller; these props are the drawer contract).
+    // Selection replaces the filter and closes the drawer; B is
+    // handled by handleBack's one-layer section, which routes the
+    // drawer step through the shared nav stack first.
     if (
       categoryDrawerMountEl instanceof HTMLElement &&
       categoryTriggerEl instanceof HTMLElement
@@ -2399,11 +2431,23 @@ const nowMs = Date.now();
     //   1. category drawer (subcategories → groups → closed),
     //   2. open programme detail,
     //   3. the Guide itself (exit to the entry mode).
-    // W4's nav-state module unifies this at integration; until
-    // then, no other code path may exit the Guide or close the
-    // drawer on B — route through handleBack() here.
+    // The drawer step routes through W4's shared nav stack
+    // (livetvNav.back()), so a B press never pops two layers
+    // when the browser/overlay guards share the same event; the
+    // detail/exit steps are local. No other code path may exit
+    // the Guide or close the drawer on B — route through
+    // handleBack() here.
     function handleBack() {
-      if (categoryPicker && categoryPicker.handleBack()) {
+      const now = Date.now();
+      if (now - lastGuideBackMs < 250) return;
+      lastGuideBackMs = now;
+      if (categoryPicker && categoryPicker.isOpen()) {
+        if (livetvNav.isTop("drawer", "guide-drawer")) {
+          livetvNav.back();
+        } else {
+          // Layer missing (external reset): step locally.
+          categoryPicker.handleBack();
+        }
         return;
       }
       if (detailOpen) {
@@ -2716,13 +2760,16 @@ const nowMs = Date.now();
         return;
       }
       const action = livetvKeyActionForKey("guide", event.key);
-      // While the category drawer is open it owns the keys (its
-      // own keydown handler moves within it); anything reaching
-      // here is swallowed except B, which routes through the
-      // one-layer B section (drawer level → close → detail → exit).
+      // While the category drawer is open it owns the keys:
+      // non-B keys route to the drawer's own handler (arrows move
+      // within it, Enter drills/selects); B routes through the
+      // one-layer B section (drawer level → close → detail →
+      // exit). Everything is claimed so SpatialNavigation cannot
+      // double-move behind the drawer.
       if (categoryPicker && categoryPicker.isOpen()) {
         claim();
         if (action === "back") handleBack();
+        else categoryPicker.handleKey(event);
         return;
       }
       if (action === "back") {
@@ -2838,7 +2885,7 @@ const nowMs = Date.now();
       const mode = event.detail?.mode;
       if (mode === "guide") {
         void activate(event.detail?.guideMode);
-      } else if (mode === "home" || mode === "landing" || mode === "playback") {
+      } else if (mode === "home" || mode === "landing" || mode === "playback" || mode === "browser") {
         // INTEGRATION 0.11.0 — "landing" is the 0.11.0 name for
         // the 0.9.0 "home" mode (setMode maps home→landing before
         // dispatching, so the "home" branch is dead): without it,
@@ -2847,14 +2894,37 @@ const nowMs = Date.now();
         // from activate() without capturing the invoker's focus
         // key — B then restored focus to a stale key (or the
         // nav fallback) instead of the invoker.
+        // 0.11.7: "browser" deactivates too — without it the
+        // Guide stayed `active` across browser mode and its
+        // livetv:back handler stole B from the browser.
         deactivate();
       }
     });
     // B behaviour (W5 contract): the gamepad layer dispatches this
     // window event; the Guide closes its detail first, then exits.
-    window.addEventListener("livetv:back", () => {
+    // Gated on context, activity, and the nav stack: a hidden
+    // Guide (or one under an overlay / another surface's layer)
+    // must never steal B. A handled press stops propagation so no
+    // other surface pops a second layer for the same B.
+    window.addEventListener("livetv:back", (event) => {
       if (!active) return;
+      const context = event.detail?.context;
+      if (context != null && context !== "guide") return;
+      const top = livetvNav.topId();
+      if (
+        top != null &&
+        top !== "guide" &&
+        !(top === "drawer" && livetvNav.isTop("drawer", "guide-drawer"))
+      ) {
+        return;
+      }
       handleBack();
+      event.preventDefault();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      } else {
+        event.stopPropagation();
+      }
     });
     // The catalog can land after activation (cold ?mode=guide):
     // a cache write, or the EPG arriving, re-checks the channel

@@ -4,10 +4,8 @@
 // Every index read in the Guide goes through `resolveGuideCategory`
 // below — no other Guide code imports `livetv-category-index.ts`,
 // and no second categorisation is maintained anywhere in the
-// Guide. When integration swaps the STUB-FOR-INTEGRATION index for
-// W1's real one, this file is the only Guide-side seam that can
-// need a shape change (and the swap is designed to need none: the
-// adapter only uses getCategoryIndex / getDerivedChannels).
+// Guide. The adapter only uses getCategoryIndex /
+// getDerivedChannels from W1's real index module.
 //
 // Selections:
 //   - "all" — every channel (the old select's "All categories").
@@ -32,8 +30,23 @@ import {
 } from "./livetv-category-index";
 import type {
   CategoryIndex,
-  CategoryIndexInput,
+  DerivedChannelsOptions,
 } from "./livetv-category-index";
+import type { LivetvChannel } from "./livetv-data";
+
+/**
+ * The channel shape the adapter actually reads: an id plus the
+ * raw provider category fields the index groups on. Production
+ * callers pass full LivetvChannel objects; tests pass minimal
+ * shapes. The index itself is built over the same objects
+ * (cast at the boundary — the index stores references, never
+ * copies, so derived results ARE the caller's objects).
+ */
+export interface GuideCategoryChannelLike {
+  id: string | number;
+  category?: unknown;
+  categoryId?: unknown;
+}
 
 /** Pseudo-group ids, kept verbatim from the old category <select>. */
 export const GUIDE_CATEGORY_ALL = "__all__";
@@ -80,11 +93,22 @@ export interface GuideCategoryContext {
 
 // Single-entry index cache: one catalogue, one index.
 let cachedRevision = -1;
-let cachedChannels: readonly CategoryIndexInput[] | null = null;
+let cachedChannels: readonly GuideCategoryChannelLike[] | null = null;
 let cachedIndex: CategoryIndex | null = null;
+/**
+ * Sequence distinguishing index builds for the shared cache:
+ * the shared cache is keyed by revision alone, and the caller's
+ * numeric revision may repeat for a DIFFERENT channel array
+ * (a re-read that forgot to bump, or two test fixtures). Every
+ * adapter-cache miss therefore mints a fresh revision string,
+ * so the shared cache can never serve another catalogue's
+ * index. Repeat calls with the same array + revision hit this
+ * adapter's cache and never reach the shared cache at all.
+ */
+let indexBuildSeq = 0;
 
 function indexFor(
-  channels: readonly CategoryIndexInput[],
+  channels: readonly GuideCategoryChannelLike[],
   revision: number,
 ): CategoryIndex {
   if (
@@ -94,7 +118,11 @@ function indexFor(
   ) {
     return cachedIndex;
   }
-  const index = getCategoryIndex(channels, { revision });
+  indexBuildSeq += 1;
+  const index = getCategoryIndex(
+    channels as readonly LivetvChannel[],
+    `guide:${revision}:${indexBuildSeq}`,
+  );
   cachedRevision = revision;
   cachedChannels = channels;
   cachedIndex = index;
@@ -139,7 +167,7 @@ function triggerLabelFor(
  * the index cache (keyed by revision + array identity). Never
  * mutates the input channels.
  */
-export function resolveGuideCategory<T extends CategoryIndexInput>(
+export function resolveGuideCategory<T extends GuideCategoryChannelLike>(
   channels: readonly T[],
   selection: GuideCategoryValue,
   context: GuideCategoryContext,
@@ -166,10 +194,13 @@ export function resolveGuideCategory<T extends CategoryIndexInput>(
       if (channel) resolved.push(channel);
     }
   } else {
-    resolved = getDerivedChannels(channels, index, {
-      groupId: valid.groupId,
-      subcategoryId: valid.subcategoryId,
-    });
+    const opts: DerivedChannelsOptions = { groupId: valid.groupId };
+    if (valid.subcategoryId != null) {
+      opts.subcategoryId = valid.subcategoryId;
+    }
+    // The index stores the caller's channel objects by
+    // reference, so this cast recovers exactly the input type.
+    resolved = getDerivedChannels(index, opts) as unknown as T[];
   }
   const favCount = (() => {
     const favs = new Set<string>();

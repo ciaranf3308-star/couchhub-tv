@@ -4141,8 +4141,9 @@ html[data-couch] .rs-guide-tonight-sections--heading-only {
 /* Category drawer (0.11.7): controller-first replacement for the
    old <select>. The mount is display:contents so the panel
    positions against the Guide root (position:relative, scoped in
-   TvGuideView.astro). SWAP TARGET: W2's TvCategoryDrawer keeps
-   these hooks/classes where it can. */
+   TvGuideView.astro). The drawer itself is rendered by W2's
+   shared drawer module (.rs-tv-category-drawer); the
+   .rs-guide-catdrawer rules below are retained mount hooks. */
 html[data-couch] [data-guide-category-drawer] {
   display: contents;
 }

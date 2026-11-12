@@ -22,8 +22,8 @@
 //     derived list; the catalogue is re-derived only when the
 //     selection, search, sort or catalogue itself changes. All
 //     category-index consumption sits behind ONE adapter function
-//     (getBrowserCategoryData) over W1's seam
-//     (livetv-category-index.ts — currently STUB-FOR-INTEGRATION).
+//     (getBrowserCategoryData) over W1's shared index
+//     (livetv-category-index.ts).
 //   - ONE CATEGORY CONTROL. The horizontal pills and category
 //     <select> elements are gone. A single prominent category
 //     button opens the category drawer (livetv-category-drawer.ts
@@ -82,7 +82,6 @@ import {
 } from "./livetv-enrichment";
 import {
   dispatchLivetvTune,
-  groupChannels,
   loadLivetvHomeData,
   nowNextForChannel,
   readActivePlaylistId,
@@ -91,9 +90,20 @@ import {
   type LivetvNowNext,
 } from "./livetv-data";
 import {
+  buildCategoryIndex,
   getCategoryIndex,
   getDerivedChannels,
+  invalidateDerivedChannels,
+  type CategoryIndex,
+  type DerivedChannelsOptions,
 } from "./livetv-category-index";
+import { livetvNav } from "./livetv-nav";
+import {
+  applyCategoryChangeToSearch,
+  readPersistedLivetvSort,
+  writePersistedLivetvSort,
+  type LivetvSearchState,
+} from "./livetv-search-sort";
 import {
   mountCategoryDrawer,
   type CategoryDrawerHandle,
@@ -125,9 +135,14 @@ export type BrowserSearchScope = "category" | "all";
 
 export interface BrowserFilter {
   query?: string;
-  /** "all" | "favourites" | "recents" | a group id from groupChannels. */
+  /** "all" | "favourites" | "recents" | a group id from the shared category index. */
   categoryId?: string | null;
-  /** Verbatim provider subcategory id within the group (null = whole group). */
+  /**
+   * Subcategory id within the group: a W1 subcategory id
+   * (`sub:<slug>`), or — for entry filters that still carry the
+   * verbatim provider category — the raw category string, which
+   * resolves to the W1 id (null = whole group).
+   */
   subcategoryId?: string | null;
   sort?: BrowserSort;
   /** Most-recent-first ids, for the "recents" pseudo-category order. */
@@ -151,8 +166,10 @@ export interface BrowserSelection {
  * Entry filter carried on `livetv:mode` {mode:"browser",
  * browserFilter} (and on the mount's data attributes — see
  * TvChannelBrowser). "category" names a provider group id
- * (groupChannels), e.g. "irish-uk" / "sports"; `subcategory`
- * optionally names a verbatim provider category within it.
+ * (the shared category index), e.g. "irish-uk" / "sports";
+ * `subcategory` optionally names a subcategory within it — a W1
+ * subcategory id, or the verbatim provider category (resolved
+ * to the W1 id on apply).
  */
 export interface BrowserEntryFilter {
   kind: "all" | "favourites" | "recents" | "category";
@@ -217,6 +234,8 @@ export interface LivetvSearchSubmitDetail {
   query: string;
   /** "all" searches the whole catalogue; anything else searches the current selection. */
   scope?: BrowserSearchScope;
+  /** Category the search was scoped to (W4 submit detail). Accepted; the browser applies the search to its current selection, which the overlay captured at open. */
+  categoryId?: string | null;
 }
 
 export interface LivetvSortSubmitDetail {
@@ -341,14 +360,24 @@ export function searchBrowserChannels(
 }
 
 /**
- * Pure: the verbatim provider subcategory identity of a channel —
- * the same fallback the category index uses for subcategory ids
- * (raw categoryId, else display label, else "uncategorized").
- * Kept in this module so the pure filter stays correct after the
- * STUB-FOR-INTEGRATION index is replaced by W1's module.
+ * Pure: resolve a subcategory reference to its canonical W1 id.
+ * Accepts a W1 subcategory id (`sub:<slug>`) directly, or the
+ * verbatim raw provider category (the pre-0.11.7 entry-filter
+ * spelling), resolved through the subcategory's raw name.
+ * Returns null when the reference names no subcategory of this
+ * group — a stale/foreign reference never silently selects a
+ * different subcategory. `subs` may be index subcategories
+ * (rawName always present) or drawer subcategories (rawName
+ * carried by the adapter).
  */
-export function browserSubcategoryIdFor(channel: LivetvChannel): string {
-  return channel.categoryId || channel.categoryLabel || "uncategorized";
+export function resolveBrowserSubcategoryId(
+  subs: ReadonlyArray<{ id: string; rawName?: string }>,
+  rawOrId: string,
+): string | null {
+  const direct = subs.find((sub) => sub.id === rawOrId);
+  if (direct) return direct.id;
+  const byRaw = subs.find((sub) => sub.rawName === rawOrId);
+  return byRaw ? byRaw.id : null;
 }
 
 /** Pure: recents-ordered channels (most-recent-first ids). */
@@ -395,12 +424,20 @@ export function sortBrowserChannels(
 }
 
 /**
- * Pure: filter + sort one browser view. Category "favourites"
- * keeps favourite-flagged channels; "recents" keeps the given
- * recent ids in recents order; a group id keeps that group's
- * channels, optionally narrowed to one subcategory (verbatim
- * provider category); "all" / null keeps everything. Sort is
- * applied last.
+ * Pure: filter + sort one browser view, through the shared
+ * category index (never the legacy groupChannels compatibility
+ * export: this
+ * builds a fresh index for the given array, so it stays pure
+ * and never serves another catalogue's cached index).
+ * Category "favourites" keeps favourite-flagged channels;
+ * "recents" keeps the given recent ids in recents order; a
+ * group id keeps that group's channels in subcategory order,
+ * optionally narrowed to one subcategory (a W1 subcategory id
+ * or the verbatim provider category — see
+ * resolveBrowserSubcategoryId); "all" / null keeps everything.
+ * An unknown group or subcategory yields []. Sort is applied
+ * last. Search uses the browser's cleaned query
+ * (normalizeBrowserQuery) over the cached haystacks.
  */
 export function applyBrowserFilter(
   channels: readonly LivetvChannel[],
@@ -413,14 +450,20 @@ export function applyBrowserFilter(
   } else if (categoryId === BROWSER_CATEGORY_RECENTS) {
     list = recentOrderedChannels(channels, filter.recentIds);
   } else if (categoryId !== BROWSER_CATEGORY_ALL) {
-    const groups = groupChannels(channels);
-    const group = groups.find((g) => g.id === categoryId);
-    list = group ? [...group.channels] : [];
+    const index = buildCategoryIndex(
+      channels,
+      "livetv-browser:applyBrowserFilter",
+    );
+    const opts: DerivedChannelsOptions = { groupId: categoryId };
     if (filter.subcategoryId) {
-      list = list.filter(
-        (channel) => browserSubcategoryIdFor(channel) === filter.subcategoryId,
-      );
+      const group = index.groups.find((g) => g.id === categoryId);
+      const resolved = group
+        ? resolveBrowserSubcategoryId(group.subcategories, filter.subcategoryId)
+        : null;
+      if (!resolved) return sortBrowserChannels([], filter.sort ?? "source");
+      opts.subcategoryId = resolved;
     }
+    list = [...getDerivedChannels(index, opts)];
   } else {
     list = [...channels];
   }
@@ -468,18 +511,24 @@ export function browserCategoryIcon(id: string): string {
 
 /**
  * Top-level categories for a channel set, in the mockup order:
- * Favourites, provider groups (Irish & UK first, groupChannels'
- * order), Recents, All Channels last. Favourites / Recents / All
- * are ALWAYS present, even at count 0, so they stay immediately
- * reachable as entry points; selecting an empty one shows the
- * empty state instead of hiding the destination. This order is
- * the drawer's top-level order and the LB/RB cycle order.
+ * Favourites, provider groups (Irish & UK first, the shared
+ * index's order), Recents, All Channels last. Favourites /
+ * Recents / All are ALWAYS present, even at count 0, so they
+ * stay immediately reachable as entry points; selecting an
+ * empty one shows the empty state instead of hiding the
+ * destination. This order is the drawer's top-level order and
+ * the LB/RB cycle order. Built from a fresh index for the given
+ * array (pure; the mounted browser's adapter caches its own
+ * index and does not call this per render).
  */
 export function browserCategories(
   channels: readonly LivetvChannel[],
   recentIds?: ReadonlyArray<string | number> | null,
 ): BrowserCategory[] {
-  const groups = groupChannels(channels);
+  const index = buildCategoryIndex(
+    channels,
+    "livetv-browser:browserCategories",
+  );
   const favCount = channels.filter((c) => c.favourite).length;
   const recentCount = (recentIds ?? []).filter((id) =>
     channels.some((c) => String(c.id) === String(id)),
@@ -494,9 +543,9 @@ export function browserCategories(
   ];
   // Mockup order for the headline groups (Favourites, Irish &
   // UK, Sports, Movies, News, Kids); every other genuine provider
-  // group follows in groupChannels order, then Recents, All last.
+  // group follows in index order, then Recents, All last.
   const headlineOrder = ["irish-uk", "sports", "movies", "news", "kids"];
-  const orderedGroups = groups
+  const orderedGroups = index.groups
     .filter((group) => group.id !== "all")
     .sort((a, b) => {
       const ai = headlineOrder.indexOf(a.id);
@@ -510,7 +559,7 @@ export function browserCategories(
     cats.push({
       id: group.id,
       label: group.label,
-      count: group.channels.length,
+      count: group.channelCount,
       icon: browserCategoryIcon(group.id),
     });
   }
@@ -661,8 +710,7 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  const node = target as HTMLElement | null;
+function isEditableTarget(target: EventTarget | null): boolean {  const node = target as HTMLElement | null;
   if (!node || typeof node.tagName !== "string") return false;
   const tag = node.tagName.toLowerCase();
   return tag === "input" || tag === "textarea" || tag === "select" || node.isContentEditable === true;
@@ -691,6 +739,9 @@ interface RowRefs {
   nextTitle: HTMLElement;
 }
 
+/** Monotonic browser-instance ids: index revisions and nav-layer keys are instance-scoped. */
+let nextBrowserInstanceId = 1;
+
 /**
  * Mount the Channel Browser into `root`. The root is owned by the
  * browser until destroy() — it replaces the root's children.
@@ -702,12 +753,23 @@ export function mountChannelBrowser(
   root: HTMLElement,
   opts: ChannelBrowserOptions,
 ): ChannelBrowserHandle {
+  const browserInstanceId = nextBrowserInstanceId++;
+  /** Nav-layer key for this instance's category drawer. */
+  const drawerNavKey = `browser-drawer:${browserInstanceId}`;
   let channels: LivetvChannel[] = [...opts.channels];
   let groupId = opts.initialCategoryId ?? BROWSER_CATEGORY_ALL;
   let subcategoryId: string | null = opts.initialSubcategoryId ?? null;
-  let sort: BrowserSort = opts.sort ?? "source";
+  // Explicit sort wins; otherwise the persisted sort (W4: the
+  // user picked an order last time and reopening keeps it).
+  let sort: BrowserSort = opts.sort ?? readPersistedLivetvSort();
   let query = "";
   let queryScope: BrowserSearchScope = "category";
+  /**
+   * Category the applied search was scoped to (subcategory id
+   * wins over group id; null for scope "all"). The
+   * category-change clearing rule (W4) compares against this.
+   */
+  let searchCategoryId: string | null = null;
   let highlightedId: string | number | null =
     opts.initialFocusId ?? null;
   let destroyed = false;
@@ -733,22 +795,40 @@ export function mountChannelBrowser(
     revision: number;
     groups: DrawerGroup[];
     channelsFor: (selection: BrowserSelection) => readonly LivetvChannel[];
+    index: CategoryIndex;
   } | null = null;
 
   /**
-   * THE ONE category-index adapter (0.11.7 seam). Every call to
+   * THE ONE category-index adapter (0.11.7). Every call to
    * getCategoryIndex / getDerivedChannels in this module happens
-   * here and nowhere else, so swapping the STUB-FOR-INTEGRATION
-   * index for W1's real module touches one function. The adapter
-   * returns the drawer's display-ordered groups (browserCategories
-   * order, enriched with real subcategories from the index) plus
-   * a channelsFor() slice lookup. Pseudo-entries (Favourites /
-   * Recents) are resolved here from the catalogue — they are not
-   * provider structure and never belong in the index.
+   * here and nowhere else. The adapter returns the drawer's
+   * display-ordered groups (browserCategories order: Favourites,
+   * headline groups, Recents, All Channels) enriched with the
+   * real provider subcategories from W1's shared index, plus a
+   * channelsFor() slice lookup. Pseudo-entries (Favourites /
+   * Recents / All) are resolved here from the catalogue — they
+   * are not provider structure and never belong in the index.
+   *
+   * Revision discipline: the shared index cache is keyed by
+   * revision alone, so the revision is instance-scoped AND
+   * epoch-scoped (`browser:<instance>:<catalogueStateRevision>`).
+   * Two browser instances never share a revision, and every
+   * catalogue replacement / in-place favourite mutation bumps
+   * the epoch — a stale index for a different catalogue is
+   * impossible. The adapter itself is cached on (channels
+   * identity, epoch), so scroll/focus/render paths never
+   * rebuild or regroup.
+   *
+   * Subcategory ids are W1's canonical ids (`sub:<slug>`);
+   * each drawer subcategory also carries its verbatim rawName
+   * so legacy verbatim references resolve (see
+   * resolveBrowserSubcategoryId). Group "all" is NOT an index
+   * group: it maps to the whole catalogue (no groupId).
    */
   function getBrowserCategoryData(): {
     groups: DrawerGroup[];
     channelsFor: (selection: BrowserSelection) => readonly LivetvChannel[];
+    index: CategoryIndex;
   } {
     if (
       categoryDataCache &&
@@ -757,37 +837,62 @@ export function mountChannelBrowser(
     ) {
       return categoryDataCache;
     }
-    const index = getCategoryIndex(channels);
-    const cats = browserCategories(channels, opts.recentIds ?? null);
-    const groups: DrawerGroup[] = cats.map((cat) => {
-      if (
-        cat.id === BROWSER_CATEGORY_FAVOURITES ||
-        cat.id === BROWSER_CATEGORY_RECENTS ||
-        cat.id === BROWSER_CATEGORY_ALL
-      ) {
-        return {
-          id: cat.id,
-          label: cat.label,
-          count: cat.count,
-          icon: cat.icon,
-          opensSubcategories: false,
-          subcategories: [],
-        };
-      }
-      const indexed = index.groups.find((g) => g.id === cat.id);
-      return {
-        id: cat.id,
-        label: cat.label,
-        count: cat.count,
-        icon: cat.icon,
+    const index = getCategoryIndex(
+      channels,
+      `browser:${browserInstanceId}:${catalogueStateRevision}`,
+    );
+    const favCount = channels.filter((c) => c.favourite).length;
+    const recentCount = (opts.recentIds ?? []).filter((id) =>
+      channels.some((c) => String(c.id) === String(id)),
+    ).length;
+    const headlineOrder = ["irish-uk", "sports", "movies", "news", "kids"];
+    const orderedGroups = [...index.groups].sort((a, b) => {
+      const ai = headlineOrder.indexOf(a.id);
+      const bi = headlineOrder.indexOf(b.id);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return 0;
+    });
+    const groups: DrawerGroup[] = [
+      {
+        id: BROWSER_CATEGORY_FAVOURITES,
+        label: "Favourites",
+        count: favCount,
+        icon: browserCategoryIcon(BROWSER_CATEGORY_FAVOURITES),
+        opensSubcategories: false,
+        subcategories: [],
+      },
+      ...orderedGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        count: group.channelCount,
+        icon: browserCategoryIcon(group.id),
         opensSubcategories: true,
-        subcategories: (indexed?.subcategories ?? []).map((sub) => ({
+        subcategories: group.subcategories.map((sub) => ({
           id: sub.id,
           label: sub.label,
-          count: sub.count,
+          count: sub.channelCount,
+          rawName: sub.rawName,
         })),
-      };
-    });
+      })),
+      {
+        id: BROWSER_CATEGORY_RECENTS,
+        label: "Recents",
+        count: recentCount,
+        icon: browserCategoryIcon(BROWSER_CATEGORY_RECENTS),
+        opensSubcategories: false,
+        subcategories: [],
+      },
+      {
+        id: BROWSER_CATEGORY_ALL,
+        label: "All Channels",
+        count: channels.length,
+        icon: browserCategoryIcon(BROWSER_CATEGORY_ALL),
+        opensSubcategories: false,
+        subcategories: [],
+      },
+    ];
     const channelsFor = (
       selection: BrowserSelection,
     ): readonly LivetvChannel[] => {
@@ -797,16 +902,23 @@ export function mountChannelBrowser(
       if (selection.groupId === BROWSER_CATEGORY_RECENTS) {
         return recentOrderedChannels(channels, opts.recentIds ?? null);
       }
-      return getDerivedChannels(index, {
+      if (selection.groupId === BROWSER_CATEGORY_ALL) {
+        return getDerivedChannels(index, {});
+      }
+      const derivedOpts: DerivedChannelsOptions = {
         groupId: selection.groupId,
-        subcategoryId: selection.subcategoryId,
-      });
+      };
+      if (selection.subcategoryId != null) {
+        derivedOpts.subcategoryId = selection.subcategoryId;
+      }
+      return getDerivedChannels(index, derivedOpts);
     };
     categoryDataCache = {
       channels,
       revision: catalogueStateRevision,
       groups,
       channelsFor,
+      index,
     };
     return categoryDataCache;
   }
@@ -853,19 +965,37 @@ export function mountChannelBrowser(
   }
 
   // Validate the initial selection against the real groups (an
-  // unknown entry falls back to All Channels, never an empty list).
+  // unknown entry falls back to All Channels, never an empty
+  // list). A verbatim initial subcategory resolves to its
+  // canonical W1 id; an unknown one falls back to the whole group.
   {
     const data = getBrowserCategoryData();
     const group = data.groups.find((g) => g.id === groupId);
     if (!group) {
       groupId = BROWSER_CATEGORY_ALL;
       subcategoryId = null;
-    } else if (
-      subcategoryId != null &&
-      !group.subcategories.some((sub) => sub.id === subcategoryId)
-    ) {
-      subcategoryId = null;
+    } else if (subcategoryId != null) {
+      subcategoryId = resolveBrowserSubcategoryId(
+        group.subcategories,
+        subcategoryId,
+      );
     }
+  }
+
+  /**
+   * W4 category-change rule, applied on EVERY selection change:
+   * a category-scoped search clears when the category changed;
+   * a scope-"all" search survives; an unchanged category keeps
+   * its search. Call with the NEW selection already assigned.
+   */
+  function syncSearchForSelection(): void {
+    const next: LivetvSearchState = applyCategoryChangeToSearch(
+      { query, scope: queryScope, categoryId: searchCategoryId },
+      { groupId, subcategoryId },
+    );
+    query = next.query;
+    queryScope = next.scope;
+    searchCategoryId = next.categoryId;
   }
 
   root.replaceChildren();
@@ -962,9 +1092,15 @@ export function mountChannelBrowser(
 
   // ── Breadcrumb: always shows the applied group + subcategory
   //    (and the active search, when one filters the list).
-  const breadcrumbEl = el("p", "rs-livetv-browser__breadcrumb");
+  //    Markup follows W4's `.lv2-breadcrumb` contract
+  //    (livetv-nav-chrome.css header): group / sep / sub /
+  //    count spans inside a <nav>. The browser's own class
+  //    keeps its layout slot; lv2 owns the breadcrumb shape.
+  const breadcrumbEl = el("nav", "rs-livetv-browser__breadcrumb lv2-breadcrumb");
   breadcrumbEl.setAttribute("data-browser-breadcrumb", "");
+  breadcrumbEl.setAttribute("aria-label", "Channel location");
   main.appendChild(breadcrumbEl);
+  let lastBreadcrumbSignature = "";
 
   // ── Column header (shares the row grid) ──
   const head = el("div", "rs-livetv-browser__head");
@@ -1400,6 +1536,51 @@ export function mountChannelBrowser(
     drawerHandle.updateGroups(getBrowserCategoryData().groups);
   }
 
+  /**
+   * Breadcrumb per the lv2 contract: group, separator,
+   * subcategory (omitted for a whole group), count. While a
+   * search filters the list, the sub slot names the search and
+   * the count is the filtered total; the group slot names the
+   * search scope. Children rebuild only when the signature
+   * changes, so scroll paints never churn this DOM.
+   */
+  function renderBreadcrumb(
+    list: LivetvChannel[],
+    label: string,
+    group: DrawerGroup | undefined,
+    unfilteredCount: number,
+  ): void {
+    const subLabel =
+      subcategoryId != null
+        ? (group?.subcategories.find((s) => s.id === subcategoryId)?.label ?? null)
+        : null;
+    const groupText = query && queryScope === "all" ? "All channels" : (group?.label ?? label);
+    const subText = query
+      ? `Search “${query}”`
+      : subLabel;
+    const countValue = query ? list.length : unfilteredCount;
+    const countText = `${countValue.toLocaleString()} channel${countValue === 1 ? "" : "s"}`;
+    const signature = [groupText, subText ?? "", countText].join("\u0000");
+    if (signature === lastBreadcrumbSignature) return;
+    lastBreadcrumbSignature = signature;
+    const groupSpan = el("span", "lv2-breadcrumb__group");
+    groupSpan.textContent = groupText;
+    const nodes: HTMLElement[] = [groupSpan];
+    if (subText != null) {
+      const sep = el("span", "lv2-breadcrumb__sep");
+      sep.setAttribute("aria-hidden", "true");
+      sep.textContent = "›";
+      const sub = el("span", "lv2-breadcrumb__sub");
+      sub.setAttribute("aria-current", "location");
+      sub.textContent = subText;
+      nodes.push(sep, sub);
+    }
+    const count = el("span", "lv2-breadcrumb__count");
+    count.textContent = countText;
+    nodes.push(count);
+    breadcrumbEl.replaceChildren(...nodes);
+  }
+
   /** Category button, breadcrumb, search/sort buttons, status. Text is only touched when it changed. */
   function renderChrome(list: LivetvChannel[]): void {
     const data = getBrowserCategoryData();
@@ -1422,12 +1603,7 @@ export function mountChannelBrowser(
       `Category: ${label}, ${unfilteredCount.toLocaleString()} channels. Open category drawer.`,
     );
 
-    const breadcrumbText = query
-      ? queryScope === "all"
-        ? `Search “${query}” · All channels`
-        : `Search “${query}” in ${label}`
-      : label;
-    setText(breadcrumbEl, breadcrumbText);
+    renderBreadcrumb(list, label, group, unfilteredCount);
     setText(searchButtonLabel, query ? `Search: “${query}”` : "⌕ Search");
     setText(sortButtonLabel, `Sort: ${browserSortLabel(sort)}`);
     clearSearchButton.hidden = query === "";
@@ -1614,9 +1790,7 @@ export function mountChannelBrowser(
     const validGroupId = group ? nextGroupId : BROWSER_CATEGORY_ALL;
     const validSubcategoryId =
       group && nextSubcategoryId != null
-        ? group.subcategories.some((sub) => sub.id === nextSubcategoryId)
-          ? nextSubcategoryId
-          : null
+        ? resolveBrowserSubcategoryId(group.subcategories, nextSubcategoryId)
         : null;
     // Remember the outgoing highlight under its selection.
     if (highlightedId != null) {
@@ -1624,6 +1798,11 @@ export function mountChannelBrowser(
     }
     groupId = validGroupId;
     subcategoryId = validSubcategoryId;
+    // A category change clears a category-scoped search (W4
+    // rule); a global search survives. Every category-change
+    // path funnels through here (drawer, LB/RB, collection
+    // cards, mode entries).
+    syncSearchForSelection();
     invalidateDerived();
     // Restore the remembered highlight for the incoming selection
     // where it is still in the list.
@@ -1661,10 +1840,9 @@ export function mountChannelBrowser(
   }
 
   // ══════════════════════════════════════════════════════════════
-  // LAYER / BACK STACK (0.11.7 W2 — ISOLATED SECTION)
+  // LAYER / BACK STACK (0.11.7 — unified with W4's livetv-nav)
   // ──────────────────────────────────────────────────────────────
-  // Integration unifies this with W4's nav-state module. Until
-  // then, ALL back-layer decisions in the browser live in this one
+  // ALL back-layer decisions in the browser live in this one
   // section: handleBack(), openCategories(), closeCategories(),
   // clearQuery(), openSearch() and openSort(). Nothing outside
   // this section closes a layer or exits the browser.
@@ -1674,11 +1852,69 @@ export function mountChannelBrowser(
   //   2. drawer top level → drawer closed (focus returns to list)
   //   3. applied search filter → cleared (list restored)
   //   4. nothing left → onClose (exit to landing / close overlay)
-  // The drawer's own level steps run through drawer.pressBack();
-  // the search-filter step runs through clearQuery(). The 250ms
-  // coalescing window in handleBack() keeps a gamepad B that
-  // arrives as both `livetv:back` and Escape to a single step.
+  //
+  // Nav-stack wiring (livetv-nav.ts): the shell owns the mode
+  // markers (landing/browser/guide/playback); this browser owns
+  // ONE overlay layer, "drawer", pushed on open and popped on
+  // close. The drawer layer carries an onBack veto: at the
+  // subcategory level B steps back to the groups level WITHOUT
+  // popping (veto); at the top level B pops the layer and the
+  // layer's onExit closes the drawer UI. The search-filter step
+  // has no layer — it is an internal filter step, handled
+  // locally after the drawer checks. handleBack() routes the
+  // drawer step through livetvNav.back() so one B press can
+  // never pop two layers, and gates every step on the nav stack:
+  // while a search/sort overlay, the Guide, playback, or another
+  // instance's drawer is on top, this browser's B is a no-op
+  // (hidden modes cannot steal input). The 250ms coalescing
+  // window keeps a gamepad B that arrives as both `livetv:back`
+  // and Escape to a single step.
+  //
+  // The keyboard path with the drawer open does not go through
+  // handleBack(): the drawer's own handleKey owns those keys
+  // (see onKeyDown) and reaches the same one-step outcomes
+  // through pressBack / onBack below.
   // ══════════════════════════════════════════════════════════════
+
+  /** True when no other surface demonstrably owns B over this browser's drawer. */
+  function drawerOwnsBack(): boolean {
+    const top = livetvNav.top();
+    if (!top) return true;
+    if (top.id === "drawer") return (top.key ?? top.id) === drawerNavKey;
+    return (
+      top.id !== "search" &&
+      top.id !== "sort" &&
+      top.id !== "guide" &&
+      top.id !== "playback" &&
+      top.id !== "subcategory"
+    );
+  }
+
+  /** True when no overlay / mode above the browser owns B. */
+  function browserOwnsBack(): boolean {
+    const top = livetvNav.top();
+    if (!top) return true;
+    return (
+      top.id !== "drawer" &&
+      top.id !== "subcategory" &&
+      top.id !== "search" &&
+      top.id !== "sort" &&
+      top.id !== "guide" &&
+      top.id !== "playback"
+    );
+  }
+
+  /** Close the drawer DOM without touching the nav stack. Runs from the layer's onExit. */
+  function closeDrawerUI(): void {
+    if (!drawerHandle) return;
+    // Remember the focused group before destroying the drawer, so
+    // reopening returns to it.
+    lastDrawerFocusGroupId = drawerHandle.getFocusedGroupId();
+    drawerHandle.destroy();
+    drawerHandle = null;
+    drawerContainer.hidden = true;
+    categoryButton.setAttribute("aria-expanded", "false");
+  }
 
   function openCategories(): void {
     if (drawerHandle) {
@@ -1703,24 +1939,44 @@ export function mountChannelBrowser(
     });
     lastDrawerSyncRevision = catalogueStateRevision;
     categoryButton.setAttribute("aria-expanded", "true");
+    // Own the drawer layer: B at the subcategory level vetoes
+    // (steps to groups, stays open); B at the top level pops
+    // and onExit closes the drawer UI.
+    livetvNav.push({
+      id: "drawer",
+      key: drawerNavKey,
+      onBack: () => {
+        if (!drawerHandle) return true;
+        if (drawerHandle.getLevel() === "subcategories") {
+          drawerHandle.pressBack();
+          return false;
+        }
+        return true;
+      },
+      onExit: () => {
+        closeDrawerUI();
+      },
+    });
     drawerHandle.focusCurrent();
   }
 
   function closeCategories(): void {
     if (!drawerHandle) return;
-    // Remember the focused group before destroying the drawer, so
-    // reopening returns to it.
-    lastDrawerFocusGroupId = drawerHandle.getFocusedGroupId();
-    drawerHandle.destroy();
-    drawerHandle = null;
-    drawerContainer.hidden = true;
-    categoryButton.setAttribute("aria-expanded", "false");
+    if (livetvNav.isTop("drawer", drawerNavKey)) {
+      // onExit closes the drawer UI.
+      livetvNav.pop();
+    } else {
+      // The layer is missing or buried (shell reset, stale
+      // stack): close the UI directly so the drawer never sticks.
+      closeDrawerUI();
+    }
   }
 
   function clearQuery(): boolean {
     const hadQuery = query !== "";
     query = "";
     queryScope = "category";
+    searchCategoryId = null;
     invalidateDerived();
     listEl.scrollTop = 0;
     paintNow();
@@ -1743,28 +1999,54 @@ export function mountChannelBrowser(
     );
   }
 
-  /** Back (B / Escape), in layer order: drawer → search → exit. Exactly one layer per press. */
-  function handleBack(): void {
-    const now = Date.now();
-    if (now - lastBackAt < BROWSER_BACK_COALESCE_MS) return;
-    lastBackAt = now;
+  /**
+   * Back (B / Escape), in layer order: drawer → search → exit.
+   * Exactly one layer per press. Returns true when a step was
+   * taken (the `livetv:back` listener stops propagation then);
+   * false when gated, coalesced, or nothing was left to close
+   * beyond onClose (onClose itself counts as handled).
+   */
+  function handleBack(): boolean {
     if (drawerHandle) {
-      drawerHandle.pressBack();
-      return;
+      if (!drawerOwnsBack()) return false;
+      const now = Date.now();
+      if (now - lastBackAt < BROWSER_BACK_COALESCE_MS) return false;
+      lastBackAt = now;
+      if (livetvNav.isTop("drawer", drawerNavKey)) {
+        // Veto at the subcategory level, pop+close at the top.
+        livetvNav.back();
+      } else {
+        // The stack lost the drawer layer: step locally so B
+        // never dead-ends (pressBack closes via onBack at the
+        // top level).
+        drawerHandle.pressBack();
+      }
+      return true;
     }
+    if (!browserOwnsBack()) return false;
+    const now = Date.now();
+    if (now - lastBackAt < BROWSER_BACK_COALESCE_MS) return false;
+    lastBackAt = now;
     if (query !== "") {
       clearQuery();
       focusListOrRow();
-      return;
+      return true;
     }
     opts.onClose?.();
+    return true;
   }
 
-  // ── End of isolated LAYER / BACK STACK section ────────────────
+  // ── End of LAYER / BACK STACK section ─────────────────────────
 
   function applySearchSubmit(detail: LivetvSearchSubmitDetail): void {
     query = (detail.query ?? "").trim();
     queryScope = detail.scope === "all" ? "all" : "category";
+    // The search applies to the CURRENT selection (the overlay
+    // captured it at open and owns input until submit), so the
+    // clearing rule tracks the current selection, not a stale
+    // context id. Scope "all" has no category.
+    searchCategoryId =
+      queryScope === "all" ? null : (subcategoryId ?? groupId);
     invalidateDerived();
     listEl.scrollTop = 0;
     if (query) {
@@ -1781,6 +2063,9 @@ export function mountChannelBrowser(
     const next = detail.sort;
     if (next !== "source" && next !== "az" && next !== "za" && next !== "category") return;
     sort = next;
+    // Persist so reopening the browser keeps the order (the W4
+    // overlay also persists on dispatch; same value, idempotent).
+    writePersistedLivetvSort(next);
     invalidateDerived();
     paintNow();
   }
@@ -1819,8 +2104,11 @@ export function mountChannelBrowser(
     if (next != null) {
       // The mutation may be in place on the cached array: bump
       // the catalogue revision so the adapter, derived list and
-      // row content keys all see the new favourite state.
+      // row content keys all see the new favourite state, and
+      // invalidate memoised derived lists (W1 seam 3: in-place
+      // flag mutation does not invalidate the memo on its own).
       catalogueStateRevision += 1;
+      invalidateDerivedChannels();
       invalidateDerived();
       paintNow();
     }
@@ -1920,11 +2208,17 @@ export function mountChannelBrowser(
     }
     if (isEditableTarget(target)) return;
     // The open drawer owns every key: unconsumed keys are still
-    // swallowed so no action fires behind the overlay.
+    // swallowed so no action fires behind the overlay. Claimed
+    // (preventDefault + stopPropagation): the app-wide
+    // SpatialNavigation handler sits on window and ignores
+    // defaultPrevented, so without stopPropagation every handled
+    // arrow would move focus twice — once in the drawer, once
+    // geometrically (the Guide's claim() fix, same cause).
     if (drawerHandle) {
       const consumed = drawerHandle.handleKey(event);
       if (consumed || livetvKeyActionForKey("browser", event.key)) {
         event.preventDefault();
+        event.stopPropagation();
       }
       return;
     }
@@ -2045,7 +2339,9 @@ export function mountChannelBrowser(
   if (opts.acceptModeEntry) window.addEventListener("livetv:mode", onMode);
 
   // B / Escape resolved to "back" by the gamepad layer (W5):
-  // `livetv:back` {context:"browser"}.
+  // `livetv:back` {context:"browser"}. A handled press stops
+  // propagation so no other surface pops a second layer for the
+  // same B (the overlay guards and the Guide do the same).
   const onBack = (event: Event) => {
     if (destroyed) return;
     const detail = (event as CustomEvent).detail as
@@ -2053,9 +2349,36 @@ export function mountChannelBrowser(
       | undefined;
     if (detail?.context && detail.context !== "browser") return;
     if (!root.isConnected || root.closest("[hidden]")) return;
-    handleBack();
+    if (handleBack()) {
+      event.preventDefault();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      } else {
+        event.stopPropagation();
+      }
+    }
   };
   window.addEventListener("livetv:back", onBack);
+
+  // Guide → Browser seam (W3): the Guide announces its channel
+  // selection as `livetv:guide-channel` {channelId, ...}.
+  // Highlight-only — never a tune, never a selection change: when
+  // the announced channel is in the current list it becomes the
+  // highlighted channel (visible on return to the browser); when
+  // it is not in the current selection it is ignored, so the
+  // browser never jumps categories behind the user's back.
+  const onGuideChannel = (event: Event) => {
+    if (destroyed) return;
+    const detail = (event as CustomEvent).detail as
+      | { channelId?: string | number; source?: string }
+      | undefined;
+    if (!detail || detail.channelId == null) return;
+    if (detail.source && detail.source !== "guide") return;
+    const list = deriveVisibleChannels();
+    if (!list.some((c) => String(c.id) === String(detail.channelId))) return;
+    highlight(detail.channelId, false);
+  };
+  window.addEventListener("livetv:guide-channel", onGuideChannel);
 
   // W4 overlay answers (see the event contract above).
   const onSearchSubmit = (event: Event) => {
@@ -2105,6 +2428,9 @@ export function mountChannelBrowser(
       ) {
         subcategoryId = null;
       }
+      // A repaired selection is a category change: re-apply the
+      // search-clearing rule (unchanged selections keep a search).
+      syncSearchForSelection();
       listEl.scrollTop = savedScrollTop;
       paintNow();
     },
@@ -2165,6 +2491,7 @@ export function mountChannelBrowser(
       window.removeEventListener("livetv:browser-category", onBrowserCategory);
       window.removeEventListener("livetv:mode", onMode);
       window.removeEventListener("livetv:back", onBack);
+      window.removeEventListener("livetv:guide-channel", onGuideChannel);
       window.removeEventListener(LIVETV_SEARCH_SUBMIT_EVENT, onSearchSubmit);
       window.removeEventListener(LIVETV_SORT_SUBMIT_EVENT, onSortSubmit);
       root.replaceChildren();
