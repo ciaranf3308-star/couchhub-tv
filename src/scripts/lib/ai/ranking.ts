@@ -999,15 +999,33 @@ interface RankCacheEntry {
 /** In-memory cache: every distinct ranking context keeps its own entry. */
 const rankCache = new Map<string, RankCacheEntry>()
 
+/**
+ * Provider identity for the cache fingerprint. Each getter is read in
+ * its own try/catch: one missing or throwing getter must never zero
+ * the other. (A test mock that omits `getAiEndpoint` throws on the
+ * binding access itself, so a single shared try/catch returned
+ * {"",""} and a model change silently reused the stale cache — the
+ * T5 model-change regression. In production all three exist; the
+ * guards are for partial environments, not for hiding real errors.)
+ */
 function readProviderIdentity(): { endpoint: string; model: string } {
+  let endpoint = ""
+  let model = ""
   try {
-    const endpoint =
-      typeof getAiEndpoint === "function" ? String(getAiEndpoint() ?? "").trim() : ""
-    const model = typeof getAiModel === "function" ? String(getAiModel() ?? "").trim() : ""
-    return { endpoint, model }
+    if (typeof getAiEndpoint === "function") {
+      endpoint = String(getAiEndpoint() ?? "").trim()
+    }
   } catch {
-    return { endpoint: "", model: "" }
+    endpoint = ""
   }
+  try {
+    if (typeof getAiModel === "function") {
+      model = String(getAiModel() ?? "").trim()
+    }
+  } catch {
+    model = ""
+  }
+  return { endpoint, model }
 }
 
 function normalizeConstraints(constraints: RankingConstraints | undefined): RankingConstraints {

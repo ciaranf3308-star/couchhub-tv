@@ -38,6 +38,8 @@ import { normalize } from "@/scripts/lib/text.ts"
 import {
   retrieveCandidates,
   RETRIEVAL_SHORTLIST_MAX,
+  describeNoMatch,
+  hasDemonstratedHardMatch,
   type QueryIntent,
 } from "@/scripts/lib/retrieval.ts"
 
@@ -768,6 +770,32 @@ export function searchDiscover(
 
   // Mood-only queries filter by the preset; constrained queries were
   // already hard-filtered by the intent.
+  //
+  // Title-token gate (0.11.5 integration — restores the 0.11.4
+  // text-match gate this function enforced as
+  // `textMatchScore(c, tokens) > 0`): when the query names content
+  // words and NOTHING in the catalogue matches any of them — no
+  // title, cast, director, genre, overview or reference hit — the
+  // honest answer is empty, never the whole catalogue ranked by
+  // rating. Without it, a nonsense title search ("zzz no such
+  // title") came back as four unrelated films. This gate lives
+  // HERE, in the local search path — not in retrieval: the AI path
+  // (rankDiscover) hands the shortlist to the model, which is
+  // allowed to reject it, and must still be consulted for title
+  // searches like "Space Heist" and vibe queries like "something
+  // moving for tonight?". A query with no title tokens (genre /
+  // tone / mood only) is unaffected.
+  if (
+    hasTextTokens &&
+    !retrieval.ranked.some(
+      (item) =>
+        (item.components.title ?? 0) > 0 ||
+        (item.components.overview ?? 0) > 0 ||
+        (item.components.reference ?? 0) > 0
+    )
+  ) {
+    return []
+  }
   let pool = retrieval.ranked
   if (moods.length && !hasTextTokens && !intentHasHardConstraints(intent)) {
     const activeMoods = moods.filter((m) => m.id !== "surprise-me")
@@ -1010,7 +1038,7 @@ export async function rankDiscover(
   // submit, so the category question still reaches the model there. A
   // bare title search ("Space Heist") likewise never reaches the model
   // unless explicitly asked, so plain lookups stay free and local.
-  const aiEligible = opts.forceAi || isNaturalLanguageQuery(trimmed)
+  const aiEligible = opts.forceAi || isNaturalLanguageQuery(query)
   // Hard filtering emptied the pool: there is nothing to rank and
   // nothing to broaden to — the local engine would return the same
   // empty pool, so answer honestly without spending a request.
@@ -1018,8 +1046,7 @@ export async function rankDiscover(
     return {
       results: [],
       source: "local",
-      fallbackReason:
-        retrieval.emptyReason ?? "No titles in your library match this request.",
+      fallbackReason: describeNoMatch(retrieval.intent),
       diagnostics: {
         catalogueSize: candidates.length,
         acceptedCount: 0,
@@ -1027,6 +1054,24 @@ export async function rankDiscover(
         retrievedCount: 0,
         sentToModelCount: 0,
       },
+    }
+  }
+  /**
+   * Local fallback for this search — or an honest empty rail. When the
+   * query states a hard constraint (anime, a genre, a kind) and NOTHING
+   * in the catalogue demonstrates it, the local engine's best picks
+   * would be genre-less unknowns presented as matches ("New to you"
+   * filler). The honest answer is no picks and the no-match text,
+   * which is also the UI's broaden hook. Soft queries always fall back
+   * to local picks: they state nothing verifiable to fail.
+   */
+  const localFallback = (): { results: RankedCandidate[]; noMatch: boolean } => {
+    if (!hasDemonstratedHardMatch(retrieval.intent, retrieval.ranked)) {
+      return { results: [], noMatch: true }
+    }
+    return {
+      results: searchDiscover(trimmed, candidates, taste, searchOpts),
+      noMatch: false,
     }
   }
   if (ranker && aiEligible) {
@@ -1085,38 +1130,44 @@ export async function rankDiscover(
       // The model answered but kept nothing (empty reply, or every
       // entry dropped by validation): a real rejection, not a
       // transport failure — the UI says so, with the ranker's own
-      // reason when it has one.
-      const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
+      // reason when it has one. When nothing demonstrates the hard
+      // constraint, the fallback is an empty rail with the no-match
+      // text, not local filler.
+      const fallback = localFallback()
       return {
-        results: localResults,
+        results: fallback.results,
         source: "local",
-        fallbackReason:
-          rankStatus?.fallbackReason ??
-          "AI didn't rank any titles in your library, so these are local picks.",
+        fallbackReason: fallback.noMatch
+          ? describeNoMatch(retrieval.intent)
+          : (rankStatus?.fallbackReason ??
+            "AI didn't rank any titles in your library, so these are local picks."),
         aiRejected: true,
-        diagnostics: { ...diagnostics, acceptedCount: localResults.length },
+        diagnostics: { ...diagnostics, acceptedCount: fallback.results.length },
       }
     } catch (error) {
-      const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
+      const fallback = localFallback()
       return {
-        results: localResults,
+        results: fallback.results,
         source: "local",
-        fallbackReason: aiFallbackReason(error),
+        fallbackReason: fallback.noMatch
+          ? describeNoMatch(retrieval.intent)
+          : aiFallbackReason(error),
         diagnostics: {
           catalogueSize: candidates.length,
-          acceptedCount: localResults.length,
+          acceptedCount: fallback.results.length,
           rejectedCount: 0,
         },
       }
     }
   }
-  const localResults = searchDiscover(trimmed, candidates, taste, searchOpts)
+  const fallback = localFallback()
   return {
-    results: localResults,
+    results: fallback.results,
     source: "local",
+    fallbackReason: fallback.noMatch ? describeNoMatch(retrieval.intent) : undefined,
     diagnostics: {
       catalogueSize: candidates.length,
-      acceptedCount: localResults.length,
+      acceptedCount: fallback.results.length,
       rejectedCount: 0,
     },
   }

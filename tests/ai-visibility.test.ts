@@ -217,8 +217,18 @@ describe("rankDiscover diagnostics", () => {
 
   it("counts model-ranked ids dropped by validation as rejected", async () => {
     registerAIRanker({
+      // The shortlist is retrieval-ordered, so the valid entry must
+      // be picked by id, not by position: for this cosy query the
+      // shortlist head is Cosy Romance, not CATALOG[0]. The test's
+      // point is the drop count (1 valid + 1 invented -> rejected 1),
+      // not which valid title the mock returns.
       rank: async (_q, candidates): Promise<RankedCandidate[]> => [
-        { candidate: candidates[0], score: 1, reason: "Cosy and funny." },
+        {
+          candidate:
+            candidates.find((c) => c.id === CATALOG[0].id) ?? candidates[0],
+          score: 1,
+          reason: "Cosy and funny.",
+        },
         {
           candidate: {
             id: "invented",

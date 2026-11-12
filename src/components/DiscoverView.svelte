@@ -504,10 +504,28 @@
   }
 
   function focusFirstResult() {
+    // Dismiss the on-screen keyboard FIRST: it is in-flow (~588px),
+    // so focusing while it is still mounted scrolls against a layout
+    // that collapses a frame later — the scroll anchoring then leaves
+    // the quick-pick row half-under the sticky nav (0.11.5 seam 6).
+    // The dismiss flushes before the rAF below runs, so the scroll
+    // and focus below measure the settled layout.
+    if (keyboard.dismiss()) syncKeyboard()
     requestAnimationFrame(() => {
+      // Scroll the FIRST RESULT CARD into view (nearest), not the
+      // rail and not the Ask AI button: the rail is taller than the
+      // remaining viewport, so scrolling it to the top clamps at max
+      // scroll with the quick picks still half-under the nav — and
+      // centring the button does the same. The card is what the user
+      // came for; nearest lands the rail in view with the quick picks
+      // fully visible above it. Then focus the first focusable
+      // without scrolling.
+      document
+        .querySelector("[data-discover-results] .rs-discover-card")
+        ?.scrollIntoView({ block: "nearest" })
       document
         .querySelector("[data-discover-results] [data-nylah-item], [data-discover-rows] [data-nylah-item]")
-        ?.focus()
+        ?.focus({ preventScroll: true })
     })
   }
 

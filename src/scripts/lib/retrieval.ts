@@ -1138,6 +1138,59 @@ export interface RetrieveOptions extends HardFilterOptions {
  * metadata fetches. The shortlist is what W2's reranker receives — the
  * ranker never sees catalogue order, only relevance order.
  */
+/**
+ * Honest "nothing matches" text for a parsed intent (0.11.5): what was
+ * asked for, in the user's terms. The UI's broaden hook — it says what
+ * to broaden (anime, a genre, films/series, a year bound, a runtime
+ * cap), never a bare "no results". Shared by retrieveCandidates'
+ * emptyReason and by rankDiscover's no-demonstrated-match fallback.
+ */
+export function describeNoMatch(intent: QueryIntent): string {
+  const parts: string[] = []
+  if (intent.anime === "required") parts.push("anime")
+  if (intent.genres.length) parts.push(intent.genres.join(" / "))
+  if (intent.contentKind) parts.push(intent.contentKind === "movie" ? "films" : "series")
+  if (intent.minYear !== undefined) parts.push(`after ${intent.minYear - 1}`)
+  if (intent.maxYear !== undefined) parts.push(`before ${intent.maxYear + 1}`)
+  if (intent.maxRuntimeMinutes !== undefined) {
+    parts.push(`under ${intent.maxRuntimeMinutes} min`)
+  }
+  return parts.length > 0
+    ? `No titles in your library match this request (${parts.join(", ")}).`
+    : "No titles in your library match this request."
+}
+
+/**
+ * True when at least one scored entry DEMONSTRATES the query's hard
+ * constraints — with metadata, not as an unknown. A genre-less row is
+ * kept by retrieval as "unknown" (it might be a match), but it never
+ * demonstrates one: for anime, only a demonstrated anime title counts
+ * (plain Animation is unconfirmed, never claimed as anime); for a
+ * genre question, only a title carrying the required genre; for a kind
+ * question, only a title of that kind. Soft queries (tones, moods,
+ * title tokens, "something for tonight") state no hard constraint, so
+ * they always count as demonstrated — the local engine may answer
+ * them with its best picks. rankDiscover's fallback uses this: when
+ * the model was asked, kept nothing, AND nothing demonstrates the
+ * hard constraint, the honest answer is an empty rail with the
+ * no-match text — never a genre-less unknown presented as a match.
+ */
+export function hasDemonstratedHardMatch(
+  intent: QueryIntent,
+  scored: Array<RetrievalScored<RetrievableCandidate>>
+): boolean {
+  const needsAnime = intent.anime === "required"
+  const needsGenres = intent.genreGroups.length > 0
+  const needsKind = intent.contentKind !== undefined
+  if (!needsAnime && !needsGenres && !needsKind) return true
+  return scored.some((entry) => {
+    if (needsAnime && entry.components.anime !== W_ANIME_DEMONSTRATED) return false
+    if (needsGenres && !(entry.components.genre > 0)) return false
+    if (needsKind && !(entry.components.kind > 0)) return false
+    return true
+  })
+}
+
 export function retrieveCandidates<T extends RetrievableCandidate>(
   query: string,
   candidates: T[],
@@ -1216,17 +1269,7 @@ export function retrieveCandidates<T extends RetrievableCandidate>(
 
   let emptyReason: string | undefined
   if (filtered.eligible.length === 0 && candidates.length > 0) {
-    const parts: string[] = []
-    if (intent.anime === "required") parts.push("anime")
-    if (intent.genres.length) parts.push(intent.genres.join(" / "))
-    if (intent.contentKind) parts.push(intent.contentKind === "movie" ? "films" : "series")
-    if (intent.minYear !== undefined) parts.push(`after ${intent.minYear - 1}`)
-    if (intent.maxYear !== undefined) parts.push(`before ${intent.maxYear + 1}`)
-    if (intent.maxRuntimeMinutes !== undefined) parts.push(`under ${intent.maxRuntimeMinutes} min`)
-    emptyReason =
-      parts.length > 0
-        ? `No titles in your library match this request (${parts.join(", ")}).`
-        : "No titles in your library match this request."
+    emptyReason = describeNoMatch(intent)
   }
 
   return {

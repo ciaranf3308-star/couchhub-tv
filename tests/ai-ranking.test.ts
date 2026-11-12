@@ -26,6 +26,7 @@ vi.mock("@/scripts/lib/app-settings.js", () => ({
 
 import {
   aiRanker,
+  applyRerankCap,
   buildAiPrompt,
   parseAiRankResponse,
   fallbackRank,
@@ -211,17 +212,30 @@ describe("buildAiPrompt", () => {
   // 'G' Men et al. for "some fucked up dark anime". The 20-cap is
   // still real, but it is a PAYLOAD cap on the shortlist the caller
   // hands over (already retrieved for relevance), never a licence
-  // to take the first 20 catalogue entries. So this test asserts
-  // the count only — never WHICH entries are in or out — and the
-  // retrieval behaviour itself is covered at the rankDiscover level
-  // in tests/ai-discovery-regression.test.ts (T1/T2).
+  // to take the first 20 catalogue entries — and it lives in the
+  // caller (applyRerankCap, applied by runRerank before the prompt
+  // is built), NOT in the renderer: buildAiPrompt renders exactly
+  // what it is handed (see the "renders the whole relevance-ranked
+  // shortlist" test in ai-rerank-w2.test.ts), so asserting the cap
+  // on the renderer would contradict that contract. This test
+  // asserts the cap at its enforcement point and that the cap
+  // keeps the HEAD of the relevance-ranked shortlist (best first),
+  // and the retrieval behaviour itself is covered at the
+  // rankDiscover level in tests/ai-discovery-regression.test.ts
+  // (T1/T2).
   it("caps the model payload at 20 candidates by count, never by catalogue position", () => {
     const many = Array.from({ length: 25 }, (_, index) =>
       candidate({ id: `c${index}`, title: `Film ${index}` })
     )
-    const { user } = buildAiPrompt("x", many, taste)
+    const capped = applyRerankCap(many)
+    expect(capped).toHaveLength(20)
+    const { user } = buildAiPrompt("x", capped, taste)
     const lines = user.split("\n").filter((line) => /^\d+\. \[/.test(line))
     expect(lines).toHaveLength(20)
+    expect(user).toContain("Film 0")
+    expect(user).toContain("Film 19")
+    expect(user).not.toContain("Film 20")
+    expect(user).not.toContain("Film 24")
     expect(chatMock).not.toHaveBeenCalled()
   })
 
