@@ -138,6 +138,19 @@ export interface AiSearchDiagnostics {
   durationMs?: number
   /** Why the local engine answered instead of AI. */
   fallbackReason?: string
+  // -- AI-first discovery (0.11.6, W1 reports these; W3 displays them).
+  //    All stay `undefined` until the orchestrator reports them — the
+  //    UI renders those as "Not reported yet", never a guessed number.
+  /** Titles the model generated, before verification/matching. */
+  generatedCount?: number
+  /** Generated titles TMDB verified. */
+  verifiedCount?: number
+  /** Verified titles matched in the local catalogue. */
+  matchedCount?: number
+  /** Generated titles verification failed on (unverified, shown honestly). */
+  verificationFailures?: number
+  /** Short provider error code when the model request failed (no bodies/keys). */
+  providerError?: string
 }
 
 export interface AiSearchReceipt {
