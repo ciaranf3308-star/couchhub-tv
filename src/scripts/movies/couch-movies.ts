@@ -174,6 +174,29 @@ export function formatClock(totalSeconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
 
+/**
+ * Provider `added` timestamp normalised to epoch milliseconds, or null
+ * when the value is missing or malformed (0.11.8 Movies Home).
+ *
+ * Xtream sends `added` as Unix seconds; some providers send
+ * milliseconds. Values above 1e12 are read as milliseconds, smaller
+ * positive values as seconds. Zero, negative, non-finite and absurd
+ * far-future values (more than a day past `nowMs`) are malformed —
+ * they must never order a "Recently Added" shelf or support a
+ * "just added" claim. Pure.
+ */
+export function addedTimestampMs(added: unknown, nowMs?: number): number | null {
+  const raw = Number(added);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  const now = nowMs ?? Date.now();
+  const ms = raw > 1e12 ? raw : raw * 1000;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  // Earlier than 2000-01-01 cannot be a real provider timestamp.
+  if (ms < 946684800000) return null;
+  if (ms > now + 24 * 60 * 60 * 1000) return null;
+  return ms;
+}
+
 export interface MovieFilter {
   query?: string;
   /** Canonical genre id, e.g. "action". "" = any. */
