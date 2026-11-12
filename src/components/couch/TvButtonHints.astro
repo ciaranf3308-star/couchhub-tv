@@ -14,6 +14,9 @@
 // per gamepad.ts) and focus on an on-screen keyboard key switches to
 // the OSK legend (A types, B deletes, X clears — the clear poll is
 // scoped to [data-couch-keyboard], see couch-button-hints.ts *9).
+// Controller 2.0 (§42): a surface that owns input claims the legend
+// via setControllerHints() and its config wins over the view-derived
+// one until it clears (null) — hints always name the actual owner.
 // The legend hides while a modal dialog owns input,
 // and in fullscreen playback while the OSD or any playback overlay
 // (options / Quick Surf / channel browser / error) is visible — those
@@ -53,6 +56,8 @@ const initial: HintConfig = hintsForView(view);
 
 <script>
   import {
+    CONTROLLER_HINTS_CHANGE_EVENT,
+    getControllerHints,
     hintsForView,
     hintItemHtml,
   } from "@/scripts/lib/couch-button-hints.ts";
@@ -105,12 +110,23 @@ const initial: HintConfig = hintsForView(view);
       // (day nav in By Channel, time nav in grid). Unset → the
       // base guide config.
       const guideMode = document.documentElement.dataset.livetvGuideMode ?? null;
-      const config = hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
+      // Controller 2.0 (§42): an owner-claimed config wins over the
+      // view-derived one — hints reflect the actual current input
+      // owner (drawer, overlay, keyboard, playback mode). Owners
+      // route every update through setControllerHints and clear on
+      // close; with no claim, the audited view config applies.
+      const override = getControllerHints();
+      const config =
+        override ?? hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
       // Hide while a dialog owns input; in Live TV playback hide
       // while the OSD / an overlay is up (it names its own keys).
+      // An owner-claimed config bypasses the hide: the owner claimed
+      // the legend for its own surface (e.g. a modal's hints), so
+      // hiding it would leave the surface legend-less.
       const hidden =
-        dialogOpen() ||
-        (view === "livetv" && mode === "playback" && overlayVisible());
+        !override &&
+        (dialogOpen() ||
+          (view === "livetv" && mode === "playback" && overlayVisible()));
       nav.toggleAttribute("hidden", hidden);
       nav.dataset.config = config.id;
       if (list.dataset.config !== config.id) {
@@ -133,6 +149,7 @@ const initial: HintConfig = hintsForView(view);
     });
     document.addEventListener("focusin", render);
     document.addEventListener("focusout", render);
+    window.addEventListener(CONTROLLER_HINTS_CHANGE_EVENT, render);
     render();
   }
 </script>

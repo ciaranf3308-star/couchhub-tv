@@ -1,3 +1,5 @@
+import { BACK_PRIORITY, registerBackLayer } from "./back-handler.ts"
+
 const DEFAULT_FOCUSABLES =
     "button, a, [role='tab'], [tabindex]:not([tabindex='-1']), input, select, textarea, summary"
 
@@ -90,6 +92,32 @@ export function attachDialogSpatialNav(
         defaultElement: opts.defaultElement,
     })
 
+    // Controller 2.0 (§38): the dialog owns B through the Back
+    // coordinator at MODAL priority, so it always closes before
+    // anything underneath it backs out. The layer is inert while the
+    // dialog is closed (isActive reads the open attribute) and
+    // unregisters on cleanup. Dialogs opened via openCouchDialog
+    // register their own layer too (invoker restore): same priority,
+    // most-recently-registered wins ties, and the openCouchDialog
+    // layer registers at open time — after this one — so it takes
+    // precedence and focus still returns to the invoker. Exactly one
+    // layer handles each press, so the dialog can never double-close.
+    const unregisterBackLayer = registerBackLayer({
+        id: `dialog-section:${sectionId}`,
+        priority: BACK_PRIORITY.MODAL,
+        isActive: () => dlg.hasAttribute("open"),
+        handle: () => {
+            if (!dlg.hasAttribute("open")) return false
+            try {
+                if (typeof dlg.close === "function") dlg.close()
+                else dlg.removeAttribute("open")
+            } catch {
+                dlg.removeAttribute("open")
+            }
+            return true
+        },
+    })
+
     const registerWithFocus = () => {
         register()
         const active = document.activeElement
@@ -124,6 +152,7 @@ export function attachDialogSpatialNav(
         dlg.removeEventListener("close", unregister)
         document.removeEventListener("astro:before-swap", unregister)
         document.removeEventListener("astro:after-swap", afterSwapCleanup)
+        unregisterBackLayer()
         unregister()
     }
 

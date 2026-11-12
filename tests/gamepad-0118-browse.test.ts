@@ -137,11 +137,14 @@ describe("browse-active routing (§16.2)", () => {
     expect(keys).toEqual([]);
   });
 
-  it("a hidden mount does not steal Y: global search still runs", () => {
+  it("a hidden mount does not steal Y: the key is dispatched, global search still runs", () => {
     mountBrowseRoot(true);
     handleGamepadButtonPress(BTN_Y, 0);
-    // No browse key: Y fell through to global search.
-    expect(keys).toEqual([]);
+    // 0.11.10: Y dispatches "y" first (page handlers may claim it);
+    // with no handler consuming it, the global-search fallback runs.
+    // No browse-layer handling: the hidden mount never sees the key
+    // as its own (its controller is suspended while hidden).
+    expect(keys).toEqual(["y"]);
   });
 });
 
@@ -167,11 +170,13 @@ describe("home-active routing (§16.1)", () => {
     expect(keys).toEqual([]);
   });
 
-  it("Y on Home still opens global search (D19)", () => {
+  it("Y on Home dispatches 'y' first, then falls back to global search when unconsumed (D19 superseded by W2 scoped search)", () => {
     mountHomeRoot();
     handleGamepadButtonPress(BTN_Y, 0);
-    // No browse key: Y fell through to global search.
-    expect(keys).toEqual([]);
+    // 0.11.10: the "y" key reaches Home handlers (scoped search
+    // claims it when present); with no handler registered, the
+    // global-search fallback runs as before.
+    expect(keys).toEqual(["y"]);
   });
 
   it("a hidden home root is inactive", () => {
@@ -213,7 +218,7 @@ describe("precedence: Live TV, modal, detail pages", () => {
     expect(keys).toEqual([]);
   });
 
-  it("a detail page (no browse/home roots) keeps the old behaviour", () => {
+  it("a detail page (no browse/home roots): LB/RB seek, Y dispatches then falls back to global search", () => {
     window.history.replaceState(null, "", "/movies/detail?id=1");
     const btn = document.createElement("button");
     btn.textContent = "Play";
@@ -223,8 +228,9 @@ describe("precedence: Live TV, modal, detail pages", () => {
     handleGamepadButtonPress(BTN_RB, 0);
     expect(keys).toEqual([]);
     handleGamepadButtonPress(BTN_Y, 0);
-    // No browse key on a detail page: Y fell through to global search.
-    expect(keys).toEqual([]);
+    // 0.11.10: Y dispatches "y" so detail handlers (scoped search)
+    // can claim it; unconsumed, it falls through to global search.
+    expect(keys).toEqual(["y"]);
   });
 
   it("in a text field, only B works — browse keys are swallowed", () => {

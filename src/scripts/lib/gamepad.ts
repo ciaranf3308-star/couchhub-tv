@@ -30,13 +30,24 @@
 //   D-pad / left stick .... move focus (spatial navigation; on the home
 //                            page the rail-aware model below takes over)
 //   A .................... activate the focused item
-//   B .................... back (Escape — closes dialogs, exits fullscreen
-//                            playback, per the app's own handlers)
+//   B .................... back — resolves through the Back
+//                            coordinator (back-handler.ts: layers,
+//                            dialog/fullscreen, route origin, then
+//                            the synthetic-Escape migration bridge);
+//                            Live TV contexts keep their own stack
 //   X .................... details of the focused card (opens its detail
-//                            page without autoplay); in the player it
-//                            stays play / pause — see inPlayerContext()
-//   Y .................... search; in the player it stays fullscreen
-//                            toggle — see inPlayerContext()
+//                            page without autoplay) — but the "x" key is
+//                            dispatched FIRST so a page handler (Home /
+//                            detail context menus) can claim it; the
+//                            details fallback runs only when no handler
+//                            consumes the key. In the player it stays
+//                            play / pause — see inPlayerContext()
+//   Y .................... search — the "y" key is dispatched FIRST so
+//                            a page handler (scoped search) can claim
+//                            it; the global-search fallback runs only
+//                            when no handler consumes the key. In the
+//                            player it stays fullscreen toggle — see
+//                            inPlayerContext()
 //   LB / RB .............. seek -10s / +10s (video with a duration only)
 //   LT / RT .............. volume down / up
 //   Menu (Start) ......... open Settings
@@ -67,6 +78,10 @@ import {
   firstFocusableInModal,
 } from "@/scripts/lib/dialog-spatial-nav.js";
 import { dispatchLivetvBack } from "@/scripts/lib/livetv-keys.ts";
+import {
+  markSyntheticBackEvent,
+  resolveBack,
+} from "@/scripts/lib/back-handler.ts";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -260,9 +275,17 @@ function handleDirection(dir: Direction | null, now: number): void {
 export function handleGamepadButtonPress(index: number, _now: number): void {
   if (isEditingTarget(document.activeElement)) {
     if (index === BTN_B) {
+      // Controller 2.0 (§4.4 / W3 keyboard semantics): B while editing
+      // blurs the field, then resolves Back through the coordinator —
+      // the keyboard layer (when registered) consumes it: close the
+      // keyboard, focus the input. Never a blind synthetic Escape:
+      // the coordinator's fallback dispatches one only for screens
+      // with no layer, and never at Home root. The keyboard layer
+      // must key off its own lifecycle state, not on the input still
+      // being focused — the blur above already happened.
       markGamepadActive();
       (document.activeElement as HTMLElement | null)?.blur?.();
-      dispatchKey("Escape");
+      resolveBack();
     }
     return;
   }
@@ -284,12 +307,16 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     // step must run exactly once, and keyboard Escape keeps its
     // own keydown path (the mode components' existing handlers).
     // While a modal dialog is open the dialog still owns B, so
-    // Escape goes to it as before.
+    // the coordinator resolves it as before.
+    // Controller 2.0 (§4.1): outside Live TV, B resolves through
+    // the Back coordinator (back-handler.ts) — layers, then
+    // dialog/popover/fullscreen, then route origin, then the
+    // synthetic-Escape migration bridge for unmigrated screens.
     const liveContext = livetvContext();
     if (liveContext && findOpenModal() === null) {
       dispatchLivetvBack(window, liveContext);
     } else {
-      dispatchKey("Escape");
+      resolveBack();
     }
     return;
   }
@@ -310,7 +337,17 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // for the controller's layer routing.
       dispatchKey("x");
     } else if (inPlayerContext()) togglePlayPause();
-    else openDetailsOfFocused();
+    // Controller 2.0 (0.11.10, W2 dependency): everywhere else the
+    // "x" key is dispatched FIRST, so page keydown handlers — the
+    // Movies/Series Home context menus and the detail More-options
+    // handlers — receive controller X exactly as they receive
+    // keyboard X. Only when no handler consumes the key
+    // (preventDefault, the convention every x/y handler follows)
+    // does the legacy fallback run: open the focused card's detail
+    // without autoplay. The player branch above deliberately stays
+    // key-less: couch-player.ts has its own "x" keydown handler
+    // that toggles play, so dispatching there would double-toggle.
+    else if (!dispatchKey("x")) openDetailsOfFocused();
     return;
   }
   if (index === BTN_Y && findOpenModal() === null) {
@@ -331,7 +368,17 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // button (D19).
       dispatchKey("y");
     } else if (inPlayerContext()) toggleFullscreen();
-    else goSearch();
+    // Controller 2.0 (0.11.10, W2 dependency): everywhere else the
+    // "y" key is dispatched FIRST, so page keydown handlers — the
+    // Movies/Series Home and detail scoped-search handlers — receive
+    // controller Y exactly as they receive keyboard Y. Only when no
+    // handler consumes the key does the global-search fallback run.
+    // (D19 superseded: scoped search now claims Y on Home/detail
+    // through its handler; pages with no handler keep global
+    // search.) The player branch above stays key-less for the same
+    // reason as X: the player's own "y" handler toggles fullscreen,
+    // so dispatching there would double-toggle.
+    else if (!dispatchKey("y")) goSearch();
     return;
   }
   if (index === BTN_LB) {
@@ -525,7 +572,17 @@ function isEditingTarget(target: EventTarget | null): boolean {
   return el.isContentEditable === true;
 }
 
-function dispatchKey(key: string): void {
+/**
+ * Dispatch a synthetic keydown + keyup pair for `key` to the focused
+ * element (bubbling, so document-level page handlers see it exactly
+ * as they see a physical key). Returns true when a keydown handler
+ * consumed the press (preventDefault) — the X/Y generic branches use
+ * that to decide whether their legacy fallback still runs. The keyup
+ * is dispatched unconditionally (a real key always comes back up),
+ * and only the keydown's consumption counts: every x/y handler in
+ * the tree consumes on keydown.
+ */
+function dispatchKey(key: string): boolean {
   const target = document.activeElement ?? document.body;
   const init: KeyboardEventInit = { key, code: key, bubbles: true, cancelable: true };
   // A synthetic KeyboardEvent reads keyCode 0 in Chromium (the
@@ -536,6 +593,7 @@ function dispatchKey(key: string): void {
   // Chromium); if an old webview refuses it, e.key readers still see
   // the press.
   const keyCode = keyCodeForKey(key);
+  let consumed = false;
   for (const type of ["keydown", "keyup"] as const) {
     const event = new KeyboardEvent(type, init);
     if (keyCode !== undefined) {
@@ -546,8 +604,17 @@ function dispatchKey(key: string): void {
         // Very old webviews: the key-only event still goes out.
       }
     }
-    target.dispatchEvent(event);
+    // Synthetic Escape must never re-enter the Back coordinator's
+    // physical-Escape listener (one press, one resolution): mark it
+    // so the listener skips it. Other synthetic keys need no mark —
+    // the coordinator only listens for Escape.
+    if (key === "Escape") markSyntheticBackEvent(event);
+    // dispatchEvent returns false when a handler preventDefaulted a
+    // cancelable event — that is the consumption signal.
+    const cancelled = !target.dispatchEvent(event);
+    if (type === "keydown" && cancelled) consumed = true;
   }
+  return consumed;
 }
 
 function currentVideo(): HTMLVideoElement | null {
