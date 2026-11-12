@@ -1,5 +1,14 @@
 # Movies & Series 2.0 (0.11.8) — W5 Contract Map
 
+> INTEGRATION NOTE (2026-11-12): the swap this map describes is DONE.
+> The stub module, the broken-variants module, and the red-verification
+> test file were deleted at integration; all 40 acceptance tests now
+> run against the real W1/W2/W3/W4 modules. The 15 pinned contract
+> decisions below were each resolved deliberately against the real
+> modules — see `docs/validation-0118.md` for the resolution record.
+> This map is kept as W5-branch provenance; its file references to the
+> deleted stub modules are historical.
+
 How integration swaps the W5 test stubs for the real W1–W4 modules and
 re-runs the acceptance suite. Read this before touching any file in
 this set.
