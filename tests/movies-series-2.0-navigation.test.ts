@@ -105,6 +105,7 @@ import {
   modeFromBrowseState,
   browseStateFromMode,
   categoryParamFor,
+  type HomeBrowseMode,
 } from "@/scripts/lib/home-browse-modes"
 import {
   recordCouchFocus,
@@ -565,7 +566,7 @@ describe("36 — drawer close and Reset All", () => {
   it("Clear All + Apply resets to the full catalogue; Cancel restores focus", async () => {
     const { container, mount } = mountCatalogue(advMovies())
     try {
-      const cards = await waitForCards(container)
+      await waitForCards(container)
       mount.setState({ filters: { genre: "horror", minRating: 7 } })
       await flush(80)
       expect(hasActiveBrowseConstraints(mount.getState())).toBe(true)
@@ -885,16 +886,16 @@ describe("mode / URL contract", () => {
   })
 
   it("mode -> params -> mode round-trips, including filters", () => {
-    const mode = {
-      view: "browse" as const,
-      kind: "movie" as const,
+    const mode: HomeBrowseMode = {
+      view: "browse",
+      kind: "movie",
       category: "genre:horror",
       page: 3,
       selectedId: "vod-7003",
       filters: { genre: "drama", minRating: 7, runtime: "under-120" },
       search: "harbour",
-      searchScope: "category" as const,
-      sort: "rating" as const,
+      searchScope: "category",
+      sort: "rating",
     }
     const params = modeToSearchParams(mode)
     expect(params.get("category")).toBe("genre:horror")

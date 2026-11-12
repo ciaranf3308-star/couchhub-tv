@@ -96,6 +96,16 @@ function installWatchSetsListeners(): void {
   }
 }
 
+/** Episode progress entries carry `seriesId` at runtime; the declared
+ * progress-entry union omits it (the same gap as the pre-existing
+ * discover.ts error in the 0.11.7 baseline). Read it structurally —
+ * never assume it exists. */
+function episodeSeriesId(entry: unknown): string | null {
+  const seriesId = (entry as { seriesId?: unknown } | null | undefined)?.seriesId;
+  if (seriesId == null) return null;
+  return String(seriesId);
+}
+
 function computeWatchSets(
   playlistId: string,
   kind: BrowseKind,
@@ -127,21 +137,16 @@ function computeWatchSets(
     // this is the honest approximation, documented in §5.4.)
     const unfinishedSeries = new Set<string>();
     for (const entry of getContinueWatching(playlistId, PROGRESS_SCAN_LIMIT)) {
-      if (entry?.kind === "episode" && entry.seriesId != null) {
-        const sid = String(entry.seriesId);
+      const sid = entry?.kind === "episode" ? episodeSeriesId(entry) : null;
+      if (sid != null) {
         inProgressIds.add(sid);
         unfinishedSeries.add(sid);
       }
     }
     for (const signal of getWatchedSignals(playlistId, PROGRESS_SCAN_LIMIT)) {
-      if (
-        signal?.kind === "episode" &&
-        signal.completed &&
-        signal.seriesId != null
-      ) {
-        const sid = String(signal.seriesId);
-        if (!unfinishedSeries.has(sid)) watchedIds.add(sid);
-      }
+      const sid =
+        signal?.kind === "episode" && signal.completed ? episodeSeriesId(signal) : null;
+      if (sid != null && !unfinishedSeries.has(sid)) watchedIds.add(sid);
     }
   }
   const followed = followedCache.get(playlistId);

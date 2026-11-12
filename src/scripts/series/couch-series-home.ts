@@ -56,11 +56,11 @@ import {
 } from "@/scripts/lib/browse-everything.ts";
 import {
   browseStateFromMode,
-  isBrowseSortId,
   parseModeFromUrl,
   setModeInUrl,
   type HomeBrowseMode,
 } from "@/scripts/lib/home-browse-modes.ts";
+import { isBrowseSortId } from "@/scripts/lib/browse-state.ts";
 import {
   createSeriesBrowseSource,
   refreshFollowedBrowseSets,

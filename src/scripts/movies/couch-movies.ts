@@ -40,6 +40,9 @@ export interface MovieRow {
   category_id?: string | null;
   /** Raw 5-based provider rating (0.11.8): lets rating evidence double it instead of misreading it as 10-point. */
   rating_5based?: string | null;
+  /** Index signature (0.11.8): mapped rows ARE W1 catalog rows — the
+   * index and rating evidence read provider fields dynamically. */
+  [key: string]: unknown;
 }
 
 export type MovieSortMode =

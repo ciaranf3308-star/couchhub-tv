@@ -631,7 +631,7 @@ export function browsePageJumpWindow(
 ): number[] {
   if (totalPages <= 1) return [];
   const size = Math.max(1, Math.min(windowSize, totalPages));
-  let start = Math.max(1, Math.min(totalPages - size + 1, page - Math.floor(size / 2)));
+  const start = Math.max(1, Math.min(totalPages - size + 1, page - Math.floor(size / 2)));
   const out: number[] = [];
   for (let i = 0; i < size; i++) out.push(start + i);
   return out;
