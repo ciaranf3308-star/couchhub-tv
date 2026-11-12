@@ -332,10 +332,11 @@ export function mountCategoryDrawer(
   list.setAttribute("aria-label", "Categories");
   panel.appendChild(list);
 
-  const hints = el("p", "rs-tv-category-drawer__hints");
-  hints.setAttribute("aria-hidden", "true");
-  hints.textContent = "A Select · B Back · ◀ ▶ List";
-  panel.appendChild(hints);
+  // 0.11.10 W4: no inline hint line — the ONE hints bar
+  // (TvLivetvHints, following the nav stack's drawer layer)
+  // names the drawer's keys. The old "A Select · B Back" line
+  // duplicated it with different wording ("Back" vs the bar's
+  // "Close drawer") and never mentioned LB/RB.
 
   container.appendChild(root);
 

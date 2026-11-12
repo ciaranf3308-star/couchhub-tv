@@ -436,6 +436,12 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 		import { restoreLivetvState, parseLivetvModeParam } from "../scripts/lib/livetv-state.ts";
 		import { persistLivetvMode } from "../scripts/lib/livetv-state.ts";
 		import { livetvNav } from "../scripts/lib/livetv-nav.ts";
+		import { hintsForLivetvLayer } from "../scripts/lib/livetv-hints.ts";
+		// SHIM-0110: replaced by W1 implementation at integration.
+		import {
+			setControllerHints,
+			setLogicalView,
+		} from "../scripts/lib/livetv-0110-seams.ts";
 
 		// ── Mode shell (0.9.0: four modes + "home" alias) ─────────
 		// Listens for livetv:mode {mode, browserFilter?, guideMode?,
@@ -486,6 +492,23 @@ const providerEmpty = livetvEmptyProps("provider-lost");
 				livetvNav.push({ id: mode, key: `shell:${mode}` });
 			}
 			document.documentElement.dataset.livetvMode = mode;
+			// 0.11.10 W4 (seam contracts): the shell is the single
+			// writer of the current mode, so it is also the single
+			// place that names the logical view (focus memory
+			// stays mode-correct) and the hint config for the
+			// mode — Guide sub-modes name their own config via
+			// the entry detail / the mirrored sub-mode. The
+			// hints bar also follows the nav stack; both paths
+			// carry the same config, so they never contradict.
+			setLogicalView(`livetv-${mode}`);
+			setControllerHints(
+				hintsForLivetvLayer(mode, {
+					guideMode:
+						detail && typeof detail === "object" && detail.guideMode
+							? String(detail.guideMode)
+							: (document.documentElement.dataset.livetvGuideMode ?? null),
+				}),
+			);
 			// 0.11.0 W1: the shell is the single writer of the
 			// current mode — persist it (mode only; tuned /
 			// previous / guide date survive via persistLivetvMode)
