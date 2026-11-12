@@ -303,14 +303,17 @@ const navItems = [
       import "@/scripts/spatial-navigation"
       import { bootTvShell } from "@/scripts/tv/shell"
       import { mountGamepad } from "@/scripts/lib/gamepad"
+      import { mountNativeGamepad } from "@/scripts/lib/native-gamepad"
       import { mountReturnHome } from "@/scripts/lib/return-home"
 
       if (!(window as any).__xtTvShellBooted) {
         ;(window as any).__xtTvShellBooted = true
         bootTvShell()
       }
-      // Nylah Studios: Xbox controller (Gamepad API) + return home to CouchHub.
+      // Nylah Studios: native XInput controller (primary) + Gamepad
+      // API fallback + return home to CouchHub.
       mountGamepad()
+      mountNativeGamepad()
       mountReturnHome()
     </script>
   </body>

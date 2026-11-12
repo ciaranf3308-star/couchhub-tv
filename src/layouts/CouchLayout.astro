@@ -143,9 +143,11 @@ const documentTitle = pageTitle
     <script>
       import "@/scripts/spatial-navigation";
       import { mountGamepad } from "@/scripts/lib/gamepad";
+      import { mountNativeGamepad } from "@/scripts/lib/native-gamepad";
       import { mountReturnHome } from "@/scripts/lib/return-home";
       import { initCouchFocus } from "@/scripts/lib/couch-focus";
       mountGamepad();
+      mountNativeGamepad();
       mountReturnHome();
       initCouchFocus();
       // Spatial navigation is the arrow-key focus engine every Couch

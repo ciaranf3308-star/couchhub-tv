@@ -1,0 +1,36 @@
+---
+// Controller status — standalone diagnostics surface (0.11.4, W6).
+//
+// Verifiable on-device immediately, with no Settings rebuild needed:
+// open /controller-status on the TV app and the card shows the
+// connected pad by name plus live button presses. If the pad is
+// connected but nothing registers here, controller input is broken.
+//
+// INTEGRATION MOUNT POINT (for the Settings rebuild, W1/W2): mount
+// <ControllerStatus /> inside the rebuilt Settings "Help &
+// Diagnostics" page, in place of (or alongside) this route. The
+// component is self-contained — no props, no page state — so the move
+// is a one-line import + tag. Keep this route too: it is the
+// no-navigation-needed check the user runs first when input dies.
+import TvLayout from "@/layouts/TvLayout.astro";
+import ControllerStatus from "@/components/ControllerStatus.svelte";
+---
+
+<TvLayout pageTitle="Controller status" view="controller-status">
+  <main class="mx-auto flex h-full w-full max-w-3xl flex-col justify-center gap-4 overflow-y-auto p-6">
+    <header>
+      <h1 class="text-xl font-semibold text-fg">Controller status</h1>
+      <p class="mt-1 text-sm text-fg-2">
+        Native XInput is the primary input path. Press any button —
+        it should register below within a second. If it doesn't, the
+        controller is not reaching the app.
+      </p>
+    </header>
+    <ControllerStatus client:load />
+    <p class="text-xs text-fg-3">
+      D-pad / A / B / X / Y / LB / RB / LT / RT / Menu / View all drive
+      this screen's focus engine — the same pipeline every other screen
+      uses. View + Menu held for 2 seconds returns home.
+    </p>
+  </main>
+</TvLayout>
