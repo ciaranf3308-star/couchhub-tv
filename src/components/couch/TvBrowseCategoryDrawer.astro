@@ -1,0 +1,114 @@
+---
+// TvBrowseCategoryDrawer — Browse Everything category drawer (0.11.8 W2).
+//
+// Thin Astro wrapper around mountBrowseCategoryDrawer
+// (src/scripts/lib/browse-category-drawer.ts), mirroring
+// TvCategoryDrawer.astro's pattern: props in, window CustomEvents
+// out (Astro components cannot take callbacks).
+//
+//   Props:
+//     families   BrowseDrawerFamily[] — §7.1 sections in order
+//                  (buildBrowseDrawerFamilies).
+//     selected?  Currently applied BrowseCategorySelection.
+//     drawerId?  DOM id for the mount point.
+//     label?     Accessible label for the drawer.
+//
+//   Events:
+//     `browse:drawer-select`  detail { selection, drawerId }
+//     `browse:drawer-back`    detail { drawerId }
+//
+//   The host owns visibility: render inside a container it
+//   shows/hides, and forward keys to the drawer while it is open
+//   (the module's handleKey, via the host's keydown delegation).
+//   Hosts with their own window keydown delegation (the Browse
+//   Everything controller) must use mountBrowseCategoryDrawer
+//   directly and route keys through the handle themselves —
+//   mounting this component inside such a host would
+//   double-handle keys. This component mounts the drawer
+//   immediately on the client and installs its own standalone
+//   key forwarding; use ONE path or the other, never both.
+import type {
+  BrowseCategorySelection,
+  BrowseDrawerFamily,
+} from "@/scripts/lib/browse-category-drawer";
+
+interface Props {
+  families: BrowseDrawerFamily[];
+  selected?: BrowseCategorySelection | null;
+  drawerId?: string;
+  label?: string;
+}
+
+const {
+  families,
+  selected = null,
+  drawerId = "browse-category-drawer",
+  label = "Categories",
+} = Astro.props;
+---
+
+<div
+  class="rs-browse-category-drawer-host"
+  data-browse-category-drawer-mount
+  data-drawer-id={drawerId}
+  data-drawer-families={JSON.stringify(families)}
+  data-drawer-selected={selected ? JSON.stringify(selected) : undefined}
+  data-drawer-label={label}
+>
+</div>
+
+<script>
+  import {
+    mountBrowseCategoryDrawer,
+    type BrowseCategorySelection,
+    type BrowseDrawerFamily,
+  } from "@/scripts/lib/browse-category-drawer";
+
+  const hosts = document.querySelectorAll<HTMLElement>(
+    "[data-browse-category-drawer-mount]",
+  );
+  for (const host of hosts) {
+    if (host.dataset.drawerArmed) continue;
+    host.dataset.drawerArmed = "1";
+    const drawerId = host.dataset.drawerId ?? "browse-category-drawer";
+    let families: BrowseDrawerFamily[] = [];
+    try {
+      families = JSON.parse(
+        host.dataset.drawerFamilies ?? "[]",
+      ) as BrowseDrawerFamily[];
+    } catch {
+      families = [];
+    }
+    let selected: BrowseCategorySelection | null = null;
+    try {
+      selected = host.dataset.drawerSelected
+        ? (JSON.parse(host.dataset.drawerSelected) as BrowseCategorySelection)
+        : null;
+    } catch {
+      selected = null;
+    }
+    const handle = mountBrowseCategoryDrawer(host, {
+      families,
+      selected,
+      label: host.dataset.drawerLabel ?? "Categories",
+      onSelect: (selection: BrowseCategorySelection) => {
+        window.dispatchEvent(
+          new CustomEvent("browse:drawer-select", {
+            detail: { selection, drawerId },
+          }),
+        );
+      },
+      onBack: () => {
+        window.dispatchEvent(
+          new CustomEvent("browse:drawer-back", { detail: { drawerId } }),
+        );
+      },
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!host.isConnected || host.closest("[hidden]")) return;
+      if (handle.handleKey(event)) event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    void handle;
+  }
+</script>
