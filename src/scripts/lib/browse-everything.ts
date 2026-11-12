@@ -65,15 +65,12 @@
 //   Menu (m/ContextMenu) opens Filters. One press = one action:
 //   edge handlers preventDefault + stopPropagation so spatial
 //   nav never double-moves; all other keys pass through.
-//   NOTE (integration flag): gamepad.ts currently routes LB/RB,
-//   Y, Menu and X to seek/goSearch/openSettings/openDetails on
-//   non-Live-TV pages. The browse key equivalents handled here
-//   (PageUp/PageDown, "y", "m", "x") work from a keyboard today
-//   and from the controller once gamepad.ts gains a browse-active
-//   branch (predicate: this controller sets
-//   [data-browse-everything] on its root + [data-browse-layer]).
-//   B/Escape, arrows and A/Enter already reach this controller
-//   from the controller today.
+//   NOTE (0.11.8, landed): gamepad.ts routes LB/RB → PageUp/
+//   PageDown, Y → "y", Menu → "m", X → "x" when this controller
+//   is active (predicate: [data-browse-everything] on the root
+//   with no [hidden] ancestor), after the Live TV checks and
+//   before player/generic handling. B/Escape, arrows and A/Enter
+//   already reached this controller from the controller.
 //
 // ── Focus/scroll distinction (§1.5) — five named operations ──────
 //   1. moveFocus (controller): spatial nav + edge handlers.
