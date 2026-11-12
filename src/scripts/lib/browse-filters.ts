@@ -705,3 +705,262 @@ export function clearBrowseFilterState(scope: string): void {
     // Ignore.
   }
 }
+
+// ── 0.11.8 W2 — Browse Everything filter extensions ─────────────
+// Brief §8/§9/§10. Additive only: nothing above changes behaviour.
+// These matchers share one honesty rule — a title whose metadata
+// is UNKNOWN for a constrained field does NOT pass that filter.
+// Unknown stays unknown; it is never guessed into a bucket, and
+// the filter drawer says so ("unknown ratings never pass a
+// minimum", "season counts confirmed only").
+
+/** Browse decade keys (brief §8.2): 2020s…1960s + Older (< 1960). */
+export const BROWSE_DECADE_ORDER = [
+  "2020s",
+  "2010s",
+  "2000s",
+  "1990s",
+  "1980s",
+  "1970s",
+  "1960s",
+  "older",
+] as const;
+
+/** Decade key for a year on the browse scale (older = before 1960). */
+export function browseDecadeKeyForYear(year: number | null): string {
+  if (year == null) return "";
+  if (year < 1960) return "older";
+  return `${Math.floor(year / 10) * 10}s`;
+}
+
+/** Decade match on the browse scale. Unknown year never passes a set decade. */
+export function browseYearMatches(yearValue: unknown, decadeKey: string): boolean {
+  if (!decadeKey) return true;
+  const year = parseYear(yearValue);
+  if (year == null) return false;
+  return browseDecadeKeyForYear(year) === decadeKey;
+}
+
+/** Custom year-range match (release/first-air year, NOT upload time). */
+export function browseYearRangeMatches(
+  yearValue: unknown,
+  yearFrom: number | null,
+  yearTo: number | null,
+): boolean {
+  if (yearFrom == null && yearTo == null) return true;
+  const year = parseYear(yearValue);
+  if (year == null) return false;
+  if (yearFrom != null && year < yearFrom) return false;
+  if (yearTo != null && year > yearTo) return false;
+  return true;
+}
+
+/** Runtime buckets (brief §8.5). "" = any length. */
+export type BrowseRuntimeBucketId =
+  | ""
+  | "under-60"
+  | "under-90"
+  | "under-120"
+  | "under-150"
+  | "under-180"
+  | "over-180";
+
+export const BROWSE_RUNTIME_BUCKET_OPTIONS: Array<{
+  value: BrowseRuntimeBucketId;
+  label: string;
+}> = [
+  { value: "", label: "Any length" },
+  { value: "under-60", label: "Under 1 hour" },
+  { value: "under-90", label: "Under 1½ hours" },
+  { value: "under-120", label: "Under 2 hours" },
+  { value: "under-150", label: "Under 2½ hours" },
+  { value: "under-180", label: "Under 3 hours" },
+  { value: "over-180", label: "Over 3 hours" },
+];
+
+/**
+ * Runtime-bucket match. A title with no parseable runtime cannot
+ * be shown to fit ANY constrained bucket — including "over-180"
+ * — so any constraint hides it rather than guessing. The drawer
+ * states this explicitly; it is not a silent exclusion from the
+ * catalogue (the "Any length" default shows everything).
+ */
+export function runtimeBucketMatches(
+  entry: BrowseFilterEntry | null | undefined,
+  bucket: BrowseRuntimeBucketId,
+): boolean {
+  if (!bucket) return true;
+  const minutes = parseRuntimeMinutes(entry?.duration ?? entry?.runtime);
+  if (minutes == null) return false;
+  switch (bucket) {
+    case "under-60":
+      return minutes < 60;
+    case "under-90":
+      return minutes < 90;
+    case "under-120":
+      return minutes < 120;
+    case "under-150":
+      return minutes < 150;
+    case "under-180":
+      return minutes < 180;
+    case "over-180":
+      return minutes > 180;
+    default:
+      return true;
+  }
+}
+
+/** Season-count buckets (brief §9.4). "" = any. */
+export type BrowseSeasonBucketId = "" | "1" | "2" | "3+" | "5+" | "10+";
+
+export const BROWSE_SEASON_BUCKET_OPTIONS: Array<{
+  value: BrowseSeasonBucketId;
+  label: string;
+}> = [
+  { value: "", label: "Any seasons" },
+  { value: "1", label: "1 season" },
+  { value: "2", label: "2 seasons" },
+  { value: "3+", label: "3+ seasons" },
+  { value: "5+", label: "5+ seasons" },
+  { value: "10+", label: "10+ seasons" },
+];
+
+/**
+ * Season-count match over a CONFIRMED count (or null = unknown).
+ * Unknown never passes a constrained bucket. Callers must pass
+ * only counts confirmed from cached series info — never fetch a
+ * catalogue-wide set of series-info payloads to fill this in.
+ */
+export function seasonCountMatches(
+  confirmedCount: number | null | undefined,
+  bucket: BrowseSeasonBucketId,
+): boolean {
+  if (!bucket) return true;
+  if (confirmedCount == null || !Number.isFinite(confirmedCount)) return false;
+  switch (bucket) {
+    case "1":
+      return confirmedCount === 1;
+    case "2":
+      return confirmedCount === 2;
+    case "3+":
+      return confirmedCount >= 3;
+    case "5+":
+      return confirmedCount >= 5;
+    case "10+":
+      return confirmedCount >= 10;
+    default:
+      return true;
+  }
+}
+
+/** Language match: exact tag match against actual catalogue data only. */
+export function languageMatches(
+  entryLanguages: readonly string[] | string | null | undefined,
+  wanted: string,
+): boolean {
+  if (!wanted) return true;
+  const list = Array.isArray(entryLanguages)
+    ? entryLanguages
+    : entryLanguages
+      ? [entryLanguages]
+      : [];
+  const norm = wanted.trim().toLowerCase();
+  return list.some((lang) => String(lang).trim().toLowerCase() === norm);
+}
+
+/** Provider-category match: exact match on the RAW provider category. */
+export function providerCategoryMatches(
+  entryCategory: unknown,
+  wantedRawName: string,
+): boolean {
+  if (!wantedRawName) return true;
+  return String(entryCategory ?? "").trim() === wantedRawName.trim();
+}
+
+/**
+ * Watch-status match over caller-supplied id sets. A title in
+ * NEITHER set is unwatched; in-progress wins over watched for
+ * display purposes (a title with progress is never "unwatched").
+ */
+export function watchStatusMatches(
+  entryId: number | string,
+  status: "" | "unwatched" | "in-progress" | "watched",
+  sets: {
+    inProgressIds: ReadonlySet<number | string>;
+    watchedIds: ReadonlySet<number | string>;
+  },
+): boolean {
+  if (!status) return true;
+  const inProgress = sets.inProgressIds.has(entryId) || sets.inProgressIds.has(String(entryId));
+  const watched = sets.watchedIds.has(entryId) || sets.watchedIds.has(String(entryId));
+  if (status === "in-progress") return inProgress;
+  if (status === "watched") return watched && !inProgress;
+  return !inProgress && !watched;
+}
+
+/**
+ * Availability for the 0.11.8 filter families, computed from the
+ * catalogue itself. `seasonCoverage` is the fraction of series
+ * with a CONFIRMED season count (0–1); the drawer shows the
+ * honest coverage note and gates the "Most Seasons" sort on it.
+ * `seriesStatus` is true only when genuine status metadata is
+ * present on at least one entry — otherwise the control is
+ * omitted entirely (brief §9.5: omit, don't fake).
+ */
+export interface BrowseFilterAvailability0118 {
+  genre: boolean;
+  year: boolean;
+  rating: boolean;
+  runtime: boolean;
+  seasonCounts: boolean;
+  seasonCoverage: number;
+  seriesStatus: boolean;
+  languages: string[];
+  providerCategories: string[];
+}
+
+export function computeBrowseFilterAvailability0118(
+  entries: Array<BrowseFilterEntry | null | undefined>,
+  seasonCounts: Map<number | string, number | null>,
+  entryIdOf: (entry: BrowseFilterEntry) => number | string,
+  statusOf?: (entry: BrowseFilterEntry) => string | null | undefined,
+  languagesOf?: (entry: BrowseFilterEntry) => readonly string[],
+): BrowseFilterAvailability0118 {
+  const base = computeFilterAvailability(entries);
+  const languages = new Set<string>();
+  const providerCategories = new Set<string>();
+  let statusFound = false;
+  let confirmed = 0;
+  let total = 0;
+  for (const entry of entries || []) {
+    if (!entry) continue;
+    total += 1;
+    const id = entryIdOf(entry);
+    if (seasonCounts.get(id) != null) confirmed += 1;
+    if (statusOf) {
+      const status = (statusOf(entry) ?? "").trim().toLowerCase();
+      if (status === "returning" || status === "ended" || status === "limited") {
+        statusFound = true;
+      }
+    }
+    if (languagesOf) {
+      for (const lang of languagesOf(entry)) {
+        const tag = String(lang).trim();
+        if (tag) languages.add(tag);
+      }
+    }
+    const category = String(entry.category ?? "").trim();
+    if (category) providerCategories.add(category);
+  }
+  return {
+    genre: base.genre,
+    year: base.year,
+    rating: base.rating,
+    runtime: base.runtime,
+    seasonCounts: confirmed > 0,
+    seasonCoverage: total > 0 ? confirmed / total : 0,
+    seriesStatus: statusFound,
+    languages: [...languages].sort((a, b) => a.localeCompare(b)),
+    providerCategories: [...providerCategories].sort((a, b) => a.localeCompare(b)),
+  };
+}

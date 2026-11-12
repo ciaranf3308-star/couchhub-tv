@@ -4442,3 +4442,467 @@ html[data-couch] .rs-channel-row__art img {
   height: 100%;
   object-fit: cover;
 }
+
+/* === 0.11.8 W2: Browse Everything === */
+/* Browse Everything (Movies & Series 2.0, Phase B): one shared
+   browsing framework — header + actions, keyed page grid,
+   pagination, one hints bar, category/filter drawers, search +
+   sort overlays. Tokens only (see the hue-family rule at the top
+   of this file): no colour literals in this section. The category
+   drawer reuses the 0.11.7 rs-tv-category-drawer chrome; only the
+   browse-only additions (unavailable reasons, section marker)
+   live here. */
+html[data-couch] .rs-browse2 {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-height: 0;
+}
+html[data-couch] .rs-browse2__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-browse2__meta {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__summary-row {
+  margin: 0;
+  min-height: 1.5rem;
+  font-size: var(--rs-meta-size);
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__summary:empty {
+  display: none;
+}
+html[data-couch] .rs-browse2__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+html[data-couch] .rs-browse2__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+html[data-couch] .rs-browse2__action-glyph {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-browse2__action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse2__status:empty {
+  display: none;
+}
+html[data-couch] .rs-browse2__notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1.5rem;
+  border: 1px solid var(--rs-line);
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-browse2__notice--error {
+  border-color: var(--rs-accent);
+}
+html[data-couch] .rs-browse2__empty-title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse2__status-text {
+  margin: 0;
+  font-size: var(--rs-description-size);
+  line-height: 1.45;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__skeleton {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+html[data-couch] .rs-browse2__skeleton-card {
+  aspect-ratio: 2 / 3;
+  border-radius: 0.75rem;
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-browse2__grid-host {
+  min-height: 0;
+}
+html[data-couch] .rs-browse2__grid-host .rs-grid {
+  gap: 1.25rem;
+}
+html[data-couch] .rs-browse2__pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+}
+html[data-couch] .rs-browse2__pagination[hidden] {
+  display: none;
+}
+html[data-couch] .rs-browse2__page-btn {
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  color: var(--rs-text);
+  font-size: var(--rs-meta-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse2__page-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse2__page-btn.is-current {
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+}
+html[data-couch] .rs-browse2__page-btn:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse2__page-label {
+  margin-inline-start: 0.75rem;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-browse2__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse2__overlay-host:empty {
+  display: none;
+}
+/* Browse category drawer: shared 0.11.7 chrome + unavailable-row
+   reasons. The drawer root is absolute inset-0; the overlay host
+   is fixed so the drawer covers the viewport. */
+html[data-couch] .rs-browse2__overlay-host {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+html[data-couch] .rs-browse2__overlay-host:empty {
+  position: static;
+}
+html[data-couch] .rs-browse-drawer__item-reason {
+  flex-shrink: 0;
+  max-width: 14rem;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--rs-text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-couch] .rs-tv-category-drawer__item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+/* Filter drawer: right-side panel (categories live on the left),
+   same scale/chrome language as the category drawer. */
+html[data-couch] .rs-browse-filter-drawer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+}
+html[data-couch] .rs-browse-filter-drawer__scrim {
+  flex: 1;
+  min-width: 0;
+  order: 1;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-filter-drawer__panel {
+  width: 38rem;
+  max-width: 86%;
+  flex-shrink: 0;
+  order: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 2rem 1.5rem 1.5rem;
+  background: var(--rs-panel);
+  border-inline-start: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+  overflow: hidden;
+}
+html[data-couch] .rs-browse-filter-drawer__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-filter-drawer__subtitle {
+  margin: 0.25rem 0 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow-y: auto;
+  padding-inline-end: 0.25rem;
+}
+html[data-couch] .rs-browse-filter-drawer__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rs-text);
+  font-size: 1.375rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-focused,
+html[data-couch] .rs-browse-filter-drawer__row:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-apply {
+  justify-content: center;
+  margin-top: 0.75rem;
+  background: var(--rs-accent);
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-filter-drawer__row.is-clear {
+  justify-content: center;
+  border-color: var(--rs-line);
+}
+html[data-couch] .rs-browse-filter-drawer__row-label {
+  flex: 1;
+  min-width: 0;
+}
+html[data-couch] .rs-browse-filter-drawer__row-value {
+  flex-shrink: 0;
+  color: var(--rs-focus);
+  font-variant-numeric: tabular-nums;
+}
+html[data-couch] .rs-browse-filter-drawer__row-note {
+  flex-basis: 100%;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+html[data-couch] .rs-browse-filter-drawer__note {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-filter-drawer__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+/* Search overlay: centred panel, large input, visible scope choice. */
+html[data-couch] .rs-browse-search-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+html[data-couch] .rs-browse-search-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-search-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: 52rem;
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-panel);
+  border: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+}
+html[data-couch] .rs-browse-search-overlay__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-search-overlay__input {
+  min-height: 3.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: var(--rs-surface);
+  color: var(--rs-text);
+  font-size: 1.5rem;
+}
+html[data-couch] .rs-browse-search-overlay__input:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  box-shadow: 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-search-overlay__scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn {
+  min-height: 3rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--rs-line);
+  background: transparent;
+  color: var(--rs-text);
+  font-size: var(--rs-meta-size);
+  font-weight: 600;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn.is-selected {
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+}
+html[data-couch] .rs-browse-search-overlay__scope-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+html[data-couch] .rs-browse-search-overlay__count {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-search-overlay__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+/* Sort overlay: centred compact list. */
+html[data-couch] .rs-browse-sort-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 16vh;
+}
+html[data-couch] .rs-browse-sort-overlay__scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--rs-ink) 72%, transparent);
+}
+html[data-couch] .rs-browse-sort-overlay__panel {
+  position: relative;
+  z-index: 1;
+  width: 34rem;
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-panel);
+  border: 1px solid var(--rs-line);
+  box-shadow: var(--rs-shadow-lift);
+}
+html[data-couch] .rs-browse-sort-overlay__title {
+  margin: 0;
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--rs-text);
+}
+html[data-couch] .rs-browse-sort-overlay__note {
+  margin: 0;
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-browse-sort-overlay__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-browse-sort-overlay__option {
+  min-height: 3.75rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rs-text);
+  font-size: 1.375rem;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+html[data-couch] .rs-browse-sort-overlay__option.is-selected {
+  background: color-mix(in srgb, var(--rs-accent) 10%, transparent);
+}
+html[data-couch] .rs-browse-sort-overlay__option.is-focused,
+html[data-couch] .rs-browse-sort-overlay__option:focus-visible {
+  outline: none;
+  border-color: var(--rs-focus);
+  background: color-mix(in srgb, var(--rs-accent) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 2px var(--rs-focus),
+    0 0 1.5rem 0.25rem var(--rs-focus-glow);
+}
+html[data-couch] .rs-browse-sort-overlay__hints {
+  margin: 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--rs-line-soft);
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}

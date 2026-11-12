@@ -1,0 +1,121 @@
+---
+// TvBrowseFilterDrawer — Browse Everything filter drawer (0.11.8 W2).
+//
+// Thin Astro wrapper around mountBrowseFilterDrawer
+// (src/scripts/lib/browse-filter-drawer.ts), mirroring
+// TvCategoryDrawer.astro's pattern: props in, window CustomEvents
+// out (Astro components cannot take callbacks).
+//
+//   Props:
+//     kind         "movie" | "series".
+//     initial      BrowseFilters — the starting draft.
+//     availability BrowseFilterDrawerAvailability — which
+//                  families the catalogue's metadata supports.
+//     genreIds     Canonical genre ids for the kind, in order.
+//     drawerId?    DOM id for the mount point.
+//
+//   Events:
+//     `browse:filter-apply`  detail { filters, drawerId }
+//     `browse:filter-cancel` detail { drawerId }
+//
+//   The host owns visibility and key forwarding (see
+//   TvBrowseCategoryDrawer.astro for the one-path rule: hosts
+//   with their own keydown delegation — the Browse Everything
+//   controller — use the TS module directly, never this
+//   component as well).
+import type { BrowseFilters, BrowseKind } from "@/scripts/lib/browse-state";
+import type { BrowseFilterDrawerAvailability } from "@/scripts/lib/browse-filter-drawer";
+
+interface Props {
+  kind: BrowseKind;
+  initial: BrowseFilters;
+  availability: BrowseFilterDrawerAvailability;
+  genreIds: string[];
+  drawerId?: string;
+}
+
+const {
+  kind,
+  initial,
+  availability,
+  genreIds,
+  drawerId = "browse-filter-drawer",
+} = Astro.props;
+---
+
+<div
+  class="rs-browse-filter-drawer-host"
+  data-browse-filter-drawer-mount
+  data-drawer-id={drawerId}
+  data-drawer-kind={kind}
+  data-drawer-initial={JSON.stringify(initial)}
+  data-drawer-availability={JSON.stringify(availability)}
+  data-drawer-genre-ids={JSON.stringify(genreIds)}
+>
+</div>
+
+<script>
+  import {
+    mountBrowseFilterDrawer,
+    type BrowseFilterDrawerAvailability,
+  } from "@/scripts/lib/browse-filter-drawer";
+  import type {
+    BrowseFilters,
+    BrowseKind,
+  } from "@/scripts/lib/browse-state";
+
+  const hosts = document.querySelectorAll<HTMLElement>(
+    "[data-browse-filter-drawer-mount]",
+  );
+  for (const host of hosts) {
+    if (host.dataset.drawerArmed) continue;
+    host.dataset.drawerArmed = "1";
+    const drawerId = host.dataset.drawerId ?? "browse-filter-drawer";
+    const kind = (host.dataset.drawerKind ?? "movie") as BrowseKind;
+    let initial: BrowseFilters | null = null;
+    let availability: BrowseFilterDrawerAvailability | null = null;
+    let genreIds: string[] = [];
+    try {
+      initial = JSON.parse(host.dataset.drawerInitial ?? "null") as BrowseFilters | null;
+    } catch {
+      initial = null;
+    }
+    try {
+      availability = JSON.parse(
+        host.dataset.drawerAvailability ?? "null",
+      ) as BrowseFilterDrawerAvailability | null;
+    } catch {
+      availability = null;
+    }
+    try {
+      genreIds = JSON.parse(host.dataset.drawerGenreIds ?? "[]") as string[];
+    } catch {
+      genreIds = [];
+    }
+    if (!initial || !availability) continue;
+    const handle = mountBrowseFilterDrawer(host, {
+      kind,
+      initial,
+      availability,
+      genreIds,
+      onApply: (filters: BrowseFilters) => {
+        window.dispatchEvent(
+          new CustomEvent("browse:filter-apply", {
+            detail: { filters, drawerId },
+          }),
+        );
+      },
+      onCancel: () => {
+        window.dispatchEvent(
+          new CustomEvent("browse:filter-cancel", { detail: { drawerId } }),
+        );
+      },
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!host.isConnected || host.closest("[hidden]")) return;
+      if (handle.handleKey(event)) event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    void handle;
+  }
+</script>

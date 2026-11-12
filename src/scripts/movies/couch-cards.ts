@@ -148,3 +148,144 @@ export function renderCouchCards(container: HTMLElement, views: CouchCardView[])
     // ignore
   }
 }
+
+// ── 0.11.8 W2 — keyed grid reuse helpers ────────────────────────
+// The keyed page grid (couch-grid.ts createKeyedPageGrid) reuses
+// card nodes by stable key. These helpers give it a render
+// signature (same key + same signature = untouched node) and an
+// in-place update for the same title whose metadata changed
+// (e.g. a season count resolving). buildCouchCard above is
+// untouched; these only ADD reuse support for browse-grid mounting.
+
+/** Render signature for a card view: every visible field, joined. */
+export function couchCardSignature(view: CouchCardView): string {
+  return [
+    view.itemKey ?? "",
+    view.title,
+    view.subtitle ?? "",
+    view.meta ?? "",
+    view.image ?? "",
+    view.kind ?? "poster",
+    typeof view.progress === "number" ? String(Math.round(view.progress * 100)) : "",
+    view.badge ?? "",
+    view.href ?? "",
+  ].join("");
+}
+
+/**
+ * Build a browse-grid card: buildCouchCard plus the stable
+ * `data-browse-key` the keyed grid reads for mountedKeys() and
+ * the signature attribute the reconciler compares. The key is the
+ * title-GROUP id (not a variant id): variants share one card.
+ */
+export function buildBrowseGridCard(
+  view: CouchCardView,
+  browseKey: string,
+): HTMLElement {
+  const card = buildCouchCard(view, false);
+  card.setAttribute("data-browse-key", browseKey);
+  card.setAttribute("data-card-signature", couchCardSignature(view));
+  return card;
+}
+
+/**
+ * Update a card node in place for a new view of the SAME title.
+ * Updates title, subtitle, meta, badge, progress and poster src
+ * without rebuilding the node (decoded images and focus survive).
+ * Returns false when the node structure does not match the
+ * buildCouchCard shape (caller rebuilds instead). Never changes
+ * the node's key attributes — re-keying a live node is forbidden
+ * (stale series-seasons observer callbacks could write into it).
+ */
+export function updateCouchCard(card: HTMLElement, view: CouchCardView): boolean {
+  const titleEl = card.querySelector(".rs-card__title");
+  const bodyEl = card.querySelector(".rs-card__body");
+  const mediaEl = card.querySelector(".rs-card__media");
+  if (!titleEl || !bodyEl || !mediaEl) return false;
+  titleEl.textContent = view.title;
+  card.setAttribute("aria-label", view.title);
+  if (view.href && card instanceof HTMLAnchorElement) card.href = view.href;
+
+  let subEl = card.querySelector(".rs-card__subtitle");
+  if (view.subtitle) {
+    if (!subEl) {
+      subEl = document.createElement("span");
+      subEl.className = "rs-card__subtitle";
+      titleEl.after(subEl);
+    }
+    subEl.textContent = view.subtitle;
+  } else {
+    subEl?.remove();
+  }
+  let metaEl = card.querySelector(".rs-card__meta");
+  if (view.meta) {
+    if (!metaEl) {
+      metaEl = document.createElement("span");
+      metaEl.className = "rs-card__meta";
+      bodyEl.appendChild(metaEl);
+    }
+    metaEl.textContent = view.meta;
+  } else {
+    metaEl?.remove();
+  }
+
+  let badgeEl = card.querySelector(".rs-card__badge");
+  if (view.badge) {
+    if (!badgeEl) {
+      badgeEl = document.createElement("span");
+      badgeEl.className = "rs-card__badge";
+      mediaEl.appendChild(badgeEl);
+    }
+    badgeEl.textContent = view.badge;
+  } else {
+    badgeEl?.remove();
+  }
+
+  const pct =
+    typeof view.progress === "number" && Number.isFinite(view.progress)
+      ? Math.max(0, Math.min(1, view.progress))
+      : null;
+  let barEl = card.querySelector<HTMLElement>(".rs-card__progress");
+  if (pct !== null && pct > 0) {
+    if (!barEl) {
+      barEl = document.createElement("span");
+      barEl.className = "rs-card__progress";
+      barEl.setAttribute("aria-hidden", "true");
+      const fill = document.createElement("span");
+      fill.className = "rs-card__progress-fill";
+      barEl.appendChild(fill);
+      mediaEl.appendChild(barEl);
+    }
+    const fill = barEl.querySelector<HTMLElement>(".rs-card__progress-fill");
+    if (fill) fill.style.width = `${Math.round(pct * 100)}%`;
+  } else {
+    barEl?.remove();
+  }
+
+  // Poster: only touch the <img> when the src actually changed —
+  // re-setting src re-queues load/decode and flashes the fallback.
+  const wrapEl = card.querySelector("[data-tv-image]");
+  const imgEl = card.querySelector<HTMLImageElement>("img[data-tv-image-img]");
+  const usable = isUsableImageSrc(view.image ?? null);
+  if (wrapEl) wrapEl.classList.toggle("is-fallback", !usable);
+  if (usable && imgEl) {
+    if (imgEl.getAttribute("src") !== view.image) {
+      imgEl.setAttribute("src", view.image as string);
+    }
+    imgEl.setAttribute("alt", view.imageAlt ?? view.title);
+  } else if (usable && !imgEl && wrapEl) {
+    const img = document.createElement("img");
+    img.setAttribute("src", view.image as string);
+    img.setAttribute("alt", view.imageAlt ?? view.title);
+    img.setAttribute("loading", "lazy");
+    img.setAttribute("decoding", "async");
+    img.setAttribute("data-tv-image-img", "");
+    const fallback = wrapEl.querySelector(".rs-image__fallback");
+    if (fallback) wrapEl.insertBefore(img, fallback);
+    else wrapEl.appendChild(img);
+  } else if (!usable && imgEl) {
+    imgEl.remove();
+  }
+  card.setAttribute("data-card-signature", couchCardSignature(view));
+  return true;
+}
