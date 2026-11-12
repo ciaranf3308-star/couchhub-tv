@@ -176,6 +176,12 @@ describe("aiSearchStateNote / isFreshAiAnswer", () => {
       "rejected",
       "cached",
       "fallback",
+      // AI Discovery 3.0 (0.11.6) generation flow phases.
+      "asking-ai",
+      "verifying-tmdb",
+      "checking-library",
+      "ready",
+      "unavailable",
     ] as const
     expect(Object.keys(AI_SEARCH_PHASE_LABELS).sort()).toEqual([...phases].sort())
     for (const phase of phases) {
@@ -183,6 +189,11 @@ describe("aiSearchStateNote / isFreshAiAnswer", () => {
     }
     expect(AI_SEARCH_PHASE_LABELS.cached).toMatch(/Cached/)
     expect(AI_SEARCH_PHASE_LABELS.fallback).toMatch(/fallback/)
+    expect(AI_SEARCH_PHASE_LABELS["asking-ai"]).toMatch(/Asking AI/)
+    expect(AI_SEARCH_PHASE_LABELS["verifying-tmdb"]).toMatch(/TMDB/)
+    expect(AI_SEARCH_PHASE_LABELS["checking-library"]).toMatch(/library/)
+    expect(AI_SEARCH_PHASE_LABELS.ready).toMatch(/ready/)
+    expect(AI_SEARCH_PHASE_LABELS.unavailable).toMatch(/unavailable/)
   })
 })
 
