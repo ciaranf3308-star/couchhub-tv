@@ -69,6 +69,16 @@ export default [
 
   {
     files: ["**/*.svelte"],
+    // 0.11.4: ControllerStatus.svelte is the first component with a
+    // <script lang="ts"> block. Without a TS parser wired here the
+    // Svelte parser reads the script as plain JS and chokes on any
+    // TS syntax ("The keyword 'interface' is reserved"). The TS
+    // parser is a superset of JS, so plain-JS components are unaffected.
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+      },
+    },
     rules: {
       "prefer-const": "off",
       "svelte/no-at-html-tags": "warn",

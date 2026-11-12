@@ -154,9 +154,9 @@ pub fn install(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     // webview would never be seen). The frontend also
                     // releases the Live TV stream on this event.
                     if let Some(tray) = window_for_hide.app_handle().tray_by_id("main") {
-                        let _ = tray.set_tooltip(
+                        let _ = tray.set_tooltip(Some(
                             "NylahBox Studios — running in tray, Live TV stopped",
-                        );
+                        ));
                     }
                     let _ = window_for_hide.emit("xt:tray:hidden-to-tray", ());
                 }
@@ -178,14 +178,14 @@ fn toggle_main_window(app: &AppHandle) {
         // Same hide contract as X / CloseRequested: release the
         // stream on the frontend and leave a persistent tray signal.
         if let Some(tray) = app.tray_by_id("main") {
-            let _ = tray.set_tooltip("NylahBox Studios — running in tray, Live TV stopped");
+            let _ = tray.set_tooltip(Some("NylahBox Studios — running in tray, Live TV stopped"));
         }
         let _ = window.emit("xt:tray:hidden-to-tray", ());
     } else {
         let _ = window.unminimize();
         let _ = window.show();
         if let Some(tray) = app.tray_by_id("main") {
-            let _ = tray.set_tooltip("NylahBox Studios");
+            let _ = tray.set_tooltip(Some("NylahBox Studios"));
         }
         // 0.11.1 W1 (white bar): a hide/show cycle must never leave
         // the window windowed — re-assert fullscreen on every show,
@@ -200,7 +200,7 @@ fn navigate(app: &AppHandle, route: &str) {
         let _ = window.unminimize();
         let _ = window.show();
         if let Some(tray) = app.tray_by_id("main") {
-            let _ = tray.set_tooltip("NylahBox Studios");
+            let _ = tray.set_tooltip(Some("NylahBox Studios"));
         }
         // 0.11.1 W1 (white bar): see toggle_main_window above.
         let _ = window.set_fullscreen(true);
