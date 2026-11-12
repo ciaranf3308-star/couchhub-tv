@@ -347,6 +347,13 @@ export const LIVETV_CONTROLLER_MAP: readonly LivetvControllerRow[] = [
   { context: "browser", input: "D-pad / stick", action: "move-right", label: "Move" },
   { context: "browser", input: "A / Enter", action: "select", label: "Select / watch" },
   { context: "browser", input: "B / Esc", action: "back", label: "Back to landing" },
+  // 0.11.7 W2 — category drawer layering (the browser interprets
+  // the same move-left / move-right / back / select actions by
+  // layer; the resolvers above are unchanged).
+  { context: "browser", input: "D-pad Left in channel list", action: "move-left", label: "Open category drawer" },
+  { context: "browser", input: "D-pad Right in drawer", action: "move-right", label: "Return to channel list" },
+  { context: "browser", input: "A / Enter in drawer", action: "select", label: "Open group / apply subcategory" },
+  { context: "browser", input: "B / Esc in drawer", action: "back", label: "Back one drawer level, then close" },
   { context: "browser", input: "LB", action: "category-prev", label: "Previous category" },
   { context: "browser", input: "RB", action: "category-next", label: "Next category" },
   { context: "browser", input: "LT", action: "page-prev", label: "Previous page" },

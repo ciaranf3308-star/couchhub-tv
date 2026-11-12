@@ -51,7 +51,6 @@ import {
   collectionNowPlaying,
   dispatchLivetvTune,
   favouriteChannels,
-  groupChannels,
   isLocalChannel,
   loadLivetvHomeData,
   nowNextForChannel,
@@ -63,8 +62,10 @@ import {
   type LivetvGroup,
   type LivetvHomeData,
 } from "./livetv-data";
+import { buildCategoryIndex } from "./livetv-category-index";
 import type { GuideMode } from "./livetv-state";
 import { LIVETV_BACK_EVENT } from "./livetv-keys";
+import { livetvNav } from "./livetv-nav";
 import { formatTimeRange, type Programme } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
 import { readCouchFocusMemory } from "./couch-focus";
@@ -374,18 +375,45 @@ export const LANDING_MAX_CATEGORIES = 6;
 
 /**
  * Browse-by-Category tiles from genuine provider groups
- * (groupChannels — never hardcoded provider naming), "all"
- * excluded, capped at LANDING_MAX_CATEGORIES. Empty groups never
+ * (the shared category index — never hardcoded provider
+ * naming), capped at LANDING_MAX_CATEGORIES. Empty groups never
  * appear; the row hides entirely when there are no groups.
+ * Built from a fresh index for this render (the landing
+ * renders on data load / mode entry, never per scroll), with
+ * each group's channels in catalogue order — the same order
+ * the legacy grouping produced, so now-playing picks are
+ * unchanged.
  */
 export function landingCategories(
   data: LivetvHomeData,
   max: number = LANDING_MAX_CATEGORIES,
   atMs: number = Date.now(),
 ): LandingCategory[] {
-  const groups = groupChannels(data.channels).filter(
-    (g: LivetvGroup) => g.id !== "all" && g.channels.length > 0,
+  const index = buildCategoryIndex(
+    data.channels,
+    "livetv-landing:landingCategories",
   );
+  const groupOf = new Map<string, string>();
+  for (const group of index.groups) {
+    for (const sub of group.subcategories) {
+      for (const id of sub.channelIds) {
+        if (!groupOf.has(id)) groupOf.set(id, group.id);
+      }
+    }
+  }
+  const buckets = new Map<string, LivetvChannel[]>();
+  for (const group of index.groups) buckets.set(group.id, []);
+  for (const channel of data.channels) {
+    const bucket = buckets.get(groupOf.get(String(channel.id)) ?? "");
+    if (bucket) bucket.push(channel);
+  }
+  const groups: LivetvGroup[] = index.groups
+    .map((group) => ({
+      id: group.id,
+      label: group.label,
+      channels: buckets.get(group.id) ?? [],
+    }))
+    .filter((g) => g.channels.length > 0);
   return groups.slice(0, Math.max(0, max)).map((group: LivetvGroup) => ({
     id: group.id,
     label: group.label,
@@ -502,7 +530,10 @@ export const LANDING_BACK_TARGET = "/";
 
 /**
  * Handle a `livetv:back` event on the landing: B/Escape goes to
- * the app Home. Events for another context are ignored. `navigate`
+ * the app Home. Events for another context are ignored, and so
+ * are events while another Live TV layer is on top of the nav
+ * stack (a hidden landing must never steal B from the browser,
+ * Guide, playback, or an overlay). `navigate`
  * defaults to window.location.assign (the gamepad.ts pattern);
  * tests inject a stub. Returns true when navigation happened.
  */
@@ -512,6 +543,8 @@ export function handleLandingBack(
 ): boolean {
   const context = event?.detail?.context;
   if (context != null && context !== "landing") return false;
+  const top = livetvNav.topId();
+  if (top != null && top !== "landing") return false;
   navigate(LANDING_BACK_TARGET);
   return true;
 }

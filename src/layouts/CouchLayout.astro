@@ -34,8 +34,14 @@ interface Props {
   pageTitle?: string;
   activeNav?: string;
   view?: string;
+  /**
+   * Hide the shared button-hint legend: pages that mount their
+   * own contextual hints (Live TV 0.11.7 mounts TvLivetvHints)
+   * set this so exactly ONE hints bar renders.
+   */
+  hideButtonHints?: boolean;
 }
-const { pageTitle, activeNav, view } = Astro.props;
+const { pageTitle, activeNav, view, hideButtonHints } = Astro.props;
 const path = Astro.url.pathname.replace(/\/+$/, "") || "/";
 const active = activeNav ?? couchNavIdFor(path) ?? "home";
 const documentTitle = pageTitle
@@ -152,8 +158,9 @@ const documentTitle = pageTitle
     <!-- Shared Xbox button legend (W6): one component, per-screen
          configs from couch-button-hints.ts; contextual via `view` +
          html[data-livetv-mode]. Rendered here so every Couch screen
-         gets it with no per-screen edits. -->
-    <TvButtonHints view={view ?? active} />
+         gets it with no per-screen edits — unless the page mounts
+         its own hints (hideButtonHints), so only one bar shows. -->
+    {!hideButtonHints && <TvButtonHints view={view ?? active} />}
 
     <script>
       import "@/scripts/spatial-navigation";

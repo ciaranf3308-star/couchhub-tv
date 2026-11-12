@@ -1,0 +1,129 @@
+---
+// TvCategoryDrawer — TV category drawer (0.11.7 W2).
+//
+// The reusable category drawer for Live TV 2.0: ONE prominent
+// category control opens a large, controller-friendly drawer with a
+// vertical top-level list; selecting a group opens its actual
+// provider subcategories ("All <Group>" first); Back steps one
+// layer at a time. The Channel Browser mounts the same drawer
+// through the TS module directly; the Guide (W3) reuses this
+// component. Props are deliberately simple:
+//
+//   Props:
+//     groups                  DrawerGroup[] — top-level entries in
+//                             display order. Pseudo-entries
+//                             (Favourites / Recents / All) carry
+//                             `opensSubcategories: false` and an
+//                             empty subcategories list; real groups
+//                             carry `opensSubcategories: true` and
+//                             their real provider subcategories.
+//                             { id, label, count, icon?,
+//                               opensSubcategories, subcategories:
+//                               [{ id, label, count }] }
+//     selectedGroupId?        Currently applied group id.
+//     selectedSubcategoryId?  Currently applied subcategory id
+//                             (null = whole group).
+//     drawerId?               DOM id for the mount point.
+//     label?                  Accessible label for the drawer.
+//
+//   Astro components cannot take callbacks, so onSelect / onBack
+//   arrive as window CustomEvents (the TS module takes real
+//   callbacks — see mountCategoryDrawer in
+//   src/scripts/lib/livetv-category-drawer.ts):
+//     `livetv:drawer-select`  detail { groupId, subcategoryId,
+//                             drawerId } — a leaf was picked.
+//     `livetv:drawer-back`    detail { drawerId } — the drawer
+//                             closed without a selection (B at the
+//                             top level, Right, or scrim click).
+//
+//   The host owns visibility: render the component inside a
+//   container it shows/hides, and forward keys to the drawer while
+//   it is open (the module's handleKey, via the browser's window
+//   keydown delegation pattern). This component mounts the drawer
+//   immediately on the client; hosts that need lazy mounting
+//   should use mountCategoryDrawer directly.
+//
+//   Behaviour, focus and counts are the module's contract — see
+//   livetv-category-drawer.ts. This wrapper adds no behaviour.
+import type { DrawerGroup } from "@/scripts/lib/livetv-category-drawer";
+
+interface Props {
+  groups: DrawerGroup[];
+  selectedGroupId?: string | null;
+  selectedSubcategoryId?: string | null;
+  drawerId?: string;
+  label?: string;
+}
+
+const {
+  groups,
+  selectedGroupId = null,
+  selectedSubcategoryId = null,
+  drawerId = "tv-category-drawer",
+  label = "Categories",
+} = Astro.props;
+---
+
+<div
+  class="rs-tv-category-drawer-host"
+  data-category-drawer-mount
+  data-drawer-id={drawerId}
+  data-drawer-groups={JSON.stringify(groups)}
+  data-drawer-selected-group={selectedGroupId ?? undefined}
+  data-drawer-selected-subcategory={selectedSubcategoryId ?? undefined}
+  data-drawer-label={label}
+>
+</div>
+
+<script>
+  import {
+    mountCategoryDrawer,
+    type DrawerGroup,
+    type DrawerSelection,
+  } from "@/scripts/lib/livetv-category-drawer";
+
+  const hosts = document.querySelectorAll<HTMLElement>("[data-category-drawer-mount]");
+  for (const host of hosts) {
+    if (host.dataset.drawerArmed) continue;
+    host.dataset.drawerArmed = "1";
+    const drawerId = host.dataset.drawerId ?? "tv-category-drawer";
+    let groups: DrawerGroup[] = [];
+    try {
+      groups = JSON.parse(host.dataset.drawerGroups ?? "[]") as DrawerGroup[];
+    } catch {
+      groups = [];
+    }
+    const handle = mountCategoryDrawer(host, {
+      groups,
+      selectedGroupId: host.dataset.drawerSelectedGroup ?? null,
+      selectedSubcategoryId: host.dataset.drawerSelectedSubcategory ?? null,
+      label: host.dataset.drawerLabel ?? "Categories",
+      onSelect: (selection: DrawerSelection) => {
+        window.dispatchEvent(
+          new CustomEvent("livetv:drawer-select", {
+            detail: { ...selection, drawerId },
+          }),
+        );
+      },
+      onBack: () => {
+        window.dispatchEvent(
+          new CustomEvent("livetv:drawer-back", { detail: { drawerId } }),
+        );
+      },
+    });
+    // Standalone key forwarding: this listener is the drawer's
+    // only key path when the component is used on its own. Hosts
+    // with their own window keydown delegation (browser / guide
+    // layer handlers) must use mountCategoryDrawer directly and
+    // route keys through the handle themselves — mounting this
+    // component inside such a host would double-handle keys.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!host.isConnected || host.closest("[hidden]")) return;
+      if (handle.handleKey(event)) event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    // The drawer lives as long as its host; Astro pages do not
+    // unmount hosts without a navigation, which drops listeners.
+    void handle;
+  }
+</script>
