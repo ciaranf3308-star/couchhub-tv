@@ -565,12 +565,15 @@ export function groupEntries(
  * Title (2022) [HINDI] / Title (2022) DUAL AUDIO" into separate
  * posters. This post-pass merges ONLY singleton groups that:
  *   - carry no TMDb identity (TMDb-verified singletons are distinct
- *     identities — an ambiguous bridge must never merge),
- *   - share one cleaned title key (variant/quality suffixes stripped)
- *     with a KNOWN year (year-less rows are uncertain — WWE Raw daily
- *     episodes stay separate),
- *   - and whose raw names DIFFER (a stripped variant marker explains
- *     the difference; exact-duplicate rows stay separate).
+ *     identities — an ambiguous bridge must never merge), and
+ *   - share one cleaned title key (variant/quality suffixes
+ *     stripped) with a KNOWN year.
+ * The known year is the conservative disambiguator: year-less rows
+ * are uncertain (WWE Raw daily episodes stay separate), and exact
+ * title+year matches are the brief §13.1 "conservative title/year
+ * without IDs" case. Rows identical in every observable field merge
+ * too — the variants stay accessible on detail (§13.2), and a
+ * duplicate poster is the §1.6 problem this grouping exists to fix.
  * The merged group is "medium" confidence, kind-prefixed "n:", with
  * the lowest-quality-rank member as primary (plain beats 4K).
  */
@@ -613,13 +616,6 @@ function mergeVariantSuffixSingletons(
   for (const [titleKey, bucket] of buckets) {
     if (bucket.length === 1) {
       out.push(bucket[0])
-      continue
-    }
-    const rawNames = new Set(
-      bucket.map((group) => rowById.get(Number(group.primaryId))?.name || ""),
-    )
-    if (rawNames.size === 1) {
-      out.push(...bucket)
       continue
     }
     const memberIds = bucket

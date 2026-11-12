@@ -1,8 +1,8 @@
 // 0.11.8 W2 — Browse search helpers (brief §12).
 //
 // Pure query handling for Browse Everything search. The actual
-// index lookup is the W1 searchCatalogIndex contract (shimmed in
-// browse-catalog-shim.ts until integration); this module owns
+// index lookup is the W1 searchCatalogIndex contract
+// (catalog-index.ts); this module owns
 // query normalisation, provider-affix stripping, year-token
 // extraction, scope resolution and the debounced-apply helper.
 //

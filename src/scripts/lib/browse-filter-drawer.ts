@@ -48,7 +48,7 @@ import {
   type BrowseSeriesStatus,
   type BrowseWatchStatus,
 } from "@/scripts/lib/browse-state.ts";
-import { genreLabelForKind } from "@/scripts/lib/browse-catalog-shim.ts";
+import { genreLabelForId } from "@/scripts/lib/genres.ts";
 
 export interface BrowseFilterDrawerAvailability {
   genre: boolean;
@@ -128,7 +128,7 @@ export function buildFilterFamilies(
         { value: "", label: "Any genre" },
         ...genreIds.map((id) => ({
           value: id,
-          label: genreLabelForKind(kind, id),
+          label: genreLabelForId(id, kind === "movie" ? "vod" : "series"),
         })),
       ],
       note: "One genre at a time — picking a new genre replaces the last.",

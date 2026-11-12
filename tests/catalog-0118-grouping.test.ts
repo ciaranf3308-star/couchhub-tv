@@ -85,6 +85,21 @@ describe("groupEntries", () => {
     expect(groups).toHaveLength(2)
   })
 
+  it("merges rows identical in name and year (variants stay on detail), but never year-less rows", () => {
+    const groups = groupEntries(
+      [
+        { id: 70, name: "Twin Film (2020)" },
+        { id: 71, name: "Twin Film (2020)" },
+        { id: 72, name: "Yearless Twin" },
+        { id: 73, name: "Yearless Twin" },
+      ],
+      "vod",
+    )
+    expect(groups).toHaveLength(3)
+    const twin = groups.find((g) => g.variantIds.includes("70"))!
+    expect([...twin.variantIds].sort()).toEqual(["70", "71"])
+  })
+
   it("keeps distinct films with similar titles separate", () => {
     const groups = groupEntries(
       [

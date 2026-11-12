@@ -16,7 +16,8 @@
 //     - buildCouchCard / couchCardSignature / updateCouchCard
 //       (movies/couch-cards.ts) — same card markup as TvCard.
 //     - The shared `normalize` search helper (text.ts) via the
-//       W1 search contract (shim until integration).
+//       W1 search contract (catalog-index.ts searchCatalogIndex,
+//       ranked retrieval over display-level groups).
 //     - createGenerationGuard (livetv-category-index.ts) for
 //       stale-load cancellation — a generic guard, not Live TV
 //       behaviour.
@@ -113,11 +114,7 @@ import {
   browseYearMatches,
   browseYearRangeMatches,
   languageMatches,
-  parseRuntimeMinutes,
-  providerCategoryMatches,
-  runtimeBucketMatches,
   seasonCountMatches,
-  watchStatusMatches,
 } from "@/scripts/lib/browse-filters.ts";
 import {
   createKeyedPageGrid,
@@ -132,31 +129,27 @@ import {
   type CouchCardView,
 } from "@/scripts/movies/couch-cards.ts";
 import {
+  getCatalogIndex,
+  searchCatalogIndex,
+  type CatalogIndex,
+  type CatalogRow,
+  type GroupAggregate,
+} from "@/scripts/lib/catalog-index.ts";
+import {
   CANONICAL_MOVIE_GENRES,
   CANONICAL_SERIES_GENRES,
-  EMPTY_COLLECTION_CONTEXT,
   UNCATEGORISED_ID,
-  canonicalGenresForKind,
-  genreLabelForKind,
-  genresForEntry,
-  getCatalogIndex,
-  getSortedGroupIds,
-  normaliseRating,
-  parseEntryYear,
-  searchCatalogIndex,
-  selectContinueWatching,
-  selectFavourites,
-  selectFollowed,
-  selectHighestRated,
-  selectNewEpisodes,
-  selectRecentlyAdded,
-  selectUnwatched,
-  selectWatchLater,
-  type CatalogEntry,
-  type CatalogIndex,
-  type CollectionContext,
-  type TitleGroup,
-} from "@/scripts/lib/browse-catalog-shim.ts";
+  genreLabelForId,
+  providerCategoryInfo,
+} from "@/scripts/lib/genres.ts";
+import { ratingPassesMinimum } from "@/scripts/lib/rating-evidence.ts";
+import type { TitleGroup } from "@/scripts/lib/language-groups.ts";
+import {
+  noteDecoratedSort,
+  noteDeriveCall,
+  noteFocusMove,
+  notePageTurn,
+} from "@/scripts/lib/browse-instrumentation.ts";
 import {
   BROWSE_DEFAULT_PAGE_SIZE,
   activeFilterSummary,
@@ -227,8 +220,8 @@ export interface BrowseLoadResult {
 export interface BrowseDataSource {
   /** Load the catalogue (cached path first, like loadCouchCatalog). */
   load: () => Promise<BrowseLoadResult>;
-  /** Adapt one raw row to a CatalogEntry (structural; raw passthrough kept). */
-  toEntry: (row: unknown) => CatalogEntry | null;
+  /** Adapt one raw row to a W1 CatalogRow (null drops the row). */
+  toEntry: (row: unknown) => CatalogRow | null;
   /** Stable key for one raw row (matches the card's data-couch-key). */
   rowKey: (row: unknown) => string;
   /** Card view for one raw row. */
@@ -254,6 +247,14 @@ export interface BrowseController {
   getState(): BrowseState;
   /** Re-read watch sets + re-derive (call after a detail trip changes favourites/progress). */
   refresh(): void;
+  /**
+   * Suspend/resume key handling (the series controller keeps the
+   * browse mount alive-but-hidden while Home shows; a suspended
+   * mount ignores its key handler so Home owns the controller).
+   */
+  setSuspended(suspended: boolean): void;
+  /** Open the search overlay (in-page Search action when already mounted). */
+  openSearch(): void;
 }
 
 export interface MountBrowseEverythingOptions {
@@ -263,12 +264,86 @@ export interface MountBrowseEverythingOptions {
   onExit: () => void;
   restoreFocus?: { id: string; page: number };
   source: BrowseDataSource;
+  /** Open search after the first catalogue load (Home "Search Movies/Series" deep link). */
+  autoOpenSearch?: boolean;
 }
 
 // ── Pure derive (tested directly) ────────────────────────────────
 
+/**
+ * One displayed title: a W1 group plus its primary row, member rows
+ * and display aggregate. Built ONCE per index (WeakMap cache) — the
+ * derive never rebuilds views, it only selects and orders them.
+ */
+export interface BrowseGroup {
+  /** Display-level group id (W1 TitleGroup id). */
+  id: string;
+  /** Primary (display) entry id, as a string. */
+  primaryId: string;
+  /** Primary row, by reference (the card view + detail id source). */
+  row: CatalogRow;
+  /** All member rows, by reference, primary first. */
+  rows: CatalogRow[];
+  /** Display-level aggregate (year/rating/runtime/genres/added). */
+  aggregate: GroupAggregate;
+  /** The W1 group (variant ids, language tags, confidence). */
+  group: TitleGroup;
+}
+
+interface BrowseViewCache {
+  views: BrowseGroup[];
+  byGroupId: Map<string, BrowseGroup>;
+  byPrimaryId: Map<string, BrowseGroup>;
+  /** Groups with no provider-category key on ANY member (the Uncategorised category). */
+  uncategorisedIds: Set<string>;
+}
+
+const browseViewCache = new WeakMap<CatalogIndex, BrowseViewCache>();
+
+function browseViewsFor(index: CatalogIndex): BrowseViewCache {
+  const cached = browseViewCache.get(index);
+  if (cached) return cached;
+  const views: BrowseGroup[] = [];
+  const byGroupId = new Map<string, BrowseGroup>();
+  const byPrimaryId = new Map<string, BrowseGroup>();
+  const uncategorisedIds = new Set<string>();
+  for (const group of index.groups) {
+    const aggregate = index.groupAggregates.get(group.id);
+    const row = index.byId.get(group.primaryId);
+    if (!aggregate || !row) continue;
+    const rows: CatalogRow[] = [];
+    for (const memberId of group.variantIds) {
+      const member = index.byId.get(memberId);
+      if (member) rows.push(member);
+    }
+    if (rows.length === 0) continue;
+    const view: BrowseGroup = {
+      id: group.id,
+      primaryId: group.primaryId,
+      row,
+      rows,
+      aggregate,
+      group,
+    };
+    views.push(view);
+    byGroupId.set(group.id, view);
+    byPrimaryId.set(group.primaryId, view);
+    // Uncategorised (category): no provider-category key on any
+    // member. This is DELIBERATELY distinct from the genre-filter
+    // value "uncategorised" (no genre evidence) — see D11.
+    const hasCategory = group.variantIds.some(
+      (memberId) => (index.meta.get(memberId)?.providerCategoryKey ?? "") !== "",
+    );
+    if (!hasCategory) uncategorisedIds.add(group.id);
+  }
+  const entry: BrowseViewCache = { views, byGroupId, byPrimaryId, uncategorisedIds };
+  browseViewCache.set(index, entry);
+  return entry;
+}
+
 export interface BrowseDeriveContext {
-  collection: CollectionContext;
+  /** Watch sets (read fresh per derive by the mount). */
+  collection: BrowseWatchSets;
   /** Confirmed season counts by GROUP id (null = unknown). Series only. */
   seasonCounts: Map<string, number | null>;
   /** Series status by GROUP id ("" = unknown). Only genuine metadata. */
@@ -276,124 +351,170 @@ export interface BrowseDeriveContext {
 }
 
 export interface BrowseDerived {
-  groups: TitleGroup[];
+  groups: BrowseGroup[];
   /** Effective sort actually applied (relevance counts as "recommended" + search). */
   effectiveSort: BrowseSortId | "relevance";
   totalGroups: number;
   totalEntries: number;
 }
 
-function groupWatchStatus(
-  group: TitleGroup,
-  ctx: BrowseDeriveContext,
-): "" | "unwatched" | "in-progress" | "watched" {
-  let anyWatched = false;
-  for (const entry of group.entries) {
-    const status = watchStatusMatches(entry.id, "in-progress", {
-      inProgressIds: ctx.collection.inProgressIds,
-      watchedIds: ctx.collection.watchedIds,
-    })
-      ? "in-progress"
-      : watchStatusMatches(entry.id, "watched", {
-          inProgressIds: ctx.collection.inProgressIds,
-          watchedIds: ctx.collection.watchedIds,
-        })
-        ? "watched"
-        : "unwatched";
-    if (status === "in-progress") return "in-progress";
-    if (status === "watched") anyWatched = true;
-  }
-  return anyWatched ? "watched" : "unwatched";
-}
-
 function groupMatchesIds(
-  group: TitleGroup,
+  group: BrowseGroup,
   ids: ReadonlySet<number | string>,
 ): boolean {
-  for (const entry of group.entries) {
-    if (ids.has(entry.id) || ids.has(String(entry.id))) return true;
+  for (const row of group.rows) {
+    if (ids.has(row.id) || ids.has(String(row.id))) return true;
   }
   return false;
+}
+
+function groupWatchStatus(
+  group: BrowseGroup,
+  ctx: BrowseDeriveContext,
+): "" | "unwatched" | "in-progress" | "watched" {
+  // In-progress wins: any member mid-way makes the title in-progress.
+  if (groupMatchesIds(group, ctx.collection.inProgressIds)) return "in-progress";
+  if (groupMatchesIds(group, ctx.collection.watchedIds)) return "watched";
+  return "unwatched";
 }
 
 function categoryBaseGroups(
   index: CatalogIndex,
   category: BrowseCategorySelection,
   ctx: BrowseDeriveContext,
-): TitleGroup[] {
+  views: BrowseViewCache,
+): BrowseGroup[] {
   switch (category.kind) {
     case "all":
-      return [...index.groups];
+      return [...views.views];
     case "genre": {
-      const ids = index.genreSets.get(category.id);
+      const ids = index.idsByGenre.get(category.id);
       if (!ids) return [];
-      return index.groups.filter((g) => ids.has(g.id));
+      const out: BrowseGroup[] = [];
+      for (const id of ids) {
+        const view = views.byPrimaryId.get(id);
+        if (view) out.push(view);
+      }
+      return out;
     }
     case "provider": {
-      const info = index.providerCategories.find((p) => p.id === category.id);
-      if (!info) return [];
-      const ids = new Set(info.groupIds);
-      return index.groups.filter((g) => ids.has(g.id));
+      const ids = index.idsByProviderCategory.get(category.id);
+      if (!ids) return [];
+      const out: BrowseGroup[] = [];
+      for (const id of ids) {
+        const view = views.byPrimaryId.get(id);
+        if (view) out.push(view);
+      }
+      return out;
     }
-    case "uncategorised": {
-      const ids = new Set(index.uncategorisedIds);
-      return index.groups.filter((g) => ids.has(g.id));
-    }
+    case "uncategorised":
+      return views.views.filter((view) => views.uncategorisedIds.has(view.id));
     case "collection": {
       switch (category.id) {
         case "recent":
-          return selectRecentlyAdded(index);
+          // Every title; the derive sorts by added when no order
+          // was picked (collection default, below).
+          return [...views.views];
         case "highest-rated":
-          return selectHighestRated(index);
+          return views.views.filter((view) => view.aggregate.rating != null);
         case "unwatched":
-          return selectUnwatched(index, ctx.collection);
+          return views.views.filter(
+            (view) => groupWatchStatus(view, ctx) === "unwatched",
+          );
         case "continue":
-          return selectContinueWatching(index, ctx.collection);
+          return views.views.filter((view) =>
+            groupMatchesIds(view, ctx.collection.inProgressIds),
+          );
         case "favourites":
-          return selectFavourites(index, ctx.collection);
+          return views.views.filter((view) =>
+            groupMatchesIds(view, ctx.collection.favouriteIds),
+          );
         case "watchlater":
-          return selectWatchLater(index, ctx.collection);
+          return views.views.filter((view) =>
+            groupMatchesIds(view, ctx.collection.watchLaterIds),
+          );
         case "followed":
-          return selectFollowed(index, ctx.collection);
+          return views.views.filter((view) =>
+            groupMatchesIds(view, ctx.collection.followedIds),
+          );
         case "new-episodes":
-          return selectNewEpisodes(index, ctx.collection);
+          return views.views.filter((view) =>
+            groupMatchesIds(view, ctx.collection.newEpisodeIds),
+          );
         default:
+          // Unknown collection id matches NOTHING — never a
+          // silent All (D12: derive-level strictness; the URL
+          // parser is the lenient layer for stale links).
           return [];
       }
     }
     default:
-      return [...index.groups];
+      return [...views.views];
+  }
+}
+
+/**
+ * Runtime bucket test over aggregate minutes. Boundaries mirror
+ * browse-filters' runtimeBucketMatches exactly: under-* is strict
+ * `<`, over-180 is strict `> 180`. Unknown runtimes never pass a
+ * bucket (the caller excludes them before calling).
+ */
+function runtimeMinutesMatchesBucket(minutes: number, bucket: string): boolean {
+  switch (bucket) {
+    case "under-60":
+      return minutes < 60;
+    case "under-90":
+      return minutes < 90;
+    case "under-120":
+      return minutes < 120;
+    case "under-150":
+      return minutes < 150;
+    case "under-180":
+      return minutes < 180;
+    case "over-180":
+      return minutes > 180;
+    default:
+      return true;
   }
 }
 
 function groupPassesFilters(
-  group: TitleGroup,
+  group: BrowseGroup,
   filters: BrowseFilters,
   index: CatalogIndex,
   ctx: BrowseDeriveContext,
 ): boolean {
-  const entry = group.displayEntry;
+  const aggregate = group.aggregate;
   // Genre (single default; multi only with explicit OR/AND).
+  // The "uncategorised" genre value means NO genre evidence.
   if (filters.genreMode !== "single" && filters.genres.length > 0) {
-    const have = new Set(genresForEntry(entry).map(String));
+    const have = new Set(aggregate.genreIds);
     const wanted = filters.genres;
     const ok =
       filters.genreMode === "multi-and"
-        ? wanted.every((g) => have.has(g))
-        : wanted.some((g) => have.has(g));
+        ? wanted.every((g) => (g === UNCATEGORISED_ID ? aggregate.genreIds.length === 0 : have.has(g)))
+        : wanted.some((g) => (g === UNCATEGORISED_ID ? aggregate.genreIds.length === 0 : have.has(g)));
     if (!ok) return false;
   } else if (filters.genre) {
-    if (!genresForEntry(entry).map(String).includes(filters.genre)) return false;
+    if (filters.genre === UNCATEGORISED_ID) {
+      if (aggregate.genreIds.length !== 0) return false;
+    } else if (!aggregate.genreIds.includes(filters.genre)) {
+      return false;
+    }
   }
-  if (!browseYearMatches(entry.year, filters.year)) return false;
-  if (!browseYearRangeMatches(entry.year, filters.yearFrom, filters.yearTo)) {
+  if (!browseYearMatches(aggregate.year, filters.year)) return false;
+  if (!browseYearRangeMatches(aggregate.year, filters.yearFrom, filters.yearTo)) {
     return false;
   }
   if (filters.minRating > 0) {
-    const rating = normaliseRating(entry);
-    if (rating.value == null || rating.value < filters.minRating) return false;
+    // Unrated titles NEVER pass a positive minimum.
+    if (!ratingPassesMinimum(aggregate.rating, filters.minRating)) return false;
   }
-  if (!runtimeBucketMatches(entry, filters.runtime)) return false;
+  if (filters.runtime) {
+    const minutes = aggregate.runtimeMinutes;
+    if (minutes == null) return false;
+    if (!runtimeMinutesMatchesBucket(minutes, filters.runtime)) return false;
+  }
   if (filters.watchStatus) {
     if (groupWatchStatus(group, ctx) !== filters.watchStatus) return false;
   }
@@ -410,17 +531,21 @@ function groupPassesFilters(
     return false;
   }
   if (filters.language) {
-    const langs = group.entries.flatMap((e) =>
-      e.languages ?? (e.language ? [e.language] : []),
-    );
-    if (!languageMatches(langs, filters.language)) return false;
+    // Language evidence is prefix-tag based only (D15): group tags
+    // plus member meta tags. Suffix markers are grouping signals,
+    // not language evidence.
+    const tags = new Set<string>(group.group.tags ?? []);
+    for (const memberId of group.group.variantIds) {
+      const tag = index.meta.get(memberId)?.languageTag;
+      if (tag) tags.add(tag);
+    }
+    if (!languageMatches([...tags], filters.language)) return false;
   }
   if (filters.providerCategory) {
-    const info = index.providerCategories.find((p) => p.id === filters.providerCategory);
-    const rawName = info?.rawName ?? filters.providerCategory;
-    if (!group.entries.some((e) => providerCategoryMatches(e.category, rawName))) {
-      return false;
-    }
+    const matches = group.group.variantIds.some(
+      (memberId) => index.meta.get(memberId)?.providerCategoryKey === filters.providerCategory,
+    );
+    if (!matches) return false;
   }
   if (filters.seasonCount) {
     if (!seasonCountMatches(ctx.seasonCounts.get(group.id) ?? null, filters.seasonCount)) {
@@ -434,32 +559,117 @@ function groupPassesFilters(
   return true;
 }
 
-function orderBySortedIndex(
-  groups: TitleGroup[],
-  index: CatalogIndex,
-  sort: BrowseSortId,
-): TitleGroup[] {
-  const order = getSortedGroupIds(index, sort);
-  const position = new Map<string, number>();
-  order.forEach((id, i) => position.set(id, i));
-  return [...groups].sort(
-    (a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0),
-  );
+function sortedIndexKeyFor(sort: BrowseSortId): keyof CatalogIndex["sortedIds"] {
+  switch (sort) {
+    case "added":
+      return "added";
+    case "year-desc":
+      return "yearDesc";
+    case "year-asc":
+      return "yearAsc";
+    case "rating":
+      return "rating";
+    case "az":
+      return "titleAsc";
+    case "za":
+      return "titleDesc";
+    case "recommended":
+    default:
+      return "catalogue";
+  }
 }
 
-function orderBySeasons(
-  groups: TitleGroup[],
-  ctx: BrowseDeriveContext,
-): TitleGroup[] {
-  return [...groups].sort((a, b) => {
-    const ca = ctx.seasonCounts.get(a.id) ?? null;
-    const cb = ctx.seasonCounts.get(b.id) ?? null;
-    if (ca == null && cb == null) return a.title.localeCompare(b.title);
-    if (ca == null) return 1;
-    if (cb == null) return -1;
-    return cb - ca || a.title.localeCompare(b.title);
-  });
+/**
+ * Order via the precomputed sorted-id index: walk the index once,
+ * collecting wanted groups — O(N), no position map, no sort. The
+ * index walk is the §15.2/§15.7 contract: deriving never sorts
+ * 50k titles from scratch.
+ */
+function orderBySortedIndex(
+  groups: BrowseGroup[],
+  index: CatalogIndex,
+  sort: BrowseSortId,
+  views: BrowseViewCache,
+): BrowseGroup[] {
+  const order = index.sortedIds[sortedIndexKeyFor(sort)];
+  const wanted = new Set(groups.map((g) => g.primaryId));
+  const out: BrowseGroup[] = [];
+  for (const id of order) {
+    if (!wanted.has(id)) continue;
+    const view = views.byPrimaryId.get(id);
+    if (view) out.push(view);
+  }
+  // Safety: any group missing from the sorted index (cannot happen
+  // for groups built from this index) appends in input order rather
+  // than vanishing.
+  if (out.length !== groups.length) {
+    const seen = new Set(out.map((g) => g.id));
+    for (const group of groups) {
+      if (!seen.has(group.id)) out.push(group);
+    }
+  }
+  return out;
 }
+
+function compareTitleKeys(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * Decorated sort: counts + precomputed title keys, sorted once.
+ * Never a per-comparison localeCompare (18s at 50k per W5's
+ * finding). Unknown counts sort last.
+ */
+function orderBySeasons(
+  groups: BrowseGroup[],
+  ctx: BrowseDeriveContext,
+): BrowseGroup[] {
+  noteDecoratedSort();
+  const decorated = groups.map((group) => ({
+    group,
+    count: ctx.seasonCounts.get(group.id) ?? null,
+    title: group.aggregate.normalisedTitle,
+  }));
+  decorated.sort((a, b) => {
+    if (a.count == null && b.count == null) return compareTitleKeys(a.title, b.title);
+    if (a.count == null) return 1;
+    if (b.count == null) return -1;
+    return b.count - a.count || compareTitleKeys(a.title, b.title);
+  });
+  return decorated.map((d) => d.group);
+}
+
+/** "Most Recently Updated": real `updated` evidence only, unknown last. */
+function orderByUpdated(groups: BrowseGroup[]): BrowseGroup[] {
+  noteDecoratedSort();
+  const decorated = groups.map((group) => {
+    const raw = Number((group.row as CatalogRow).updated);
+    return {
+      group,
+      updated: Number.isFinite(raw) && raw > 0 ? raw : 0,
+      title: group.aggregate.normalisedTitle,
+    };
+  });
+  decorated.sort(
+    (a, b) => b.updated - a.updated || compareTitleKeys(a.title, b.title),
+  );
+  return decorated.map((d) => d.group);
+}
+
+function applySortOrder(
+  groups: BrowseGroup[],
+  index: CatalogIndex,
+  sort: BrowseSortId,
+  ctx: BrowseDeriveContext,
+  views: BrowseViewCache,
+): BrowseGroup[] {
+  if (sort === "seasons") return orderBySeasons(groups, ctx);
+  if (sort === "updated") return orderByUpdated(groups);
+  return orderBySortedIndex(groups, index, sort, views);
+}
+
+/** W1 search cap: searchCatalogIndex clamps its limit to 500. */
+const SEARCH_RESULT_LIMIT = 500;
 
 /**
  * Pure derive: category → filters → search → sort. Called ONLY on
@@ -472,26 +682,39 @@ export function deriveBrowseGroups(
   state: BrowseState,
   ctx: BrowseDeriveContext,
 ): BrowseDerived {
-  const base = categoryBaseGroups(index, state.category, ctx);
+  noteDeriveCall();
+  const views = browseViewsFor(index);
+  const base = categoryBaseGroups(index, state.category, ctx, views);
   const query = state.search.trim();
   const searching = hasSearchableQuery(query);
-  let groups: TitleGroup[];
+  let groups: BrowseGroup[];
   let effectiveSort: BrowseSortId | "relevance";
 
   if (searching) {
     const scope = resolveSearchScope(state.searchScope, state.category.kind);
-    const onlyIds =
-      scope === "category" ? new Set(base.map((g) => g.id)) : null;
-    const hits = searchCatalogIndex(index, query, onlyIds);
-    groups = hits.map((h) => h.group);
+    let hitIds: string[];
+    if (scope === "category" && state.category.kind === "genre") {
+      // Genre-scoped search: W1 pools the search to the genre.
+      hitIds = searchCatalogIndex(index, query, { genreId: state.category.id }, SEARCH_RESULT_LIMIT);
+    } else {
+      hitIds = searchCatalogIndex(index, query, null, SEARCH_RESULT_LIMIT);
+      if (scope === "category") {
+        // Non-genre category scope: intersect with the category
+        // base set, preserving relevance rank.
+        const baseIds = new Set(base.map((g) => g.primaryId));
+        hitIds = hitIds.filter((id) => baseIds.has(id));
+      }
+    }
+    groups = [];
+    for (const id of hitIds) {
+      const view = views.byPrimaryId.get(id);
+      if (view) groups.push(view);
+    }
     // Filters still apply on top of search (all visible in the summary).
     groups = groups.filter((g) => groupPassesFilters(g, state.filters, index, ctx));
     if (state.sort !== "recommended") {
       effectiveSort = state.sort;
-      groups =
-        state.sort === "seasons"
-          ? orderBySeasons(groups, ctx)
-          : orderBySortedIndex(groups, index, state.sort);
+      groups = applySortOrder(groups, index, state.sort, ctx, views);
     } else {
       // Relevance order from the search hits is preserved.
       effectiveSort = "relevance";
@@ -512,17 +735,14 @@ export function deriveBrowseGroups(
       }
     }
     effectiveSort = sort;
-    groups =
-      sort === "seasons"
-        ? orderBySeasons(groups, ctx)
-        : orderBySortedIndex(groups, index, sort);
+    groups = applySortOrder(groups, index, sort, ctx, views);
   }
 
   return {
     groups,
     effectiveSort,
     totalGroups: groups.length,
-    totalEntries: groups.reduce((n, g) => n + g.entries.length, 0),
+    totalEntries: groups.reduce((n, g) => n + g.rows.length, 0),
   };
 }
 
@@ -561,6 +781,8 @@ export function mountBrowseEverything(
   }
 
   let destroyed = false;
+  let suspended = false;
+  let pendingOpenSearch = opts.autoOpenSearch ?? false;
   let layer: BrowseLayer = "grid";
   let index: CatalogIndex | null = null;
   let playlistId = "";
@@ -659,7 +881,7 @@ export function mountBrowseEverything(
   interface GridItem {
     key: string;
     signature: string;
-    group: TitleGroup;
+    group: BrowseGroup;
     view: CouchCardView;
   }
   const grid: KeyedPageGrid<GridItem> = createKeyedPageGrid<GridItem>({
@@ -676,6 +898,8 @@ export function mountBrowseEverything(
         openDetailFor(item.group);
       });
       card.addEventListener("keydown", (ev) => {
+        // Held-key repeats must not double-activate (§16.6).
+        if (ev.repeat) return;
         if (ev.key === "Enter" || ev.key === " ") {
           ev.preventDefault();
           openDetailFor(item.group);
@@ -684,7 +908,7 @@ export function mountBrowseEverything(
       if (source.decorateCard && !decorated.has(card)) {
         decorated.add(card);
         try {
-          source.decorateCard(card, item.group.displayEntry.raw ?? item.group.displayEntry, playlistId);
+          source.decorateCard(card, item.group.row, playlistId);
         } catch {
           // Decoration is enrichment; a failure never breaks the card.
         }
@@ -747,15 +971,7 @@ export function mountBrowseEverything(
   // ── Derive + render ─────────────────────────────────────────
   const buildDeriveContext = (): BrowseDeriveContext => {
     const sets = source.watchSets(playlistId);
-    const collection: CollectionContext = {
-      favouriteIds: sets.favouriteIds,
-      watchLaterIds: sets.watchLaterIds,
-      inProgressIds: sets.inProgressIds,
-      watchedIds: sets.watchedIds,
-      followedIds: sets.followedIds,
-      newEpisodeIds: sets.newEpisodeIds,
-    };
-    return { collection, seasonCounts, seriesStatus: seriesStatusMap };
+    return { collection: sets, seasonCounts, seriesStatus: seriesStatusMap };
   };
 
   const computeColumns = (): number => {
@@ -792,9 +1008,8 @@ export function mountBrowseEverything(
         : `${derived.totalGroups.toLocaleString()} ${derived.totalGroups === 1 ? "title" : "titles"}`;
     categoryEl.textContent = state.category.label;
     const summary = activeFilterSummary(state, {
-      genreLabel: (id) => genreLabelForKind(kind, id),
-      providerLabel: (id) =>
-        index?.providerCategories.find((p) => p.id === id)?.label ?? id,
+      genreLabel: (id) => genreLabelForId(id, kind === "movie" ? "vod" : "series"),
+      providerLabel: (id) => providerCategoryInfo(id).rawLabel || id,
     });
     summaryEl.textContent = summary
       ? `Showing: ${summary}`
@@ -914,7 +1129,8 @@ export function mountBrowseEverything(
       title.textContent = state.search.trim() ? "No results for this search" : "No matches";
       const text = el("p", "rs-browse2__status-text");
       const summary = activeFilterSummary(state, {
-        genreLabel: (id) => genreLabelForKind(kind, id),
+        genreLabel: (id) => genreLabelForId(id, kind === "movie" ? "vod" : "series"),
+        providerLabel: (id) => providerCategoryInfo(id).rawLabel || id,
       });
       text.textContent = summary
         ? `Applied filters: ${summary}. Nothing in the catalogue matches all of them.`
@@ -940,8 +1156,7 @@ export function mountBrowseEverything(
     const info = browsePageInfo(state, derived.totalGroups);
     const pageGroups = derived.groups.slice(info.startIndex, info.endIndex);
     const items: GridItem[] = pageGroups.map((group) => {
-      const row = group.displayEntry.raw ?? group.displayEntry;
-      const view = source.cardView(row, playlistId);
+      const view = source.cardView(group.row, playlistId);
       return {
         key: group.id,
         signature: couchCardSignature({ ...view, href: undefined }),
@@ -964,7 +1179,7 @@ export function mountBrowseEverything(
       const nextGroups = derived.groups.slice(info.endIndex, info.endIndex + state.pageSize);
       schedulePrefetch(
         nextGroups
-          .map((g) => source.cardView(g.displayEntry.raw ?? g.displayEntry, playlistId).image)
+          .map((g) => source.cardView(g.row, playlistId).image)
           .filter((u): u is string => typeof u === "string" && u.length > 0),
       );
     } else {
@@ -1005,7 +1220,9 @@ export function mountBrowseEverything(
     const totalPages = browseTotalPages(derived.totalGroups, state.pageSize);
     if (totalPages <= 1 && page === state.page) return;
     const focusedIdx = keepIndex ?? currentFocusedPageIndex();
+    const prevPage = state.page;
     state = setPage(state, page, Math.max(1, totalPages));
+    if (state.page !== prevPage) notePageTurn();
     syncUrl();
     renderHeader();
     renderPagination();
@@ -1033,8 +1250,7 @@ export function mountBrowseEverything(
     const info = browsePageInfo(state, derived.totalGroups);
     const pageGroups = derived.groups.slice(info.startIndex, info.endIndex);
     const at = pageGroups.findIndex((g) => {
-      const row = g.displayEntry.raw ?? g.displayEntry;
-      return source.detailId(row) === id || g.id === id;
+      return source.detailId(g.row) === id || g.id === id;
     });
     renderAll({
       mode: "keep-key",
@@ -1065,11 +1281,10 @@ export function mountBrowseEverything(
     );
   };
 
-  const openDetailFor = (group: TitleGroup) => {
-    const row = group.displayEntry.raw ?? group.displayEntry;
+  const openDetailFor = (group: BrowseGroup) => {
     state = { ...state, selectedId: group.id };
     syncUrl();
-    opts.onOpenDetail(source.detailId(row));
+    opts.onOpenDetail(source.detailId(group.row));
   };
 
   // ── Overlays ────────────────────────────────────────────────
@@ -1107,64 +1322,73 @@ export function mountBrowseEverything(
   const drawerStats = (): BrowseDrawerStats | null => {
     if (!index) return null;
     const ctx = buildDeriveContext();
-    const canonical = canonicalGenresForKind(kind);
+    const views = browseViewsFor(index);
+    const canonical =
+      kind === "movie" ? CANONICAL_MOVIE_GENRES : CANONICAL_SERIES_GENRES;
     const genres = canonical.map((g) => ({
       id: g.id,
       label: g.label,
-      count: index!.genreSets.get(g.id)?.size ?? 0,
+      count: index!.idsByGenre.get(g.id)?.length ?? 0,
     }));
     const sets = source.watchSets(playlistId);
-    const highestRatedArr = selectHighestRated(index);
-    const ratedCount = highestRatedArr.length;
-    const unwatchedArr = selectUnwatched(index, ctx.collection);
-    const continueArr = selectContinueWatching(index, ctx.collection);
-    const favouritesArr = selectFavourites(index, ctx.collection);
-    const watchLaterArr = selectWatchLater(index, ctx.collection);
+    // Collection counts reuse the derive's own category bases, so
+    // the drawer count ALWAYS equals the Browse result count.
+    const countCollection = (id: string): number =>
+      categoryBaseGroups(
+        index!,
+        { kind: "collection", id, label: id },
+        ctx,
+        views,
+      ).length;
+    const ratedCount = countCollection("highest-rated");
     const collections: BrowseDrawerStats["collections"] = [
       { id: "recent", label: "Recently Added", count: index.totalGroups, available: true },
       { id: "highest-rated", label: "Highest Rated", count: ratedCount, available: ratedCount > 0, unavailableReason: "No rated titles in this catalogue." },
-      { id: "unwatched", label: "Unwatched", count: unwatchedArr.length, available: true },
-      { id: "continue", label: "Continue Watching", count: continueArr.length, available: true },
-      { id: "favourites", label: "Favourites", count: favouritesArr.length, available: true },
-      { id: "watchlater", label: "Watch Later", count: watchLaterArr.length, available: true },
+      { id: "unwatched", label: "Unwatched", count: countCollection("unwatched"), available: true },
+      { id: "continue", label: "Continue Watching", count: countCollection("continue"), available: true },
+      { id: "favourites", label: "Favourites", count: countCollection("favourites"), available: true },
+      { id: "watchlater", label: "Watch Later", count: countCollection("watchlater"), available: true },
     ];
     if (kind === "series") {
       const followedOk = sets.followedSupported ?? sets.followedIds.size > 0;
       const newEpOk = sets.newEpisodesSupported ?? sets.newEpisodeIds.size > 0;
-      const followedArr = selectFollowed(index, ctx.collection);
-      const newEpArr = selectNewEpisodes(index, ctx.collection);
       collections.push(
         {
           id: "followed",
           label: "Followed Series",
-          count: followedArr.length,
+          count: countCollection("followed"),
           available: followedOk,
           unavailableReason: "Follow a series to see it here.",
         },
         {
           id: "new-episodes",
           label: "New Episodes",
-          count: newEpArr.length,
+          count: countCollection("new-episodes"),
           available: newEpOk,
           unavailableReason: "No new-episode detection for this catalogue yet.",
         },
       );
     }
     const genreUnion = new Set<string>();
-    for (const ids of index.genreSets.values()) for (const id of ids) genreUnion.add(id);
+    for (const [genreId, ids] of index.idsByGenre) {
+      if (genreId === UNCATEGORISED_ID) continue;
+      for (const id of ids) genreUnion.add(id);
+    }
     const providerUnion = new Set<string>();
-    for (const p of index.providerCategories) for (const id of p.groupIds) providerUnion.add(id);
+    for (const ids of index.idsByProviderCategory.values()) {
+      for (const id of ids) providerUnion.add(id);
+    }
     return {
       kind,
       totalGroups: index.totalGroups,
       genres,
       collections,
-      providerCategories: index.providerCategories.map((p) => ({
-        id: p.id,
-        label: p.label,
-        count: p.count,
+      providerCategories: [...index.idsByProviderCategory.entries()].map(([key, ids]) => ({
+        id: key,
+        label: providerCategoryInfo(key).rawLabel || key,
+        count: ids.length,
       })),
-      uncategorisedCount: index.uncategorisedIds.length,
+      uncategorisedCount: views.uncategorisedIds.size,
       genreUnionCount: genreUnion.size,
       // Recently Added reaches every title, so the collection
       // family union is the full catalogue by construction.
@@ -1201,13 +1425,22 @@ export function mountBrowseEverything(
     const base = { ...DEFAULT_FILTER_DRAWER_AVAILABILITY };
     if (!index) return base;
     const sets = source.watchSets(playlistId);
-    const anyGenre = index.genreSets.size > 0;
-    const anyYear = index.groups.some((g) => parseEntryYear(g.displayEntry) != null);
-    const anyRating = index.groups.some((g) => normaliseRating(g.displayEntry).hasEvidence);
+    const aggregates = [...index.groupAggregates.values()];
+    const anyGenre = [...index.idsByGenre.entries()].some(
+      ([genreId, ids]) => genreId !== UNCATEGORISED_ID && ids.length > 0,
+    );
+    const anyYear = aggregates.some((a) => a.year != null);
+    const anyRating = aggregates.some((a) => a.rating != null);
     const anyRuntime =
-      kind === "movie" &&
-      index.groups.some((g) => parseRuntimeMinutes(g.displayEntry.duration) != null);
+      kind === "movie" && aggregates.some((a) => a.runtimeMinutes != null);
     const confirmed = [...seasonCounts.values()].filter((c) => c != null).length;
+    const languageSet = new Set<string>();
+    for (const group of index.groups) {
+      for (const tag of group.tags ?? []) languageSet.add(tag);
+    }
+    for (const meta of index.meta.values()) {
+      if (meta.languageTag) languageSet.add(meta.languageTag);
+    }
     return {
       ...base,
       genre: anyGenre,
@@ -1217,8 +1450,11 @@ export function mountBrowseEverything(
       seasonCounts: confirmed > 0,
       seasonCoverage: index.totalGroups > 0 ? confirmed / index.totalGroups : 0,
       seriesStatus: [...seriesStatusMap.values()].some(Boolean),
-      languages: index.languages,
-      providerCategories: index.providerCategories.map((p) => ({ id: p.id, label: p.label })),
+      languages: [...languageSet],
+      providerCategories: [...index.idsByProviderCategory.keys()].map((key) => ({
+        id: key,
+        label: providerCategoryInfo(key).rawLabel || key,
+      })),
       followedAvailable: sets.followedSupported ?? sets.followedIds.size > 0,
       newEpisodesAvailable: sets.newEpisodesSupported ?? sets.newEpisodeIds.size > 0,
     };
@@ -1228,7 +1464,7 @@ export function mountBrowseEverything(
     if (!index) return;
     closeOverlay(false);
     setLayer("filters");
-    const genreIds = canonicalGenresForKind(kind).map((g) => g.id);
+    const genreIds = (kind === "movie" ? CANONICAL_MOVIE_GENRES : CANONICAL_SERIES_GENRES).map((g) => g.id);
     filterDrawer = mountBrowseFilterDrawer(overlayHost, {
       kind,
       initial: state.filters,
@@ -1251,18 +1487,20 @@ export function mountBrowseEverything(
     if (!index) {
       return { added: false, year: false, rating: false, updated: false, seasons: false };
     }
-    const anyAdded = index.groups.some((g) => Number(g.displayEntry.added) > 0);
-    const anyYear = index.groups.some((g) => parseEntryYear(g.displayEntry) != null);
-    const anyRating = index.groups.some((g) => normaliseRating(g.displayEntry).hasEvidence);
+    const aggregates = [...index.groupAggregates.values()];
+    const anyAdded = aggregates.some((a) => a.addedMs != null);
+    const anyYear = aggregates.some((a) => a.year != null);
+    const anyRating = aggregates.some((a) => a.rating != null);
     const confirmed = [...seasonCounts.values()].filter((c) => c != null).length;
     const coverage = index.totalGroups > 0 ? confirmed / index.totalGroups : 0;
     return {
       added: anyAdded,
       year: anyYear,
       rating: anyRating,
-      // "Most Recently Updated" needs real update evidence: the
-      // shim carries `updated` only when the row supplied it.
-      updated: index.groups.some((g) => Number(g.displayEntry.updated) > 0),
+      // "Most Recently Updated" needs real update evidence: a row
+      // carrying an `updated` timestamp. Mapped rows carry none,
+      // so the sort stays correctly gated off for bulk catalogues.
+      updated: index.entries.some((row) => Number((row as CatalogRow).updated) > 0),
       // "Most Seasons" needs sufficient confirmed coverage (>= 50%).
       seasons: coverage >= 0.5,
     };
@@ -1498,28 +1736,39 @@ export function mountBrowseEverything(
     }
     playlistId = result.playlistId;
     playlistTitle = result.playlistTitle;
-    const entries: CatalogEntry[] = [];
+    const entries: CatalogRow[] = [];
     for (const row of result.rows) {
       const entry = source.toEntry(row);
       if (entry) entries.push(entry);
     }
     const revision = `${playlistId}:${entries.length}:${result.fromCache ? "cache" : "live"}`;
-    index = getCatalogIndex(kind, entries, revision);
-    // Season counts + status: CACHED reads only, once per load.
-    // No series-info requests here — the bulk list has no counts
-    // and a catalogue-wide fetch would hammer the provider.
+    index = getCatalogIndex(kind, entries, revision, {
+      playlistId,
+      // §15.6: CACHED-ONLY season counts via the source's reader.
+      // The index never fetches; a missing reader yields nulls.
+      seasonCountReader: (id) => source.seasonCount?.(playlistId, id) ?? null,
+    });
+    // Season counts: read from the index meta (populated by the
+    // cached-only reader above) — no second pass over the source,
+    // no series-info requests. Status: genuine source metadata
+    // only, keyed by group, primary id first.
     seasonCounts = new Map();
     seriesStatusMap = new Map();
-    if (kind === "series") {
-      for (const group of index.groups) {
-        const entry = group.displayEntry;
-        try {
-          seasonCounts.set(group.id, source.seasonCount?.(playlistId, entry.id) ?? null);
-        } catch {
-          seasonCounts.set(group.id, null);
+    for (const group of index.groups) {
+      let count = index.meta.get(group.primaryId)?.seasonCount ?? null;
+      if (count == null) {
+        for (const memberId of group.variantIds) {
+          const memberCount = index.meta.get(memberId)?.seasonCount;
+          if (memberCount != null) {
+            count = memberCount;
+            break;
+          }
         }
+      }
+      seasonCounts.set(group.id, count);
+      if (kind === "series" && source.seriesStatus) {
         try {
-          const status = source.seriesStatus?.(playlistId, entry.id) ?? "";
+          const status = source.seriesStatus(playlistId, group.primaryId) ?? "";
           if (status) seriesStatusMap.set(group.id, status);
         } catch {
           // Unknown stays unknown.
@@ -1566,6 +1815,10 @@ export function mountBrowseEverything(
       } catch {
         // Focus memory is a nicety, never fatal.
       }
+      if (pendingOpenSearch) {
+        pendingOpenSearch = false;
+        openSearch();
+      }
     } else {
       renderAll({ mode: "keep-key", key: currentFocusedKey(), index: currentFocusedPageIndex() });
     }
@@ -1573,7 +1826,7 @@ export function mountBrowseEverything(
 
   // ── Key handling (shared pipeline: KeyboardEvents only) ─────
   const onKeyDown = (event: KeyboardEvent) => {
-    if (destroyed) return;
+    if (destroyed || suspended) return;
     // Never steal keys from a text field outside the search layer.
     const target = event.target as HTMLElement | null;
     const inField =
@@ -1734,6 +1987,7 @@ export function mountBrowseEverything(
     const target = event.target as HTMLElement | null;
     const card = target?.closest?.("[data-browse-key]") as HTMLElement | null;
     if (!card || !grid.el.contains(card)) return;
+    noteFocusMove();
     const key = card.dataset.browseKey;
     if (key && key !== state.selectedId) {
       state = { ...state, selectedId: key };
@@ -1842,6 +2096,19 @@ export function mountBrowseEverything(
       if (destroyed || !index) return;
       rederive();
       renderAll({ mode: "keep-key", key: currentFocusedKey(), index: currentFocusedPageIndex() });
+    },
+    setSuspended(next: boolean): void {
+      suspended = next;
+    },
+    openSearch(): void {
+      if (destroyed) return;
+      if (!index) {
+        // Catalogue still loading: open search once it lands.
+        pendingOpenSearch = true;
+        return;
+      }
+      pendingOpenSearch = false;
+      openSearch();
     },
   };
 }

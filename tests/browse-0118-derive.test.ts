@@ -1,6 +1,15 @@
 // 0.11.8 W2 — derive engine (brief §6.4, §8–§12). Pure.
+// Integration adaptation: the shim index is gone; rows are W1
+// CatalogRows, groups are BrowseGroups (display title via the
+// primary row's name, year/rating/runtime via the aggregate).
+// Language evidence is prefix-tag based only (D15): the foreign
+// film carries an "FR - " prefix, the only language signal W1
+// reads from bulk rows.
 import { describe, expect, it } from "vitest";
-import { buildCatalogIndex, type CatalogEntry } from "@/scripts/lib/browse-catalog-shim";
+import {
+  buildCatalogIndex,
+  type CatalogRow,
+} from "@/scripts/lib/catalog-index";
 import { deriveBrowseGroups, type BrowseDeriveContext } from "@/scripts/lib/browse-everything";
 import {
   applyFilters,
@@ -10,16 +19,16 @@ import {
   setSort,
 } from "@/scripts/lib/browse-state";
 
-function entry(partial: Partial<CatalogEntry> & { id: number; name: string }): CatalogEntry {
+function entry(partial: Partial<CatalogRow> & { id: number; name: string }): CatalogRow {
   return { ...partial };
 }
 
-const ROWS: CatalogEntry[] = [
+const ROWS: CatalogRow[] = [
   entry({ id: 1, name: "Dune", year: "2021", rating: "8.4", duration: "155 min", category: "Science Fiction", added: 100, tmdb: 1 }),
   entry({ id: 2, name: "Dune", year: "2021", rating: "8.4", duration: "155 min", category: "Sci-Fi FHD", added: 101 }),
   entry({ id: 3, name: "Dune", year: "1984", rating: "6.5", duration: "137 min", category: "Science Fiction", added: 50 }),
   entry({ id: 4, name: "The Comedy Show", year: "2019", rating: "", duration: "", category: "Comedy", added: 90 }),
-  entry({ id: 5, name: "Obscure Foreign Film", year: "", rating: "", duration: "", category: "", added: 10, language: "fr" }),
+  entry({ id: 5, name: "FR - Obscure Foreign Film", year: "", rating: "", duration: "", category: "", added: 10 }),
   entry({ id: 6, name: "Old Classic", year: "1955", rating: "9.1", duration: "200 min", category: "Drama", added: 5, tmdb: 6 }),
   entry({ id: 7, name: "Horror Night", year: "2023", rating: "7.2", duration: "95 min", category: "Horror", added: 120 }),
   entry({ id: 8, name: "Short Film", year: "2022", rating: "6.0", duration: "45 min", category: "Drama", added: 110 }),
@@ -43,14 +52,18 @@ function ctx(overrides: Partial<BrowseDeriveContext> = {}): BrowseDeriveContext 
   };
 }
 
+function titles(groups: Array<{ row: CatalogRow }>): string[] {
+  return groups.map((g) => g.row.name ?? "");
+}
+
 describe("ALL TITLES MEANS ALL (§6.4)", () => {
   it("the default state shows every group incl. obscure/unrated/foreign/old", () => {
     const derived = deriveBrowseGroups(INDEX, createBrowseState("movie"), ctx());
     expect(derived.totalGroups).toBe(7); // Dune 2021 variants grouped
     expect(derived.totalEntries).toBe(8);
-    expect(derived.groups.map((g) => g.title)).toContain("Obscure Foreign Film");
-    expect(derived.groups.map((g) => g.title)).toContain("Old Classic");
-    expect(derived.groups.map((g) => g.title)).toContain("The Comedy Show");
+    expect(titles(derived.groups)).toContain("FR - Obscure Foreign Film");
+    expect(titles(derived.groups)).toContain("Old Classic");
+    expect(titles(derived.groups)).toContain("The Comedy Show");
   });
 
   it("uncategorised selection shows only uncategorised groups", () => {
@@ -60,7 +73,7 @@ describe("ALL TITLES MEANS ALL (§6.4)", () => {
       label: "Uncategorised",
     });
     const derived = deriveBrowseGroups(INDEX, state, ctx());
-    expect(derived.groups.map((g) => g.title)).toEqual(["Obscure Foreign Film"]);
+    expect(titles(derived.groups)).toEqual(["FR - Obscure Foreign Film"]);
   });
 });
 
@@ -71,37 +84,37 @@ describe("category + filter combination (§7.2/§8/§10)", () => {
       { year: "2020s" },
     );
     const derived = deriveBrowseGroups(INDEX, state, ctx());
-    expect(derived.groups.map((g) => g.title)).toEqual(["Short Film"]);
+    expect(titles(derived.groups)).toEqual(["Short Film"]);
   });
 
   it("unknown ratings never pass a minimum filter", () => {
     const state = applyFilters(createBrowseState("movie"), { minRating: 7 });
-    const titles = deriveBrowseGroups(INDEX, state, ctx()).groups.map((g) => g.title);
-    expect(titles).not.toContain("The Comedy Show");
-    expect(titles).not.toContain("Obscure Foreign Film");
-    expect(titles).toContain("Dune");
-    expect(titles).toContain("Horror Night");
+    const found = titles(deriveBrowseGroups(INDEX, state, ctx()).groups);
+    expect(found).not.toContain("The Comedy Show");
+    expect(found).not.toContain("FR - Obscure Foreign Film");
+    expect(found).toContain("Dune");
+    expect(found).toContain("Horror Night");
   });
 
   it("runtime buckets exclude unknown runtimes; over-3h finds the classic", () => {
     const over = applyFilters(createBrowseState("movie"), { runtime: "over-180" });
-    expect(deriveBrowseGroups(INDEX, over, ctx()).groups.map((g) => g.title)).toEqual(["Old Classic"]);
+    expect(titles(deriveBrowseGroups(INDEX, over, ctx()).groups)).toEqual(["Old Classic"]);
     const under = applyFilters(createBrowseState("movie"), { runtime: "under-60" });
-    expect(deriveBrowseGroups(INDEX, under, ctx()).groups.map((g) => g.title)).toEqual(["Short Film"]);
+    expect(titles(deriveBrowseGroups(INDEX, under, ctx()).groups)).toEqual(["Short Film"]);
   });
 
   it("year ranges and decades use release year", () => {
     const state = applyFilters(createBrowseState("movie"), { year: "older" });
-    expect(deriveBrowseGroups(INDEX, state, ctx()).groups.map((g) => g.title)).toEqual(["Old Classic"]);
+    expect(titles(deriveBrowseGroups(INDEX, state, ctx()).groups)).toEqual(["Old Classic"]);
     const range = applyFilters(createBrowseState("movie"), { yearFrom: 2020, yearTo: 2022 });
-    expect(deriveBrowseGroups(INDEX, range, ctx()).groups.map((g) => g.title)).toContain("Dune");
-    expect(deriveBrowseGroups(INDEX, range, ctx()).groups.map((g) => g.title)).not.toContain("Old Classic");
+    expect(titles(deriveBrowseGroups(INDEX, range, ctx()).groups)).toContain("Dune");
+    expect(titles(deriveBrowseGroups(INDEX, range, ctx()).groups)).not.toContain("Old Classic");
   });
 
   it("language filter uses actual catalogue data only", () => {
     const state = applyFilters(createBrowseState("movie"), { language: "fr" });
-    expect(deriveBrowseGroups(INDEX, state, ctx()).groups.map((g) => g.title)).toEqual([
-      "Obscure Foreign Film",
+    expect(titles(deriveBrowseGroups(INDEX, state, ctx()).groups)).toEqual([
+      "FR - Obscure Foreign Film",
     ]);
     const de = applyFilters(createBrowseState("movie"), { language: "de" });
     expect(deriveBrowseGroups(INDEX, de, ctx()).groups).toEqual([]);
@@ -119,11 +132,11 @@ describe("category + filter combination (§7.2/§8/§10)", () => {
       },
     });
     const fav = applyFilters(createBrowseState("movie"), { favouritesOnly: true });
-    expect(deriveBrowseGroups(INDEX, fav, withSets).groups.map((g) => g.title)).toEqual(["Horror Night"]);
+    expect(titles(deriveBrowseGroups(INDEX, fav, withSets).groups)).toEqual(["Horror Night"]);
     const prog = applyFilters(createBrowseState("movie"), { watchStatus: "in-progress" });
-    expect(deriveBrowseGroups(INDEX, prog, withSets).groups.map((g) => g.title)).toEqual(["Dune"]);
+    expect(titles(deriveBrowseGroups(INDEX, prog, withSets).groups)).toEqual(["Dune"]);
     const unw = applyFilters(createBrowseState("movie"), { watchStatus: "unwatched" });
-    const unwatched = deriveBrowseGroups(INDEX, unw, withSets).groups.map((g) => g.title);
+    const unwatched = titles(deriveBrowseGroups(INDEX, unw, withSets).groups);
     expect(unwatched).not.toContain("Old Classic");
     expect(unwatched).toContain("Horror Night");
   });
@@ -160,17 +173,19 @@ describe("search (§12)", () => {
 
   it("search + filters combine (both visible in the summary)", () => {
     const state = applyFilters(setSearch(createBrowseState("movie"), "dune"), { minRating: 8 });
-    const titles = deriveBrowseGroups(INDEX, state, ctx()).groups.map((g) => `${g.title} ${g.year}`);
-    expect(titles).toEqual(["Dune 2021"]);
+    const found = deriveBrowseGroups(INDEX, state, ctx()).groups.map(
+      (g) => `${g.row.name} ${g.aggregate.year}`,
+    );
+    expect(found).toEqual(["Dune 2021"]);
   });
 });
 
 describe("sort (§11)", () => {
   it("rating sort puts evidence first and unrated last", () => {
     const state = setSort(createBrowseState("movie"), "rating");
-    const titles = deriveBrowseGroups(INDEX, state, ctx()).groups.map((g) => g.title);
-    expect(titles[0]).toBe("Old Classic");
-    expect(titles.slice(-2)).toEqual(expect.arrayContaining(["The Comedy Show", "Obscure Foreign Film"]));
+    const found = titles(deriveBrowseGroups(INDEX, state, ctx()).groups);
+    expect(found[0]).toBe("Old Classic");
+    expect(found.slice(-2)).toEqual(expect.arrayContaining(["The Comedy Show", "FR - Obscure Foreign Film"]));
   });
 
   it("recent collection defaults to added order; explicit sort wins", () => {
@@ -181,9 +196,9 @@ describe("sort (§11)", () => {
     });
     const derived = deriveBrowseGroups(INDEX, recent, ctx());
     expect(derived.effectiveSort).toBe("added");
-    expect(derived.groups[0].title).toBe("Horror Night");
+    expect(derived.groups[0].row.name).toBe("Horror Night");
     const az = deriveBrowseGroups(INDEX, setSort(recent, "az"), ctx());
-    expect(az.groups[0].title).toBe("Dune");
+    expect(az.groups[0].row.name).toBe("Dune");
   });
 
   it("seasons sort orders by confirmed counts, unknown last", () => {
@@ -198,13 +213,14 @@ describe("sort (§11)", () => {
     );
     const counts = new Map<string, number | null>();
     for (const g of seriesIndex.groups) {
-      counts.set(g.id, g.title === "Long Show" ? 10 : g.title === "Short Show" ? 1 : null);
+      const name = seriesIndex.byId.get(g.primaryId)?.name;
+      counts.set(g.id, name === "Long Show" ? 10 : name === "Short Show" ? 1 : null);
     }
     const state = setSort(createBrowseState("series"), "seasons");
-    const titles = deriveBrowseGroups(seriesIndex, state, ctx({ seasonCounts: counts })).groups.map(
-      (g) => g.title,
+    const found = titles(
+      deriveBrowseGroups(seriesIndex, state, ctx({ seasonCounts: counts })).groups,
     );
-    expect(titles).toEqual(["Long Show", "Short Show", "Unknown Show"]);
+    expect(found).toEqual(["Long Show", "Short Show", "Unknown Show"]);
   });
 });
 

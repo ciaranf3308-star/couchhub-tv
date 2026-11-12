@@ -8,7 +8,8 @@ import {
   mountBrowseEverything,
   type BrowseDataSource,
 } from "@/scripts/lib/browse-everything";
-import { resetShimCatalogCache, type CatalogEntry } from "@/scripts/lib/browse-catalog-shim";
+import { invalidateCatalogIndex } from "@/scripts/lib/catalog-index";
+import { clearTitleGroupRegistry } from "@/scripts/lib/language-groups";
 
 interface FixtureRow {
   id: number;
@@ -40,8 +41,11 @@ function buildRows(): FixtureRow[] {
     });
   }
   // 100 variants: same title+year as an existing title (grouping).
+  // Year-less bases are skipped: conservative title/year grouping
+  // requires a known year, so a year-less variant cannot merge.
   for (let i = 0; i < 100; i++) {
     const base = rows[i * 10];
+    if (!base.year) continue;
     rows.push({ ...base, id: id++, category: `${base.category} FHD` });
   }
   return rows;
@@ -66,8 +70,7 @@ function makeSource(rows: FixtureRow[], overrides: Partial<BrowseDataSource> = {
         duration: r.duration,
         category: r.category,
         added: r.added,
-        raw: r,
-      } satisfies CatalogEntry;
+      };
     },
     rowKey: (row) => `vod-${(row as FixtureRow).id}`,
     cardView: (row) => {
@@ -101,7 +104,8 @@ beforeEach(() => {
     (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number,
   );
   vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id));
-  resetShimCatalogCache();
+  invalidateCatalogIndex();
+  clearTitleGroupRegistry();
   window.history.replaceState(null, "", "/movies");
 });
 
@@ -358,10 +362,13 @@ describe("filter drawer (§8/§10) + sort (§11) + search (§12)", () => {
 describe("empty/error states (§18)", () => {
   it("no matches shows applied filters + Reset All; never a fake empty catalogue", async () => {
     const { host, controller } = await mount();
-    controller.setState({ search: "zzz-no-such-title-zzz" });
+    // Token-disjoint query: W1 search is ranked retrieval, so a
+    // query sharing one token ("title") with every fixture title
+    // legitimately returns results. This query shares none.
+    controller.setState({ search: "zzz-no-such-qqq-zzz" });
     await flush();
     expect(host.querySelector(".rs-browse2__empty-title")?.textContent).toContain("No results");
-    expect(host.querySelector(".rs-browse2__status-text")?.textContent).toContain("zzz-no-such-title-zzz");
+    expect(host.querySelector(".rs-browse2__status-text")?.textContent).toContain("zzz-no-such-qqq-zzz");
     expect(gridCards(host)).toHaveLength(0);
     controller.destroy();
   });
