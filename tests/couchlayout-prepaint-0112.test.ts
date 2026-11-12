@@ -73,7 +73,9 @@ describe("Settings display diagnostics (0.11.2 W2, moved 0.11.4)", () => {
   });
 
   it("captures the line for the diagnostics export instead", () => {
-    expect(settings).toContain("window.__xtDisplayDiagnostics");
+    // 0.11.4 integration: the capture lives in the shared settings
+    // script (settings-page.js), not in the App & Updates markup.
+    expect(settingsScript).toContain("window.__xtDisplayDiagnostics");
     const snapshot = readFileSync(
       join(repo, "src/scripts/lib/diagnostic-snapshot.ts"),
       "utf8",

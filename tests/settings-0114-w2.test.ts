@@ -2,12 +2,17 @@
  * @vitest-environment jsdom
  */
 // Settings rebuild 0.11.4 (W2 — the 14 fix items): regression tests for the
-// testable units + static guards on settings.astro copy/structure.
+// testable units + static guards on Settings copy/structure.
 // Backup round-trip behaviour lives in tests/backup.test.ts; the
 // diagnostics-export leg of the display-diagnostics move lives in
 // tests/diagnostic-snapshot.test.ts.
+// 0.11.4 integration: Settings is split (W1) — one short page per section
+// under src/pages/settings/*.astro, shared behaviour in
+// src/scripts/settings/settings-page.js. The `settings` source below is
+// the home + every section page + the shared script, so the static
+// guards keep checking the same controls in their new homes.
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -46,7 +51,13 @@ import {
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, "..")
 const read = (rel: string) => readFileSync(join(repo, rel), "utf8")
-const settings = read("src/pages/settings.astro")
+const settings = [
+  read("src/pages/settings.astro"),
+  ...readdirSync(join(repo, "src/pages/settings"))
+    .filter((f) => f.endsWith(".astro"))
+    .map((f) => read(`src/pages/settings/${f}`)),
+  read("src/scripts/settings/settings-page.js"),
+].join("\n")
 const backupJs = read("src/scripts/lib/backup.js")
 const followedCard = read("src/scripts/settings/followed-card.ts")
 const aiStatusTs = read("src/scripts/lib/ai/status.ts")
