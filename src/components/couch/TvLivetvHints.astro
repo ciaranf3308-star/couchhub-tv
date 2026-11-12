@@ -1,0 +1,341 @@
+---
+// TvLivetvHints — Live TV 2.0 contextual controller hints (0.11.7, W4).
+//
+// ONE compact hints component for Live TV. It renders the
+// button legend for the CURRENT navigation layer (landing /
+// browser / drawer / subcategory / search / sort / guide /
+// playback) and re-renders whenever the top layer changes.
+// Configs live in src/scripts/lib/livetv-hints.ts: existing
+// layers reuse the audited couch-button-hints configs, new
+// layers name only nav-contract-true buttons.
+//
+// Props (small API — everything else is automatic):
+//   context?: the initial layer id for the server render
+//     ("browser" by default). After hydration the component
+//     follows the live nav stack, not this prop.
+//   guideMode?: the initial Guide sub-mode for the server
+//     render. After hydration it follows
+//     html[data-livetv-guide-mode].
+//
+// Update sources, in priority order:
+//   1. `livetv:nav-change` {top} from livetvNav (the nav
+//      stack is the source of truth once adopted).
+//   2. html[data-livetv-nav-layer] (the nav mirror, observed).
+//   3. `livetv:mode` {mode} fallback (pre-integration: the
+//      mode shell is the only signal; maps landing / browser /
+//      playback / guide directly).
+//
+// MOUNT CONTRACT (integration): mount ONCE on the Live TV
+// page, at the layout level (next to TvButtonHints, or in its
+// place for the livetv view). The component is self-contained:
+// it brings its own styles and needs no per-surface wiring.
+// Do NOT mount it alongside a visible TvButtonHints on the
+// same page — the two bars would duplicate. Recommended: hide
+// TvButtonHints when the livetv view mounts this component
+// (integration owns that switch; this component never hides
+// another component itself). Mounting more than one instance
+// is harmless (each updates itself) but renders duplicate bars,
+// so mount exactly one.
+import "@/styles/livetv-nav-chrome.css";
+import {
+  hintsForLivetvLayer,
+  livetvHintsListHtml,
+  type LivetvHintContext,
+} from "@/scripts/lib/livetv-hints.ts";
+import type { GuideMode } from "@/scripts/lib/livetv-state.ts";
+
+interface Props {
+  /** Initial layer for the server render. Live updates follow the nav stack. */
+  context?: LivetvHintContext;
+  /** Initial Guide sub-mode for the server render. */
+  guideMode?: GuideMode | string;
+}
+const { context = "browser", guideMode } = Astro.props;
+const initial = hintsForLivetvLayer(context, { guideMode });
+---
+
+<nav
+  class="lv2-hints"
+  data-livetv-hints
+  data-context={context}
+  data-config={initial.id}
+  aria-label="Controller buttons"
+>
+  <ul
+    class="lv2-hints__list"
+    data-livetv-hints-list
+    data-config={initial.id}
+    set:html={livetvHintsListHtml(initial)}
+  >
+  </ul>
+</nav>
+
+<script>
+  import { hintsForLivetvLayer, livetvHintsListHtml } from "@/scripts/lib/livetv-hints.ts";
+  import { LIVETV_NAV_CHANGE_EVENT } from "@/scripts/lib/livetv-nav.ts";
+  import type { LivetvNavLayerId } from "@/scripts/lib/livetv-nav.ts";
+
+  const nav = document.querySelector<HTMLElement>("[data-livetv-hints]");
+  const list = nav?.querySelector<HTMLElement>("[data-livetv-hints-list]");
+  if (nav && list && !nav.dataset.wired) {
+    nav.dataset.wired = "1";
+
+    let currentLayer: LivetvNavLayerId | null =
+      (nav.dataset.context as LivetvNavLayerId | undefined) ?? null;
+
+    // Selectors whose visibility means "a playback overlay owns
+    // the buttons" (same set TvButtonHints uses): OSD + options
+    // + Quick Surf + channel browser + error, driven by
+    // data-hidden + the hidden attribute. The bar hides in
+    // playback while one is visible — those surfaces name their
+    // own keys. It NEVER hides for the search/sort overlays:
+    // the bar is the legend for those surfaces.
+    const OVERLAY_SELECTORS =
+      "[data-livetv-osd], [data-livetv-options], [data-livetv-quicksurf], [data-livetv-play-browser], [data-livetv-error]";
+
+    function overlayVisible(): boolean {
+      const overlays = document.querySelectorAll<HTMLElement>(OVERLAY_SELECTORS);
+      for (const el of overlays) {
+        if (el.dataset.hidden === "false" && !el.hidden) return true;
+      }
+      return false;
+    }
+
+    function dialogOpen(): boolean {
+      if (document.querySelector("dialog[open]")) return true;
+      try {
+        return !!document.querySelector("[popover]:popover-open");
+      } catch {
+        return false;
+      }
+    }
+
+    function guideModeNow(): string | null {
+      return document.documentElement.dataset.livetvGuideMode ?? null;
+    }
+
+    function render(layer: LivetvNavLayerId | string | null): void {
+      if (typeof layer === "string" && layer) {
+        currentLayer = layer as LivetvNavLayerId;
+      }
+      const config = hintsForLivetvLayer(currentLayer, {
+        guideMode: guideModeNow(),
+      });
+      nav.dataset.context = currentLayer ?? "";
+      nav.dataset.config = config.id;
+      // Hide while a dialog owns input, and in playback while
+      // the OSD / a playback overlay is up (it names its own
+      // keys). Never hidden for search / sort / drawer layers.
+      const hidden =
+        dialogOpen() || (currentLayer === "playback" && overlayVisible());
+      nav.toggleAttribute("hidden", hidden);
+      if (list.dataset.config !== config.id) {
+        list.innerHTML = livetvHintsListHtml(config);
+        list.dataset.config = config.id;
+      }
+    }
+
+    // 1. Nav-stack changes (source of truth once adopted).
+    window.addEventListener(LIVETV_NAV_CHANGE_EVENT, (event) => {
+      const detail = (event as CustomEvent).detail as
+        | { top?: LivetvNavLayerId | null }
+        | undefined;
+      if (detail?.top) render(detail.top);
+    });
+
+    // 2. Dataset mirror (covers stack changes made without the
+    // event, and Guide sub-mode switches for the guide rows).
+    const attrObserver = new MutationObserver(() => {
+      const mirrored = document.documentElement.dataset.livetvNavLayer;
+      render(mirrored ?? currentLayer);
+    });
+    attrObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-livetv-nav-layer", "data-livetv-guide-mode"],
+    });
+
+    // 3. Mode-shell fallback (pre-integration): when no nav
+    // layer has ever been mirrored, follow livetv:mode.
+    window.addEventListener("livetv:mode", (event) => {
+      if (document.documentElement.dataset.livetvNavLayer) return;
+      const detail = (event as CustomEvent).detail as
+        | { mode?: string }
+        | undefined;
+      const mode = detail?.mode;
+      if (
+        mode === "landing" ||
+        mode === "browser" ||
+        mode === "playback" ||
+        mode === "guide"
+      ) {
+        render(mode);
+      } else if (mode === "home") {
+        render("landing");
+      }
+    });
+
+    // Playback-overlay / dialog visibility (the hide rule
+    // above): re-render when overlay visibility attributes or
+    // the DOM change, as TvButtonHints does.
+    const domObserver = new MutationObserver(() => render(null));
+    domObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["data-hidden", "hidden", "open"],
+      childList: true,
+      subtree: true,
+    });
+
+    // Initial sync: a nav layer mirrored before this script ran
+    // wins over the server-rendered context prop.
+    const mirrored = document.documentElement.dataset.livetvNavLayer;
+    if (mirrored) render(mirrored);
+    else render(null);
+  }
+</script>
+
+<style is:global>
+  /* is:global is required, not a shortcut: the legend items are
+     injected via set:html / innerHTML (server + client
+     re-render), so they never carry Astro's scoped-style CID
+     attribute and a scoped block would leave them unstyled.
+     Selectors are rooted at .lv2-hints, so nothing leaks.
+     Self-contained: glyph + item styles live here (mirroring
+     TvButtonHints' treatment) so this bar renders correctly
+     even where TvButtonHints is not mounted. Fixed
+     bottom-anchored pill bar, pointer-events:none (display
+     only, never swallows a click). */
+  html[data-couch] .lv2-hints {
+    position: fixed;
+    left: 50%;
+    bottom: 0.75rem;
+    transform: translateX(-50%);
+    /* Above the overlay scrims (z-index 80): the bar is the
+       legend FOR the search/sort overlays, so it must stay
+       bright while one is open. It hides in playback while a
+       playback overlay is up (see the script's hide rule)
+       instead of floating over video controls. */
+    z-index: 90;
+    max-width: calc(100vw - 2rem);
+    pointer-events: none;
+  }
+  html[data-couch] .lv2-hints[hidden] {
+    display: none;
+  }
+  html[data-couch] .lv2-hints__list {
+    display: flex;
+    align-items: center;
+    gap: 1.125rem;
+    margin: 0;
+    padding: 0.45rem 1rem;
+    list-style: none;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    font-family: var(--rs-font-body);
+    font-size: 0.8125rem;
+    line-height: 1;
+    color: var(--rs-text-2);
+    background: color-mix(in srgb, var(--rs-bg) 74%, transparent);
+    border: 1px solid var(--rs-line-soft);
+    border-radius: 999px;
+    box-shadow: var(--rs-shadow);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  html[data-couch] .lv2-hints__list::-webkit-scrollbar {
+    display: none;
+  }
+  html[data-couch] .lv2-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  html[data-couch] .lv2-hint__label {
+    font-weight: 600;
+    color: var(--rs-text);
+    opacity: 0.92;
+  }
+  html[data-couch] .lv2-hint__when {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--rs-text-2);
+  }
+  html[data-couch] .lv2-hint-glyphs {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+  }
+  html[data-couch] .lv2-hint-plus {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--rs-text-2);
+  }
+  html[data-couch] .lv2-hint-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    height: 1.05rem;
+    min-width: 1.05rem;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #fff;
+  }
+  /* Xbox face buttons — authentic colours, small and flat. */
+  html[data-couch] .lv2-hint-glyph--a {
+    border-radius: 50%;
+    background: #107c10;
+  }
+  html[data-couch] .lv2-hint-glyph--b {
+    border-radius: 50%;
+    background: #e81123;
+  }
+  html[data-couch] .lv2-hint-glyph--x {
+    border-radius: 50%;
+    background: #0078d7;
+  }
+  html[data-couch] .lv2-hint-glyph--y {
+    border-radius: 50%;
+    background: #f2c200;
+    color: #201600;
+  }
+  /* Shoulders / Menu / arrows — burgundy surface pills. */
+  html[data-couch] .lv2-hint-glyph--shoulder {
+    padding: 0 0.32rem;
+    border-radius: 0.3rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.02em;
+    color: var(--rs-text);
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+  }
+  /* D-pad — CSS plus on a burgundy tile. */
+  html[data-couch] .lv2-hint-glyph--dpad {
+    position: relative;
+    border-radius: 0.25rem;
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-line);
+  }
+  html[data-couch] .lv2-hint-glyph--dpad::before,
+  html[data-couch] .lv2-hint-glyph--dpad::after {
+    content: "";
+    position: absolute;
+    background: var(--rs-text);
+    border-radius: 1px;
+  }
+  html[data-couch] .lv2-hint-glyph--dpad::before {
+    left: 50%;
+    top: 18%;
+    width: 2px;
+    height: 64%;
+    transform: translateX(-50%);
+  }
+  html[data-couch] .lv2-hint-glyph--dpad::after {
+    top: 50%;
+    left: 18%;
+    height: 2px;
+    width: 64%;
+    transform: translateY(-50%);
+  }
+</style>
