@@ -1,18 +1,24 @@
 ---
- // Couch Movies — cinematic browsing on the W1 shared UI system.
- // Restored as a real destination in 0.10.0 (reverses the 0.8.0 Browse
- // consolidation — user's explicit call). The catalogue loads
- // client-side (Xtream provider) via src/scripts/movies/couch-index.ts:
- // genre collections (Action, Thriller, Comedy, Horror, Sci-Fi, Drama,
- // Documentary Films, Recently Added — only non-empty ones render),
- // Continue Watching, Featured, Recommended, Favourites, Watch Later,
- // genre/year/rating/sort controls, search + on-screen keyboard, and a
- // windowed grid (computeVisibleWindow) for large catalogues.
- // No Live TV here (B11): live recommendations live on Home and in the
- // dedicated Live TV experience, never in catalogue browsing.
- // The genre filter is ONE labelled select rendered by the controller
- // into #couch-browse-genres — no per-genre pill buttons. The list
- // tabs are ONE joined segmented control.
+ // Couch Movies — 0.11.8 Movies Home + Browse Everything (brief §1.1, §2).
+ //
+ // Movies is ONE nav destination with TWO explicit modes, chosen by
+ // the URL (W2's mode contract — see couch-index.ts):
+ //   /movies              -> Movies Home: curated. Header, ONE featured
+ //                           film, Continue Watching, Worth Watching,
+ //                           Recently Added, Explore Genres, and the
+ //                           Browse Everything entry. The full catalogue
+ //                           grid NEVER mounts here (acceptance test 1).
+ //   /movies?view=browse  -> Browse Everything: the exhaustive browser
+ //                           (W2's engine at integration; on this branch
+ //                           the legacy browse controller mounts into the
+ //                           scaffold below via the W2 shim).
+ //
+ // Home sections paint client-side from the Xtream catalogue via
+ // src/scripts/movies/movies-home-mount.ts. No Live TV here (B11).
+ // No six dropdowns beside the title: the Home header carries the
+ // library count and two primary actions (Search Movies, Browse
+ // Everything). The filter selects below belong ONLY to the Browse
+ // scaffold.
 import CouchLayout from "@/layouts/CouchLayout.astro";
 import TvDialog from "@/components/couch/TvDialog.astro";
 import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
@@ -23,126 +29,219 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
 ---
 
 <CouchLayout pageTitle="Movies" activeNav="movies" view="movies">
-  <header class="rs-browse-head">
-    <h1 class="rs-page-title">Movies</h1>
-    <p class="rs-meta">
-      <span id="couch-browse-hero-count">—</span>
-      <span aria-hidden="true"> · </span>
-      <span id="couch-browse-status">Loading…</span>
-    </p>
-  </header>
-
-  <section class="rs-browse-toolbar" aria-label="Browse controls">
-    <div class="rs-browse-search">
-      <label class="rs-browse-label" for="couch-browse-search">Search movies</label>
-      <input
-        id="couch-browse-search"
-        type="search"
-        placeholder="Search movies…"
-        autocomplete="off"
-      />
-      <button
-        id="couch-search-open"
-        type="button"
-        class="rs-hero__action rs-hero__action--secondary"
-        data-couch-dialog-open="couch-search-dialog"
+  <div id="movies-home-root">
+    <header class="mh-header">
+      <div class="mh-header__titles">
+        <h1 class="rs-page-title">Movies</h1>
+        <p class="rs-meta">
+          <span id="movies-home-count">Loading…</span>
+        </p>
+      </div>
+      <div
+        class="mh-header__actions"
+        data-nylah-rail="movies-home-actions"
+        aria-label="Movie actions"
       >
-        ⌨ On-screen keyboard
-      </button>
+        <a
+          class="rs-hero__action rs-hero__action--secondary"
+          data-nylah-item
+          data-couch-key="movies-search"
+          href="/movies?view=browse&focus=search"
+        >
+          Search Movies
+        </a>
+        <a
+          class="rs-hero__action"
+          data-nylah-item
+          data-couch-key="movies-browse"
+          href="/movies?view=browse"
+        >
+          Browse Everything
+        </a>
+      </div>
+    </header>
+
+    <div id="movies-home-skeleton">
+      <TvSkeleton kind="hero" />
+      <TvSkeleton kind="poster" count={6} />
     </div>
 
-    <div class="rs-browse-selects">
-      <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
-      <select id="couch-browse-sort">
-        {
-          MOVIE_SORT_MODES.map((mode) => (
-            <option value={mode.value}>{mode.label}</option>
-          ))
-        }
-      </select>
-      <label class="rs-browse-label" for="couch-browse-year">Decade</label>
-      <select id="couch-browse-year">
-        <option value="">Any decade</option>
-        {
-          YEAR_ORDER.map((year) => (
-            <option value={year}>{year}</option>
-          ))
-        }
-      </select>
-      <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
-      <select id="couch-browse-rating">
-        {
-          RATING_OPTIONS.map((min) => (
-            <option value={min}>
-              {min === 0 ? "Any rating" : `${min}+`}
-            </option>
-          ))
-        }
-      </select>
-        {/*
-          GENRE FILTER: the controller renders ONE labelled Genre
-          select into this mount point — no per-genre pill buttons.
-          It lives in the filter row with Sort / Decade / Rating.
-        */}
-        <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
-        {/*
-          RUNTIME FILTER (B09): the controller renders ONE labelled
-          Length select into this mount point — only when the
-          catalogue carries runtime metadata (movies do; series
-          rows carry none, so the mount stays empty on /series).
-        */}
-        <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
-        {/*
-          RESET FILTERS (0.11.6, W4): the controller renders ONE
-          "Reset filters" button into this mount point — the last
-          control in the filter row. One press clears every filter
-          (genre, decade, rating, length, sort, search, list tab)
-          and the persisted filter state. No filter pills.
-        */}
-        <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
+    <div id="movies-home-nolist" hidden>
+      <TvEmpty
+        title="No playlist yet"
+        message="Add a playlist in Settings to browse your movies."
+        art="library"
+        actionLabel="Open Settings"
+        actionHref="/settings"
+      />
     </div>
-  </section>
 
-  <div
-    id="couch-browse-tabs"
-    class="rs-browse-tabs rs-browse-segmented"
-    role="group"
-    aria-label="Movie lists"
-  >
-  </div>
+    <div id="movies-home-empty" hidden>
+      <TvEmpty
+        title="No movies yet"
+        message="This playlist has no movies."
+        art="library"
+        actionLabel="Open Settings"
+        actionHref="/settings"
+      />
+    </div>
 
-  <div id="couch-browse-rails"></div>
+    <div id="movies-home-error" hidden role="alert">
+      <p class="rs-body-text" id="movies-home-error-message"></p>
+      <p class="mh-error__actions">
+        <button
+          id="movies-home-retry"
+          type="button"
+          class="rs-hero__action"
+          data-nylah-item
+        >
+          Try again
+        </button>
+        <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
+          Check Settings
+        </a>
+      </p>
+    </div>
 
-  <div id="couch-browse-skeleton">
-    <TvSkeleton kind="poster" count={12} />
-  </div>
+    <div id="movies-home-featured"></div>
+    <div id="movies-home-continue"></div>
+    <div id="movies-home-worth"></div>
+    <div id="movies-home-recent"></div>
+    <div id="movies-home-genres"></div>
 
-  <div id="couch-browse-empty" hidden>
-    <TvEmpty
-      title="No movies yet"
-      message="This playlist has no movies."
-      art="library"
-      actionLabel="Open Settings"
-      actionHref="/settings"
-    />
-  </div>
-
-  <div id="couch-browse-error" hidden role="alert">
-    <p class="rs-body-text" data-role="error-message"></p>
-    <p>
-      <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
-        Check Settings
+    <section
+      id="movies-home-browse-entry"
+      class="mh-browse-entry"
+      data-nylah-rail="movies-browse-entry"
+      aria-label="Browse everything"
+      hidden
+    >
+      <a
+        class="mh-browse-entry__link"
+        data-nylah-item
+        data-couch-key="movies-browse-entry"
+        href="/movies?view=browse"
+      >
+        <span class="mh-browse-entry__title">Browse Everything</span>
+        <span class="mh-browse-entry__count" id="movies-home-browse-count"></span>
+        <span class="mh-browse-entry__arrow" aria-hidden="true">→</span>
       </a>
-    </p>
+    </section>
   </div>
 
-  <div
-    id="couch-browse-grid"
-    class="rs-grid"
-    data-couch-grid
-    aria-label="All movies"
-    hidden
-  >
+  {/*
+    0.11.8 SHIM SCAFFOLD — Browse Everything mount point. W2's real
+    engine renders into #movies-browse-mount at integration and this
+    legacy scaffold is deleted. On this branch the W2 shim mounts
+    the existing browse controller here (bare ids — the controller's own DOM contract, unchanged)
+    so the entire catalogue stays reachable from Movies Home. The
+    controller owns visibility of the skeleton / empty / error / grid
+    nodes below; the router owns the mount div's own `hidden`.
+  */}
+  <div id="movies-browse-mount" hidden>
+    <header class="rs-browse-head">
+      <h1 class="rs-page-title">Movies</h1>
+      <p class="rs-meta">
+        <span id="couch-browse-hero-count">—</span>
+        <span aria-hidden="true"> · </span>
+        <span id="couch-browse-status">Loading…</span>
+      </p>
+    </header>
+
+    <section class="rs-browse-toolbar" aria-label="Browse controls">
+      <div class="rs-browse-search">
+        <label class="rs-browse-label" for="couch-browse-search">Search movies</label>
+        <input
+          id="couch-browse-search"
+          type="search"
+          placeholder="Search movies…"
+          autocomplete="off"
+        />
+        <button
+          id="couch-search-open"
+          type="button"
+          class="rs-hero__action rs-hero__action--secondary"
+          data-couch-dialog-open="couch-search-dialog"
+        >
+          ⌨ On-screen keyboard
+        </button>
+      </div>
+
+      <div class="rs-browse-selects">
+        <label class="rs-browse-label" for="couch-browse-sort">Sort</label>
+        <select id="couch-browse-sort">
+          {
+            MOVIE_SORT_MODES.map((mode) => (
+              <option value={mode.value}>{mode.label}</option>
+            ))
+          }
+        </select>
+        <label class="rs-browse-label" for="couch-browse-year">Decade</label>
+        <select id="couch-browse-year">
+          <option value="">Any decade</option>
+          {
+            YEAR_ORDER.map((year) => (
+              <option value={year}>{year}</option>
+            ))
+          }
+        </select>
+        <label class="rs-browse-label" for="couch-browse-rating">Rating</label>
+        <select id="couch-browse-rating">
+          {
+            RATING_OPTIONS.map((min) => (
+              <option value={min}>
+                {min === 0 ? "Any rating" : `${min}+`}
+              </option>
+            ))
+          }
+        </select>
+        <div id="couch-browse-genres" class="rs-browse-genre-filter"></div>
+        <div id="couch-browse-runtime" class="rs-browse-runtime-filter"></div>
+        <div id="couch-browse-reset" class="rs-browse-reset-filter"></div>
+      </div>
+    </section>
+
+    <div
+      id="couch-browse-tabs"
+      class="rs-browse-tabs rs-browse-segmented"
+      role="group"
+      aria-label="Movie lists"
+    >
+    </div>
+
+    <div id="couch-browse-rails"></div>
+
+    <div id="couch-browse-skeleton">
+      <TvSkeleton kind="poster" count={12} />
+    </div>
+
+    <div id="couch-browse-empty" hidden>
+      <TvEmpty
+        title="No movies yet"
+        message="This playlist has no movies."
+        art="library"
+        actionLabel="Open Settings"
+        actionHref="/settings"
+      />
+    </div>
+
+    <div id="couch-browse-error" hidden role="alert">
+      <p class="rs-body-text" data-role="error-message"></p>
+      <p>
+        <a class="rs-hero__action rs-hero__action--secondary" href="/settings">
+          Check Settings
+        </a>
+      </p>
+    </div>
+
+    <div
+      id="couch-browse-grid"
+      class="rs-grid"
+      data-couch-grid
+      aria-label="All movies"
+      hidden
+    >
+    </div>
   </div>
 
   <TvDialog id="couch-search-dialog" title="Search movies">
@@ -155,6 +254,16 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
   </script>
 
   <style>
+    /* Home root + Browse scaffold: flex columns matching the old
+       direct-children-of-main layout. :not([hidden]) so the router's
+       `hidden` toggles still hide the inactive mode. */
+    #movies-home-root:not([hidden]),
+    #movies-browse-mount:not([hidden]) {
+      display: flex;
+      flex-direction: column;
+      gap: 2.5rem;
+      min-width: 0;
+    }
     .rs-browse-head {
       display: flex;
       flex-direction: column;
@@ -202,9 +311,6 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       font-size: 1.125rem;
       color: var(--rs-text-2);
     }
-    /* Genre filter: ONE labelled select in the filter row —
-       the controller renders it into the .rs-browse-genre-filter
-       mount point. No per-genre pill buttons anywhere. */
     .rs-browse-genre-filter {
       display: flex;
       align-items: center;
@@ -219,10 +325,6 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       color: var(--rs-text);
       font-size: 1.125rem;
     }
-    /* Runtime filter (B09): same treatment as the genre filter —
-       the controller renders ONE labelled Length select into the
-       .rs-browse-runtime-filter mount point, only when the catalogue
-       carries runtime metadata. */
     .rs-browse-runtime-filter {
       display: flex;
       align-items: center;
@@ -237,21 +339,13 @@ import { YEAR_ORDER, RATING_OPTIONS } from "@/scripts/lib/browse-filters.ts";
       color: var(--rs-text);
       font-size: 1.125rem;
     }
-    /* Reset Filters (0.11.6, W4): same row treatment as the genre /
-       runtime mounts — the button itself reuses the shared
-       rs-hero__action--secondary styling, so no button CSS lives here. */
     .rs-browse-reset-filter {
       display: flex;
       align-items: center;
     }
-    /* List switcher: ONE joined segmented control — the segments
-       share a single border instead of floating as separate pills.
-       Same buttons, same aria-pressed behaviour as before. */
     .rs-browse-segmented {
       display: inline-flex;
       flex-wrap: wrap;
-      /* Hug the segments: the page main is a flex column, and a bare
-         inline-flex item would otherwise stretch the full width. */
       align-self: flex-start;
       max-width: 100%;
       border: 1px solid var(--rs-line);
