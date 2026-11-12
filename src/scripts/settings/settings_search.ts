@@ -20,10 +20,12 @@ import { searchSettingsIndex } from "@/scripts/settings/settings-index.ts"
 import {
   registerBackLayer,
   BACK_PRIORITY,
+} from "@/scripts/lib/back-handler.js"
+import {
   openCouchKeyboard,
   closeCouchKeyboard,
-  isTitleContextMenuOpen,
-} from "@/scripts/lib/controller-seams-0110.js"
+} from "@/scripts/lib/couch-keyboard.js"
+import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.js"
 import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
 
 const INPUT_ID = "settings-search-input"
@@ -332,23 +334,29 @@ function init(): void {
 
   registerBackLayer({
     id: "settings-search-editing",
-    priority: BACK_PRIORITY.EDITING,
+    priority: BACK_PRIORITY.KEYBOARD,
     isActive: () =>
       document.activeElement === input &&
       input.value === "" &&
       !findOpenModal() &&
       !isTitleContextMenuOpen(),
-    handle: exitSearch,
+    handle: () => {
+      exitSearch()
+      return true
+    },
   })
   registerBackLayer({
     id: "settings-search-active",
-    priority: BACK_PRIORITY.OVERLAY,
+    priority: BACK_PRIORITY.DRAWER,
     isActive: () =>
       document.activeElement !== input &&
       input.value !== "" &&
       !findOpenModal() &&
       !isTitleContextMenuOpen(),
-    handle: exitSearch,
+    handle: () => {
+      exitSearch()
+      return true
+    },
   })
 
   document.addEventListener("keydown", (event) => {

@@ -15,7 +15,7 @@
 // favourite toggle, watchlist + watched toggles (VOD/series only —
 // live channels have no watchlist/watched concept).
 
-import type { TitleContextAction } from "@/scripts/lib/controller-seams-0110.js"
+import type { TitleContextAction } from "@/scripts/lib/poster-menu.js"
 
 export type CardContextKind = "vod" | "series" | "live"
 

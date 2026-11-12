@@ -14,12 +14,16 @@
   import {
     registerBackLayer,
     BACK_PRIORITY,
+  } from "@/scripts/lib/back-handler.ts"
+  import {
     recordOriginFromReferrer,
     navigateBackWithOrigin,
-    setLogicalView,
+  } from "@/scripts/lib/route-origin.ts"
+  import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+  import {
     openTitleContextMenu,
     isTitleContextMenuOpen,
-  } from "@/scripts/lib/controller-seams-0110.ts"
+  } from "@/scripts/lib/poster-menu.ts"
   import {
     initListFocusMemory,
     restoreListFocus,
@@ -259,9 +263,12 @@
     const stopFocusMemory = initListFocusMemory(document, ROUTE)
     const unregisterBack = registerBackLayer({
       id: "recently-added-root",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
-      handle: () => navigateBackWithOrigin("/"),
+      handle: () => {
+        navigateBackWithOrigin("/")
+        return true
+      },
     })
     document.addEventListener("keydown", onCardKey)
     reload()

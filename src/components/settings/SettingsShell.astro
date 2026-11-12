@@ -149,15 +149,19 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     import {
       registerBackLayer,
       BACK_PRIORITY,
+    } from "@/scripts/lib/back-handler.ts"
+    import {
       recordOriginFromReferrer,
       navigateBackWithOrigin,
-      setLogicalView,
-      setControllerHints,
-      isTitleContextMenuOpen,
-    } from "@/scripts/lib/controller-seams-0110.ts"
+    } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+    import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts"
     import { initListFocusMemory } from "@/scripts/lib/couch-list-focus.ts"
     import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
-    import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
+    import {
+      RETURN_HOME_HINT,
+      setControllerHints,
+    } from "@/scripts/lib/couch-button-hints.ts"
 
     // W5 (0.11.10): Settings Back hierarchy (common contract §33).
     // Modals/editing own B first (native dialog cancel + the search
@@ -183,17 +187,21 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     if (settingsCurrent === "home") {
       registerBackLayer({
         id: "settings-home-root",
-        priority: BACK_PRIORITY.PAGE,
+        priority: BACK_PRIORITY.ROUTE,
         isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
-        handle: () => navigateBackWithOrigin("/"),
+        handle: () => {
+          navigateBackWithOrigin("/")
+          return true
+        },
       })
     } else {
       registerBackLayer({
         id: "settings-section-root",
-        priority: BACK_PRIORITY.SECTION,
+        priority: BACK_PRIORITY.PAGE_STATE,
         isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
         handle: () => {
           window.location.assign("/settings")
+          return true
         },
       })
     }

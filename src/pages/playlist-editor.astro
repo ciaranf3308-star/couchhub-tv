@@ -415,17 +415,17 @@ import {
     import {
       registerBackLayer,
       BACK_PRIORITY,
-      recordOriginFromReferrer,
-      setLogicalView,
-      isTitleContextMenuOpen,
-    } from "@/scripts/lib/controller-seams-0110.ts"
+    } from "@/scripts/lib/back-handler.ts"
+    import { recordOriginFromReferrer } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+    import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts"
     import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
 
     setLogicalView("playlist-editor")
     recordOriginFromReferrer()
     registerBackLayer({
       id: "playlist-editor-editing",
-      priority: BACK_PRIORITY.EDITING,
+      priority: BACK_PRIORITY.KEYBOARD,
       isActive: () => {
         const active = document.activeElement
         if (!(active instanceof HTMLElement)) return false
@@ -440,14 +440,16 @@ import {
       handle: () => {
         const active = document.activeElement
         if (active instanceof HTMLElement) active.blur()
+        return true
       },
     })
     registerBackLayer({
       id: "playlist-editor-root",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
       handle: () => {
         window.location.assign("/settings/playlists")
+        return true
       },
     })
   </script>

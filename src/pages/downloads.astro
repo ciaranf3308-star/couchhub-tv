@@ -195,11 +195,13 @@ import {
     import {
       registerBackLayer,
       BACK_PRIORITY,
+    } from "@/scripts/lib/back-handler.ts"
+    import {
       recordOriginFromReferrer,
       navigateBackWithOrigin,
-      setLogicalView,
-      isTitleContextMenuOpen,
-    } from "@/scripts/lib/controller-seams-0110.ts"
+    } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+    import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts"
 
     const isAndroid = /Android/i.test(navigator.userAgent || "")
     const isTauriEnv =
@@ -245,9 +247,12 @@ import {
     recordOriginFromReferrer()
     registerBackLayer({
       id: "downloads-root",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
-      handle: () => navigateBackWithOrigin("/"),
+      handle: () => {
+        navigateBackWithOrigin("/")
+        return true
+      },
     })
 
     // ----------------------------

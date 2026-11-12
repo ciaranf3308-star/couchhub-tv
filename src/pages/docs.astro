@@ -133,16 +133,17 @@ import Layout from "@/layouts/Layout.astro"
     import {
       registerBackLayer,
       BACK_PRIORITY,
-      setLogicalView,
-    } from "@/scripts/lib/controller-seams-0110.ts"
+    } from "@/scripts/lib/back-handler.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
 
     setLogicalView("docs")
     registerBackLayer({
       id: "docs-root",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => true,
       handle: () => {
         window.location.assign("/settings/help-diagnostics")
+        return true
       },
     })
   </script>

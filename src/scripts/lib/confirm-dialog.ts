@@ -14,7 +14,7 @@ import { findReplacementFocus } from "@/scripts/lib/couch-focus.js"
 import {
   registerBackLayer,
   BACK_PRIORITY,
-} from "@/scripts/lib/controller-seams-0110.js"
+} from "@/scripts/lib/back-handler.js"
 
 const DIALOG_ID = "xt-confirm-dialog"
 
@@ -190,16 +190,18 @@ export function confirmDialog(
     if (typeof node.showModal === "function") node.showModal()
     else node.setAttribute("open", "")
 
-    // Back layer for the W1 coordinator: while open, this dialog
-    // owns B (close = cancel). On this branch the shim dispatcher
-    // skips open dialogs and the native <dialog> cancel closes
-    // them, so this layer is dormant until integration.
+    // Back layer for the coordinator: while open, this dialog
+    // owns B (close = cancel). Highest priority — a confirm
+    // dialog outranks every other layer, including modals.
     backUnregister?.()
     backUnregister = registerBackLayer({
       id: "confirm-dialog",
-      priority: BACK_PRIORITY.MODAL,
+      priority: BACK_PRIORITY.CONFIRM_DIALOG,
       isActive: () => node.open,
-      handle: () => node.close?.(),
+      handle: () => {
+        node.close?.()
+        return true
+      },
     })
 
     // Focus Cancel by default: the safe action owns the first A

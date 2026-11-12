@@ -693,16 +693,22 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	import {
 		registerBackLayer,
 		BACK_PRIORITY,
+	} from "@/scripts/lib/back-handler.ts";
+	import {
 		recordOriginFromReferrer,
 		navigateBackWithOrigin,
-		setLogicalView,
-		setControllerHints,
+	} from "@/scripts/lib/route-origin.ts";
+	import { setLogicalView } from "@/scripts/lib/couch-focus.ts";
+	import {
 		openCouchKeyboard,
 		closeCouchKeyboard,
-		isTitleContextMenuOpen,
-	} from "@/scripts/lib/controller-seams-0110.ts";
+	} from "@/scripts/lib/couch-keyboard.ts";
+	import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts";
 	import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts";
-	import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts";
+	import {
+		RETURN_HOME_HINT,
+		setControllerHints,
+	} from "@/scripts/lib/couch-button-hints.ts";
 
 	const EPG_URL_RX = /^https?:\/\/[^\s]+$/i;
 
@@ -2026,7 +2032,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	});
 	registerBackLayer({
 		id: "login-editing",
-		priority: BACK_PRIORITY.EDITING,
+		priority: BACK_PRIORITY.KEYBOARD,
 		isActive: () =>
 			!!loginFieldTarget(document.activeElement) &&
 			!findOpenModal() &&
@@ -2035,16 +2041,17 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 			closeCouchKeyboard(false);
 			const field = document.activeElement;
 			if (field instanceof HTMLElement) field.blur();
+			return true;
 		},
 	});
 	registerBackLayer({
 		id: "login-root",
-		priority: BACK_PRIORITY.PAGE,
+		priority: BACK_PRIORITY.ROUTE,
 		isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
 		handle: () => {
 			if (!loginIsDirty()) {
 				navigateBackWithOrigin("/settings/playlists");
-				return;
+				return true;
 			}
 			void confirmDialog({
 				title: editing ? t("login.title.edit") : t("login.title.add"),
@@ -2055,6 +2062,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 			}).then((confirmed) => {
 				if (confirmed) navigateBackWithOrigin("/settings/playlists");
 			});
+			return true;
 		},
 	});
 </script>

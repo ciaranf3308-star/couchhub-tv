@@ -42,19 +42,24 @@ import ControllerStatus from "@/components/ControllerStatus.svelte";
     import {
       registerBackLayer,
       BACK_PRIORITY,
+    } from "@/scripts/lib/back-handler.ts"
+    import {
       recordOriginFromReferrer,
       navigateBackWithOrigin,
-      setLogicalView,
-    } from "@/scripts/lib/controller-seams-0110.ts"
+    } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
     import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
 
     setLogicalView("controller-status")
     recordOriginFromReferrer()
     registerBackLayer({
       id: "controller-status-root",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => !findOpenModal(),
-      handle: () => navigateBackWithOrigin("/"),
+      handle: () => {
+        navigateBackWithOrigin("/")
+        return true
+      },
     })
   </script>
 </TvLayout>

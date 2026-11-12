@@ -27,14 +27,17 @@ import { confirmDialog } from "@/scripts/lib/confirm-dialog.js"
 import {
   registerBackLayer,
   BACK_PRIORITY,
+} from "@/scripts/lib/back-handler.js"
+import {
   recordOriginFromReferrer,
   navigateBackWithOrigin,
-  setLogicalView,
-  setControllerHints,
+} from "@/scripts/lib/route-origin.js"
+import { setLogicalView } from "@/scripts/lib/couch-focus.js"
+import {
   openTitleContextMenu,
   isTitleContextMenuOpen,
   type TitleContextAction,
-} from "@/scripts/lib/controller-seams-0110.js"
+} from "@/scripts/lib/poster-menu.js"
 import {
   initListFocusMemory,
   restoreListFocus,
@@ -42,7 +45,10 @@ import {
   restoreFocusKeyWithin,
 } from "@/scripts/lib/couch-list-focus.js"
 import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
-import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.js"
+import {
+  RETURN_HOME_HINT,
+  setControllerHints,
+} from "@/scripts/lib/couch-button-hints.js"
 import {
   armTvImageFallbacks,
   fallbackMarkFor,
@@ -515,9 +521,12 @@ recordOriginFromReferrer()
 initListFocusMemory(document, "/followed")
 registerBackLayer({
   id: "followed-root",
-  priority: BACK_PRIORITY.PAGE,
+  priority: BACK_PRIORITY.ROUTE,
   isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
-  handle: () => navigateBackWithOrigin("/"),
+  handle: () => {
+    navigateBackWithOrigin("/")
+    return true
+  },
 })
 
 // W1 image fallback for the runtime-built posters (capture-phase error

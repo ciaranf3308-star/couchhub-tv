@@ -53,7 +53,7 @@ const { id, title } = Astro.props;
   import {
     registerBackLayer,
     BACK_PRIORITY,
-  } from "@/scripts/lib/controller-seams-0110.ts";
+  } from "@/scripts/lib/back-handler.ts";
 
   document.querySelectorAll("dialog[data-nylah-dialog]").forEach((dlg) => {
     if (!(dlg instanceof HTMLDialogElement) || !dlg.id) return;
@@ -61,11 +61,10 @@ const { id, title } = Astro.props;
     dlg.dataset.dialogWired = "1";
     const dialogId = dlg.id;
     attachDialogSpatialNav(dlg);
-    // Back layer for the W1 coordinator: while this dialog is open
-    // it owns B (close + invoker restore via closeCouchDialog). On
-    // this branch the shim dispatcher skips open dialogs and the
-    // native <dialog> cancel closes them, so this layer is dormant
-    // until integration — it never double-closes.
+    // Back layer for the coordinator: while this dialog is open
+    // it owns B (close + invoker restore via closeCouchDialog).
+    // The coordinator runs this layer before its own
+    // close-topmost-chrome fallback, so it never double-closes.
     registerBackLayer({
       id: `tv-dialog:${dialogId}`,
       priority: BACK_PRIORITY.MODAL,

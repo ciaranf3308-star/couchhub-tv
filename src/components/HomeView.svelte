@@ -38,13 +38,15 @@
     mergeHomePayload,
     detailHrefWithoutAutoplay,
   } from "@/scripts/lib/home-rails.ts"
-  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
   import {
+    restoreCouchFocus,
     setLogicalView,
-    setControllerHints,
+  } from "@/scripts/lib/couch-focus.ts"
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts"
+  import {
     openTitleContextMenu,
     isTitleContextMenuOpen,
-  } from "@/scripts/lib/controller-seams-0110.ts"
+  } from "@/scripts/lib/poster-menu.ts"
   import {
     buildCardContextActions,
     cardContextLabels,
