@@ -4442,3 +4442,233 @@ html[data-couch] .rs-channel-row__art img {
   height: 100%;
   object-fit: cover;
 }
+
+/* === 0.11.8 W4: Series Home === */
+/* Series Home (W4-owned) — header, shelves, genre grid, browse
+   entry, view-all tiles and home states. Tokens only: no colour
+   literals (the visual-identity test pins the wine hue family).
+   Card/rail/focus primitives come from the shared rules above; this
+   section only composes them for the episodic home layout. */
+
+/* Header: title + count on the left, primary actions on the right. */
+html[data-couch] .rs-series-home-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+}
+html[data-couch] .rs-series-home-head__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+html[data-couch] .rs-series-home-head__titles .rs-meta {
+  margin: 0;
+}
+html[data-couch] .rs-series-home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+html[data-couch] .rs-series-home-actions[hidden] {
+  display: none;
+}
+
+/* Shelf stack: vertical rhythm between shelves; each shelf is a
+   shared .rs-rail, so card sizing and focus behaviour match the
+   rest of the app. */
+html[data-couch] #series-home-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+  min-width: 0;
+}
+html[data-couch] .rs-series-home-shelf {
+  min-width: 0;
+}
+html[data-couch] .rs-series-home-subtitle {
+  margin: 0;
+}
+
+/* Genre grid: the rail row becomes a grid for the genre section —
+   tiles wrap into rows at any viewport width. Linear D-pad L/R
+   still walks every tile in reading order (one rail, one row). */
+html[data-couch] .rs-series-home-genre-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: 1.25rem;
+  overflow: visible;
+  padding: 0.75rem 0.25rem 1rem;
+}
+html[data-couch] .rs-series-home-genre {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--rs-radius);
+  overflow: hidden;
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-genre__media {
+  position: absolute;
+  inset: 0;
+}
+html[data-couch] .rs-series-home-genre__media .rs-image {
+  width: 100%;
+  height: 100%;
+}
+html[data-couch] .rs-series-home-genre__media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+html[data-couch] .rs-series-home-genre__body {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 2.5rem 1.25rem 1rem;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--rs-ink) 88%, transparent),
+    transparent
+  );
+}
+html[data-couch] .rs-series-home-genre--no-art {
+  justify-content: flex-end;
+}
+html[data-couch] .rs-series-home-genre--no-art .rs-series-home-genre__body {
+  background: none;
+  padding: 1.25rem;
+}
+html[data-couch] .rs-series-home-genre__name {
+  font-family: var(--rs-font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+html[data-couch] .rs-series-home-genre__count {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-series-home-genre:focus-visible {
+  outline: none;
+  transform: scale(1.03);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+  z-index: 2;
+}
+
+/* View-all tile: same footprint as a poster card, quiet surface. */
+html[data-couch] .rs-series-home-viewall {
+  flex: 0 0 clamp(9rem, 11.5vw, 13rem);
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  font-size: 1.25rem;
+  font-weight: 600;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-viewall__arrow {
+  font-size: 1.75rem;
+  color: var(--rs-focus);
+}
+html[data-couch] .rs-series-home-viewall:focus-visible {
+  outline: none;
+  transform: scale(1.05);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+  z-index: 2;
+}
+
+/* Browse Everything entry: one wide band closing the home stack. */
+html[data-couch] .rs-series-home-browse-section {
+  gap: 0;
+}
+html[data-couch] .rs-series-home-browse-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1.75rem 2rem;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-line);
+  color: var(--rs-text);
+  text-decoration: none;
+  transition:
+    transform var(--rs-motion),
+    box-shadow var(--rs-motion);
+}
+html[data-couch] .rs-series-home-browse-entry__title {
+  font-family: var(--rs-font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+html[data-couch] .rs-series-home-browse-entry__meta {
+  font-size: var(--rs-meta-size);
+  color: var(--rs-text-2);
+}
+html[data-couch] .rs-series-home-browse-entry:focus-visible {
+  outline: none;
+  transform: scale(1.01);
+  box-shadow:
+    0 0 0 3px var(--rs-focus),
+    0 0 2rem 0.25rem var(--rs-focus-glow),
+    var(--rs-shadow-lift);
+}
+
+/* Home states: loading skeleton rows (no fake titles) and the
+   centred status blocks for no-playlist / empty / error. */
+html[data-couch] .rs-series-home-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+html[data-couch] .rs-series-home-skeleton-row {
+  display: flex;
+  gap: 1.25rem;
+}
+html[data-couch] .rs-series-home-skeleton-card {
+  flex: 0 0 clamp(9rem, 11.5vw, 13rem);
+  aspect-ratio: 2 / 3;
+  border-radius: var(--rs-radius);
+  background: var(--rs-surface-2);
+}
+html[data-couch] .rs-series-home-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 46rem;
+  padding: 2rem 0;
+}
+html[data-couch] .rs-series-home-state .rs-empty__title,
+html[data-couch] .rs-series-home-state .rs-empty__message {
+  margin: 0;
+}
+/* === end 0.11.8 W4: Series Home === */
