@@ -71,6 +71,8 @@
       setWriteNfoEnabled,
       getPerfMode,
       setPerfMode,
+      getCursorMode,
+      setCursorMode,
       getUiSoundsEnabled,
       setUiSoundsEnabled,
       getCaptionsAutoEnabled,
@@ -1140,6 +1142,28 @@
       syncPerfModeButtons()
     })
     syncPerfModeButtons()
+
+    // ---------------------------------------------------------------------
+    // Controller Cursor Mode (0.11.10, W6): persisted to
+    // xt_cursor_mode, default off (absent key). cursor-mode.ts listens
+    // for `xt:cursor-mode-changed` and exits immediately on disable.
+    // ---------------------------------------------------------------------
+    const cursorModeGroup = document.getElementById("settings-cursor-mode")
+    function syncCursorModeButtons() {
+      const current = getCursorMode()
+      for (const btn of cursorModeGroup?.querySelectorAll(".cursor-mode-btn") || []) {
+        const isOn = btn.dataset.cursor === "on"
+        btn.setAttribute("aria-pressed", String(isOn === current))
+      }
+    }
+    cursorModeGroup?.addEventListener("click", (event) => {
+      const target = /** @type {HTMLElement} */ (event.target)
+      const btn = target.closest(".cursor-mode-btn")
+      if (!btn) return
+      setCursorMode(btn.dataset.cursor === "on")
+      syncCursorModeButtons()
+    })
+    syncCursorModeButtons()
 
     // ---------------------------------------------------------------------
     // Interface sounds

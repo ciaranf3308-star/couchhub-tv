@@ -17,6 +17,9 @@
 //   xinput-direction { slot, direction, phase }  direction: up | down |
 //                                                left | right;
 //                                                phase: start | end
+//   xinput-stick     { slot, x, y }              right-stick axes, raw
+//                                                i16 (0.11.10 W6,
+//                                                Cursor Mode only)
 //   xinput-status    { available, slots[] }      connect / disconnect
 //
 // Slot discipline: only the first slot that produces input drives
@@ -34,6 +37,7 @@
 // Gamepad API owns input there.
 
 import { listen } from "@tauri-apps/api/event";
+import { noteNativeStick, setCursorModeActive } from "./cursor-mode";
 import {
   clearViewMenuHoldTimer,
   dispatchNativeButton,
@@ -58,6 +62,12 @@ interface XInputDirectionPayload {
   slot: number;
   direction: string;
   phase: string;
+}
+
+interface XInputStickPayload {
+  slot: number;
+  x: number;
+  y: number;
 }
 
 interface XInputSlotPayload {
@@ -154,6 +164,19 @@ export function mountNativeGamepad(): void {
     }
   });
 
+  // 0.11.10 (W6): right-stick axes for Cursor Mode. Same slot
+  // discipline as buttons/directions — only the driving slot's stick
+  // moves the pointer — and the same native-liveness note, so the
+  // browser fallback stands down while the stick is moving. Deadzone
+  // + scaling live in cursor-mode.ts; when Cursor Mode is off this
+  // only stores a vector and moves nothing.
+  void listen<XInputStickPayload>("xinput-stick", (event) => {
+    const { slot, x, y } = event.payload;
+    if (!slotOwnsEvent(slot)) return;
+    noteNativeInputActive();
+    noteNativeStick(x, y);
+  });
+
   void listen<XInputStatusPayload>("xinput-status", (event) => {
     // A status event proves the Rust poll thread is alive. A
     // disconnect of the driving slot releases it, so a reconnected
@@ -166,6 +189,9 @@ export function mountNativeGamepad(): void {
         clearReturnHomeTimer();
         setNativeDirectionActive(false);
         dispatchNativeDirection(null);
+        // 0.11.10 (W6): a disconnected pad must never leave the
+        // cursor stranded on screen — Cursor Mode stops with it.
+        setCursorModeActive(false);
       }
     }
   });

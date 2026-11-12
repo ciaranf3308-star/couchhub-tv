@@ -35,7 +35,12 @@
 //   dead-zone constant) and one direction at a time (D-pad beats the
 //   left stick; stick dead zone 7849, the XInput constant) are emitted
 //   as `xinput-button` / `xinput-direction` events. Connect /
-//   disconnect emits `xinput-status`.
+//   disconnect emits `xinput-status`. Right-stick axes are forwarded
+//   separately as rate-bounded `xinput-stick` events for Cursor Mode
+//   (0.11.10, W6): at most one per 16 ms while deflected beyond the
+//   same 7849 dead zone, plus one zero event on return to centre — a
+//   resting stick emits nothing. Deadzone rescaling + pointer speed
+//   live in the frontend (cursor-mode.ts).
 // - `xinput_status` is the synchronous snapshot the diagnostics UI
 //   (`ControllerStatus.svelte`, /controller-status) polls. It is the
 //   only Tauri command: the poll thread needs no command to run.
@@ -87,6 +92,15 @@ struct XInputDirectionEvent {
     phase: &'static str, // "start" | "end"
 }
 
+/// Right-stick axes for Cursor Mode (0.11.10, W6). Raw i16 axes —
+/// XInput Y is up-positive; the frontend inverts to screen space.
+#[derive(Debug, Clone, Serialize)]
+struct XInputStickEvent {
+    slot: u32,
+    x: i16,
+    y: i16,
+}
+
 /// Synchronous snapshot for the diagnostics UI. Never blocks on the
 /// poll thread: it polls XInput directly, one GetState per slot.
 #[tauri::command]
@@ -107,7 +121,9 @@ pub fn start_xinput_poll(app: &tauri::AppHandle) {
 
 #[cfg(target_os = "windows")]
 mod imp {
-    use super::{XInputButtonEvent, XInputDirectionEvent, XInputSlotStatus, XInputStatus};
+    use super::{
+        XInputButtonEvent, XInputDirectionEvent, XInputSlotStatus, XInputStatus, XInputStickEvent,
+    };
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::OnceLock;
@@ -131,6 +147,7 @@ mod imp {
 
     const TRIGGER_THRESHOLD: u8 = 30;
     const STICK_DEADZONE: i16 = 7849;
+    const STICK_EVENT_INTERVAL_MS: u64 = 16;
     const ERROR_DEVICE_NOT_CONNECTED: u32 = 1167;
     const MAX_SLOTS: u32 = 4;
     const POLL_INTERVAL_MS: u64 = 8;
@@ -378,6 +395,12 @@ mod imp {
         lt: bool,
         rt: bool,
         direction: Option<&'static str>,
+        /// True once a deflected right-stick event has been emitted
+        /// and the stick has not yet returned to centre — the zero
+        /// event on centre-return is emitted exactly once.
+        stick_active: bool,
+        /// Last `xinput-stick` emission, for the 16 ms rate bound.
+        last_stick_emit: Option<std::time::Instant>,
     }
 
     static POLL_STARTED: AtomicBool = AtomicBool::new(false);
@@ -404,6 +427,15 @@ mod imp {
                         match poll_slot(api, slot) {
                             None => {
                                 if slots[index].connected {
+                                    // A stick held deflected at disconnect
+                                    // still gets its zero event, so the
+                                    // frontend pointer stops dead.
+                                    if slots[index].stick_active {
+                                        let _ = app.emit(
+                                            "xinput-stick",
+                                            XInputStickEvent { slot, x: 0, y: 0 },
+                                        );
+                                    }
                                     slots[index] = SlotPollState::default();
                                     status_changed = true;
                                     log::info!("[xinput] slot {slot} disconnected");
@@ -508,6 +540,45 @@ mod imp {
                                         );
                                     }
                                     slots[index].direction = dir;
+                                }
+                                // Right-stick axes for Cursor Mode
+                                // (0.11.10, W6): raw axes, rate-bounded
+                                // to one event per 16 ms while deflected
+                                // beyond the dead zone, plus one zero
+                                // event on return to centre. The frontend
+                                // filters to the driving slot, exactly as
+                                // it does for buttons/directions. Axes are
+                                // widened to i32 before abs() so i16::MIN
+                                // can never panic in a debug build.
+                                let rx = pad.s_thumb_rx;
+                                let ry = pad.s_thumb_ry;
+                                let deadzone = STICK_DEADZONE as i32;
+                                let deflected = (rx as i32).abs() > deadzone
+                                    || (ry as i32).abs() > deadzone;
+                                if deflected {
+                                    let now = std::time::Instant::now();
+                                    let due = match slots[index].last_stick_emit {
+                                        None => true,
+                                        Some(last) => {
+                                            now.saturating_duration_since(last).as_millis()
+                                                >= STICK_EVENT_INTERVAL_MS as u128
+                                        }
+                                    };
+                                    if due {
+                                        slots[index].last_stick_emit = Some(now);
+                                        slots[index].stick_active = true;
+                                        let _ = app.emit(
+                                            "xinput-stick",
+                                            XInputStickEvent { slot, x: rx, y: ry },
+                                        );
+                                    }
+                                } else if slots[index].stick_active {
+                                    slots[index].stick_active = false;
+                                    slots[index].last_stick_emit = None;
+                                    let _ = app.emit(
+                                        "xinput-stick",
+                                        XInputStickEvent { slot, x: 0, y: 0 },
+                                    );
                                 }
                             }
                         }
