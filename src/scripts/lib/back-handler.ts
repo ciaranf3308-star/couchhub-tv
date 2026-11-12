@@ -319,3 +319,74 @@ export function mountBackCoordinator(): void {
   win[COORDINATOR_FLAG] = true
   window.addEventListener("keydown", handleCoordinatorEscape, true)
 }
+
+// ── Detail Back stack (shared by both detail pages) ─────────────────
+// Relocated from the W2 shim (controller-0110-seams.ts) at 0.11.10
+// integration: the Movies/Series detail pages register the same
+// stack — playback sub-layer, playback, detail subview, route —
+// exactly one step per press, highest priority first.
+
+export interface DetailBackLayersOptions {
+  /** True while the player is mounted (B exits playback first). */
+  isPlayerOpen: () => boolean
+  /** Close the topmost playback sub-layer (track list). True when one closed. */
+  closePlaybackSubLayer?: () => boolean
+  /** Exit playback to the detail (focus Play/Resume / episode card). */
+  onPlayerBack: () => void
+  /** True when focus sits in a detail subview (episodes/seasons). */
+  isInDetailSubView?: () => boolean
+  /** One subview Back step (e.g. episodes → primary actions). */
+  onDetailSubViewBack?: () => void
+  /** Route Back (provenance / Back link). */
+  onDetailBack: () => void
+}
+
+/**
+ * Register the detail Back stack. Returns the unregister function
+ * (unregisters every layer it registered).
+ */
+export function installDetailBackLayers(
+  opts: DetailBackLayersOptions,
+): () => void {
+  const unregisters: Array<() => void> = []
+  unregisters.push(
+    registerBackLayer({
+      id: "detail-playback",
+      priority: BACK_PRIORITY.PLAYBACK,
+      isActive: () => opts.isPlayerOpen(),
+      handle: () => {
+        if (opts.closePlaybackSubLayer?.()) return true
+        opts.onPlayerBack()
+        return true
+      },
+    }),
+  )
+  if (opts.onDetailSubViewBack) {
+    unregisters.push(
+      registerBackLayer({
+        id: "detail-subview",
+        priority: BACK_PRIORITY.DETAIL_SUBVIEW,
+        isActive: () =>
+          !opts.isPlayerOpen() && (opts.isInDetailSubView?.() ?? false),
+        handle: () => {
+          opts.onDetailSubViewBack?.()
+          return true
+        },
+      }),
+    )
+  }
+  unregisters.push(
+    registerBackLayer({
+      id: "detail-route",
+      priority: BACK_PRIORITY.ROUTE,
+      isActive: () => !opts.isPlayerOpen(),
+      handle: () => {
+        opts.onDetailBack()
+        return true
+      },
+    }),
+  )
+  return () => {
+    for (const fn of unregisters) fn()
+  }
+}

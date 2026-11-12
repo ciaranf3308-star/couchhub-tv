@@ -12,8 +12,8 @@
 // come from html[data-livetv-mode]; a focused text field switches to
 // the minimal editing legend (only B + View+Menu work while typing,
 // per gamepad.ts) and focus on an on-screen keyboard key switches to
-// the OSK legend (A types, B deletes, X clears — the clear poll is
-// scoped to [data-couch-keyboard], see couch-button-hints.ts *9).
+// the OSK legend (A types, B closes the keyboard, the ⌫ key deletes,
+// the Clear key clears — B never deletes, see couch-keyboard.ts).
 // Controller 2.0 (§42): a surface that owns input claims the legend
 // via setControllerHints() and its config wins over the view-derived
 // one until it clears (null) — hints always name the actual owner.

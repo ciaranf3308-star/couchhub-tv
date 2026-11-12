@@ -60,8 +60,11 @@
 // the Backspace KEY (or the physical Backspace key) deletes. See
 // oskKeyAction() — the single rule OnScreenKeyboard implements.
 
-import { BACK_PRIORITY, registerBackLayer, setControllerHints } from "./controller-0110-seams";
-import type { HintConfig } from "./couch-button-hints";
+import { BACK_PRIORITY, registerBackLayer } from "./back-handler";
+import {
+  setControllerHints,
+  type HintConfig,
+} from "./couch-button-hints";
 
 /** How long a scope exit counts as "just happened" for the trailing-Escape swallow. */
 export const TRAILING_ESCAPE_WINDOW_MS = 500;
@@ -236,17 +239,11 @@ export const KEYBOARD_OPEN_HINTS: HintConfig = {
   ],
 };
 
-/** Hints once editing ends (provisional until W1's hints unification). */
-export const KEYBOARD_CLOSED_HINTS: HintConfig = {
-  id: "browse-0110",
-  items: [
-    { glyph: "dpad", label: "Move" },
-    { glyph: "a", label: "Select" },
-    { glyph: "b", label: "Back" },
-    { glyph: "menu", label: "Settings" },
-    { glyph: "view-menu", label: "Return home" },
-  ],
-};
+// Closing releases the override (setControllerHints(null)): the
+// shared legend falls back to the view's audited config (or the
+// next owner's claim). The provisional fixed "closed" config is
+// gone with W1's hints unification — a browse legend must never
+// linger on Discover, Search or Settings.
 
 export interface OpenCouchKeyboardOptions {
   /**
@@ -392,7 +389,7 @@ export function closeCouchKeyboard(commit: boolean): void {
   session.unregisterBack();
   const { input, onCommit } = session;
   const value = input.value;
-  setControllerHints(KEYBOARD_CLOSED_HINTS);
+  setControllerHints(null);
   input.dispatchEvent(
     new CustomEvent(COUCH_KEYBOARD_CLOSED_EVENT, {
       bubbles: true,

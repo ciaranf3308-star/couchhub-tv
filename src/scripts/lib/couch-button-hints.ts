@@ -133,9 +133,9 @@ export const EDITING_HINTS: HintConfig = {
 
 /**
  * Legend while focus is on an on-screen keyboard key ([data-osk]).
- * A types the focused key, B backspaces (OnScreenKeyboard's own
- * keydown handler), X clears the query (the clear poll fires while
- * focus is inside [data-couch-keyboard] — W2 fix). D-pad moves
+ * A types the focused key, B closes the keyboard (B never deletes —
+ * the ⌫ key deletes, see oskKeyAction in couch-keyboard.ts), and
+ * there is no X shortcut (the Clear key clears). D-pad moves
  * between keys. Y goes to Search except on the Search screen
  * itself, where it is a no-op.
  */
@@ -143,8 +143,7 @@ export function hintsForOsk(view: string | null | undefined): HintConfig {
   const items: HintItem[] = [
     { glyph: "dpad", label: "Move" },
     { glyph: "a", label: "Type" },
-    { glyph: "b", label: "Delete" },
-    { glyph: "x", label: "Clear" },
+    { glyph: "b", label: "Close keyboard" },
   ];
   if ((view ?? "").trim() !== "search") {
     items.push({ glyph: "y", label: "Search" });
