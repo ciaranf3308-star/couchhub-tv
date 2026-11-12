@@ -30,9 +30,11 @@
 //
 // Error state: on `livetv:playback-error` the shell shows a
 // polished overlay (TvEmpty) with Retry / Previous channel /
-// Live TV Home. A failed tune leaves the previous working stream
-// playing where possible — the overlay sits over the still-playing
-// video, it never blanks the player.
+// Live TV Home. The previous stream was released before the tune,
+// so a failed tune leaves a blank player behind the overlay — the
+// overlay never claims a previous channel is still playing. (A
+// connection-limit refusal is retried automatically by the engine
+// first; the overlay only shows when that retry also fails.)
 import TvOsd from "./TvOsd.astro";
 import TvQuickSurf from "./TvQuickSurf.astro";
 import TvEmpty from "./TvEmpty.astro";
@@ -126,7 +128,7 @@ import TvLogo from "./TvLogo.astro";
     <div class="rs-livetv-play-error__panel">
       <TvEmpty
         title="This channel isn't playing right now"
-        message="Your previous channel keeps playing underneath. Try this channel again, or go back to it."
+        message="The channel didn't start. Check your connection and try again, or go back to Live TV Home."
       />
       <p class="rs-livetv-play-error__reason" data-error-reason hidden></p>
       <div class="rs-livetv-play-error__actions">
@@ -502,7 +504,7 @@ import TvLogo from "./TvLogo.astro";
       codec: "This channel uses a video format this device can't decode in the app.",
       audio: "The audio on this channel couldn't be decoded in the app.",
       parse: "This channel's stream couldn't be read.",
-      "connection-limit": "The provider refused another connection.",
+      "connection-limit": "The TV provider isn't accepting a new channel right now. Wait a moment and try again.",
     };
 
     // The engine's own external-player launch button, created by
@@ -586,10 +588,12 @@ import TvLogo from "./TvLogo.astro";
         // shell's tuned state is cleared with the stream, so a later
         // error overlay can never offer retry to a dead channel and
         // Previous never points at a released session.
-        const wasPlayback =
-          document.documentElement.dataset.livetvMode === "playback";
+        // 0.11.4 W5 — the release is gated on the TUNED channel,
+        // not on the document mode still reading "playback": a
+        // detour through the Guide had already rewritten the mode
+        // to "guide", so playback → Guide → Landing never released
+        // and the channel kept playing hidden, holding the slot.
         if (
-          wasPlayback &&
           tunedId !== null &&
           shouldReleaseStreamOnModeLeave(mode)
         ) {
@@ -635,9 +639,10 @@ import TvLogo from "./TvLogo.astro";
 
     window.addEventListener("livetv:playback-error", (ev) => {
       const detail = (ev as CustomEvent).detail ?? {};
-      // Keep the previous working stream: it stays tuned underneath
-      // the error overlay; only a failed tune of the *current*
-      // channel leaves nothing to keep.
+      // Record which channel was working before the failure, for
+      // Retry / Previous. The stream itself is gone — it was
+      // released before the failed tune — so `lastWorkingId` is
+      // only the id to retry, never a stream still on screen.
       const keep = streamToKeepOnFailure(detail.streamId ?? null, tunedId);
       if (keep !== null) lastWorkingId = keep;
       else if (tunedId !== null && detail.streamId === tunedId) lastWorkingId = null;

@@ -6,13 +6,23 @@
 //   - Ctrl+Alt+Home, the same global shortcut the CouchHub launcher
 //     registers for itself.
 //
-// What happens: the current video (if any) is paused, fullscreen is
-// exited, and the Tauri window is minimised. CouchHub's own hotkey /
-// tray icon then brings the CouchHub dashboard back — Nylah Studios does
-// not try to launch or focus CouchHub itself, and it never closes,
-// kills or force-quits anything. Minimise (not hide/close) is deliberate:
-// if CouchHub is ever unavailable, Nylah Studios is still sitting in the
-// taskbar where the user can bring it back.
+// What happens: the Live TV stream (if any) is released, the
+// current video is paused, fullscreen is exited, and the Tauri
+// window is minimised. CouchHub's own hotkey / tray icon then
+// brings the CouchHub dashboard back — Nylah Studios does not try
+// to launch or focus CouchHub itself, and it never closes, kills
+// or force-quits anything. Minimise (not hide/close) is deliberate:
+// if CouchHub is ever unavailable, Nylah Studios is still sitting
+// in the taskbar where the user can bring it back.
+//
+// Releasing (not just pausing) is load-bearing: pausing the video
+// element leaves the HLS session attached and the provider's single
+// connection held indefinitely while the window sits minimised —
+// the user believes the app is closed, but no tune can ever
+// succeed while that session lives. The release is the engine's
+// own `livetv:release` event (stream.ts's
+// releaseLocalPlaybackForHandoff); dispatching it with no listener
+// is a harmless no-op, so the web preview is unaffected.
 //
 // In a plain web preview (no Tauri) there is no window to minimise, so
 // the handler pauses video, exits fullscreen and does nothing else.
@@ -30,6 +40,17 @@ export function mountReturnHome(): void {
   (window as unknown as Record<string, unknown>)[flag] = true;
 
   async function goHome(): Promise<void> {
+    // Release the Live TV stream FIRST — minimising must never
+    // leave it playing invisibly and holding the provider's single
+    // connection (see the header note). The video pause below is
+    // belt-and-braces for players the engine does not own.
+    try {
+      window.dispatchEvent(
+        new CustomEvent("livetv:release", { detail: { channelId: null } }),
+      );
+    } catch {
+      // Releasing is best-effort; never block the return home.
+    }
     try {
       const video =
         document.querySelector<HTMLVideoElement>("#tv-player-video") ??
