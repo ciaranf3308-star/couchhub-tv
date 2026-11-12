@@ -296,28 +296,26 @@ describe("editing + fallback", () => {
     expect(labelsOf(EDITING_HINTS)).toEqual(["Back", "Return home"]);
   });
 
-  it("on-screen keyboard focus: Type / Delete / Clear (W2 fixed the scope)", () => {
-    // A types the focused key, B backspaces (OnScreenKeyboard's own
-    // keydown handler). X clears: the poll fires while focus is
-    // inside [data-couch-keyboard] (W2 fix — the old `.search-view`
-    // scope matched nothing, so X cleared nothing before W2). Y goes
-    // to Search except on Search itself.
+  it("on-screen keyboard focus: Type / Close keyboard, no X (B never deletes)", () => {
+    // A types the focused key, B closes the keyboard (B never
+    // deletes — the Backspace key deletes, the Clear key clears;
+    // the old "Delete / Clear" legend lied). Y goes to Search
+    // except on Search itself.
     const discover = hintsForView("discover", { osk: true });
     expect(discover.id).toBe("osk");
-    expect(glyphsOf(discover)).toEqual(["dpad", "a", "b", "x", "y", "menu", "view-menu"]);
+    expect(glyphsOf(discover)).toEqual(["dpad", "a", "b", "y", "menu", "view-menu"]);
     expect(labelsOf(discover)).toEqual([
       "Move",
       "Type",
-      "Delete",
-      "Clear",
+      "Close keyboard",
       "Search",
       "Settings",
       "Return home",
     ]);
     const search = hintsForView("search", { osk: true });
-    expect(glyphsOf(search)).toEqual(["dpad", "a", "b", "x", "menu", "view-menu"]);
-    expect(configHasGlyph(search, "x")).toBe(true);
-    expect(configHasGlyph(discover, "x")).toBe(true);
+    expect(glyphsOf(search)).toEqual(["dpad", "a", "b", "menu", "view-menu"]);
+    expect(configHasGlyph(search, "x")).toBe(false);
+    expect(configHasGlyph(discover, "x")).toBe(false);
   });
 
   it("editing wins over OSK focus (an input owns the controller)", () => {

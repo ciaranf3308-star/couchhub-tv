@@ -12,7 +12,10 @@
 //   1. Registered Back layers, topmost-first: highest priority wins,
 //      most-recently-registered wins ties. A layer that is active but
 //      declines (handle() returns false) falls through to lower
-//      layers; a layer that handles (true) stops the chain.
+//      layers; a layer that handles (true) stops the chain. While a
+//      native <dialog>/popover is open, only CONFIRM_DIALOG / MODAL
+//      layers run — the dialog owns B, so the press closes it (step
+//      3) instead of navigating the page behind it.
 //   2. Legacy registerBackInterceptor callbacks (LIFO) — the existing
 //      Android callers (DiscoverView, legacy playback). Kept working
 //      unchanged; new code registers Back layers instead.
@@ -225,8 +228,27 @@ function runLegacyInterceptors(): boolean {
   return false
 }
 
+// An open native <dialog> / popover owns B. Attribute predicate,
+// matching closeTopmostChrome: the visibility-based findOpenModal
+// cannot be used here (dialog-spatial-nav imports this module).
+function hasOpenNativeModal(): boolean {
+  if (typeof document === "undefined") return false
+  if (document.querySelector("dialog[open]")) return true
+  try {
+    if (document.querySelector("[popover]:popover-open")) return true
+  } catch {}
+  return false
+}
+
 function resolveBackInternal(fromPhysicalEscape: boolean): boolean {
+  const modalOpen = hasOpenNativeModal()
   for (const layer of orderedLayers()) {
+    // A dialog owns B: sub-MODAL layers (keyboard, drawers,
+    // playback, detail, page, route) are suspended while one is
+    // open, so the press falls through to closeTopmostChrome and
+    // closes the dialog instead of acting behind it. The dialog's
+    // own CONFIRM_DIALOG / MODAL layers still run.
+    if (modalOpen && layer.priority < BACK_PRIORITY.MODAL) continue
     let active: boolean
     try {
       active = layer.isActive()
@@ -321,8 +343,8 @@ export function mountBackCoordinator(): void {
 }
 
 // ── Detail Back stack (shared by both detail pages) ─────────────────
-// Relocated from the W2 shim (controller-0110-seams.ts) at 0.11.10
-// integration: the Movies/Series detail pages register the same
+// Relocated from the W2 seam shim at 0.11.10 integration:
+// the Movies/Series detail pages register the same
 // stack — playback sub-layer, playback, detail subview, route —
 // exactly one step per press, highest priority first.
 

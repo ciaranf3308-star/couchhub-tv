@@ -21,16 +21,18 @@ import {
   nextDiscoverBackStep,
   COUCH_KEYBOARD_CLOSED_EVENT,
   KEYBOARD_OPEN_HINTS,
-  KEYBOARD_CLOSED_HINTS,
 } from "@/scripts/lib/couch-keyboard";
 import {
   BACK_PRIORITY,
+  mountBackCoordinator,
   registerBackLayer,
-  recordRouteOrigin,
+} from "@/scripts/lib/back-handler";
+import { getControllerHints } from "@/scripts/lib/couch-button-hints";
+import {
   navigateBackWithOrigin,
-  getLastControllerHints,
-} from "@/scripts/lib/controller-0110-seams";
-import { mountBackHandler } from "@/scripts/lib/back-handler";
+  recordRouteOrigin,
+  setRouteNavigator,
+} from "@/scripts/lib/route-origin";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -61,11 +63,12 @@ function makeOskGrid(): HTMLElement {
 }
 
 beforeEach(() => {
-  mountBackHandler();
+  mountBackCoordinator();
 });
 
 afterEach(() => {
   endCouchKeyboardSession();
+  setRouteNavigator(null);
   document.body.innerHTML = "";
   try {
     sessionStorage.clear();
@@ -106,7 +109,7 @@ describe("Contract E: open / close lifecycle", () => {
     expect(isCouchKeyboardOpen()).toBe(true);
     expect(getCouchKeyboardInput()).toBe(input);
     expect(document.activeElement).toBe(input);
-    expect(getLastControllerHints()).toEqual(KEYBOARD_OPEN_HINTS);
+    expect(getControllerHints()).toEqual(KEYBOARD_OPEN_HINTS);
   });
 
   it("open moves focus into the key grid by default (controller entry)", () => {
@@ -142,7 +145,8 @@ describe("Contract E: open / close lifecycle", () => {
       commit: false,
       value: "typed",
     });
-    expect(getLastControllerHints()).toEqual(KEYBOARD_CLOSED_HINTS);
+    // Closing releases the override: the view config applies again.
+    expect(getControllerHints()).toBeNull();
   });
 
   it("close(true) commits: onCommit + closed event + focus returns", () => {
@@ -228,7 +232,7 @@ describe("Contract E: open / close lifecycle", () => {
   });
 });
 
-describe("Back layers (SHIM-0110): priority + activity gating", () => {
+describe("Back layers (coordinator): priority + activity gating", () => {
   it("BACK_PRIORITY matches the contract", () => {
     expect(BACK_PRIORITY.MODAL).toBe(90);
     expect(BACK_PRIORITY.KEYBOARD).toBe(80);
@@ -290,9 +294,12 @@ describe("Back layers (SHIM-0110): priority + activity gating", () => {
     unregisterB();
   });
 
-  it("re-registering an id replaces the layer; unregister removes it", () => {
+  it("duplicate ids are independent registrations; unregister removes only its own", () => {
+    // The coordinator keys layers by registration, not by id (ids
+    // are for debugging): same priority resolves most-recent-first,
+    // and unregistering the newer registration revives the older.
     const calls: string[] = [];
-    registerBackLayer({
+    const unregisterOld = registerBackLayer({
       id: "dup",
       priority: BACK_PRIORITY.PAGE_STATE,
       isActive: () => true,
@@ -301,7 +308,7 @@ describe("Back layers (SHIM-0110): priority + activity gating", () => {
         return true;
       },
     });
-    const unregister = registerBackLayer({
+    const unregisterNew = registerBackLayer({
       id: "dup",
       priority: BACK_PRIORITY.PAGE_STATE,
       isActive: () => true,
@@ -312,10 +319,11 @@ describe("Back layers (SHIM-0110): priority + activity gating", () => {
     });
     (window as unknown as { __xtHandleBack: () => boolean }).__xtHandleBack();
     expect(calls).toEqual(["new"]);
-    unregister();
+    unregisterNew();
     const handled = (window as unknown as { __xtHandleBack: () => boolean }).__xtHandleBack();
-    expect(handled).toBe(false);
-    expect(calls).toEqual(["new"]);
+    expect(handled).toBe(true);
+    expect(calls).toEqual(["new", "old"]);
+    unregisterOld();
   });
 });
 
@@ -353,21 +361,25 @@ describe("nextDiscoverBackStep (§25 hierarchy)", () => {
   });
 });
 
-describe("provenance (SHIM-0110): validated, single-use origins", () => {
+describe("provenance: validated, single-use origins", () => {
   it("records a safe route and rejects unsafe ones", () => {
     recordRouteOrigin({ route: "/movies", label: "Movies" });
-    expect(sessionStorage.getItem("rs-route-origin-0110")).toContain("/movies");
+    expect(sessionStorage.getItem("nylah:route-origin")).toContain("/movies");
     recordRouteOrigin({ route: "https://evil.example/x", label: "x" });
-    expect(sessionStorage.getItem("rs-route-origin-0110")).toContain("/movies");
+    expect(sessionStorage.getItem("nylah:route-origin")).toContain("/movies");
     recordRouteOrigin({ route: "//evil.example/x", label: "x" });
-    expect(sessionStorage.getItem("rs-route-origin-0110")).toContain("/movies");
+    expect(sessionStorage.getItem("nylah:route-origin")).toContain("/movies");
   });
 
   it("navigateBackWithOrigin consumes the origin (single-use)", () => {
+    const navigated: string[] = [];
+    setRouteNavigator((url) => navigated.push(url));
     recordRouteOrigin({ route: "/movies", label: "Movies" });
-    // jsdom cannot navigate; the call must still consume + not throw.
-    expect(() => navigateBackWithOrigin("/")).not.toThrow();
-    expect(sessionStorage.getItem("rs-route-origin-0110")).toBeNull();
+    navigateBackWithOrigin("/");
+    expect(navigated).toEqual(["/movies"]);
+    expect(sessionStorage.getItem("nylah:route-origin")).toBeNull();
+    navigateBackWithOrigin("/home");
+    expect(navigated).toEqual(["/movies", "/home"]);
   });
 });
 

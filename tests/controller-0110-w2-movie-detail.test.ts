@@ -7,6 +7,7 @@
 // i18n mocked (no network, no playlist); the detail load exits
 // early (no ?id=) so only the navigation wiring is exercised.
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
+import { resolveBack } from "@/scripts/lib/back-handler";
 
 vi.mock("@/scripts/lib/creds.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -73,10 +74,12 @@ describe("movie detail Back (player closed)", () => {
     document.body.replaceChildren();
   });
 
+  // One Back press through the real coordinator: jsdom events are
+  // untrusted, so a dispatched Escape would never reach the
+  // coordinator's capture listener. resolveBack() is the chain
+  // controller B and Android BACK run.
   function pressEscape(): void {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-    );
+    resolveBack();
   }
 
   it("B performs the Back button navigation without focus on the button", () => {
@@ -100,6 +103,7 @@ describe("movie detail Back (player closed)", () => {
     const before = clicked.mock.calls.length;
     pressEscape();
     expect(clicked.mock.calls.length).toBe(before);
-    dlg.removeAttribute("open");
+    // The press closed the dialog instead of navigating behind it.
+    expect(dlg.hasAttribute("open")).toBe(false);
   });
 });

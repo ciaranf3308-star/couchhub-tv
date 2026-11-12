@@ -7,6 +7,7 @@
 // itself is not focusable). Fixtures + mocks as in the movie
 // detail test; the detail load exits early (no ?id=).
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
+import { resolveBack } from "@/scripts/lib/back-handler";
 
 vi.mock("@/scripts/lib/creds.js", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -102,10 +103,11 @@ describe("series detail Back + episode focus", () => {
     document.body.replaceChildren();
   });
 
+  // One Back press through the real coordinator (see the movie
+  // detail test: jsdom events are untrusted and never reach the
+  // coordinator's capture listener).
   function pressEscape(): void {
-    document.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-    );
+    resolveBack();
   }
 
   it("focusEpisodeCard focuses the Play button, not the unfocusable article", () => {

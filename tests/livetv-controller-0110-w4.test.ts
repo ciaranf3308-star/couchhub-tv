@@ -11,7 +11,8 @@
  * remembered-highlight scroll repair, filter-less entry keeping
  * the selection, close-overlay focus restore, the two-step nav
  * veto mechanism the search overlay's B hierarchy relies on, and
- * the SHIM-0110 seam contracts (hints / logical view / keyboard).
+ * the seam contracts against the real modules (hints /
+ * logical view / keyboard).
  *
  * Deliberately NOT duplicated: the onTabRow resolver table and
  * stepHighlight (tests/livetv-controller.test.ts), the single
@@ -46,16 +47,17 @@ import {
   resolveLandingKeyAction,
 } from "@/scripts/lib/livetv-landing";
 import {
-  CONTROLLER_HINTS_EVENT,
-  LOGICAL_VIEW_EVENT,
-  closeCouchKeyboard,
+  CONTROLLER_HINTS_CHANGE_EVENT,
   getControllerHints,
-  getLogicalView,
+  setControllerHints,
+} from "@/scripts/lib/couch-button-hints";
+import { getLogicalView, setLogicalView } from "@/scripts/lib/couch-focus";
+import {
+  closeCouchKeyboard,
+  endCouchKeyboardSession,
   isCouchKeyboardOpen,
   openCouchKeyboard,
-  setControllerHints,
-  setLogicalView,
-} from "@/scripts/lib/livetv-0110-seams";
+} from "@/scripts/lib/couch-keyboard";
 import { hintsForLivetvLayer } from "@/scripts/lib/livetv-hints";
 import { dispatchLivetvCloseOverlay } from "@/scripts/lib/livetv-search-sort";
 import type { LivetvChannel } from "@/scripts/lib/livetv-data";
@@ -509,66 +511,41 @@ describe("two-step nav veto (search B hierarchy mechanism, §10)", () => {
   });
 });
 
-describe("SHIM-0110 seam contracts (replaced by W1/W3 at integration)", () => {
+describe("seam contracts against the real modules (W1/W3)", () => {
   afterEach(() => {
-    closeCouchKeyboard(false);
-    delete document.documentElement.dataset.couchLogicalView;
+    endCouchKeyboardSession();
+    setControllerHints(null);
+    setLogicalView("");
   });
 
-  it("setControllerHints dispatches the event and writes the hints list", () => {
-    const list = document.createElement("ul");
-    list.setAttribute("data-livetv-hints-list", "");
-    document.body.appendChild(list);
-    const seen: Array<Record<string, unknown>> = [];
-    const onHints = (event: Event) => {
-      seen.push({ ...(event as CustomEvent).detail });
+  it("setControllerHints publishes the override and dispatches the change event", () => {
+    const seen: number[] = [];
+    const onHints = () => {
+      seen.push(1);
     };
-    window.addEventListener(CONTROLLER_HINTS_EVENT, onHints);
+    window.addEventListener(CONTROLLER_HINTS_CHANGE_EVENT, onHints);
     try {
       const config = hintsForLivetvLayer("browser");
       setControllerHints(config);
-      expect(seen).toHaveLength(1);
-      expect((seen[0].config as { id?: string }).id).toBe(config.id);
-      expect(list.children.length).toBeGreaterThan(0);
-      expect(list.dataset.config).toBe(config.id);
-    } finally {
-      window.removeEventListener(CONTROLLER_HINTS_EVENT, onHints);
-      list.remove();
-    }
-  });
-
-  it("setLogicalView mirrors the view and dispatches the event", () => {
-    const seen: string[] = [];
-    const onView = (event: Event) => {
-      seen.push((event as CustomEvent).detail.view as string);
-    };
-    window.addEventListener(LOGICAL_VIEW_EVENT, onView);
-    try {
-      setLogicalView("livetv-guide");
-      expect(document.documentElement.dataset.couchLogicalView).toBe("livetv-guide");
-      expect(seen).toEqual(["livetv-guide"]);
-      expect(getLogicalView()).toBe("livetv-guide");
-    } finally {
-      window.removeEventListener(LOGICAL_VIEW_EVENT, onView);
-    }
-  });
-
-  it("getControllerHints reads back the last config; null clears the bar", () => {
-    const list = document.createElement("ul");
-    list.setAttribute("data-livetv-hints-list", "");
-    document.body.appendChild(list);
-    try {
-      const config = hintsForLivetvLayer("landing");
-      setControllerHints(config);
       expect(getControllerHints()).toBe(config);
-      expect(list.children.length).toBeGreaterThan(0);
+      expect(seen).toHaveLength(1);
+      // The shared TvButtonHints bar renders the override; the seam
+      // itself writes no DOM.
       setControllerHints(null);
       expect(getControllerHints()).toBeNull();
-      expect(list.children.length).toBe(0);
-      expect(list.dataset.config).toBeUndefined();
+      expect(seen).toHaveLength(2);
     } finally {
-      list.remove();
+      window.removeEventListener(CONTROLLER_HINTS_CHANGE_EVENT, onHints);
     }
+  });
+
+  it("setLogicalView/getLogicalView round-trips; unset reads empty string", () => {
+    setLogicalView("livetv-guide");
+    expect(getLogicalView()).toBe("livetv-guide");
+    setLogicalView("livetv-browser");
+    expect(getLogicalView()).toBe("livetv-browser");
+    setLogicalView("");
+    expect(getLogicalView()).toBe("");
   });
 
   it("keyboard lifecycle: open → commit-close runs onCommit; cancel-close does not", () => {
@@ -577,19 +554,21 @@ describe("SHIM-0110 seam contracts (replaced by W1/W3 at integration)", () => {
     document.body.appendChild(input);
     try {
       const onCommit = vi.fn();
-      expect(openCouchKeyboard(input, onCommit)).toBe(true);
+      openCouchKeyboard(input, onCommit, { focusGrid: false });
       expect(isCouchKeyboardOpen()).toBe(true);
       expect(document.activeElement).toBe(input);
-      expect(closeCouchKeyboard(true)).toBe(true);
+      closeCouchKeyboard(true);
       expect(onCommit).toHaveBeenCalledTimes(1);
       expect(onCommit).toHaveBeenCalledWith("sports");
       expect(isCouchKeyboardOpen()).toBe(false);
 
-      expect(openCouchKeyboard(input, onCommit)).toBe(true);
-      expect(closeCouchKeyboard(false)).toBe(true);
+      openCouchKeyboard(input, onCommit, { focusGrid: false });
+      closeCouchKeyboard(false);
       expect(onCommit).toHaveBeenCalledTimes(1);
       expect(isCouchKeyboardOpen()).toBe(false);
-      expect(closeCouchKeyboard(false)).toBe(false);
+      // Closing with no session is a no-op.
+      closeCouchKeyboard(false);
+      expect(isCouchKeyboardOpen()).toBe(false);
     } finally {
       input.remove();
     }
@@ -598,7 +577,7 @@ describe("SHIM-0110 seam contracts (replaced by W1/W3 at integration)", () => {
   it("a keyboard record whose input left the document clears lazily", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);
-    openCouchKeyboard(input);
+    openCouchKeyboard(input, undefined, { focusGrid: false });
     expect(isCouchKeyboardOpen()).toBe(true);
     input.remove();
     expect(isCouchKeyboardOpen()).toBe(false);

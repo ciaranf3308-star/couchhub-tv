@@ -10,21 +10,28 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   BACK_PRIORITY,
-  __resetBackLayersForTests,
-  closeCouchKeyboard,
-  getLastControllerHints,
-  getLogicalView,
+  handleCoordinatorEscape,
   installDetailBackLayers,
+  registerBackLayer,
+  resolveBack,
+} from "@/scripts/lib/back-handler";
+import {
+  getControllerHints,
+  setControllerHints,
+} from "@/scripts/lib/couch-button-hints";
+import { getLogicalView, setLogicalView } from "@/scripts/lib/couch-focus";
+import {
+  closeCouchKeyboard,
+  endCouchKeyboardSession,
   isCouchKeyboardOpen,
-  navigateBackWithOrigin,
   openCouchKeyboard,
+} from "@/scripts/lib/couch-keyboard";
+import {
+  navigateBackWithOrigin,
   readRouteOrigin,
   recordRouteOrigin,
-  registerBackLayer,
-  resolveBackNavigation,
-  setControllerHints,
-  setLogicalView,
-} from "@/scripts/lib/controller-0110-seams";
+  setRouteNavigator,
+} from "@/scripts/lib/route-origin";
 import {
   closeTitleContextMenu,
   isTitleContextMenuOpen,
@@ -45,14 +52,22 @@ import {
 import { invalidateCatalogIndex } from "@/scripts/lib/catalog-index";
 import { clearTitleGroupRegistry } from "@/scripts/lib/language-groups";
 
-function pressEscape(target: EventTarget = document): KeyboardEvent {
-  const event = new KeyboardEvent("keydown", {
-    key: "Escape",
-    bubbles: true,
-    cancelable: true,
-  });
-  target.dispatchEvent(event);
-  return event;
+// Back layers are module state: track every registration so tests
+// cannot leak layers into each other (the real coordinator has no
+// test reset — unregister functions are the isolation mechanism).
+const unregisters: Array<() => void> = [];
+function trackLayer(unregister: () => void): void {
+  unregisters.push(unregister);
+}
+
+/**
+ * One Back press through the real coordinator. jsdom events are
+ * untrusted, so a dispatched Escape would never reach the
+ * coordinator's capture listener; resolveBack() is the same chain
+ * controller B and Android BACK run.
+ */
+function pressBack(): boolean {
+  return resolveBack();
 }
 
 function pressKey(key: string, target: EventTarget = document): KeyboardEvent {
@@ -62,32 +77,35 @@ function pressKey(key: string, target: EventTarget = document): KeyboardEvent {
 }
 
 beforeEach(() => {
-  __resetBackLayersForTests();
   sessionStorage.clear();
   localStorage.clear();
   document.body.replaceChildren();
   window.history.replaceState(null, "", "/");
+  setRouteNavigator(null);
 });
 
 afterEach(() => {
   closeTitleContextMenu();
-  __resetBackLayersForTests();
+  endCouchKeyboardSession();
+  for (const off of unregisters.splice(0)) off();
+  setControllerHints(null);
   document.body.replaceChildren();
   sessionStorage.clear();
   localStorage.clear();
   window.history.replaceState(null, "", "/");
+  setRouteNavigator(null);
   vi.restoreAllMocks();
 });
 
 // ── Back layers ─────────────────────────────────────────────────
 
-describe("Back layers (shim)", () => {
+describe("Back layers (coordinator)", () => {
   it("highest-priority active layer handles; lower layers never run", () => {
     const route = vi.fn(() => true);
     const drawer = vi.fn(() => true);
-    registerBackLayer({ id: "r", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: route });
-    registerBackLayer({ id: "d", priority: BACK_PRIORITY.DRAWER, isActive: () => true, handle: drawer });
-    pressEscape();
+    trackLayer(registerBackLayer({ id: "r", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: route }));
+    trackLayer(registerBackLayer({ id: "d", priority: BACK_PRIORITY.DRAWER, isActive: () => true, handle: drawer }));
+    expect(pressBack()).toBe(true);
     expect(drawer).toHaveBeenCalledTimes(1);
     expect(route).not.toHaveBeenCalled();
   });
@@ -99,12 +117,12 @@ describe("Back layers (shim)", () => {
       drawerActive = false;
       return true;
     });
-    registerBackLayer({ id: "r", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: route });
-    registerBackLayer({ id: "d", priority: BACK_PRIORITY.DRAWER, isActive: () => drawerActive, handle: drawer });
-    pressEscape();
+    trackLayer(registerBackLayer({ id: "r", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: route }));
+    trackLayer(registerBackLayer({ id: "d", priority: BACK_PRIORITY.DRAWER, isActive: () => drawerActive, handle: drawer }));
+    pressBack();
     expect(drawer).toHaveBeenCalledTimes(1);
     expect(route).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(route).toHaveBeenCalledTimes(1);
   });
 
@@ -112,90 +130,79 @@ describe("Back layers (shim)", () => {
     const handle = vi.fn(() => true);
     const off = registerBackLayer({ id: "x", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle });
     off();
-    const event = pressEscape();
+    pressBack();
     expect(handle).not.toHaveBeenCalled();
-    expect(event.defaultPrevented).toBe(false);
   });
 
-  it("an open dialog owns B: layers do not run", () => {
+  it("a dialog-guarded layer stays dormant while a dialog is open", () => {
+    // The coordinator runs layers before its chrome fallback, so
+    // layers self-guard on open dialogs (findOpenModal in views);
+    // the fallback then closes the dialog itself.
     const handle = vi.fn(() => true);
-    registerBackLayer({ id: "x", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle });
+    trackLayer(
+      registerBackLayer({
+        id: "x",
+        priority: BACK_PRIORITY.ROUTE,
+        isActive: () => !document.querySelector("dialog[open]"),
+        handle,
+      }),
+    );
     const dlg = document.createElement("dialog");
     dlg.setAttribute("open", "");
     document.body.appendChild(dlg);
-    pressEscape();
+    expect(pressBack()).toBe(true);
     expect(handle).not.toHaveBeenCalled();
-    dlg.remove();
-    pressEscape();
+    expect(dlg.hasAttribute("open")).toBe(false);
+    pressBack();
     expect(handle).toHaveBeenCalledTimes(1);
   });
 
-  it("a handled press is claimed (defaultPrevented)", () => {
-    registerBackLayer({ id: "x", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: () => true });
-    expect(pressEscape().defaultPrevented).toBe(true);
+  it("a handled physical Escape is claimed (preventDefault + stop)", () => {
+    trackLayer(registerBackLayer({ id: "x", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: () => true }));
+    // Fabricated trusted-like event: jsdom cannot produce a trusted
+    // KeyboardEvent, so the listener body is called directly (the
+    // W1 test pattern).
+    const preventDefault = vi.fn();
+    const stopImmediatePropagation = vi.fn();
+    const consumed = handleCoordinatorEscape({
+      key: "Escape",
+      isTrusted: true,
+      defaultPrevented: false,
+      preventDefault,
+      stopImmediatePropagation,
+    } as unknown as KeyboardEvent);
+    expect(consumed).toBe(true);
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(stopImmediatePropagation).toHaveBeenCalledTimes(1);
   });
 });
 
 // ── Route provenance ────────────────────────────────────────────
 
 describe("route provenance", () => {
-  it("matching referrer + history → history-back", () => {
-    expect(
-      resolveBackNavigation({
-        origin: { route: "/movies?view=browse&page=3", label: "Browse" },
-        referrer: "http://localhost/movies?view=browse&page=3",
-        originOrigin: "http://localhost",
-        historyLength: 3,
-      }),
-    ).toEqual({ kind: "history-back" });
-  });
-
-  it("matching referrer without history → assign the origin route", () => {
-    expect(
-      resolveBackNavigation({
-        origin: { route: "/discover", label: "Discover" },
-        referrer: "http://localhost/discover",
-        originOrigin: "http://localhost",
-        historyLength: 1,
-      }),
-    ).toEqual({ kind: "assign", route: "/discover" });
-  });
-
-  it("stale origin (referrer names another route) → Back link decides", () => {
-    expect(
-      resolveBackNavigation({
-        origin: { route: "/discover", label: "Discover" },
-        referrer: "http://localhost/movies",
-        originOrigin: "http://localhost",
-        historyLength: 3,
-      }),
-    ).toEqual({ kind: "click-back-link" });
-  });
-
-  it("no origin / cross-origin referrer → Back link decides", () => {
-    expect(
-      resolveBackNavigation({
-        origin: null,
-        referrer: "",
-        originOrigin: "http://localhost",
-        historyLength: 3,
-      }),
-    ).toEqual({ kind: "click-back-link" });
-    expect(
-      resolveBackNavigation({
-        origin: { route: "/movies", label: "Movies" },
-        referrer: "https://evil.example/movies",
-        originOrigin: "http://localhost",
-        historyLength: 3,
-      }),
-    ).toEqual({ kind: "click-back-link" });
-  });
-
   it("record/read round-trips; malformed storage reads null", () => {
     recordRouteOrigin({ route: "/series?view=browse", label: "Browse Series" });
     expect(readRouteOrigin()).toEqual({ route: "/series?view=browse", label: "Browse Series" });
-    sessionStorage.setItem("rs_route_origin_0110", "{broken");
+    sessionStorage.setItem("nylah:route-origin", "{broken");
     expect(readRouteOrigin()).toBeNull();
+  });
+
+  it("unsafe routes are never recorded", () => {
+    recordRouteOrigin({ route: "https://evil.example/x", label: "x" });
+    expect(readRouteOrigin()).toBeNull();
+    recordRouteOrigin({ route: "//evil.example/x", label: "x" });
+    expect(readRouteOrigin()).toBeNull();
+  });
+
+  it("navigateBackWithOrigin goes to the recorded origin, single-use", () => {
+    const navigated: string[] = [];
+    setRouteNavigator((url) => navigated.push(url));
+    recordRouteOrigin({ route: "/movies?view=browse&page=3", label: "Browse" });
+    navigateBackWithOrigin("/movies");
+    expect(navigated).toEqual(["/movies?view=browse&page=3"]);
+    expect(readRouteOrigin()).toBeNull();
+    navigateBackWithOrigin("/movies");
+    expect(navigated).toEqual(["/movies?view=browse&page=3", "/movies"]);
   });
 
   it("navigateBackWithOrigin clicks the Back link when no origin applies", () => {
@@ -214,39 +221,32 @@ describe("route provenance", () => {
 
 // ── Logical view / keyboard / hints ─────────────────────────────
 
-describe("logical view, keyboard seam, hints", () => {
-  it("setLogicalView/getLogicalView round-trips and persists", () => {
+describe("logical view, keyboard lifecycle, hints", () => {
+  it("setLogicalView/getLogicalView round-trips; unset reads empty string", () => {
+    // W1 semantics: module state, "" when unset (never null), no
+    // persistence — full-page navigations reset it.
     setLogicalView("series-browse");
     expect(getLogicalView()).toBe("series-browse");
-    expect(sessionStorage.getItem("rs_couch_logical_view")).toBe("series-browse");
     setLogicalView("series-home");
     expect(getLogicalView()).toBe("series-home");
+    setLogicalView("");
+    expect(getLogicalView()).toBe("");
   });
 
-  it("openCouchKeyboard focuses the input and tracks state; close reports commit", () => {
+  it("openCouchKeyboard focuses the input and tracks state; close commits the value", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);
     const onCommit = vi.fn();
-    const opened = vi.fn();
-    window.addEventListener("couch-keyboard:open", opened);
-    openCouchKeyboard(input, onCommit);
+    openCouchKeyboard(input, onCommit, { focusGrid: false });
     expect(isCouchKeyboardOpen()).toBe(true);
     expect(document.activeElement).toBe(input);
-    expect(opened).toHaveBeenCalledTimes(1);
     input.value = "horror";
     closeCouchKeyboard(true);
     expect(isCouchKeyboardOpen()).toBe(false);
-    expect(onCommit).toHaveBeenCalledWith(true, "horror");
-    window.removeEventListener("couch-keyboard:open", opened);
+    expect(onCommit).toHaveBeenCalledWith("horror");
   });
 
-  it("setControllerHints writes the shared bar and remembers the config", () => {
-    const nav = document.createElement("nav");
-    nav.setAttribute("data-button-hints", "");
-    const list = document.createElement("ul");
-    list.setAttribute("data-button-hints-list", "");
-    nav.appendChild(list);
-    document.body.appendChild(nav);
+  it("setControllerHints publishes the override; null releases it", () => {
     setControllerHints({
       id: "browse-movie",
       items: [
@@ -254,10 +254,9 @@ describe("logical view, keyboard seam, hints", () => {
         { glyph: "y", label: "Search Movies" },
       ],
     });
-    expect(list.textContent).toContain("Options");
-    expect(list.textContent).toContain("Search Movies");
-    expect(list.dataset.config).toBe("browse-movie");
-    expect(getLastControllerHints()?.id).toBe("browse-movie");
+    expect(getControllerHints()?.id).toBe("browse-movie");
+    setControllerHints(null);
+    expect(getControllerHints()).toBeNull();
   });
 });
 
@@ -269,7 +268,7 @@ describe("installDetailBackLayers", () => {
     let listOpen = true;
     const onPlayerBack = vi.fn();
     const onDetailBack = vi.fn();
-    installDetailBackLayers({
+    trackLayer(installDetailBackLayers({
       isPlayerOpen: () => playerOpen,
       closePlaybackSubLayer: () => {
         if (!listOpen) return false;
@@ -281,14 +280,14 @@ describe("installDetailBackLayers", () => {
         onPlayerBack();
       },
       onDetailBack,
-    });
-    pressEscape();
+    }));
+    pressBack();
     expect(onPlayerBack).not.toHaveBeenCalled();
     expect(onDetailBack).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(onPlayerBack).toHaveBeenCalledTimes(1);
     expect(onDetailBack).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(onDetailBack).toHaveBeenCalledTimes(1);
   });
 
@@ -296,7 +295,7 @@ describe("installDetailBackLayers", () => {
     const onSubView = vi.fn();
     const onDetailBack = vi.fn();
     let inSubView = true;
-    installDetailBackLayers({
+    trackLayer(installDetailBackLayers({
       isPlayerOpen: () => false,
       onPlayerBack: vi.fn(),
       isInDetailSubView: () => inSubView,
@@ -305,11 +304,11 @@ describe("installDetailBackLayers", () => {
         onSubView();
       },
       onDetailBack,
-    });
-    pressEscape();
+    }));
+    pressBack();
     expect(onSubView).toHaveBeenCalledTimes(1);
     expect(onDetailBack).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(onDetailBack).toHaveBeenCalledTimes(1);
   });
 });
@@ -351,13 +350,13 @@ describe("openTitleContextMenu (Contract F)", () => {
   it("B closes the menu and restores focus without popping a lower layer", () => {
     const card = anchorCard();
     const lower = vi.fn(() => true);
-    registerBackLayer({ id: "lower", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: lower });
+    trackLayer(registerBackLayer({ id: "lower", priority: BACK_PRIORITY.ROUTE, isActive: () => true, handle: lower }));
     openTitleContextMenu(card, [{ id: "open", label: "Open", action: vi.fn() }]);
-    pressEscape();
+    pressBack();
     expect(isTitleContextMenuOpen()).toBe(false);
     expect(document.activeElement).toBe(card);
     expect(lower).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(lower).toHaveBeenCalledTimes(1);
   });
 
@@ -432,9 +431,9 @@ describe("Movies Home controller keys", () => {
     pressKey("x");
     await new Promise((r) => setTimeout(r, 0));
     expect(isTitleContextMenuOpen()).toBe(true);
-    pressEscape();
+    pressBack();
     expect(isTitleContextMenuOpen()).toBe(false);
-    pressEscape();
+    pressBack();
     expect(navigate).toHaveBeenCalledWith("/");
     off();
   });
@@ -518,13 +517,28 @@ describe("Browse Everything (0.11.10 integration)", () => {
     window.history.replaceState(null, "", "/movies?view=browse");
   });
 
+  const mounted: Array<{ destroy: () => void }> = [];
+
   afterEach(() => {
+    for (const m of mounted.splice(0)) {
+      try {
+        m.destroy();
+      } catch {
+        // Already destroyed by the test itself.
+      }
+    }
     vi.unstubAllGlobals();
   });
 
   const flush = async (ms = 80) => new Promise((r) => setTimeout(r, ms));
 
   async function mountBrowse() {
+    const mountedBrowse = await mountBrowseInner();
+    mounted.push(mountedBrowse.controller);
+    return mountedBrowse;
+  }
+
+  async function mountBrowseInner() {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const onOpenDetail = vi.fn();
@@ -554,7 +568,7 @@ describe("Browse Everything (0.11.10 integration)", () => {
     expect(isTitleContextMenuOpen()).toBe(true);
     const items = [...document.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
     expect(items.length).toBe(4);
-    pressEscape();
+    pressBack();
     expect(isTitleContextMenuOpen()).toBe(false);
     expect(document.activeElement).toBe(card);
     expect(onExit).not.toHaveBeenCalled();
@@ -571,8 +585,8 @@ describe("Browse Everything (0.11.10 integration)", () => {
   it("each Escape press on the grid exits once (one step per press)", async () => {
     const { container, controller, onExit } = await mountBrowse();
     firstCard(container).focus();
-    pressEscape();
-    pressEscape();
+    pressBack();
+    pressBack();
     // First press exits; the layer stays registered until destroy,
     // so a second press calls onExit again — one call per press.
     expect(onExit).toHaveBeenCalledTimes(2);
@@ -584,10 +598,10 @@ describe("Browse Everything (0.11.10 integration)", () => {
     const sortBtn = container.querySelector<HTMLButtonElement>("[data-browse-action='sort']");
     sortBtn!.click();
     expect(container.querySelector("[data-browse-sort-overlay]")).not.toBeNull();
-    pressEscape();
+    pressBack();
     expect(container.querySelector("[data-browse-sort-overlay]")).toBeNull();
     expect(onExit).not.toHaveBeenCalled();
-    pressEscape();
+    pressBack();
     expect(onExit).toHaveBeenCalledTimes(1);
     controller.destroy();
   });
@@ -603,11 +617,11 @@ describe("Browse Everything (0.11.10 integration)", () => {
     expect(window.location.pathname).toBe("/movies");
     expect(isCouchKeyboardOpen()).toBe(true);
     // B exits editing first (keyboard closes, overlay stays)…
-    pressEscape();
+    pressBack();
     expect(isCouchKeyboardOpen()).toBe(false);
     expect(container.querySelector("[data-browse-search-overlay]")).not.toBeNull();
     // …then B cancels the search without changing browse state.
-    pressEscape();
+    pressBack();
     expect(container.querySelector("[data-browse-search-overlay]")).toBeNull();
     controller.destroy();
   });
@@ -642,7 +656,7 @@ describe("Browse Everything (0.11.10 integration)", () => {
     const state = controller.getState();
     expect(state.category.id).toBe("comedy");
     expect(state.page).toBe(1);
-    pressEscape();
+    pressBack();
     expect(onExit).toHaveBeenCalledTimes(1);
     controller.destroy();
   });

@@ -13,7 +13,8 @@ import { confirmDialog } from "../src/scripts/lib/confirm-dialog"
 import {
   registerBackLayer,
   BACK_PRIORITY,
-} from "../src/scripts/lib/controller-seams-0110"
+  resolveBack,
+} from "../src/scripts/lib/back-handler"
 
 describe("confirmDialog", () => {
   let invoker: HTMLButtonElement
@@ -104,10 +105,10 @@ describe("confirmDialog", () => {
   })
 
   it("a page Back layer does not run while the dialog is open", async () => {
-    const handle = vi.fn()
+    const handle = vi.fn(() => true)
     const unregister = registerBackLayer({
       id: "page",
-      priority: BACK_PRIORITY.PAGE,
+      priority: BACK_PRIORITY.ROUTE,
       isActive: () => true,
       handle,
     })
@@ -120,13 +121,9 @@ describe("confirmDialog", () => {
       })
       // Simulate the open dialog the browser would show.
       dialogNode().setAttribute("open", "")
-      document.body.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Escape",
-          bubbles: true,
-          cancelable: true,
-        }),
-      )
+      // One Back press through the coordinator: the dialog's own
+      // CONFIRM_DIALOG layer owns it; the page layer never runs.
+      expect(resolveBack()).toBe(true)
       expect(handle).not.toHaveBeenCalled()
       closeDialog()
       await expect(pending).resolves.toBe(false)

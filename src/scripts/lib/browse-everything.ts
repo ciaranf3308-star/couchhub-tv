@@ -1119,12 +1119,12 @@ export function mountBrowseEverything(
       handle: () => {
         // B exits editing/keyboard first, then cancels the
         // search (position preserved) — one step per press.
+        // closeCouchKeyboard re-focuses the input, so there is no
+        // separate blur step: blurring would strand focus on the
+        // body for a press with no user-visible effect, while
+        // cancelSearch restores focus to the browse grid.
         if (isCouchKeyboardOpen()) {
           closeCouchKeyboard(false);
-          return true;
-        }
-        if (document.activeElement === searchInput) {
-          searchInput?.blur();
           return true;
         }
         cancelSearch();
