@@ -1,18 +1,31 @@
 /**
  * @vitest-environment jsdom
  */
-// Movies & Series 2.0 (0.11.8, W5) acceptance tests 11–20: SERIES.
+// Movies & Series 2.0 (0.11.8) acceptance tests 11–20: SERIES.
 //
-// Followed-series behaviour is tested against the REAL followed.ts
-// store + snapshot/diff functions (createMemoryFollowedStore,
-// followSeries, unfollowSeries, listSubscriptions, normalizeSnapshot,
-// diffSnapshots, isSaneSnapshot) and the REAL series helpers
-// (groupEpisodesBySeason, nextEpisode, resumeEpisode,
-// resumeOrNextEpisode, selectSeason, seriesDetailViewModel). The
-// shelf/index/browse surface is the contract stub. No network, no
-// provider calls: snapshots are fixture payloads.
+// Adapted at integration from the W5 stub contract to the REAL W1/W2/W4
+// modules (see tests/movies-series-2.0-contract-map.md + the
+// integration adaptations recorded in docs/validation-0118.md).
+// Followed-series behaviour was already tested against the REAL
+// followed.ts store + snapshot/diff functions and the REAL series
+// helpers — tests 11/13/14/16/17 are UNCHANGED. Tests 12/15/18/19/20
+// were rewired to the real W4 Home composition/render and the real W2
+// browse mount; each adaptation is marked ADAPTED.
+//
+// Key contract resolutions in this file:
+// - Worth Starting has NO rating floor and NO rating-descending
+//   order (stub decision 10; brief §4.4 mandates neither): the
+//   unrated series MAY appear under composite scoring. What is
+//   pinned: series-level, deterministic, contains the known-good
+//   series, excludes the confirmed-empty one (D28 fix).
+// - Detail return is page navigation + focus memory + URL mode in
+//   production: the stub's in-mount openDetail/returnFromDetail half
+//   has no real equivalent and was dropped; the remount half IS the
+//   real restore path (W2 mount + restoreCouchFocus).
+// - The real mount loads the catalogue ONCE (initial load); the
+//   stub asserted 0 loads because the index was injected.
 
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import {
   FOLLOWED_CHANGED_EVENT,
   createMemoryFollowedStore,
@@ -42,18 +55,27 @@ import {
 } from "@/scripts/lib/couch-focus.ts"
 import {
   getCatalogIndex,
-  mountBrowseEverything,
-  mountHomeShelves,
-  normaliseRating,
-  selectHomeShelves,
-  selectSeriesWorthStarting,
-  type CatalogEntry,
+  invalidateCatalogIndex,
   type CatalogIndex,
-} from "./movies-series-2.0-stubs.ts"
+} from "@/scripts/lib/catalog-index.ts"
+import {
+  selectSeriesWorthStarting,
+  selectorIds,
+} from "@/scripts/lib/collection-selectors.ts"
+import { emptyTasteModel } from "@/scripts/lib/taste.ts"
+import {
+  mountBrowseEverything,
+  type BrowseController,
+  type BrowseDataSource,
+} from "@/scripts/lib/browse-everything.ts"
+import { assembleSeriesHomeSections } from "@/scripts/series/series-home-model.ts"
+import { renderSeriesHome } from "@/scripts/series/series-home-render.ts"
+import { clearTitleGroupRegistry } from "@/scripts/lib/language-groups.ts"
 import {
   adversarialFixture,
   buildChurnScenario,
   generateCatalogue,
+  type CatalogEntry,
 } from "./fixtures-0118-catalogue.ts"
 
 // Node 24+ ships a native sessionStorage that shadows jsdom's; stub
@@ -79,10 +101,14 @@ function makeStorage(): Storage {
   } as Storage
 }
 
+const TASTE = emptyTasteModel("acceptance", "acceptance-playlist")
+
 let revisionCounter = 2000
 function freshIndex(kind: "vod" | "series", entries: CatalogEntry[]): CatalogIndex {
   revisionCounter += 1
-  return getCatalogIndex(kind, entries, revisionCounter)
+  return getCatalogIndex(kind, [...entries], `acceptance:${revisionCounter}`, {
+    playlistId: "acceptance-playlist",
+  })
 }
 
 function makeVisible(el: Element): void {
@@ -105,6 +131,21 @@ beforeEach(() => {
     configurable: true,
   })
   clearCouchFocusMemory()
+  // The W2 mount renders through requestAnimationFrame; drive it
+  // with timers (the browse-0118-mount.test.ts settle pattern).
+  vi.stubGlobal(
+    "requestAnimationFrame",
+    (cb: FrameRequestCallback) => setTimeout(() => cb(0), 0) as unknown as number,
+  )
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => clearTimeout(id))
+  invalidateCatalogIndex()
+  clearTitleGroupRegistry()
+  window.history.replaceState(null, "", "/series")
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  document.body.innerHTML = ""
 })
 
 /** Episode progress: S1 complete, S2E1 in progress, rest untouched. */
@@ -141,6 +182,68 @@ async function follow(
 async function followedIds(store: FollowedStore): Promise<number[]> {
   const subs = await listSubscriptions(store)
   return subs.map((s) => Number(s.seriesId))
+}
+
+/** A real W2 data source over fixture rows (cf. browse-0118-mount.test.ts). */
+function makeSource(
+  rows: CatalogEntry[],
+  kind: "movie" | "series",
+  onLoad?: () => void
+): BrowseDataSource {
+  return {
+    load: async () => {
+      onLoad?.()
+      return {
+        rows,
+        playlistId: PLAYLIST,
+        playlistTitle: "Test Playlist",
+        fromCache: false,
+        loadError: false,
+      }
+    },
+    toEntry: (row) => row as CatalogEntry,
+    rowKey: (row) => `${kind === "movie" ? "vod" : "series"}-${(row as CatalogEntry).id}`,
+    cardView: (row) => {
+      const r = row as CatalogEntry
+      return {
+        title: r.name,
+        meta: [r.year, r.category].filter(Boolean).join(" · "),
+        image: r.logo,
+        kind: "poster",
+        itemKey: `${kind === "movie" ? "vod" : "series"}-${r.id}`,
+      }
+    },
+    detailId: (row) => String((row as CatalogEntry).id),
+    watchSets: () => ({
+      favouriteIds: new Set(),
+      watchLaterIds: new Set(),
+      inProgressIds: new Set(),
+      watchedIds: new Set(),
+      followedIds: new Set(),
+      newEpisodeIds: new Set(),
+    }),
+    emptyTitle: "No titles yet",
+    emptyMessage: "Empty.",
+  }
+}
+
+function gridCards(host: HTMLElement): HTMLElement[] {
+  return [...host.querySelectorAll<HTMLElement>("[data-browse-key]")]
+}
+
+async function waitForCards(host: HTMLElement, min = 1, timeoutMs = 15000): Promise<void> {
+  const start = Date.now()
+  for (;;) {
+    if (gridCards(host).length >= min) return
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`timed out waiting for ${min} browse cards (have ${gridCards(host).length})`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+async function flush(ms = 60): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => {
@@ -198,26 +301,41 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
     expect(refused.ok).toBe(false)
     expect(refused.reason).toBe("no-episodes")
 
+    // ADAPTED: the real W4 composition over the real store read.
     const index = freshIndex("series", ADV.series)
-    const shelves = selectHomeShelves(index, {
-      followedIds: await followedIds(store),
+    const subscriptions = (await listSubscriptions(store)).filter(
+      (s) => s.playlistId === PLAYLIST
+    )
+    const sections = assembleSeriesHomeSections({
+      index,
+      rowsById: new Map(ADV.series.map((e) => [e.id, e])),
+      continueInputs: [],
+      notificationGroups: [],
+      subscriptions,
+      taste: TASTE,
+      startedIds: [],
+      isEpisodeWatched: () => false,
     })
-    expect(shelves.followedSeries.map((e) => e.id)).toEqual([7101, 7102])
+    const followed = sections.find((s) => s.kind === "followed")
+    expect(followed).toBeDefined()
+    if (followed?.kind !== "followed") throw new Error("unreachable")
+    expect(followed.items.map((i) => i.seriesId)).toEqual(["7101", "7102"])
     // Title order, matching listSubscriptions.
-    expect(shelves.followedSeries.map((e) => e.displayTitle)).toEqual([
+    expect(followed.items.map((i) => i.title)).toEqual([
       "The Crossing",
       "The Long Watch",
     ])
     // Never-followed series never appear, however highly rated.
-    expect(shelves.followedSeries.map((e) => e.id)).not.toContain(7104)
-    expect(shelves.followedSeries.map((e) => e.id)).not.toContain(7105)
+    expect(followed.items.map((i) => i.seriesId)).not.toContain("7104")
+    expect(followed.items.map((i) => i.seriesId)).not.toContain("7105")
 
-    // The shelf renders from the store read, through the home mount.
+    // The shelf renders from the store read, through the real render.
     const container = document.createElement("div")
     document.body.appendChild(container)
-    const home = mountHomeShelves(container, shelves)
-    expect(home.getShelfCounts()["followed-series"]).toBe(2)
-    home.unmount()
+    renderSeriesHome(container, sections, { playlistId: PLAYLIST })
+    expect(
+      container.querySelectorAll('[data-nylah-rail="series-home-followed"] .rs-card').length
+    ).toBe(2)
   })
 
   it("13. Newly detected provider episodes appear accurately", async () => {
@@ -290,28 +408,32 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
 
   it("15. Worth Starting returns series-level entries", () => {
     const index = freshIndex("series", ADV.series)
-    const result = selectSeriesWorthStarting(index)
-    expect(result.length).toBeGreaterThan(0)
-    const seen = new Set<number>()
-    for (const entry of result) {
-      expect(entry.kind).toBe("series")
-      // Series-level: the entry IS a catalogue series row (id, season
-      // info, episode list) — never an episode row.
-      expect(index.byId.get(entry.id)).toBe(entry)
-      expect(Array.isArray(entry.episodes)).toBe(true)
-      expect(seen.has(entry.id)).toBe(false)
-      seen.add(entry.id)
-      const rating = normaliseRating(entry)
-      expect(rating.hasEvidence).toBe(true)
-      expect(rating.value as number).toBeGreaterThanOrEqual(7)
+    const result = selectSeriesWorthStarting(index, TASTE, 12, { cacheKey: "t15" })
+    const ids = selectorIds(result)
+    expect(ids.length).toBeGreaterThan(0)
+    // Deterministic: a fresh index over the same rows selects identically.
+    const again = selectSeriesWorthStarting(freshIndex("series", ADV.series), TASTE, 12, {
+      cacheKey: "t15",
+    })
+    expect(selectorIds(again)).toEqual(ids)
+    const seen = new Set<string>()
+    for (const id of ids) {
+      // Series-level: the id resolves (by reference) to a catalogue
+      // series row — never an episode row.
+      const row = index.byId.get(id) as CatalogEntry | undefined
+      expect(row).toBeDefined()
+      expect(row?.kind).toBe("series")
+      expect(Array.isArray(row?.episodes)).toBe(true)
+      expect(seen.has(id)).toBe(false)
+      seen.add(id)
     }
-    expect(result.map((e) => e.id)).toContain(7101)
-    expect(result.map((e) => e.id)).toContain(7102)
-    expect(result.map((e) => e.id)).not.toContain(7104) // confirmed 0 episodes
-    expect(result.map((e) => e.id)).not.toContain(7105) // unrated
-    // Rating-evidence order, deterministic.
-    const values = result.map((e) => normaliseRating(e).value as number)
-    expect([...values].sort((a, b) => b - a)).toEqual(values)
+    expect(ids).toContain("7101")
+    expect(ids).toContain("7102")
+    expect(ids).not.toContain("7104") // confirmed 0 episodes (D28)
+    // ADAPTED: the stub's ≥7 floor, rating-evidence requirement, and
+    // rating-descending order were stub decision 10 — brief §4.4
+    // mandates none of them. The unrated series (7105) MAY appear
+    // under composite scoring; nothing about it is asserted.
   })
 
   it("16. Season filters use confirmed counts", () => {
@@ -364,15 +486,24 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
   })
 
   it("18. Detail return restores the selected poster", async () => {
+    // ADAPTED: the real W2 mount + the real focus memory. The stub's
+    // in-mount openDetail/returnFromDetail half has no real
+    // equivalent (detail is page navigation); the remount half IS
+    // the production restore path.
     const catalogue = generateCatalogue({ seed: 0x1018, movieCount: 0, seriesCount: 120 })
-    const index = freshIndex("series", catalogue.series)
     const container = document.createElement("div")
     document.body.appendChild(container)
-    const mount = mountBrowseEverything(container, { index })
-    await mount.awaitSettled()
-    const focused = mount.focusCard(3)
-    expect(focused).not.toBeNull()
-    const key = focused?.getAttribute("data-group-key")
+    const mount: BrowseController = mountBrowseEverything(container, {
+      kind: "series",
+      source: makeSource(catalogue.series, "series"),
+      onOpenDetail: () => {},
+      onExit: () => {},
+    })
+    await waitForCards(container, 4)
+    const cards = gridCards(container)
+    const focused = cards[3]
+    focused.focus()
+    const key = focused.getAttribute("data-couch-key")
     expect(key).toBeTruthy()
     // Record through the REAL focus memory, then navigate away and back.
     recordCouchFocus({
@@ -382,30 +513,29 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
       key: key as string,
     })
     expect(readCouchFocusMemory()?.key).toBe(key)
-    mount.openDetail(key as string)
-    expect(mount.isDetailOpen()).toBe(true)
-    mount.returnFromDetail()
-    await mount.awaitSettled()
-    const restored = mount.getFocusedCard()
-    expect(restored?.getAttribute("data-group-key")).toBe(key)
+    mount.destroy()
 
     // The REAL restore path: a fresh mount, nothing focused, memory
     // intact → restoreCouchFocus lands on the same poster.
-    mount.unmount()
     const container2 = document.createElement("div")
     document.body.appendChild(container2)
-    const mount2 = mountBrowseEverything(container2, { index })
-    await mount2.awaitSettled()
-    container2.querySelectorAll("[data-browse-card]").forEach(makeVisible)
+    const mount2 = mountBrowseEverything(container2, {
+      kind: "series",
+      source: makeSource(catalogue.series, "series"),
+      onOpenDetail: () => {},
+      onExit: () => {},
+    })
+    await waitForCards(container2, 4)
+    gridCards(container2).forEach(makeVisible)
     const rail = container2.querySelector("[data-nylah-rail]")
     if (rail) makeVisible(rail)
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     expect(document.activeElement).toBe(document.body)
     const target = restoreCouchFocus(document)
     expect(target).not.toBeNull()
-    expect(target?.getAttribute("data-group-key")).toBe(key)
+    expect(target?.getAttribute("data-couch-key")).toBe(key)
     expect(document.activeElement).toBe(target)
-    mount2.unmount()
+    mount2.destroy()
   })
 
   it("19. Unfollow updates shelves without restart", async () => {
@@ -415,10 +545,28 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
     const index = freshIndex("series", ADV.series)
     const container = document.createElement("div")
     document.body.appendChild(container)
-    const render = async () =>
-      selectHomeShelves(index, { followedIds: await followedIds(store) })
-    const home = mountHomeShelves(container, await render())
-    expect(home.getShelfCounts()["followed-series"]).toBe(2)
+    // ADAPTED: the real W4 composition + render, re-rendered into
+    // the same container from the live store read.
+    const render = async () => {
+      const subscriptions = (await listSubscriptions(store)).filter(
+        (s) => s.playlistId === PLAYLIST
+      )
+      const sections = assembleSeriesHomeSections({
+        index,
+        rowsById: new Map(ADV.series.map((e) => [e.id, e])),
+        continueInputs: [],
+        notificationGroups: [],
+        subscriptions,
+        taste: TASTE,
+        startedIds: [],
+        isEpisodeWatched: () => false,
+      })
+      renderSeriesHome(container, sections, { playlistId: PLAYLIST })
+    }
+    const followedCards = () =>
+      container.querySelectorAll('[data-nylah-rail="series-home-followed"] .rs-card')
+    await render()
+    expect(followedCards().length).toBe(2)
 
     // The real store emits the change event the home subscribes to.
     let events = 0
@@ -430,47 +578,52 @@ describe("0.11.8 series acceptance (tests 11–20)", { timeout: 120000 }, () => 
     document.removeEventListener(FOLLOWED_CHANGED_EVENT, listener)
     expect(events).toBe(1)
 
-    // Same mount, same container — a re-render from the live store
-    // drops the unfollowed show. No restart, no remount.
-    home.reRender(await render())
-    expect(home.getShelfCounts()["followed-series"]).toBe(1)
+    // Same container — a re-render from the live store drops the
+    // unfollowed show. No restart, no remount.
+    await render()
+    expect(followedCards().length).toBe(1)
     const remaining = container.querySelector(
-      '[data-nylah-rail="followed-series"] [data-entry-id]'
+      '[data-nylah-rail="series-home-followed"] [data-couch-key]'
     )
-    expect(remaining?.getAttribute("data-entry-id")).toBe("7102")
+    expect(remaining?.getAttribute("data-couch-key")).toBe("series-7102")
     expect(await followedIds(store)).toEqual([7102])
-    home.unmount()
   })
 
   it("20. No extra provider requests from opening a large grid", async () => {
-    const catalogue = generateCatalogue({ seed: 0x1020, movieCount: 8000, seriesCount: 2000 })
-    const index = freshIndex("vod", catalogue.movies)
+    // ADAPTED: the real mount loads the catalogue ONCE (initial
+    // load); paging/scrolling/category/filter/search must add ZERO
+    // further loads. The stub asserted 0 because the index was
+    // injected — the real contract is exactly-one.
+    const catalogue = generateCatalogue({ seed: 0x1020, movieCount: 8000, seriesCount: 0 })
     let loaderCalls = 0
     const container = document.createElement("div")
     document.body.appendChild(container)
     const mount = mountBrowseEverything(container, {
-      index,
-      loader: () => {
+      kind: "movie",
+      source: makeSource(catalogue.movies, "movie", () => {
         loaderCalls += 1
-        return null
-      },
+      }),
+      onOpenDetail: () => {},
+      onExit: () => {},
     })
-    await mount.awaitSettled()
+    await waitForCards(container, 1)
+    expect(loaderCalls).toBe(1)
     // Paging, scrolling, category switches, filters: all from the index.
     for (let page = 1; page <= 5; page++) {
-      mount.setPage(page)
-      await mount.awaitSettled()
+      mount.setState({ page })
+      await flush()
     }
-    for (let i = 0; i < 20; i++) mount.scrollWithinPage(1)
-    const firstCategory = index.categories[0]
-    mount.setCategory(firstCategory.id)
-    await mount.awaitSettled()
-    mount.applyFilters({ minRating: 7 })
-    await mount.awaitSettled()
-    mount.setSearch("harbour", "all")
-    await mount.awaitSettled()
-    expect(loaderCalls).toBe(0)
-    expect(mount.getMountedCardCount()).toBeGreaterThan(0)
-    mount.unmount()
+    const grid = container.querySelector("[data-nylah-rail='browse-grid']") ?? container
+    for (let i = 0; i < 20; i++) grid.dispatchEvent(new Event("scroll", { bubbles: true }))
+    await flush()
+    mount.setState({ category: { kind: "genre", id: "action", label: "Action" } })
+    await flush()
+    mount.setState({ filters: { minRating: 7 } })
+    await flush()
+    mount.setState({ search: "harbour", searchScope: "all" })
+    await flush()
+    expect(loaderCalls).toBe(1)
+    expect(gridCards(container).length).toBeGreaterThan(0)
+    mount.destroy()
   })
 })
