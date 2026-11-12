@@ -1,10 +1,11 @@
 /**
  * @vitest-environment jsdom
  *
- * Channel Browser tests (0.9.0 W2 rebuild): the virtualised utility
- * screen — 4-column rows (Ch. / Channel / Now / Next), compact
- * contextual panel, category selector order, entry filters, search,
- * page jumps, favourite toggle, B/back, and highlight-never-tunes.
+ * Channel Browser tests (0.9.0 W2 rebuild; 0.11.7 W2 drawer
+ * rebuild): the virtualised utility screen — 4-column rows (Ch. /
+ * Channel / Now / Next), compact contextual panel, category drawer
+ * order, entry filters, search/sort overlay events, page jumps,
+ * favourite toggle, B/back, and highlight-never-tunes.
  * Synthetic data only; nothing here plays a stream.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -198,7 +199,7 @@ describe("browserCategories", () => {
     expect(cats.find((c) => c.id === "recents")?.count).toBe(0);
   });
 
-  it("every pill carries a text glyph icon", () => {
+  it("every drawer entry carries a text glyph icon", () => {
     const cats = browserCategories(CHANNELS, [1, 2]);
     for (const cat of cats) {
       expect(cat.icon.length).toBeGreaterThan(0);
@@ -444,33 +445,43 @@ describe("mountChannelBrowser", () => {
     handle.destroy();
   });
 
-  it("Y focuses search; typing filters the list", () => {
-    vi.useFakeTimers();
+  it("Y dispatches livetv:open-search; a search-submit filters the list", () => {
+    const openSpy = vi.fn();
+    window.addEventListener("livetv:open-search", openSpy);
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
     const list = root.querySelector<HTMLElement>("[data-browser-list]")!;
     keyOn(list, "y");
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    expect(document.activeElement).toBe(input);
-    expect(handle.isSearchOpen()).toBe(true);
-    input.value = "sports";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    // Before the debounce fires the list is unfiltered.
-    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("4 channels");
-    vi.advanceTimersByTime(200);
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openSpy.mock.calls[0][0].detail).toEqual({
+      groupId: "all",
+      subcategoryId: null,
+      query: "",
+      scope: "category",
+    });
+    window.removeEventListener("livetv:open-search", openSpy);
+    // W4's overlay answers with a submit; the browser applies it.
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "sports" } }),
+    );
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
+    expect(handle.isSearchOpen()).toBe(true);
+    expect(handle.getHighlightedId()).toBe(2);
+    expect(root.querySelector("[data-browser-breadcrumb]")?.textContent).toContain("sports");
     handle.destroy();
   });
 
-  it("search is debounced and filters the list", () => {
-    vi.useFakeTimers();
+  it("a search-submit filters the list immediately (debounce lives in the W4 overlay)", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "sports";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    // Before the debounce fires the list is unfiltered.
-    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("4 channels");
-    vi.advanceTimersByTime(200);
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "sports" } }),
+    );
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
+    // Submitting an empty query clears the filter.
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "" } }),
+    );
+    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("4 channels");
+    expect(handle.isSearchOpen()).toBe(false);
     handle.destroy();
   });
 
@@ -514,6 +525,8 @@ describe("mountChannelBrowser", () => {
   });
 
   it("a livetv:mode browser entry applies the filter and opens search", () => {
+    const openSpy = vi.fn();
+    window.addEventListener("livetv:open-search", openSpy);
     const handle = mountChannelBrowser(root, {
       channels: CHANNELS,
       acceptModeEntry: true,
@@ -525,7 +538,15 @@ describe("mountChannelBrowser", () => {
     );
     expect(handle.getCategoryId()).toBe("favourites");
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
-    expect(document.activeElement).toBe(root.querySelector("[data-browser-search]"));
+    // Search opens via the W4 overlay event, carrying the context.
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    expect(openSpy.mock.calls[0][0].detail).toEqual({
+      groupId: "favourites",
+      subcategoryId: null,
+      query: "",
+      scope: "category",
+    });
+    window.removeEventListener("livetv:open-search", openSpy);
     handle.destroy();
   });
 
@@ -548,11 +569,9 @@ describe("mountChannelBrowser", () => {
       onClose,
       acceptModeEntry: true,
     });
-    handle.openSearch();
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "sports";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(200);
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "sports" } }),
+    );
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
 
     window.dispatchEvent(new CustomEvent("livetv:back", { detail: { context: "browser" } }));
@@ -617,12 +636,20 @@ describe("mountChannelBrowser", () => {
     handle.destroy();
   });
 
-  it("screen mode puts title and search on one header row and adds no duplicate hints legend", () => {
+  it("screen mode carries a title header with the toolbar on its own row below, and no duplicate hints legend", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS, acceptModeEntry: true });
     const header = root.querySelector<HTMLElement>(".rs-livetv-browser__header")!;
     expect(header).not.toBeNull();
     expect(header.contains(root.querySelector(".rs-livetv-browser__title-text"))).toBe(true);
-    expect(header.contains(root.querySelector("[data-browser-search]"))).toBe(true);
+    // The toolbar is the row after the header: the category
+    // control + Search / Sort buttons (overlays), not an inline
+    // search box or select.
+    const toolbar = root.querySelector<HTMLElement>(".rs-livetv-browser__toolbar")!;
+    expect(header.nextElementSibling).toBe(toolbar);
+    expect(toolbar.contains(root.querySelector("[data-browser-category-button]"))).toBe(true);
+    expect(toolbar.contains(root.querySelector("[data-browser-search-button]"))).toBe(true);
+    expect(root.querySelector("[data-browser-search]")).toBeNull();
+    expect(root.querySelector("select")).toBeNull();
     // The shell's global Xbox hints bar already renders the legend
     // in browser mode (A Watch / B Back / LB RB / LT RT / X / Y) —
     // a second legend here would duplicate it and sit below the fold.
@@ -637,42 +664,40 @@ describe("mountChannelBrowser", () => {
   });
 
   it("a no-match search shows the empty state inside the list", () => {
-    vi.useFakeTimers();
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "zzz-no-such-channel";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    vi.advanceTimersByTime(200);
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "zzz-no-such-channel" } }),
+    );
     const empty = root.querySelector<HTMLElement>("[data-browser-empty]")!;
     expect(empty.hidden).toBe(false);
     expect(empty.textContent).toContain("No channels match");
     handle.destroy();
   });
 
-  it("category pills show their icon glyphs", () => {
+  it("drawer entries show their icon glyphs", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS, recentIds: [1, 2] });
-    const pills = [...root.querySelectorAll<HTMLElement>("[data-browser-category]")];
-    expect(pills.map((p) => p.textContent)).toEqual(
-      expect.arrayContaining(["★Favourites", "▦All Channels"]),
+    handle.openCategories();
+    const items = [...root.querySelectorAll<HTMLElement>("[data-category-drawer-item]")];
+    expect(items.length).toBeGreaterThan(0);
+    expect(items[0]?.querySelector(".rs-tv-category-drawer__item-icon")?.textContent).toBe("★");
+    expect(items[0]?.querySelector(".rs-tv-category-drawer__item-label")?.textContent).toBe("Favourites");
+    const all = items.find(
+      (item) => item.querySelector(".rs-tv-category-drawer__item-label")?.textContent === "All Channels",
     );
-    expect(pills[0]?.querySelector(".rs-livetv-browser__category-icon")?.textContent).toBe("★");
+    expect(all?.querySelector(".rs-tv-category-drawer__item-icon")?.textContent).toBe("▦");
     handle.destroy();
   });
 
-  it("Enter in search applies the query and jumps to the first match", () => {
-    vi.useFakeTimers();
+  it("a search-submit jumps to the first match; a no-match submit leaves no highlight", () => {
     const handle = mountChannelBrowser(root, { channels: CHANNELS });
-    const input = root.querySelector<HTMLInputElement>("[data-browser-search]")!;
-    input.value = "BBC";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    // The debounce has not fired yet — Enter applies it now.
-    expect(root.querySelector("[data-browser-status]")?.textContent).toContain("4 channels");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "BBC" } }),
+    );
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("No channels match");
     expect(handle.getHighlightedId()).toBeNull();
-    input.value = "sports";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    window.dispatchEvent(
+      new CustomEvent("livetv:search-submit", { detail: { query: "sports" } }),
+    );
     expect(root.querySelector("[data-browser-status]")?.textContent).toContain("2 channels");
     expect(handle.getHighlightedId()).toBe(2);
     handle.destroy();
