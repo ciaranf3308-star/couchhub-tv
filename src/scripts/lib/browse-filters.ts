@@ -656,3 +656,21 @@ export function clearBrowseFilterState(scope: string): void {
     // Ignore.
   }
 }
+
+// ── STUB — 0.11.6 W5: deleted at integration, replaced by the real ──
+// implementation (W4). Minimal, behaviourally transparent stand-in for
+// W4's genre-selection helper, written ONLY so the 0.11.6 acceptance
+// tests (tests/ai-discovery-3.0.test.ts, Test E) compile and their LOGIC
+// is verified in the W5 worktree. Selecting a genre REPLACES the
+// previous genre — never intersects, never accumulates — which is the
+// fix for the user-reported Comedy-then-Horror progressive sub-filter
+// bug. Pure: returns a new state, never mutates the input. `null`
+// clears the genre (same as "All genres"). Every other field passes
+// through untouched.
+
+export function selectGenreFilter(
+  state: BrowseFilterState,
+  genre: string | null,
+): BrowseFilterState {
+  return { ...state, genre: genre ?? "" }
+}
