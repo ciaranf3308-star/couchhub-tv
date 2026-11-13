@@ -315,15 +315,19 @@ describe("prefetchProgrammes", () => {
 // a TMDb key later takes effect at once. Genuine no-match placeholders
 // (key active, searched, nothing found) ARE negative-cached 24h — see
 // "negatively caches a failed match" above.
+// 0.11.12 W1: the title here is deliberately non-sport. The original
+// F1 title now resolves through the sports fallbacks (generic
+// motorsport photo once W2's manifest lands), so it can no longer pin
+// the no-key placeholder behaviour.
 describe("enrichProgramme — no-key placeholder is transient", () => {
   it("does not cache the placeholder when TMDb is inactive", async () => {
     mockIsTmdbActive.mockReturnValue(false)
     mockGetTmdbApiKey.mockReturnValue("")
     clearProgrammeArtworkCache()
-    expect(getProgrammeArtworkSync("F1: Brazilian Grand Prix — Qualifying")).toBeNull()
-    const art = await enrichProgramme({ title: "F1: Brazilian Grand Prix — Qualifying", channelName: "Sky Sports F1" })
+    expect(getProgrammeArtworkSync("A Programme That Does Not Exist")).toBeNull()
+    const art = await enrichProgramme({ title: "A Programme That Does Not Exist", channelName: "BBC One" })
     expect(art.source).toBe("placeholder")
     expect(art.confidence).toBe(0)
-    expect(getProgrammeArtworkSync("F1: Brazilian Grand Prix — Qualifying")).toBeNull()
+    expect(getProgrammeArtworkSync("A Programme That Does Not Exist")).toBeNull()
   })
 })

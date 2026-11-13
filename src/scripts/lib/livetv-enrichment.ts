@@ -27,6 +27,21 @@
 // - Never logs a key (the tmdb.ts client puts the key in the URL; this
 //   module never logs URLs or the key — log.warn calls below pass only
 //   the title and the error object, and log.ts redacts credential params).
+//
+// 0.11.12 (sports-aware hierarchy): titles classify through
+// livetv-sports-classifier.ts BEFORE any TMDb search. Resolution order:
+// (1) exact verified programme artwork via the TMDb path above (confident-
+// match requirements unchanged); (2) verified sports event artwork via
+// the provider hook; (3) team/league artwork via the same hook;
+// (4) generic sport photography from the bundled manifest; (5) channel
+// branding; (6) branded placeholder. High-confidence fixtures, tournaments
+// and league broadcasts skip the blind TMDb search entirely — TMDb has no
+// fixture art, and searching wastes requests. Exact-event and generic-
+// sport images carry distinct artworkKind/provenance and must never be
+// confused: a generic photo is suitable art for the sport, never evidence
+// of the actual fixture, so it keeps identity confidence 0. The persisted
+// cache namespace is v2: 0.11.11 v1 negative entries must not suppress
+// the new sport fallbacks.
 import { getTmdbApiKey, isTmdbActive } from "@/scripts/lib/app-settings.js"
 import { getActiveLocale } from "@/scripts/lib/i18n.js"
 import { log } from "@/scripts/lib/log.js"
@@ -44,17 +59,36 @@ import {
   type TmdbSearchResult,
 } from "@/scripts/lib/tmdb.ts"
 import { cleanProviderTitle, pickTmdbMatch } from "@/scripts/lib/tmdb-match.ts"
+import {
+  classifySportsProgramme,
+  type SportsClassification,
+  type SportId,
+} from "@/scripts/lib/livetv-sports-classifier.ts"
+import { SPORT_ARTWORK_MANIFEST, type SportsArtworkEntry } from "@/scripts/lib/sports-artwork-manifest.ts"
+import { lookupSportsEventArtwork, type ExactSportsArtwork } from "@/scripts/lib/thesportsdb-provider.ts"
 
 export interface ProgrammeArtwork {
   backdropUrl: string | null
   posterUrl: string | null
   stillUrl: string | null
-  source: "tmdb-episode" | "tmdb-series" | "tmdb-movie" | "channel" | "placeholder"
+  source: "tmdb-episode" | "tmdb-series" | "tmdb-movie" | "channel" | "sports" | "placeholder"
   /** 0..1. Placeholder is 0; a confident exact+year match is 0.95. */
   confidence: number
   matchedTitle: string | null
   synopsis: string | null
   genres: string[]
+  /** 0.11.12: which hierarchy level produced this artwork. Consumers
+   *  (W3) build against this: displayable kinds show their art
+   *  regardless of identity confidence, while channel-branding and
+   *  placeholder kinds keep the branded placeholder. `confidence`
+   *  keeps its identity-match meaning — visual suitability is
+   *  expressed here, never by inflating confidence. */
+  artworkKind?: "exact-programme" | "exact-sports-event" | "league-team" | "generic-sport" | "channel-branding" | "placeholder"
+  /** 0.11.12: artwork origin and rights attribution. TMDb results
+   *  carry { source: "TMDb" }; generic sport photos carry the
+   *  manifest entry's creator/licence; provider results carry the
+   *  provider's rights basis. Absent on legacy cached entries. */
+  provenance?: { source: string; attribution?: string; licence?: string; licenceUrl?: string; sourcePage?: string }
 }
 
 export interface EnrichProgrammeRequest {
@@ -62,6 +96,10 @@ export interface EnrichProgrammeRequest {
   channelName?: string
   startMs?: number
   endMs?: number
+  /** Optional provider category (e.g. "Sports"). Supporting evidence
+   *  for the sports classifier only — it can raise a weak title signal,
+   *  never create a sport classification on its own. */
+  category?: string
   /** Optional channel logo URL. Only used for the 'channel' fallback source
    *  when TMDb has no confident match — never as programme artwork. */
   channelLogoUrl?: string | null
@@ -76,6 +114,7 @@ export const PLACEHOLDER_ARTWORK: ProgrammeArtwork = {
   matchedTitle: null,
   synopsis: null,
   genres: [],
+  artworkKind: "placeholder",
 }
 
 /** Fresh honest-miss shape (exported for callers/tests that need a
@@ -199,7 +238,16 @@ export function parseProgrammeTitleSignals(rawTitle: string, channelName?: strin
 
 const POSITIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000
-const PERSIST_KEY = "xt_livetv_enrichment_v1"
+// 0.11.12: sports outcomes re-check sooner than TMDb negatives — event
+// artwork can appear closer to the fixture, and a stale generic photo
+// must yield to it. Applies to provider negatives, generic-sport title
+// entries, and sport-title placeholder negatives.
+const SPORTS_TTL_MS = 6 * 60 * 60 * 1000
+// v2 namespace (0.11.12): a v1 negative entry (e.g. "NHL Hockey" cached
+// as no-match under 0.11.11) must NOT suppress the new sport fallbacks,
+// so the persisted key is bumped and v1 blobs are never hydrated.
+const PERSIST_KEY = "xt_livetv_enrichment_v2"
+const LEGACY_PERSIST_KEY = "xt_livetv_enrichment_v1"
 const MAX_PERSISTED_ENTRIES = 200
 
 interface CacheEntry {
@@ -252,7 +300,7 @@ function persistCache(): void {
   }
 }
 
-function cacheGet(key: string): ProgrammeArtwork | null {
+function readCacheEntry(key: string): CacheEntry | null {
   hydratePersistedCache()
   const entry = memoryCache.get(key)
   if (!entry) return null
@@ -260,13 +308,17 @@ function cacheGet(key: string): ProgrammeArtwork | null {
     memoryCache.delete(key)
     return null
   }
-  return entry.art
+  return entry
 }
 
-function cachePut(key: string, art: ProgrammeArtwork, negative: boolean): void {
+function cacheGet(key: string): ProgrammeArtwork | null {
+  return readCacheEntry(key)?.art ?? null
+}
+
+function cachePut(key: string, art: ProgrammeArtwork, negative: boolean, ttlMs?: number): void {
   memoryCache.set(key, {
     art,
-    expiresAt: Date.now() + (negative ? NEGATIVE_TTL_MS : POSITIVE_TTL_MS),
+    expiresAt: Date.now() + (ttlMs ?? (negative ? NEGATIVE_TTL_MS : POSITIVE_TTL_MS)),
     negative,
   })
   persistCache()
@@ -277,7 +329,12 @@ export function clearProgrammeArtworkCache(): void {
   memoryCache.clear()
   persistedHydrated = true
   try {
-    if (typeof localStorage !== "undefined") localStorage.removeItem(PERSIST_KEY)
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(PERSIST_KEY)
+      // Drop the pre-0.11.12 blob too, so stale v1 negatives can never
+      // be re-read by an older build running alongside this one.
+      localStorage.removeItem(LEGACY_PERSIST_KEY)
+    }
   } catch {
     // Ignore — cache is already cleared in memory.
   }
@@ -391,6 +448,8 @@ async function fetchArtworkForMatch(
       matchedTitle: bundle.title || match.title,
       synopsis: bundle.overview || null,
       genres: (bundle.genres || []).map((genre) => genre.name),
+      artworkKind: "exact-programme",
+      provenance: { source: "TMDb" },
     }
   }
 
@@ -404,6 +463,8 @@ async function fetchArtworkForMatch(
     matchedTitle: bundle.name || match.title,
     synopsis: bundle.overview || null,
     genres: (bundle.genres || []).map((genre) => genre.name),
+    artworkKind: "exact-programme",
+    provenance: { source: "TMDb" },
   }
 
   // Episode still when the EPG title carries SxxExx / Series N Episode M.
@@ -427,58 +488,279 @@ async function fetchArtworkForMatch(
 }
 
 // ---------------------------------------------------------------------------
+// Sports artwork (0.11.12): provider hook + generic manifest fallback
+// ---------------------------------------------------------------------------
+
+/** The provider hook runs only for sport classifications with high or
+ *  medium confidence — never for non-sport titles, and never for weak
+ *  (low) sport signals, where only the generic fallback may apply. */
+function isProviderEligible(classification: SportsClassification): boolean {
+  return classification.isSport && (classification.confidence === "high" || classification.confidence === "medium")
+}
+
+/**
+ * High-confidence fixtures, tournaments and league broadcasts never need
+ * a blind TMDb search: TMDb has no fixture art, and searching wastes
+ * requests on titles like "NHL Hockey". General-sport titles and
+ * anything below high confidence still try exact TMDb art first, so a
+ * series or film with a sport-shaped title keeps its exact artwork.
+ */
+function shouldSkipTmdb(classification: SportsClassification): boolean {
+  return classification.isSport && classification.confidence === "high" && classification.kind !== "general-sport"
+}
+
+/** Broadcast date (local YYYY-MM-DD) for the sports-event cache key and
+ *  the provider hook. Dateless calls describe now-playing rows, so they
+ *  default to today: the same programme enriched with and without
+ *  startMs shares one entry, and tomorrow's fixture gets a fresh key. */
+function broadcastDateFor(startMs?: number): string {
+  const date = new Date(typeof startMs === "number" && Number.isFinite(startMs) ? startMs : Date.now())
+  const pad = (value: number): string => String(value).padStart(2, "0")
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** Composite sports-event cache key: normalised title + sport +
+ *  teams/event + broadcast date. Lowercased so capitalisation variants
+ *  share one entry. */
+function sportsCacheKey(title: string, classification: SportsClassification, startMs?: number): string {
+  const event = classification.teams
+    ? classification.teams.map((side) => side.toLowerCase()).join(" v ")
+    : (classification.competition ?? "").toLowerCase()
+  return `sport-event:${normalizeProgrammeTitle(title).toLowerCase()}|${classification.sport ?? ""}|${event}|${broadcastDateFor(startMs)}`
+}
+
+interface SportsCacheLookup {
+  hit: boolean
+  /** Null on a hit means the provider authoritatively returned nothing. */
+  art: ProgrammeArtwork | null
+}
+
+function sportsCacheGet(key: string): SportsCacheLookup {
+  const entry = readCacheEntry(key)
+  if (!entry) return { hit: false, art: null }
+  if (entry.negative) return { hit: true, art: null }
+  return { hit: true, art: entry.art }
+}
+
+function sportsCachePut(key: string, art: ProgrammeArtwork | null): void {
+  if (art) cachePut(key, art, false)
+  else cachePut(key, placeholderArtwork(), true, SPORTS_TTL_MS)
+}
+
+const PROVIDER_TIMEOUT_MS = 3000
+const inflightProviderLookups = new Map<string, Promise<ProgrammeArtwork | null>>()
+
+/**
+ * Map verified provider art onto ProgrammeArtwork. Both URL slots are
+ * filled from whichever image the provider returned: hero and tile
+ * consumers read backdropUrl only, so a poster-only result must still
+ * land in the wide slot. The provider shape carries no team/league
+ * distinction, so every verified result maps to "exact-sports-event";
+ * "league-team" is reserved for a future provider revision that reports
+ * team/league art distinctly.
+ */
+function providerArtworkToProgrammeArtwork(result: ExactSportsArtwork, title: string): ProgrammeArtwork | null {
+  const backdropUrl = result.backdropUrl ?? result.posterUrl ?? null
+  const posterUrl = result.posterUrl ?? result.backdropUrl ?? null
+  if (!backdropUrl && !posterUrl) return null
+  return {
+    backdropUrl,
+    posterUrl,
+    stillUrl: null,
+    source: "sports",
+    artworkKind: "exact-sports-event",
+    confidence: 0.85,
+    matchedTitle: result.eventName || title.trim() || null,
+    synopsis: null,
+    genres: [],
+    provenance: { source: "TheSportsDB", licence: result.rightsBasis },
+  }
+}
+
+/**
+ * Provider lookup with timeout, failure isolation, in-flight dedup and
+ * composite-key caching. An authoritative null is cached (short sports
+ * TTL); a throw or timeout is NOT cached, so a retry can succeed.
+ * Never throws; never returns a partial result.
+ */
+async function lookupProviderArtwork(
+  classification: SportsClassification,
+  req: EnrichProgrammeRequest
+): Promise<ProgrammeArtwork | null> {
+  const key = sportsCacheKey(req.title, classification, req.startMs)
+  const cached = sportsCacheGet(key)
+  if (cached.hit) return cached.art
+  const inFlight = inflightProviderLookups.get(key)
+  if (inFlight) return inFlight
+
+  const promise = (async (): Promise<ProgrammeArtwork | null> => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    try {
+      const lookup = lookupSportsEventArtwork(classification, {
+        title: req.title,
+        broadcastDate: broadcastDateFor(req.startMs),
+      })
+      // Swallow a late rejection: if the timeout wins the race, the
+      // provider promise still settles and must not surface unhandled.
+      void lookup.catch(() => undefined)
+      let timedOut = false
+      const timeout = new Promise<null>((resolve) => {
+        timeoutId = setTimeout(() => {
+          timedOut = true
+          resolve(null)
+        }, PROVIDER_TIMEOUT_MS)
+      })
+      const result = await Promise.race([lookup, timeout])
+      if (timedOut) return null
+      const art = result ? providerArtworkToProgrammeArtwork(result, req.title) : null
+      sportsCachePut(key, art)
+      return art
+    } catch (error) {
+      // Failure isolation: the provider must never break resolution.
+      log.warn("[xt:livetv-enrich] sports provider failed:", req.title, error)
+      return null
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId)
+      inflightProviderLookups.delete(key)
+    }
+  })()
+
+  inflightProviderLookups.set(key, promise)
+  return promise
+}
+
+/**
+ * Generic sport photographs, resolved once per sport (the manifest is a
+ * static bundled list, so the memo never goes stale). Landscape is
+ * preferred: hero and tile slots read the backdrop, and a landscape
+ * photo fills both slots. An empty manifest resolves to null and the
+ * hierarchy falls through to channel branding.
+ */
+const genericSportMemo = new Map<SportId, SportsArtworkEntry | null>()
+
+function genericEntryForSport(sport: SportId): SportsArtworkEntry | null {
+  if (genericSportMemo.has(sport)) return genericSportMemo.get(sport) ?? null
+  const entries = SPORT_ARTWORK_MANIFEST.filter((entry) => entry.sport === sport)
+  const entry = entries.find((candidate) => candidate.orientation === "landscape") ?? entries[0] ?? null
+  genericSportMemo.set(sport, entry)
+  return entry
+}
+
+function genericSportArtwork(classification: SportsClassification, title: string): ProgrammeArtwork | null {
+  if (!classification.sport) return null
+  const entry = genericEntryForSport(classification.sport)
+  if (!entry) return null
+  return {
+    backdropUrl: entry.path,
+    posterUrl: entry.path,
+    stillUrl: null,
+    source: "sports",
+    artworkKind: "generic-sport",
+    // Identity-match confidence stays 0: a generic photo is suitable
+    // art for the sport without being evidence of the actual fixture.
+    // Suitability is expressed via artworkKind, not confidence.
+    confidence: 0,
+    matchedTitle: title.trim() || null,
+    synopsis: null,
+    genres: [],
+    provenance: {
+      // The 0.11.12 manifest is Wikimedia Commons photographs only
+      // (brief hard rule); the entry carries creator/licence/attribution.
+      source: "Wikimedia Commons",
+      attribution: entry.attribution,
+      licence: entry.licence,
+      licenceUrl: entry.licenceUrl,
+      sourcePage: entry.sourcePage,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API (contracts)
 // ---------------------------------------------------------------------------
 
 interface UncachedResult {
   art: ProgrammeArtwork
   /**
-   * True only for an authoritative "no confident match" (searches completed
-   * and nothing matched, or a match with no usable art). False for the
-   * no-key path and for network/auth/rate-limit failures — those must
-   * never be negatively cached.
+   * True only for an authoritative "no artwork" outcome: a TMDb key is
+   * configured, the search ran (or was skipped by design for a
+   * high-confidence sport title) without failure, and no hierarchy
+   * level produced art. False for the no-key path and for network /
+   * auth / rate-limit failures — those must never be negatively cached.
    */
   negative: boolean
+  /**
+   * TTL for a negatively-cached placeholder. Sport titles re-check
+   * after the short sports TTL (event art can appear closer to the
+   * fixture); non-sport titles keep the 24h TMDb negative TTL.
+   */
+  negativeTtlMs: number
 }
 
 async function enrichProgrammeUncached(req: EnrichProgrammeRequest): Promise<UncachedResult> {
   const signals = parseProgrammeTitleSignals(req.title, req.channelName)
-  if (!signals.query) return { art: placeholderArtwork(), negative: true }
+  if (!signals.query) return { art: placeholderArtwork(), negative: true, negativeTtlMs: NEGATIVE_TTL_MS }
+
+  // Classify BEFORE any TMDb search: high-confidence sport titles skip
+  // the blind search entirely (see shouldSkipTmdb).
+  const classification = classifySportsProgramme(req.title, {
+    channelName: req.channelName,
+    category: req.category,
+  })
+  const negativeTtlMs = classification.isSport ? SPORTS_TTL_MS : NEGATIVE_TTL_MS
 
   // Channel branding is a valid fallback with or without a TMDb key — but
   // it is never cached (see enrichProgramme): a key added later must win.
   const channelFallback = channelArtwork(req)
 
-  // No key configured: degrade silently to placeholder — no network, and
-  // deliberately NOT cached, so adding a key later enriches immediately.
-  if (!isTmdbActive()) {
-    return { art: channelFallback ?? placeholderArtwork(), negative: false }
-  }
-  const apiKey = getTmdbApiKey()
-  if (!apiKey) return { art: channelFallback ?? placeholderArtwork(), negative: false }
+  const tmdbActive = isTmdbActive()
+  const apiKey = tmdbActive ? getTmdbApiKey() : ""
+  const skipTmdb = shouldSkipTmdb(classification)
 
-  const language = tmdbLanguage()
-  try {
-    const match = await searchConfidentMatch(apiKey, signals, language)
-    if (!match) {
-      return channelFallback
-        ? { art: channelFallback, negative: false }
-        : { art: placeholderArtwork(), negative: true }
+  // Level 1: exact verified programme artwork via TMDb. The
+  // confident-match requirements in searchConfidentMatch are unchanged.
+  let tmdbSearched = false
+  let tmdbFailed = false
+  if (!skipTmdb && apiKey) {
+    const language = tmdbLanguage()
+    try {
+      const match = await searchConfidentMatch(apiKey, signals, language)
+      tmdbSearched = true
+      if (match) {
+        const art = await fetchArtworkForMatch(apiKey, match, signals, language)
+        if (art && (art.backdropUrl || art.posterUrl || art.stillUrl)) {
+          return { art, negative: false, negativeTtlMs }
+        }
+      }
+    } catch (error) {
+      // Network / auth / rate-limit failure: fall through to the sport
+      // levels (they need no TMDb key), then channel/placeholder.
+      // Never thrown, and never negatively cached — a retry must be
+      // able to succeed.
+      tmdbFailed = true
+      log.warn("[xt:livetv-enrich] enrich failed:", req.title, error)
     }
-    const art = await fetchArtworkForMatch(apiKey, match, signals, language)
-    if (!art || (!art.backdropUrl && !art.posterUrl && !art.stillUrl)) {
-      // Matched but TMDb has no usable art: fall back to channel, else no match.
-      return channelFallback
-        ? { art: channelFallback, negative: false }
-        : { art: placeholderArtwork(), negative: true }
-    }
-    return { art, negative: false }
-  } catch (error) {
-    // Network / auth / rate-limit failure: placeholder, never thrown, and
-    // never negatively cached — a retry must be able to succeed.
-    log.warn("[xt:livetv-enrich] enrich failed:", req.title, error)
-    return { art: channelFallback ?? placeholderArtwork(), negative: false }
   }
+
+  // Levels 2/3: verified sports event / team-league artwork via the
+  // provider hook (high/medium sport only; timeout + failure isolated).
+  if (isProviderEligible(classification)) {
+    const providerArt = await lookupProviderArtwork(classification, req)
+    if (providerArt) return { art: providerArt, negative: false, negativeTtlMs }
+  }
+
+  // Level 4: generic sport photography from the bundled manifest.
+  if (classification.isSport) {
+    const genericArt = genericSportArtwork(classification, req.title)
+    if (genericArt) return { art: genericArt, negative: false, negativeTtlMs }
+  }
+
+  // Level 5: channel branding.
+  if (channelFallback) return { art: channelFallback, negative: false, negativeTtlMs }
+
+  // Level 6: branded placeholder.
+  const negative = tmdbActive && !tmdbFailed && (tmdbSearched || skipTmdb)
+  return { art: placeholderArtwork(), negative, negativeTtlMs }
 }
 
 /** 'channel'-source artwork from an explicit channel logo URL, or null. */
@@ -493,6 +775,8 @@ function channelArtwork(req: EnrichProgrammeRequest): ProgrammeArtwork | null {
     matchedTitle: req.title.trim() || null,
     synopsis: null,
     genres: [],
+    artworkKind: "channel-branding",
+    provenance: { source: req.channelName?.trim() || "channel" },
   }
 }
 
@@ -500,51 +784,96 @@ function channelArtwork(req: EnrichProgrammeRequest): ProgrammeArtwork | null {
  * Enrich one EPG programme title. Never throws; returns placeholder-source
  * on any failure. Only enriches when called — callers decide visibility.
  * Successful matches are cached 7 days; authoritative "no confident
- * match" results are negatively cached 24h.
+ * match" results are negatively cached 24h (6h for sport titles, so
+ * event art appearing later still wins). Verified sports-event art is
+ * cached separately under a composite title+sport+teams/event+date key;
+ * generic sport photos are title-cached 6h while a TMDb key is
+ * configured, and never cached without one (a key added later must win).
  */
 export async function enrichProgramme(req: EnrichProgrammeRequest): Promise<ProgrammeArtwork> {
   const key = normalizeProgrammeTitle(req.title)
   if (!key) return placeholderArtwork()
 
+  const classification = classifySportsProgramme(req.title, {
+    channelName: req.channelName,
+    category: req.category,
+  })
+
+  // Verified sports-event art is checked first under its composite key:
+  // a cached event image wins without re-running the TMDb search that
+  // already lost on the first resolution — but only when TMDb is
+  // skipped by design (high confidence) or inactive. For medium
+  // confidence with an active key, exact TMDb art (level 1) must get
+  // its chance first, so the check below falls through to the full
+  // resolution, where the provider wrapper reuses the cached entry.
+  if (isProviderEligible(classification) && (shouldSkipTmdb(classification) || !isTmdbActive())) {
+    const sportsCached = sportsCacheGet(sportsCacheKey(req.title, classification, req.startMs))
+    if (sportsCached.hit && sportsCached.art) return sportsCached.art
+  }
+
   const cached = cacheGet(key)
   if (cached) return cached
 
-  const inFlight = inflightEnrichments.get(key)
+  // In-flight dedup: sports resolutions dedup on the composite key (the
+  // same fixture on different dates resolves independently); everything
+  // else dedups on the normalised title as before.
+  const dedupKey = isProviderEligible(classification)
+    ? sportsCacheKey(req.title, classification, req.startMs)
+    : key
+  const inFlight = inflightEnrichments.get(dedupKey)
   if (inFlight) return inFlight
 
   const promise = (async (): Promise<ProgrammeArtwork> => {
-    const { art, negative } = await enrichProgrammeUncached(req)
+    const { art, negative, negativeTtlMs } = await enrichProgrammeUncached(req)
     if (art.source === "placeholder") {
       // Negative-cache only an authoritative no-match while a key is
       // configured. No-key and network-failure placeholders are transient
       // by design (see enrichProgrammeUncached) and must not be cached:
       // re-checking is cheap and a later key / recovered network must work.
-      if (negative && isTmdbActive()) cachePut(key, placeholderArtwork(), true)
+      if (negative && isTmdbActive()) cachePut(key, placeholderArtwork(), true, negativeTtlMs)
       return art
     }
     // Channel-source art is never cached: a TMDb key added later must win
     // over the logo fallback on the next enrich.
     if (art.source === "channel") return art
+    if (art.source === "sports") {
+      // Verified event art lives only in the date-keyed sports cache —
+      // a title-keyed entry would serve one date's fixture art for
+      // another. Generic sport photos ARE title-cached while a key is
+      // configured (TMDb already had its chance) with the short sports
+      // TTL, so event art appearing later still wins.
+      if (art.artworkKind === "generic-sport" && isTmdbActive()) {
+        cachePut(key, art, false, SPORTS_TTL_MS)
+      }
+      return art
+    }
     cachePut(key, art, false)
     return art
   })()
 
-  inflightEnrichments.set(key, promise)
+  inflightEnrichments.set(dedupKey, promise)
   try {
     return await promise
   } finally {
-    inflightEnrichments.delete(key)
+    inflightEnrichments.delete(dedupKey)
   }
 }
 
 /**
  * Cache peek only — no network. Returns the cached artwork for a title
  * (including a negatively-cached placeholder), or null when the title has
- * never been enriched or the entry expired.
+ * never been enriched or the entry expired. Dateless peeks check the
+ * sports-event cache under today's broadcast date, with the same
+ * hierarchy guard as enrichProgramme.
  */
 export function getProgrammeArtworkSync(title: string): ProgrammeArtwork | null {
   const key = normalizeProgrammeTitle(title)
   if (!key) return null
+  const classification = classifySportsProgramme(title)
+  if (isProviderEligible(classification) && (shouldSkipTmdb(classification) || !isTmdbActive())) {
+    const sportsCached = sportsCacheGet(sportsCacheKey(title, classification))
+    if (sportsCached.hit && sportsCached.art) return sportsCached.art
+  }
   return cacheGet(key)
 }
 
@@ -587,18 +916,37 @@ export function prefetchProgrammes(titles: string[]): void {
 // DOM upgrade helper for TvProgrammeArt + client-rendered callers
 // ---------------------------------------------------------------------------
 
-function pickArtworkUrl(art: ProgrammeArtwork, variant: string): string | null {
+// 0.11.12 DISPLAY RULE (mirrors the consumer rule in TvProgrammeArt /
+// Quick Surf / landing / browser / guide): when the resolver reports an
+// artworkKind, only a displayable kind may supply an image — a
+// displayable kind shows its art regardless of identity confidence (a
+// confidently classified hockey title gets the hockey photo even though
+// no exact event identity is established), and channel-branding /
+// placeholder kinds never paint (the branded placeholder stays). A
+// missing kind is legacy resolver output and keeps the slot order below
+// unchanged.
+const DISPLAYABLE_ARTWORK_KINDS: ReadonlySet<NonNullable<ProgrammeArtwork["artworkKind"]>> = new Set([
+  "exact-programme",
+  "exact-sports-event",
+  "league-team",
+  "generic-sport",
+])
+
+/** Pick the display URL for one artwork + variant under the display rule. */
+export function pickArtworkUrl(art: ProgrammeArtwork, variant: string): string | null {
+  if (art.artworkKind != null && !DISPLAYABLE_ARTWORK_KINDS.has(art.artworkKind)) return null
   if (variant === "card") return art.posterUrl || art.backdropUrl || art.stillUrl
   return art.backdropUrl || art.stillUrl || art.posterUrl
 }
 
 function applyArtworkToElement(element: HTMLElement, art: ProgrammeArtwork, variant: string): void {
   const url = pickArtworkUrl(art, variant)
-  element.setAttribute("data-art-source", art.source)
   if (!url) {
+    element.setAttribute("data-art-source", "placeholder")
     element.setAttribute("data-art-state", "done")
     return
   }
+  element.setAttribute("data-art-source", art.source)
   const existing = element.querySelector<HTMLImageElement>("img.rs-livetv-programme-art__img")
   if (existing) {
     if (existing.getAttribute("src") === url) {
