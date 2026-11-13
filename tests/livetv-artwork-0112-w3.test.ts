@@ -17,8 +17,9 @@
  * Tonight), Quick Surf row art (TvQuickSurf), and the
  * TvProgrammeArt slot contract. The resolver, classifier,
  * hierarchy, cache and manifest are W1/W2/W4's — nothing here
- * tests them, and the artworkKind/provenance fields are the
- * SHIM-0112 type-only definitions until W1 lands the real ones.
+ * tests them. The artworkKind/provenance fields are W1's real
+ * definitions in livetv-enrichment.ts (no SHIM remains on the
+ * merged tree).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
@@ -95,7 +96,7 @@ const LOGO_POSTER = "https://fixtures.invalid/logos/channel.png";
 
 beforeEach(() => {
   window.localStorage.removeItem("xt_tmdb_key");
-  window.localStorage.removeItem("xt_livetv_enrichment_v1");
+  window.localStorage.removeItem("xt_livetv_enrichment_v2");
   clearProgrammeArtworkCache();
   sessionStorage.clear();
 });
@@ -103,7 +104,7 @@ beforeEach(() => {
 afterEach(() => {
   document.body.replaceChildren();
   window.localStorage.removeItem("xt_tmdb_key");
-  window.localStorage.removeItem("xt_livetv_enrichment_v1");
+  window.localStorage.removeItem("xt_livetv_enrichment_v2");
   clearProgrammeArtworkCache();
 });
 
@@ -693,9 +694,9 @@ describe("TvQuickSurf artwork (0.11.12 kinds)", () => {
   });
 });
 
-// ── TvProgrammeArt slots + SHIM discipline ───────────────────────
+// ── TvProgrammeArt slots + merged-tree type discipline ───────────
 
-describe("TvProgrammeArt slots + SHIM-0112 discipline", () => {
+describe("TvProgrammeArt slots + merged-tree type discipline", () => {
   it("keeps the slot order (card: poster first; wide: backdrop first) behind the kind gate", () => {
     const astro = read("src/components/couch/TvProgrammeArt.astro");
     expect(astro).toContain("kindDisplayable");
@@ -706,9 +707,9 @@ describe("TvProgrammeArt slots + SHIM-0112 discipline", () => {
     expect(astro).toContain("upgradeProgrammeArtElements");
   });
 
-  it("the enrichment module carries ONLY the two SHIM type fields", () => {
+  it("the enrichment module carries W1's real kind/provenance definitions and no SHIM marker", () => {
     const enrichment = read("src/scripts/lib/livetv-enrichment.ts");
-    expect(enrichment.match(/SHIM-0112: type-only, W1 owns the real definition/g)?.length).toBe(2);
+    expect(enrichment).not.toContain("SHIM-0112");
     expect(enrichment).toContain("artworkKind?");
     expect(enrichment).toContain("provenance?");
     expect(enrichment).toContain('"generic-sport"');
@@ -722,7 +723,7 @@ describe("TvProgrammeArt slots + SHIM-0112 discipline", () => {
 // paints seeded generic-sport art and refuses seeded
 // channel-branding art without any network call.
 describe("enrichCategoryTiles through the seeded enrichment cache", () => {
-  const PERSIST_KEY = "xt_livetv_enrichment_v1";
+  const PERSIST_KEY = "xt_livetv_enrichment_v2";
 
   async function runWithSeededCache(seed: Record<string, unknown>) {
     window.localStorage.setItem(PERSIST_KEY, JSON.stringify(seed));
