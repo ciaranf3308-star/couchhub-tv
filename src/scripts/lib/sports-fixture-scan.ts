@@ -398,6 +398,19 @@ export function matchUnitedFixture(
 
 // ── Scan ────────────────────────────────────────────────────────
 
+/**
+ * The EPG revision time, when the state carries one. The loader
+ * type does not declare `fetchedAt` (it is a runtime field of the
+ * real store), so the read goes through `unknown` and validates.
+ */
+function epgFetchedAtOf(
+  state: GuideEpgStateLike | null | undefined,
+): number | null {
+  if (state == null) return null
+  const fetchedAt = (state as unknown as { fetchedAt?: unknown }).fetchedAt
+  return typeof fetchedAt === "number" ? fetchedAt : null
+}
+
 function normaliseTitleForId(title: string): string {
   return title
     .toLowerCase()
@@ -633,11 +646,7 @@ export function scanSportsFixtures(
   playlistId: string,
   nowMs: number = Date.now(),
 ): SportsScanResult {
-  const epgFetchedAt =
-    state != null &&
-    typeof (state as { fetchedAt?: unknown }).fetchedAt === "number"
-      ? (state as { fetchedAt: number }).fetchedAt
-      : null
+  const epgFetchedAt = epgFetchedAtOf(state)
   const loaded = loadGuideProgrammes(channels, state, overrides)
   const byId = new Map<string, SportsScanChannel>()
   for (const channel of channels) byId.set(String(channel.id), channel)
@@ -711,11 +720,7 @@ export function getSportsScan(
   playlistId: string,
   nowMs: number = Date.now(),
 ): SportsScanResult {
-  const fetchedAt =
-    state != null &&
-    typeof (state as { fetchedAt?: unknown }).fetchedAt === "number"
-      ? (state as { fetchedAt: number }).fetchedAt
-      : null
+  const fetchedAt = epgFetchedAtOf(state)
   const key = `${playlistId}|${fetchedAt ?? "none"}`
   if (cachedResult !== null && cachedKey === key) return cachedResult
   scanRunCount += 1

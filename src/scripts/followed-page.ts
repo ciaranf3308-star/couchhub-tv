@@ -623,7 +623,8 @@ async function mountSportsEntryCard(): Promise<void> {
     const sources = Array.isArray(detail.sources) ? detail.sources : []
     if (sources.length === 0) return
     const allFailed = sources.every(
-      (source) => source && source.status === "error",
+      (source: { status?: unknown }) =>
+        source && source.status === "error",
     )
     if (allFailed === epgFailed) return
     epgFailed = allFailed

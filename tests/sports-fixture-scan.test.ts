@@ -648,7 +648,6 @@ describe("synthetic 15,319-channel scan (T15)", () => {
       const elapsedMs = Date.now() - started
       // The number is the evidence — reported, not asserted against
       // a brittle threshold (sandbox CPU is throttled).
-      // eslint-disable-next-line no-console
       console.info(
         `[sports-scan T15] 15,319 channels x ${PER_CHANNEL} programmes scanned in ${elapsedMs}ms, ${result.fixtures.length} fixture(s) found`,
       )

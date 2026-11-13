@@ -1092,6 +1092,15 @@ export function mountSportsHubPage(): void {
   let callbacks: SportsHubCallbacks | null = null
   let controller: SportsHubController | null = null
   let mounted = true
+  // Async continuations (playlist resolution, EPG loads) must not
+  // render into a page the user has already left.
+  window.addEventListener(
+    "pagehide",
+    () => {
+      mounted = false
+    },
+    { once: true },
+  )
 
   const currentFixtures = (): ReadonlyArray<SportsFixture> =>
     runtime.scanResult?.fixtures ?? []
@@ -1243,7 +1252,8 @@ export function mountSportsHubPage(): void {
     const sources = Array.isArray(detail.sources) ? detail.sources : []
     if (sources.length === 0) return
     const allFailed = sources.every(
-      (source) => source && source.status === "error",
+      (source: { status?: unknown }) =>
+        source && source.status === "error",
     )
     if (allFailed === (runtime.epgStatus === "failed")) return
     runtime.epgStatus = allFailed ? "failed" : "ready"
