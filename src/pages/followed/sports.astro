@@ -1,0 +1,332 @@
+---
+// Sports Corner — Manchester United hub (0.11.13).
+// Lives inside Followed: /followed/sports. All fixture content is
+// derived at runtime from the EPG by followed-sports-page.ts; this
+// shell carries the header, the state/content regions, and the
+// global styles the runtime-built rows need.
+import CouchLayout from "@/layouts/CouchLayout.astro";
+import TvEmpty from "@/components/couch/TvEmpty.astro";
+---
+
+<CouchLayout pageTitle="Manchester United" activeNav="followed" view="followed-sports">
+  <div data-sports-hub-shell class="rs-sports-shell">
+    <header class="rs-sports-head">
+      <div class="rs-sports-head-text">
+        <p class="rs-sports-eyebrow">Sports Corner</p>
+        <h1 class="rs-page-title">Manchester United</h1>
+        <p data-sports-hub-meta class="rs-meta">
+          Fixtures from your programme guide
+        </p>
+        <p data-sports-hub-stale class="rs-sports-stale" hidden>
+          Programme guide data may be out of date.
+        </p>
+      </div>
+      <button
+        data-sports-hub-follow
+        data-couch-key="sports:unfollow"
+        type="button"
+        class="rs-hero__action rs-hero__action--secondary"
+      >
+        Unfollow
+      </button>
+    </header>
+
+    <div data-sports-hub-states>
+      <TvEmpty
+        title="Loading the programme guide…"
+        message="Fixtures from your programme guide will appear here."
+        art="library"
+      />
+    </div>
+    <div data-sports-hub-content></div>
+  </div>
+
+  <script>
+    import { mountSportsHubPage } from "@/scripts/followed-sports-page.ts";
+    import "@/scripts/updater-startup.js";
+    mountSportsHubPage();
+  </script>
+
+  <style is:global>
+    /* Hub content is built at runtime by followed-sports-page.ts,
+       so these rules must be global (Astro's scoped styles cannot
+       reach DOM created after render). All colours come from the
+       W1 tokens. Rows are hairline-separated list rows, not boxes
+       inside boxes; only the hero is a banner. */
+    html[data-couch] .rs-sports-shell {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    html[data-couch] .rs-sports-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1.5rem;
+    }
+    html[data-couch] .rs-sports-head-text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+    html[data-couch] .rs-sports-eyebrow {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-stale {
+      margin: 0;
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-hero {
+      position: relative;
+      overflow: hidden;
+      border-radius: var(--rs-radius);
+      background:
+        linear-gradient(100deg, rgba(23, 10, 12, 0.92) 30%, rgba(23, 10, 12, 0.55) 60%, rgba(23, 10, 12, 0.15)),
+        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+      box-shadow: var(--rs-shadow);
+      min-height: 16rem;
+      display: flex;
+      align-items: flex-end;
+    }
+    html[data-couch] .rs-sports-hero-has-art {
+      background:
+        linear-gradient(100deg, rgba(23, 10, 12, 0.94) 28%, rgba(23, 10, 12, 0.6) 58%, rgba(23, 10, 12, 0.1)),
+        var(--rs-sports-hero-art) center 30% / cover no-repeat,
+        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+    }
+    html[data-couch] .rs-sports-hero-body {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+      padding: 2rem;
+      max-width: 52rem;
+    }
+    html[data-couch] .rs-sports-hero-eyebrow {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-hero-title {
+      font-family: var(--rs-font-display);
+      font-size: 2.75rem;
+      line-height: 1.1;
+      margin: 0;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-hero-meta,
+    html[data-couch] .rs-sports-hero-also {
+      margin: 0;
+      font-size: 1.25rem;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-hero-desc {
+      margin: 0.25rem 0 0;
+      font-size: 1.125rem;
+      line-height: 1.45;
+      color: var(--rs-text-2);
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    html[data-couch] .rs-sports-hero-watch {
+      margin-top: 0.75rem;
+      font-size: 1.25rem;
+      font-weight: 700;
+      padding: 0.75rem 1.75rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-accent);
+      background: var(--rs-accent);
+      color: var(--rs-text);
+      cursor: pointer;
+    }
+    html[data-couch] .rs-sports-hero-watch:hover,
+    html[data-couch] .rs-sports-hero-watch:focus-visible {
+      box-shadow:
+        0 0 0 2px var(--rs-focus),
+        0 0 20px 2px var(--rs-focus-glow);
+      outline: none;
+    }
+    html[data-couch] .rs-sports-section {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    html[data-couch] .rs-sports-section-title {
+      font-family: var(--rs-font-display);
+      font-size: 1.75rem;
+      line-height: 1.2;
+      margin: 0.75rem 0 0;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-section-note {
+      margin: 0;
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-subhead {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin: 0.5rem 0 0;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-list {
+      display: flex;
+      flex-direction: column;
+    }
+    html[data-couch] .rs-sports-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+      width: 100%;
+      padding: 1.125rem 0.75rem;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--rs-line-soft);
+      color: var(--rs-text);
+      text-align: left;
+      cursor: pointer;
+    }
+    html[data-couch] .rs-sports-row:hover,
+    html[data-couch] .rs-sports-row:focus-visible {
+      background: var(--rs-surface-2);
+      outline: none;
+      box-shadow: inset 0 0 0 2px var(--rs-focus);
+      border-radius: 0.5rem;
+    }
+    html[data-couch] .rs-sports-row-main {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      min-width: 0;
+      flex: 1;
+    }
+    html[data-couch] .rs-sports-row-title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    html[data-couch] .rs-sports-row-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+      line-height: 1.25;
+    }
+    html[data-couch] .rs-sports-badge {
+      font-size: 0.875rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 0.25rem 0.625rem;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-badge-live {
+      background: var(--rs-accent);
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-badge-possible {
+      border: 1px solid var(--rs-focus);
+      color: var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-row-meta {
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-row-also {
+      font-size: 1.0625rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-row-desc {
+      font-size: 1.0625rem;
+      line-height: 1.4;
+      color: var(--rs-text-2);
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    html[data-couch] .rs-sports-row-action {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.25rem;
+      flex-shrink: 0;
+    }
+    html[data-couch] .rs-sports-row-action-label {
+      font-size: 1.125rem;
+      font-weight: 700;
+      color: var(--rs-focus);
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-row-catchup {
+      font-size: 1rem;
+      color: var(--rs-text-2);
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-empty-line {
+      margin: 0;
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-state {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 2rem 0;
+    }
+    html[data-couch] .rs-sports-state-title {
+      font-family: var(--rs-font-display);
+      font-size: 1.75rem;
+      line-height: 1.25;
+      margin: 0;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-state-message {
+      margin: 0;
+      font-size: 1.25rem;
+      line-height: 1.5;
+      color: var(--rs-text-2);
+      max-width: 48rem;
+    }
+    html[data-couch] .rs-sports-state-action {
+      font-size: 1.125rem;
+      font-weight: 600;
+      padding: 0.625rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-bg-2);
+      color: var(--rs-text);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    html[data-couch] .rs-sports-state-action:hover,
+    html[data-couch] .rs-sports-state-action:focus-visible {
+      border-color: var(--rs-focus);
+      outline: none;
+      box-shadow: 0 0 0 2px var(--rs-focus);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html[data-couch] .rs-sports-hero-watch:hover,
+      html[data-couch] .rs-sports-hero-watch:focus-visible,
+      html[data-couch] .rs-sports-state-action:hover,
+      html[data-couch] .rs-sports-state-action:focus-visible {
+        box-shadow: 0 0 0 2px var(--rs-focus);
+      }
+    }
+  </style>
+</CouchLayout>

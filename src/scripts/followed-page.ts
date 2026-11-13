@@ -53,6 +53,29 @@ import {
   armTvImageFallbacks,
   fallbackMarkFor,
 } from "@/scripts/lib/couch-image.ts"
+import { getActiveEntry } from "@/scripts/lib/creds.js"
+import { hydrate as hydrateCache } from "@/scripts/lib/cache.js"
+import {
+  EPG_LOADED_EVENT,
+  EPG_SOURCE_STATUS_EVENT,
+  getProgrammesSync,
+} from "@/scripts/lib/epg-data.js"
+import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.js"
+import { getChannelEpgOverride } from "@/scripts/lib/preferences.js"
+import {
+  isSportsTeamFollowed,
+  SPORTS_FOLLOW_CHANGED_EVENT,
+} from "@/scripts/lib/sports-follow.js"
+import {
+  getSportsScan,
+  type SportsScanChannel,
+  type SportsScanResult,
+} from "@/scripts/lib/sports-fixture-scan.js"
+import {
+  buildSportsEntryCardModel,
+  createSportsHubCallbacks,
+  renderSportsEntryCard,
+} from "@/scripts/followed-sports-page.js"
 
 const newListEl = document.getElementById("followed-new-list")
 const newEmptyEl = document.getElementById("followed-new-empty")
@@ -533,4 +556,118 @@ registerBackLayer({
 // handler; idempotent, safe to arm once per page load).
 armTvImageFallbacks(document)
 
+// Sports Corner entry card (0.11.13, plan §5.1): one section above
+// New Episodes, fed by the SAME memoised scan as the hub. The card
+// never triggers an EPG load — if no EPG state exists it shows its
+// loading line and waits for xt:epg-loaded. No playlist → the
+// section stays hidden (the page's existing empty handling covers
+// it). The card does not join the X menu; its actions are its own
+// buttons.
+async function mountSportsEntryCard(): Promise<void> {
+  const section = document.querySelector<HTMLElement>(
+    "[data-sports-entry-section]",
+  )
+  const container = document.querySelector<HTMLElement>(
+    "[data-sports-entry-card]",
+  )
+  if (!section || !container) return
+  let playlistId = ""
+  let channels: SportsScanChannel[] = []
+  let overrides: Record<string, string> = {}
+  let scanResult: SportsScanResult | null = null
+  let epgFailed = false
+
+  const renderCard = (): void => {
+    const state = playlistId ? getProgrammesSync(playlistId) : null
+    const model = buildSportsEntryCardModel(
+      isSportsTeamFollowed(),
+      playlistId !== "",
+      state ? "ready" : epgFailed ? "failed" : "loading",
+      scanResult,
+      Date.now(),
+    )
+    section.hidden = !model.hasPlaylist
+    const callbacks = createSportsHubCallbacks(playlistId, "/followed")
+    renderSportsEntryCard(container, model, {
+      onWatchLive: (fixture) => callbacks.onWatch(fixture),
+      onToggleFollow: () => callbacks.onToggleFollow(),
+    })
+  }
+
+  const scan = (): void => {
+    if (!playlistId || !isSportsTeamFollowed()) return
+    try {
+      const state = getProgrammesSync(playlistId)
+      scanResult = state
+        ? getSportsScan(channels, state, overrides, playlistId)
+        : null
+    } catch (err) {
+      log.warn("[xt:sports] entry-card scan failed:", err)
+      scanResult = null
+    }
+  }
+
+  document.addEventListener(EPG_LOADED_EVENT, () => {
+    epgFailed = false
+    scan()
+    renderCard()
+  })
+  document.addEventListener(EPG_SOURCE_STATUS_EVENT, (event) => {
+    const detail = (event as CustomEvent)?.detail ?? {}
+    if (
+      detail.playlistId &&
+      playlistId &&
+      detail.playlistId !== playlistId
+    ) {
+      return
+    }
+    const sources = Array.isArray(detail.sources) ? detail.sources : []
+    if (sources.length === 0) return
+    const allFailed = sources.every(
+      (source: { status?: unknown }) =>
+        source && source.status === "error",
+    )
+    if (allFailed === epgFailed) return
+    epgFailed = allFailed
+    renderCard()
+  })
+  document.addEventListener(SPORTS_FOLLOW_CHANGED_EVENT, () => {
+    scan()
+    renderCard()
+  })
+
+  try {
+    const entry = await getActiveEntry()
+    if (!entry?._id) return
+    playlistId = String(entry._id)
+    // Warm the channel cache from IndexedDB before reading it (see
+    // the hub mount: the in-memory cache is per-page-load). A local
+    // read, not a fetch and not an EPG load — the card still never
+    // triggers an EPG load (§2.4).
+    await Promise.allSettled([
+      hydrateCache(playlistId, "live"),
+      hydrateCache(playlistId, "m3u"),
+    ])
+    const rawChannels = readCachedLiveChannels(playlistId)
+    channels = (Array.isArray(rawChannels) ? rawChannels : []).filter(
+      (channel): channel is SportsScanChannel =>
+        channel != null && channel.id != null,
+    )
+    overrides = {}
+    for (const channel of channels) {
+      try {
+        const override = getChannelEpgOverride(playlistId, channel.id)
+        if (override) overrides[String(channel.id)] = override
+      } catch {
+        // No override for this channel; resolution falls through.
+      }
+    }
+    scan()
+    renderCard()
+  } catch (err) {
+    log.warn("[xt:sports] entry-card mount failed:", err)
+  }
+}
+
 void render()
+void mountSportsEntryCard()

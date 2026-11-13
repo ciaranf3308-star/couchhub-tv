@@ -145,6 +145,10 @@ import { getOffsetSetting, setOffsetSetting } from "@/scripts/lib/epg-data.js"
 import { setLocale, getActiveLocale } from "@/scripts/lib/i18n.js"
 import { listTvDevices, saveTvDevice } from "@/scripts/lib/tv-cast.js"
 import { log } from "@/scripts/lib/log.js"
+import {
+  readSportsFollowRecord,
+  restoreSportsFollowState,
+} from "@/scripts/lib/sports-follow.js"
 
 const FORMAT_VERSION = 1
 const FORMAT_NAME = "extreme-infinitv-backup"
@@ -361,6 +365,11 @@ export async function exportAll() {
     tvDevices: listTvDevices(),
     prefs: snapshotPrefs(),
     followed,
+    // Sports Corner (0.11.13): the single follow record only —
+    // fixtures are derived, never stored, so there is nothing else
+    // to back up. Null when no record exists (fresh default on
+    // restore). Old backups without this field simply skip.
+    sportsFollow: readSportsFollowRecord(),
     profiles: { keys: snapshotProfileKeys() },
     ai: {
       endpoint: getAiEndpoint(),
@@ -543,6 +552,15 @@ export async function importAll(blob) {
       }
     } catch (err) {
       log.warn("[xt:backup] followed restore failed (continuing):", err)
+    }
+  }
+
+  // Sports Corner (0.11.13): restore the single follow record.
+  // Validation lives in restoreSportsFollowState — a bad record is
+  // ignored, never fatal, and old backups without the field skip.
+  if (b.sportsFollow && typeof b.sportsFollow === "object") {
+    if (restoreSportsFollowState(b.sportsFollow)) {
+      summary.appSettings++
     }
   }
 

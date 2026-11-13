@@ -26,6 +26,15 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
     <span id="followed-last-check" class="rs-meta" aria-live="polite"></span>
   </div>
 
+  <!-- Sports Corner entry (0.11.13): rendered by followed-page.ts
+       into the rs-sports-card system. Hidden until a playlist is
+       resolved; the section heading stays out of the way when the
+       card has nothing to show. -->
+  <section aria-labelledby="sports-corner-heading" class="rs-followed-section" data-sports-entry-section hidden>
+    <h2 id="sports-corner-heading" class="rs-section-title">Sports Corner</h2>
+    <div data-sports-entry-card></div>
+  </section>
+
   <section aria-labelledby="followed-new-heading" class="rs-followed-section">
     <h2 id="followed-new-heading" class="rs-section-title">
       <span data-i18n="followed.newEpisodes">New Episodes</span>
@@ -174,6 +183,83 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
     html[data-couch] .rs-followed-btn:disabled {
       opacity: 0.55;
       cursor: default;
+    }
+    /* Sports Corner entry card (0.11.13): built at runtime by
+       followed-sports-page.ts, so these rules must be global. The
+       artwork panel is a branded gradient until enrichment resolves
+       a real backdrop — never a stretched logo. */
+    html[data-couch] .rs-sports-card {
+      display: flex;
+      gap: 1.25rem;
+      padding: 1.25rem;
+      background: var(--rs-surface);
+      border: 1px solid var(--rs-line-soft);
+      border-radius: var(--rs-radius);
+      box-shadow: var(--rs-shadow);
+      min-width: 0;
+    }
+    html[data-couch] .rs-sports-card-art {
+      width: 12rem;
+      flex-shrink: 0;
+      border-radius: 0.75rem;
+      background: linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+      min-height: 7rem;
+    }
+    html[data-couch] .rs-sports-card-art-has-art {
+      background:
+        var(--rs-sports-card-art) center 30% / cover no-repeat,
+        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+    }
+    html[data-couch] .rs-sports-card-body {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.5rem;
+      min-width: 0;
+      flex: 1;
+    }
+    html[data-couch] .rs-sports-card-team {
+      margin: 0;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      color: var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-card-line {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      line-height: 1.25;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-card-meta {
+      margin: 0;
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-card-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+    html[data-couch] .rs-sports-card-button {
+      font-size: 1.125rem;
+      font-weight: 600;
+      padding: 0.625rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-bg-2);
+      color: var(--rs-text);
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-card-button:hover,
+    html[data-couch] .rs-sports-card-button:focus-visible {
+      background: var(--rs-surface);
+      border-color: var(--rs-focus);
+      outline: none;
     }
     @media (prefers-reduced-motion: reduce) {
       html[data-couch] .rs-followed-card:focus-within,

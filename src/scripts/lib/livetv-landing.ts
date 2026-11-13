@@ -74,6 +74,11 @@ import { formatTimeRange, type Programme } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
 import { readCouchFocusMemory } from "./couch-focus";
 import { EPG_LOADED_EVENT } from "./epg-data.js";
+import {
+  clearRouteOrigin,
+  markBackNavigation,
+  readRouteOrigin,
+} from "./route-origin.js";
 
 // ── Events / mode contract ──────────────────────────────────────
 
@@ -542,6 +547,15 @@ export const LANDING_BACK_TARGET = "/";
  * handler owns that press). `navigate`
  * defaults to window.location.assign (the gamepad.ts pattern);
  * tests inject a stub. Returns true when navigation happened.
+ *
+ * §7.4 (0.11.13, Sports Corner): when a tune deep link recorded a
+ * return origin (the Sports Corner hub or the Followed page),
+ * B returns there instead of Home. The origin is consumed in
+ * both branches (one-shot). A Live TV origin is ignored — the
+ * landing never "returns" to itself — and the back-navigation
+ * flag is set so the destination does not record /livetv as an
+ * origin and ping-pong on the next B press. No Live TV entry
+ * records an origin today, so the default path is unchanged.
  */
 export function handleLandingBack(
   event?: { detail?: { context?: string } | null } | null,
@@ -552,8 +566,21 @@ export function handleLandingBack(
   if (isLandingOptionsMenuOpen()) return false;
   const top = livetvNav.topId();
   if (top != null && top !== "landing") return false;
+  const origin = readRouteOrigin();
+  clearRouteOrigin();
+  if (origin && !isLiveTvRoute(origin.route)) {
+    markBackNavigation();
+    navigate(origin.route);
+    return true;
+  }
   navigate(LANDING_BACK_TARGET);
   return true;
+}
+
+/** True for Live TV's own routes (path only; query/hash ignored). */
+function isLiveTvRoute(route: string): boolean {
+  const path = route.split(/[?#]/)[0].replace(/\/$/, "") || "/";
+  return path === "/livetv" || path === "/epg";
 }
 
 /** Listen for `livetv:back` on window; returns an unmount function. */

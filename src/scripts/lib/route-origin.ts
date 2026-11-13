@@ -145,7 +145,11 @@ export function recordOriginFromReferrer(currentPath?: string): void {
   }
 }
 
-function markBackNavigation(): void {
+/** Exported for the §7.4 landing-B return (0.11.13): livetv-landing.ts
+ *  marks the navigation as a Back navigation so the destination's
+ *  recordOriginFromReferrer does not record /livetv as an origin
+ *  and ping-pong. Export-only; the function itself is unchanged. */
+export function markBackNavigation(): void {
   try {
     storage()?.setItem(BACK_NAV_FLAG_KEY, "1");
   } catch {

@@ -81,7 +81,7 @@ export function couchNavIdFor(pathname: string): string | null {
   if (path === "/series" || path.startsWith("/series/")) return "series";
   if (path === "/discover") return "discover";
   if (path === "/search") return "browse";
-  if (path === "/followed") return "followed";
+  if (path === "/followed" || path.startsWith("/followed/")) return "followed";
   if (path === "/favorites") return "favorites";
   if (path === "/watchlist") return "watchlist";
   if (path === "/settings" || path.startsWith("/settings/")) return "settings";
