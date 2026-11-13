@@ -407,7 +407,11 @@ describe("Guide source guards (0.11.11 W4)", () => {
   it("filters Tonight through the shared scope (visible channels, not the whole catalogue)", () => {
     const tonight = guide.slice(guide.indexOf("function renderTonight()"));
     const scan = tonight.slice(0, tonight.indexOf("buildTonightSections"));
-    expect(scan).toContain("for (const channel of visibleChannels)");
+    // Merged shape (0.11.11 integration, seam 1): W3's
+    // collectTonightItems restructure carries W4's scope — the
+    // scoped set is the collection source, never the catalogue.
+    expect(scan).toContain("collectTonightItems(visibleChannels");
+    expect(scan).not.toContain("collectTonightItems(allChannels");
     expect(scan).not.toContain("for (const channel of allChannels)");
   });
 
