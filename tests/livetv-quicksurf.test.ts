@@ -119,6 +119,9 @@ describe("adjacent-channel browsing", () => {
     expect(state.highlightedId).toBe(101);
   });
 
+  // The SHARED stepHighlight wraps (pinned here for the player
+  // paths that rely on it). Quick Surf itself uses the bounded
+  // stepHighlightBounded since 0.11.11 — see the 0111 suite.
   it("wraps from the last channel to the first and back", () => {
     let state = openSurf({ tunedId: 104, previousId: 103, highlightedId: null, open: false });
     state = surfStep(state, 1);
@@ -191,29 +194,41 @@ describe("Quick Surf overlay open/close events", () => {
   });
 });
 
-// INTEGRATION (0.9.0) — mockup 2: the surf panel is rows +
-// chevrons only. The note + six-button action grid were removed
-// (every action is a key the hint line documents, or an OSD
-// button once surf closes); the category filter stays.
+// 0.11.11 (W1) — the mockup-2 trim assertions below were replaced:
+// the category filter is GONE (the raw provider-category button
+// wall is deleted, not hidden) and the panel now carries four
+// focusable discovery actions. The state-machine describes above
+// still pin the SHARED wrapping stepHighlight (other player paths
+// rely on it); Quick Surf itself steps through the bounded
+// variants in livetv-quicksurf.ts — see
+// tests/livetv-quicksurf-0111.test.ts.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 
-describe("TvQuickSurf — mockup-2 panel trim (integration)", () => {
+describe("TvQuickSurf — 0.11.11 rebuild (integration)", () => {
   const src = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "src/components/couch/TvQuickSurf.astro"),
     "utf8",
   );
 
-  it("has no action-button grid or note in the panel", () => {
+  it("has no category wall and no action-button grid or note in the panel", () => {
+    expect(src).not.toContain("rs-livetv-play-quicksurf__categories");
+    expect(src).not.toContain("rs-livetv-play-quicksurf__chip");
     expect(src).not.toContain("rs-livetv-play-quicksurf__actions");
     expect(src).not.toContain("rs-livetv-play-quicksurf__note");
     expect(src).not.toContain("[data-qs-action]");
   });
 
-  it("keeps the category filter, the rows and the key hint line", () => {
-    expect(src).toContain("rs-livetv-play-quicksurf__categories");
+  it("keeps the rows, the group header, and the key hint line", () => {
     expect(src).toContain("rs-livetv-play-quicksurf__list");
-    expect(src).toContain("↑↓ browse · A watch · B back");
+    expect(src).toContain("[data-qs-group]");
+    expect(src).toContain("↑↓ browse · ←→ discovery · A select · B back · X guide · Y browser");
+  });
+
+  it("carries the four discovery actions for the W2 browser handoff", () => {
+    for (const action of ["favourites", "recents", "categories", "search"]) {
+      expect(src).toContain(`data-qs-discovery="${action}"`);
+    }
   });
 });

@@ -1428,7 +1428,7 @@ html[data-couch] .rs-livetv-play-osd__btn:hover {
   background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
 }
 html[data-couch] .rs-livetv-play-osd__btn:focus-visible,
-html[data-couch] .rs-livetv-play-quicksurf__chip:focus-visible,
+html[data-couch] .rs-livetv-play-quicksurf__discovery-action:focus-visible,
 html[data-couch] .rs-livetv-channel-card:focus-visible,
 html[data-couch] .rs-livetv-channel-card__link:focus-visible {
   outline: 3px solid var(--rs-accent);
@@ -1483,34 +1483,32 @@ html[data-couch] .rs-livetv-play-quicksurf__eyebrow {
   text-transform: none;
   color: var(--rs-text-2);
 }
-html[data-couch] .rs-livetv-play-quicksurf__categories {
-  display: flex;
-  flex-wrap: wrap;
+/* 0.11.11 — the raw provider-category chip wall is DELETED
+   (its __categories / __chip rules are gone with it). Discovery
+   is four real focusable actions in a 2×2 grid: big sofa-distance
+   targets, no pill wall, no nested panels. */
+html[data-couch] .rs-livetv-play-quicksurf__discovery {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 0.5rem;
 }
-/* Category shortcuts as a flat text row, not pills. */
-html[data-couch] .rs-livetv-play-quicksurf__chip {
-  padding: 0.375rem 0.5rem;
-  border: 0;
-  border-radius: 0.375rem;
-  background: transparent;
-  color: var(--rs-text-2);
+html[data-couch] .rs-livetv-play-quicksurf__discovery-action {
+  padding: 0.625rem 0.75rem;
+  border: 1px solid rgb(255 255 255 / 0.14);
+  border-radius: 0.625rem;
+  background: rgb(255 255 255 / 0.05);
+  color: var(--rs-text);
   font-size: 1.125rem;
   font-weight: 600;
+  text-align: center;
   cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-html[data-couch] .rs-livetv-play-quicksurf__chip[aria-pressed="true"] {
-  background: transparent;
-  border-color: transparent;
-  color: var(--rs-text);
-  text-decoration: underline;
-  text-underline-offset: 4px;
-  text-decoration-color: var(--rs-accent);
-  text-decoration-thickness: 2px;
+html[data-couch] .rs-livetv-play-quicksurf__discovery-action:hover {
+  background: color-mix(in srgb, var(--rs-accent) 22%, transparent);
 }
-/* (No __actions rule: TvQuickSurf renders no actions row —
-   livetv-quicksurf.test.ts pins the component against it — so both
-   the centred-panel and docked-panel __actions rules are deleted.) */
 
 /* Channel card — see the SINGLE canonical definition in the
    "Live TV shared (W1)" block below (0.11.0 W1 merge). The
@@ -3382,6 +3380,24 @@ html[data-couch] .rs-livetv-play-quicksurf__header {
   align-items: baseline;
   justify-content: space-between;
   gap: 1rem;
+}
+html[data-couch] .rs-livetv-play-quicksurf__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+html[data-couch] .rs-livetv-play-quicksurf__group {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--rs-text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html[data-couch] .rs-livetv-play-quicksurf__group:empty {
+  display: none;
 }
 html[data-couch] .rs-livetv-play-quicksurf__position {
   margin: 0;
