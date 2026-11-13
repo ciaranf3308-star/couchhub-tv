@@ -1,7 +1,7 @@
 {
   "productName": "CouchHub TV",
   "mainBinaryName": "couchhub-tv",
-  "version": "0.11.11",
+  "version": "0.11.12",
   "identifier": "com.couchhub.tv",
   "build": {
     "frontendDist": "../dist",
@@ -50,7 +50,7 @@
     "copyright": "© 2026 NylahBox Studios — fork of Extreme InfiniTV (© 2025 Ludovico Ferrara), GPL-3.0-or-later",
     "createUpdaterArtifacts": true,
     "android": {
-      "versionCode": 11119000
+      "versionCode": 11129000
     },
     "icon": [
       "icons/32x32.png",
