@@ -396,17 +396,15 @@ export function collectTonightItems(
  * genuinely failed (brief §16 state (e)): W4's classifier returns
  * "failure" and shows no listings rather than guessed ones.
  *
- * INTEGRATION WIRE (one line, at W4's seam in renderNow, which
- * passes `loadFailed: false` today):
+ * INTEGRATION WIRE (applied at W4's seam in renderNow):
  *
  *   loadFailed: resolveGuideLoadFailed({
  *     pipelineFailed: guideDataError !== null,
  *     epgSourcesFailed: epgLoadFailed,
  *   }),
  *
- * (adding `resolveGuideLoadFailed` to the livetv-guide-data.ts
- * import in TvGuideView.astro). The same wire applies to any other
- * mode renderer that calls `guideDataState`.
+ * The same wire applies to any other mode renderer that calls
+ * `guideDataState`.
  */
 export interface GuideFailureSignal {
   pipelineFailed: boolean;

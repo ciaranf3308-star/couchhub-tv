@@ -196,6 +196,81 @@ export function gridRenderSignature(input: {
   ].join("|");
 }
 
+// ── Full Guide cell mounting (0.11.11 W4, §14) ─────────────────
+//
+// Moving to an unmounted grid cell must render it and restore
+// actual focus — never a missing highlight, dead D-pad, or focus
+// behind a hidden element. The grid only mounts the row/time
+// window around the scroll offsets, so navigation first computes
+// the scroll offsets that include the target cell, applies them,
+// and re-renders BEFORE focusing. This helper is the single math
+// for that: vertical (row fully in view) + horizontal (cell start
+// in view). It follows the grid's own scroll convention
+// (TvGuideView renderRows / scrollToViewStart): scrollLeft maps
+// linearly to time at pxPerHour from the day start, with no
+// channel-column offset — the same convention epgTimeWindow
+// uses, so a computed offset always mounts the cell.
+
+export interface GridCellScrollInput {
+  /** Zero-based row index of the target channel in the grid. */
+  rowIndex: number;
+  rowHeightPx: number;
+  scrollTopPx: number;
+  viewportHeightPx: number;
+  /** Target programme start / stop (display ms). */
+  startMs: number;
+  stopMs: number;
+  /** Local-midnight ms of the displayed day. */
+  dayStartMs: number;
+  pxPerHour: number;
+  scrollLeftPx: number;
+  viewportWidthPx: number;
+}
+
+export interface GridCellScroll {
+  scrollTop: number;
+  scrollLeft: number;
+}
+
+/**
+ * Scroll offsets that bring the target cell into the mounted
+ * window, or null when it is already fully in view (no scroll
+ * change, no re-render needed). Returned offsets are clamped to
+ * >= 0; the caller applies them and re-renders synchronously.
+ */
+export function gridScrollForCell(
+  input: GridCellScrollInput,
+): GridCellScroll | null {
+  const rowHeight = Math.max(1, input.rowHeightPx);
+  const rowIndex = Math.max(0, Math.floor(input.rowIndex));
+  const scrollTop = Math.max(0, input.scrollTopPx);
+  const viewportHeight = Math.max(1, input.viewportHeightPx);
+  const rowTop = rowIndex * rowHeight;
+  const rowBottom = rowTop + rowHeight;
+  let nextTop = scrollTop;
+  if (rowTop < scrollTop) {
+    nextTop = rowTop;
+  } else if (rowBottom > scrollTop + viewportHeight) {
+    nextTop = rowBottom - viewportHeight;
+  }
+  const pxPerHour = Math.max(1, input.pxPerHour);
+  const hourMs = 3_600_000;
+  const startX = ((input.startMs - input.dayStartMs) / hourMs) * pxPerHour;
+  const scrollLeft = Math.max(0, input.scrollLeftPx);
+  const viewportWidth = Math.max(1, input.viewportWidthPx);
+  let nextLeft = scrollLeft;
+  if (startX < scrollLeft) {
+    nextLeft = Math.max(0, startX);
+  } else if (startX >= scrollLeft + viewportWidth) {
+    // Cell starts past the right edge: align its start with the
+    // left edge so the focused cell is fully visible from its
+    // start (its tail may still run off — that is fine).
+    nextLeft = Math.max(0, startX);
+  }
+  if (nextTop === scrollTop && nextLeft === scrollLeft) return null;
+  return { scrollTop: Math.max(0, nextTop), scrollLeft: Math.max(0, nextLeft) };
+}
+
 // ── Focus preservation ──────────────────────────────────────────
 
 /** data-focus-key of the focused element inside `container`, or null. */

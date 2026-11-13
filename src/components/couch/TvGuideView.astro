@@ -99,6 +99,24 @@
 // Browser uses). A channel selected in the Guide is
 // identifiable in the Browser via the `livetv:guide-channel`
 // event (see selectProgramme) — highlight-only, never tunes.
+//
+// 0.11.11 (W4) — Guide modes + navigation. The four modes and the
+// 0.11.10 controller work (tab switching, intentional moves,
+// entry focus, one-layer B, origin resolution) are PRESERVED —
+// this pass only fills the gaps the brief names: On Now opens on
+// a familiar scope (Favourites → Recents → All) instead of the
+// exhaustive catalogue, and names its real empty condition
+// (guideDataState) with a Change-scope way out; Tonight honours
+// the shared category scope; By Channel names the exact
+// no-schedule state and returns focus to the picker; the Full
+// Guide enters on the selected channel and mounts unmounted
+// cells before focusing them; applying a category returns focus
+// to Guide content. W3 owns the data pipeline in this file
+// (loadAllProgrammes, the EPG-loaded handler, finishActivation's
+// data flow, renderTonight's input scan) — the ONLY W4 touch
+// inside a W3-owned function is the one-token scope source in
+// renderTonight's scan loop (allChannels → visibleChannels),
+// flagged inline for integration.
 import TvProgrammeMeta from "./TvProgrammeMeta.astro";
 
 interface Props {
@@ -214,10 +232,23 @@ const nowMs = Date.now();
           <span class="rs-guide-now-head__next">Next</span>
         </div>
         <div class="rs-guide-list rs-guide-now-list" data-guide-now-list></div>
-        <p class="rs-guide-panel-empty" data-guide-now-empty hidden>
-          Nothing on now — the guide hasn't loaded yet. Open Live TV first
-          so the channel list and programme data load.
-        </p>
+        <!-- 0.11.11 W4 §11: the empty text is set by renderNow()
+             through guideDataState (five honest states), and the
+             action opens the category drawer so an empty scope
+             always has a way out — never a dead blank list. -->
+        <div class="rs-guide-panel-empty" data-guide-now-empty hidden>
+          <p data-guide-now-empty-text>
+            Nothing on now — the guide hasn't loaded yet. Open Live TV first
+            so the channel list and programme data load.
+          </p>
+          <button
+            type="button"
+            class="rs-livetv-guide__toolbtn rs-guide-empty-action"
+            data-guide-now-change-scope
+          >
+            Change scope
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -283,9 +314,24 @@ const nowMs = Date.now();
         </span>
       </div>
       <div class="rs-guide-list" data-guide-channel-schedule></div>
-      <p class="rs-guide-panel-empty" data-guide-channel-empty hidden>
-        No programmes listed for this channel on this day.
-      </p>
+      <!-- 0.11.11 W4 §13: the empty text is set by
+           renderChannelSchedule() through
+           channelScheduleEmptyMessage — a channel with no EPG
+           at all reads "No schedule available for this
+           channel." — and the action returns focus to the
+           channel picker so another channel is one press away. -->
+      <div class="rs-guide-panel-empty" data-guide-channel-empty hidden>
+        <p data-guide-channel-empty-text>
+          No programmes listed for this channel on this day.
+        </p>
+        <button
+          type="button"
+          class="rs-livetv-guide__toolbtn rs-guide-empty-action"
+          data-guide-channel-pick-another
+        >
+          Choose another channel
+        </button>
+      </div>
     </div>
   </div>
 
@@ -357,6 +403,13 @@ const nowMs = Date.now();
         ></div>
       </div>
     </div>
+    <!-- 0.11.11 W4 §14: the grid's no-channels state. Shown only
+         when the current scope has no channels at all; a scope
+         with channels but no EPG still renders its channel rows
+         (empty, honest — never fabricated cells). -->
+    <p class="rs-guide-panel-empty" data-guide-grid-empty hidden>
+      No channels in this category. Choose a different scope to see the guide.
+    </p>
   </div>
 
   <!-- Contextual detail for the selected programme. The meta block
@@ -723,6 +776,14 @@ const nowMs = Date.now();
     color: var(--rs-focus);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-accent) 50%, transparent);
   }
+  /* 0.11.11 W4: empty-state actions (Change scope / Choose
+     * another channel) sit under the honest empty text. */
+  .rs-guide-panel-empty p {
+    margin: 0 0 1rem;
+  }
+  .rs-guide-empty-action {
+    margin-top: 0.25rem;
+  }
   .rs-livetv-guide__empty {
     border: 1px solid var(--rs-line);
     border-radius: 1.25rem;
@@ -763,9 +824,11 @@ const nowMs = Date.now();
     GUIDE_MAX_PAST_DAYS,
     DEFAULT_GUIDE_MODE,
     availableGuideDays,
+    channelScheduleEmptyMessage,
     clampGuideDayOffset,
     filterGuideRows,
     guideCellViewModel,
+    guideDataState,
     guideDayForOffset,
     jumpToNowWindow,
     parseGuideMode,
@@ -797,6 +860,7 @@ const nowMs = Date.now();
     collectTonightItems,
     createNowNextRowsCache,
     loadGuideProgrammes,
+    resolveGuideLoadFailed,
   } from "@/scripts/lib/livetv-guide-data.ts";
   import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.ts";
   import { getActiveEntry } from "@/scripts/lib/creds.js";
@@ -812,13 +876,17 @@ const nowMs = Date.now();
   import {
     createVirtualList,
     gridRenderSignature,
+    gridScrollForCell,
     measureRowHeight,
     preserveGuideFocus,
   } from "@/scripts/lib/livetv-guide-virtual.ts";
   import {
     GUIDE_CATEGORY_DEFAULT,
+    GUIDE_CATEGORY_FAVOURITES,
+    GUIDE_CATEGORY_RECENTS,
     guideCategoryValueFromDrawer,
     guideCategoryValueToDrawer,
+    pickDefaultGuideScope,
     resolveGuideCategory,
   } from "@/scripts/lib/livetv-guide-categories.ts";
   import { mountGuideCategoryPicker } from "@/scripts/lib/livetv-guide-category-picker.ts";
@@ -870,6 +938,8 @@ const nowMs = Date.now();
     const panelEls = [...root.querySelectorAll("[data-guide-panel]")];
     const nowListEl = root.querySelector("[data-guide-now-list]");
     const nowEmptyEl = root.querySelector("[data-guide-now-empty]");
+    const nowEmptyTextEl = root.querySelector("[data-guide-now-empty-text]");
+    const gridEmptyEl = root.querySelector("[data-guide-grid-empty]");
     const nowFeaturedEl = root.querySelector("[data-guide-now-featured]");
     const tonightFeaturedEl = root.querySelector("[data-guide-tonight-featured]");
     const tonightSectionsEl = root.querySelector("[data-guide-tonight-sections]");
@@ -878,6 +948,7 @@ const nowMs = Date.now();
     const channelListEl = root.querySelector("[data-guide-channel-list]");
     const channelScheduleEl = root.querySelector("[data-guide-channel-schedule]");
     const channelEmptyEl = root.querySelector("[data-guide-channel-empty]");
+    const channelEmptyTextEl = root.querySelector("[data-guide-channel-empty-text]");
     const channelDayLabelEl = root.querySelector("[data-guide-channel-day-label]");
     const channelPrevDayBtn = root.querySelector("[data-guide-channel-prev-day]");
     const channelNextDayBtn = root.querySelector("[data-guide-channel-next-day]");
@@ -910,6 +981,14 @@ const nowMs = Date.now();
     let days = [];
     /** Category selection (shared index, via the adapter only). */
     let categorySelection = GUIDE_CATEGORY_DEFAULT;
+    /** 0.11.11 W4 §11: true once the user picks a scope in the
+     *  drawer (setCategorySelection). Until then, the first
+     *  resolution with channels applies the familiar default
+     *  scope (Favourites → Recents → All) exactly once, so On
+     *  Now never opens on the exhaustive catalogue by default.
+     *  An explicit choice is never overridden afterwards. */
+    let categorySelectionExplicit = false;
+    let scopeDefaultApplied = false;
     /** Groups for the category picker, from the last resolution. */
     let categoryGroups = [];
     /** Catalogue revision: bumped on every catalogue re-read; the
@@ -921,8 +1000,8 @@ const nowMs = Date.now();
     // ── Failure signal inputs (0.11.11 W3, §16) ──────────────────
     // The two genuine-failure conditions behind W4's guideDataState
     // `loadFailed` input (the single classifier — this file defines
-    // no second one). Integration wires them with one line at W4's
-    // seam; see resolveGuideLoadFailed in livetv-guide-data.ts.
+    // no second one). Wired at integration via
+    // resolveGuideLoadFailed at W4's seam in renderNow.
     // Both clear on a clean EPG load.
     /** Last data-pipeline error, or null once a load succeeds. */
     let guideDataError = null;
@@ -1187,11 +1266,34 @@ const nowMs = Date.now();
 
     /** Resolve the current selection → visible channels + picker groups. */
     function resolveCategory() {
-      const resolution = resolveGuideCategory(allChannels, categorySelection, {
+      let resolution = resolveGuideCategory(allChannels, categorySelection, {
         revision: catalogRevision,
         favouriteIds: favouriteIds(),
         recentIds: recentIdList(),
       });
+      // 0.11.11 W4 §11: first resolution with a real catalogue
+      // and no explicit user choice applies the familiar default
+      // scope (Favourites → Recents → All). Counts come from the
+      // adapter's own groups — no second count, no second list.
+      // Runs once; later resolutions keep the applied selection.
+      if (!categorySelectionExplicit && !scopeDefaultApplied && allChannels.length > 0) {
+        scopeDefaultApplied = true;
+        const groups = resolution.groups;
+        const fallback = pickDefaultGuideScope({
+          favouriteCount:
+            groups.find((g) => g.id === GUIDE_CATEGORY_FAVOURITES)?.channelCount ?? 0,
+          recentCount:
+            groups.find((g) => g.id === GUIDE_CATEGORY_RECENTS)?.channelCount ?? 0,
+        });
+        if (fallback.kind !== "all") {
+          categorySelection = fallback;
+          resolution = resolveGuideCategory(allChannels, categorySelection, {
+            revision: catalogRevision,
+            favouriteIds: favouriteIds(),
+            recentIds: recentIdList(),
+          });
+        }
+      }
       categorySelection = resolution.selection;
       categoryGroups = resolution.groups;
       visibleChannels = resolution.channels;
@@ -1209,6 +1311,7 @@ const nowMs = Date.now();
 
     /** Apply a new category selection (replaces, never intersects). */
     function setCategorySelection(next) {
+      categorySelectionExplicit = true;
       categorySelection = next;
       resolveCategory();
       if (scrollEl instanceof HTMLElement) scrollEl.scrollTop = 0;
@@ -1291,6 +1394,13 @@ const nowMs = Date.now();
                 selection.subcategoryId,
               ),
             );
+            // 0.11.11 W4 §15: applying a scope returns focus to
+            // useful Guide content (first panel item), not the
+            // trigger — the drawer close already focused the
+            // trigger, which is chrome, not content. When the
+            // panel is empty there is nothing to focus and the
+            // trigger keeps focus (correct fallback).
+            focusFirstPanelItem();
           },
           onBack: () => {
             closeCategoryDrawer();
@@ -1651,6 +1761,34 @@ const nowMs = Date.now();
       );
       nowList.setItems(entries, { resetScroll: consumeListReset() });
       if (nowEmptyEl) nowEmptyEl.hidden = entries.length > 0;
+      // 0.11.11 W4 §11 + failure states: an empty On Now list
+      // names its real condition — never a blank list, never a
+      // claim the guide "hasn't loaded" when the scope's channels
+      // simply have no matched EPG. The Change-scope action in
+      // the empty container is the way out of an unmapped scope.
+      // loadFailed is W3's signal, wired at integration: either
+      // genuine-failure condition (pipeline throw, or every EPG
+      // source errored) surfaces the classifier's failure state.
+      if (nowEmptyTextEl && entries.length === 0) {
+        let mapped = 0;
+        for (const channel of visibleChannels) {
+          const list = programmesByChannel.get(String(channel.id));
+          if (list && list.length > 0) mapped += 1;
+        }
+        const dataState = guideDataState({
+          channelCount: visibleChannels.length,
+          mappedChannelCount: mapped,
+          rowCount: 0,
+          loading: !activationFinished,
+          loadFailed: resolveGuideLoadFailed({
+            pipelineFailed: guideDataError !== null,
+            epgSourcesFailed: epgLoadFailed,
+          }),
+          scopeLabel: categoryTriggerLabelEl?.textContent ?? undefined,
+          rangeLabel: "on now",
+        });
+        nowEmptyTextEl.textContent = dataState.message;
+      }
       measureListHeights();
     }
 
@@ -1875,12 +2013,22 @@ const nowMs = Date.now();
         .join("");
       if (channelEmptyEl) {
         channelEmptyEl.hidden = rows.length > 0;
-        // Accurate empty state: no channels at all (empty category)
-        // reads differently from a channel with no programmes today.
-        channelEmptyEl.textContent =
-          visibleChannels.length === 0
-            ? "No channels in this category."
-            : "No programmes listed for this channel on this day.";
+        // 0.11.11 W4 §13: a channel with no EPG data at all reads
+        // exactly "No schedule available for this channel." —
+        // distinct from a channel with programmes on other days
+        // or a search with no matches. The channel stays listed
+        // in the picker; the empty container's action returns
+        // focus there so another channel is one press away.
+        if (channelEmptyTextEl && rows.length === 0) {
+          const allForChannel = channel
+            ? programmesByChannel.get(String(channel.id)) || []
+            : [];
+          channelEmptyTextEl.textContent = channelScheduleEmptyMessage({
+            visibleChannelCount: visibleChannels.length,
+            channelHasAnyProgrammes: allForChannel.length > 0,
+            searching: searchQuery.trim().length > 0,
+          });
+        }
       }
     }
 
@@ -1911,6 +2059,12 @@ const nowMs = Date.now();
         panel.hidden = panel.dataset.guidePanel !== next;
       }
       renderActivePanel();
+      // 0.11.11 W4 §14: entering the grid lands on the current
+      // category + selected channel — the user reaches a channel
+      // without stepping through thousands of unrelated rows.
+      // No-op before data loads (empty scope) or when the entry
+      // channel is not in the current scope.
+      if (next === "grid") positionGridOnEntryChannel();
       // 0.11.10 W4 (seam contracts): the Guide names its own
       // sub-mode hints on every tab switch (the shell only
       // names "guide" on mode entry) and re-asserts the logical
@@ -1984,6 +2138,12 @@ const nowMs = Date.now();
 
     function renderRows() {
       if (!(bodyEl instanceof HTMLElement) || !(scrollEl instanceof HTMLElement)) return;
+      // 0.11.11 W4 §14: the grid's no-channels state, toggled
+      // before the signature early-return (a scope change alters
+      // the signature, but the toggle must also hold on frames
+      // the rebuild skips). No per-frame data scan: the empty
+      // case is decided by the scope size alone.
+      if (gridEmptyEl) gridEmptyEl.hidden = visibleChannels.length > 0;
       const viewportHeight = scrollEl.clientHeight || 600;
       const viewportWidth = scrollEl.clientWidth || 1200;
       const scrollTop = scrollEl.scrollTop;
@@ -2318,11 +2478,91 @@ const nowMs = Date.now();
       );
     }
 
+    // ── Full Guide mounting (0.11.11 W4, §14) ──────────────────
+    // The grid only mounts the row/time window around the scroll
+    // offsets. These helpers make a target cell exist BEFORE
+    // focus moves to it — the window is positioned, the grid
+    // re-renders synchronously, and only then is the cell
+    // focused. Without this, entry/restore/navigation to a cell
+    // outside the window silently focused nothing.
+
+    /** Scroll the grid row window to the entry channel (the
+     *  Guide's selected channel in the current scope), so grid
+     *  entry starts at a sensible channel instead of row 0. The
+     *  time axis is untouched (scroll position / Jump to Now own
+     *  it). No-op when the entry channel is unknown or out of
+     *  scope. */
+    function positionGridOnEntryChannel() {
+      if (!(scrollEl instanceof HTMLElement)) return;
+      const entryId = liveState.guideChannelId || selectedChannelId;
+      if (!entryId) return;
+      const rowIndex = visibleChannels.findIndex(
+        (c) => String(c.id) === String(entryId),
+      );
+      if (rowIndex < 0) return;
+      const top = rowIndex * ROW_HEIGHT_PX;
+      if (scrollEl.scrollTop === top) return;
+      scrollEl.scrollTop = top;
+      renderRows();
+    }
+
+    /** Ensure the grid cell for (channelId, startMs) is mounted:
+     *  position the row/time window on it (gridScrollForCell)
+     *  and re-render synchronously when the window moved.
+     *  Returns false when the channel is out of scope. */
+    function ensureGridCellMounted(channelId, startMs) {
+      if (!(scrollEl instanceof HTMLElement) || !(bodyEl instanceof HTMLElement)) {
+        return false;
+      }
+      const rowIndex = visibleChannels.findIndex(
+        (c) => String(c.id) === String(channelId),
+      );
+      if (rowIndex < 0) return false;
+      const programme = findProgramme(channelId, startMs);
+      const adjusted = gridScrollForCell({
+        rowIndex,
+        rowHeightPx: ROW_HEIGHT_PX,
+        scrollTopPx: scrollEl.scrollTop,
+        viewportHeightPx: scrollEl.clientHeight || 600,
+        startMs,
+        stopMs: programme ? programme.stopMs : startMs + HOUR_MS,
+        dayStartMs: dayStartMs(),
+        pxPerHour: PX_PER_HOUR,
+        scrollLeftPx: scrollEl.scrollLeft,
+        viewportWidthPx: scrollEl.clientWidth || 1200,
+      });
+      if (adjusted) {
+        scrollEl.scrollTop = adjusted.scrollTop;
+        scrollEl.scrollLeft = adjusted.scrollLeft;
+        renderRows();
+      }
+      return true;
+    }
+
+    /** Focus a By Channel pick, mounting it first when the
+     *  virtual picker window does not contain it (a selected
+     *  channel deep in a 15,319-channel scope is usually
+     *  unmounted). Returns true when a pick was focused. */
+    function focusChannelPick(channelId) {
+      if (!channelPickList || !channelId) return false;
+      const key = `guide:channel:${String(channelId)}`;
+      const idx = channelPickList.indexOfKey(key);
+      if (idx < 0) return false;
+      const node = channelPickList.ensureIndexVisible(idx);
+      if (node instanceof HTMLElement) {
+        node.focus({ preventScroll: true });
+        node.scrollIntoView({ block: "nearest" });
+        return true;
+      }
+      return false;
+    }
+
     function restoreSelectionFocus() {
       if (!selectedKey || guideMode !== "grid") return;
       const [channelId, startRaw] = selectedKey.split("@");
       const startMs = Number(startRaw);
       if (!channelId || !Number.isFinite(startMs)) return;
+      ensureGridCellMounted(channelId, startMs);
       selectProgramme(channelId, startMs, { focus: true });
       const cell = bodyEl.querySelector(
         `[data-guide-cell][data-channel-id="${CSS.escape(channelId)}"][data-start-ms="${startMs}"]`,
@@ -2341,12 +2581,19 @@ const nowMs = Date.now();
       const { viewStartMs: start } = jumpToNowWindow(Date.now());
       viewStartMs = start;
       scrollToViewStart();
-      queueRender();
+      // 0.11.11 W4 §14: render synchronously at the new time
+      // offset before selecting — the old queueRender (rAF)
+      // left selectProgramme's focus query running against the
+      // stale window, so Jump to Now often focused nothing.
+      renderRows();
       const list = dayProgrammes.get(String(liveState.guideChannelId || "")) || [];
       const current = list.find(
         (p) => programmeState(p.startMs, p.stopMs, Date.now()) === "now",
       );
-      if (current) selectProgramme(current.channelId, current.startMs, { focus: true });
+      if (current) {
+        ensureGridCellMounted(current.channelId, current.startMs);
+        selectProgramme(current.channelId, current.startMs, { focus: true });
+      }
     }
 
     function shiftTime(deltaHours) {
@@ -2391,14 +2638,14 @@ const nowMs = Date.now();
         }
       }
       if (!target) return false;
-      const targetRow = visibleChannels.findIndex(
-        (c) => String(c.id) === String(target.channelId),
-      );
-      if (scrollEl instanceof HTMLElement) {
-        const top = targetRow * ROW_HEIGHT_PX;
-        if (top < scrollEl.scrollTop || top + ROW_HEIGHT_PX > scrollEl.scrollTop + scrollEl.clientHeight) {
-          scrollEl.scrollTop = Math.max(0, top - ROW_HEIGHT_PX);
-        }
+      // 0.11.11 W4 §14: mount the target cell before focusing
+      // it — the old code only scrolled vertically, so a
+      // Left/Right move past the time window's edge queried a
+      // cell that was never mounted and the D-pad went dead.
+      // ensureGridCellMounted positions both axes and renders;
+      // when the cell is already mounted it is a no-op.
+      if (!ensureGridCellMounted(target.channelId, target.startMs)) {
+        return false;
       }
       renderRows();
       const el = bodyEl.querySelector(
@@ -2573,14 +2820,13 @@ const nowMs = Date.now();
           row.closest("[data-guide-channel-schedule]")
         ) {
           claim();
-          const target =
-            (selectedChannelId
-              ? channelListEl?.querySelector(
-                  `[data-guide-channel-pick="${CSS.escape(selectedChannelId)}"]`,
-                )
-              : null) ||
-            channelListEl?.querySelector("[data-guide-channel-pick]");
-          focusEl(target);
+          // 0.11.11 W4 §13: mount the selected pick first — the
+          // old DOM query missed it whenever the virtual picker
+          // window had slid past it, and Left went nowhere.
+          if (selectedChannelId && focusChannelPick(selectedChannelId)) {
+            return true;
+          }
+          focusEl(channelListEl?.querySelector("[data-guide-channel-pick]"));
           return true;
         }
         return false;
@@ -2699,15 +2945,24 @@ const nowMs = Date.now();
      * featured programme, else first section/fallback row;
      * By Channel — the selected channel's pick, else the first
      * pick; grid — first rendered cell. Returns true when
-     * something was focused. Never focuses a hidden or
-     * unmounted node: every candidate comes from the live DOM
-     * of the visible panel.
+     * something was focused. Never focuses a hidden node:
+     * every candidate comes from the live DOM of the visible
+     * panel (0.11.11 W4: the By Channel branch mounts the
+     * selected pick through the virtual list first, so the
+     * candidate exists even when the window had slid past it).
      */
     function focusFirstPanelItem() {
       // Every mode branch below assigns before the check.
       let target;
       if (guideMode === "now") {
         target = nowListEl?.querySelector("[data-guide-row]");
+        // 0.11.11 W4 §11: an empty On Now list lands focus on
+        // the Change-scope action (the way out of the empty
+        // scope) instead of nowhere — only when the empty
+        // container is actually showing.
+        if (!target && nowEmptyEl && !nowEmptyEl.hidden) {
+          target = nowEmptyEl.querySelector("[data-guide-now-change-scope]");
+        }
       } else if (guideMode === "tonight") {
         target =
           tonightFeaturedEl?.querySelector("[data-guide-row]") ||
@@ -2715,12 +2970,14 @@ const nowMs = Date.now();
           tonightFallbackEl?.querySelector("[data-guide-row]") ||
           null;
       } else if (guideMode === "channel") {
-        target =
-          (selectedChannelId
-            ? channelListEl?.querySelector(
-                `[data-guide-channel-pick="${CSS.escape(selectedChannelId)}"]`,
-              )
-            : null) || channelListEl?.querySelector("[data-guide-channel-pick]") || null;
+        // 0.11.11 W4 §13: mount the selected pick first — the
+        // old DOM query fell back to the first mounted pick
+        // whenever the selected channel sat outside the
+        // virtual window, landing focus on the wrong channel.
+        if (selectedChannelId && focusChannelPick(selectedChannelId)) {
+          return true;
+        }
+        target = channelListEl?.querySelector("[data-guide-channel-pick]") || null;
       } else {
         target = bodyEl?.querySelector("[data-guide-cell]") || null;
       }
@@ -2951,6 +3208,22 @@ const nowMs = Date.now();
       if (trigger instanceof HTMLElement) {
         if (categoryPicker && categoryPicker.isOpen()) closeCategoryDrawer();
         else openCategoryDrawer();
+        return;
+      }
+      // 0.11.11 W4 §11/§13: empty-state actions. Change scope
+      // opens the category drawer; Choose another channel
+      // returns focus to the selected channel's pick (mounted
+      // first when the virtual window slid past it).
+      if (target.closest("[data-guide-now-change-scope]")) {
+        openCategoryDrawer();
+        return;
+      }
+      if (target.closest("[data-guide-channel-pick-another]")) {
+        if (selectedChannelId) focusChannelPick(selectedChannelId);
+        else {
+          const first = channelListEl?.querySelector("[data-guide-channel-pick]");
+          if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+        }
         return;
       }
       const pick = target.closest("[data-guide-channel-pick]");
