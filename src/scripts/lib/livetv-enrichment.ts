@@ -32,9 +32,10 @@
 // livetv-sports-classifier.ts BEFORE any TMDb search. Resolution order:
 // (1) exact verified programme artwork via the TMDb path above (confident-
 // match requirements unchanged); (2) verified sports event artwork via
-// the provider hook; (3) team/league artwork via the same hook;
-// (4) generic sport photography from the bundled manifest; (5) channel
-// branding; (6) branded placeholder. High-confidence fixtures, tournaments
+// the provider hook; (3) team/venue photography from the bundled manifest
+// (entries carrying `subjects` match keys); (4) generic sport photography
+// from the bundled manifest; (5) channel branding; (6) branded placeholder.
+// High-confidence fixtures, tournaments
 // and league broadcasts skip the blind TMDb search entirely — TMDb has no
 // fixture art, and searching wastes requests. Exact-event and generic-
 // sport images carry distinct artworkKind/provenance and must never be
@@ -556,8 +557,8 @@ const inflightProviderLookups = new Map<string, Promise<ProgrammeArtwork | null>
  * consumers read backdropUrl only, so a poster-only result must still
  * land in the wide slot. The provider shape carries no team/league
  * distinction, so every verified result maps to "exact-sports-event";
- * "league-team" is reserved for a future provider revision that reports
- * team/league art distinctly.
+ * "league-team" is produced only by hierarchy level 3 (team/venue
+ * resolution against the bundled manifest, below), never here.
  */
 function providerArtworkToProgrammeArtwork(result: ExactSportsArtwork, title: string): ProgrammeArtwork | null {
   const backdropUrl = result.backdropUrl ?? result.posterUrl ?? null
@@ -676,6 +677,150 @@ function genericSportArtwork(classification: SportsClassification, title: string
 }
 
 // ---------------------------------------------------------------------------
+// Team/venue artwork (0.11.12 W5): hierarchy level 3
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalise a team or competition name for subject matching. Mirrors the
+ * classifier's normaliseSideForAlias (livetv-sports-classifier.ts):
+ * lowercase, "&" to "and", apostrophes dropped, other punctuation to
+ * spaces, and trailing FC/AFC/CF, age-group (U21) and "women" suffixes
+ * stripped. Kept local to this module — the classifier owns
+ * classification outcomes and must not gain matching behaviour — but
+ * the two must stay in step: a side the classifier recognises
+ * ("Man Utd") must normalise the same way here ("man utd") or the
+ * alias map below cannot fire. Manifest subjects are stored in this
+ * normalised form; they are re-normalised at match time anyway, so a
+ * hand-edited subject with stray caps or punctuation still matches.
+ */
+function normaliseSubjectKey(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[’']/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\s+(fc|afc|cf)$/, "")
+    .replace(/\s+u\d{2}$/, "")
+    .replace(/\s+women$/, "")
+    .trim()
+}
+
+/**
+ * Short-form -> canonical team name, for EPG sides written as
+ * abbreviations or famous short forms ("Man Utd", "Spurs", "Leafs").
+ * Keys and values are normalised subject keys. Deliberately small and
+ * conservative: only unambiguous short forms are listed. Single-word
+ * tails that already appear as manifest subjects ("oilers", "flames",
+ * "sabres") need no alias — they match directly. Bare "united" is NOT
+ * an entry (ambiguous across clubs), and bare "rangers" is NOT an
+ * entry (Glasgow Rangers vs New York Rangers — the sport filter in
+ * findTeamVenueEntry, not the alias, disambiguates same-name sides).
+ */
+const TEAM_SUBJECT_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["man utd", "manchester united"],
+  ["manchester utd", "manchester united"],
+  ["man city", "manchester city"],
+  ["spurs", "tottenham hotspur"],
+  ["tottenham", "tottenham hotspur"],
+  ["west ham", "west ham united"],
+  ["wolves", "wolverhampton wanderers"],
+  ["brighton", "brighton and hove albion"],
+  ["newcastle", "newcastle united"],
+  ["leeds", "leeds united"],
+  ["sheffield utd", "sheffield united"],
+  ["leicester", "leicester city"],
+  ["norwich", "norwich city"],
+  ["ipswich", "ipswich town"],
+  ["nottm forest", "nottingham forest"],
+  ["leafs", "toronto maple leafs"],
+  ["bruins", "boston bruins"],
+  ["habs", "montreal canadiens"],
+  ["pens", "pittsburgh penguins"],
+  ["caps", "washington capitals"],
+  ["hawks", "chicago blackhawks"],
+  ["wings", "detroit red wings"],
+  ["sens", "ottawa senators"],
+])
+
+/** Match keys for one raw name: the normalised key, then its alias
+ *  expansion when one exists. Both are tried, key first. */
+function subjectKeysFor(raw: string): string[] {
+  const key = normaliseSubjectKey(raw)
+  if (!key) return []
+  const alias = TEAM_SUBJECT_ALIASES.get(key)
+  return alias && alias !== key ? [key, alias] : [key]
+}
+
+/**
+ * First manifest entry (in manifest order) whose subjects match team A,
+ * else team B, else the competition/venue — or null. Only entries
+ * carrying subjects can match; entries without subjects never match
+ * level 3 and stay generic-fallback-only. Candidates are scoped to the
+ * classified sport when one is known, so a team name shared across
+ * sports ("rangers") cannot pull the wrong sport's photo; a null sport
+ * (ambiguous fixture) searches all sports, with the subject keys
+ * themselves disambiguating. No randomness: manifest order decides.
+ */
+function findTeamVenueEntry(classification: SportsClassification): SportsArtworkEntry | null {
+  if (!classification.isSport) return null
+  const candidates = SPORT_ARTWORK_MANIFEST.filter(
+    (entry) =>
+      (entry.subjects?.length ?? 0) > 0 &&
+      (classification.sport == null || entry.sport === classification.sport)
+  )
+  if (candidates.length === 0) return null
+  const lookupKeys: string[][] = []
+  if (classification.teams) {
+    lookupKeys.push(subjectKeysFor(classification.teams[0]), subjectKeysFor(classification.teams[1]))
+  }
+  if (classification.competition) lookupKeys.push(subjectKeysFor(classification.competition))
+  for (const keys of lookupKeys) {
+    for (const key of keys) {
+      const entry = candidates.find((candidate) =>
+        (candidate.subjects ?? []).some((subject) => normaliseSubjectKey(subject) === key)
+      )
+      if (entry) return entry
+    }
+  }
+  return null
+}
+
+/**
+ * Hierarchy level 3: a team/venue photograph from the bundled manifest
+ * for a fixture naming a depicted team, or a broadcast naming a
+ * depicted competition/venue. This is supplementary team/venue imagery
+ * — a previous fixture or a stadium/arena shot — never a photograph of
+ * the actual current fixture, so identity confidence stays 0 (the same
+ * convention as the generic-sport level) and the EPG title is carried
+ * unchanged. The artworkKind and provenance stay distinct from
+ * exact-event images: consumers must never present this as the fixture.
+ */
+function teamVenueArtwork(classification: SportsClassification, title: string): ProgrammeArtwork | null {
+  const entry = findTeamVenueEntry(classification)
+  if (!entry) return null
+  return {
+    backdropUrl: entry.path,
+    posterUrl: entry.path,
+    stillUrl: null,
+    source: "sports",
+    artworkKind: "league-team",
+    confidence: 0,
+    matchedTitle: title.trim() || null,
+    synopsis: null,
+    genres: [],
+    provenance: {
+      source: "Wikimedia Commons",
+      attribution: entry.attribution,
+      licence: entry.licence,
+      licenceUrl: entry.licenceUrl,
+      sourcePage: entry.sourcePage,
+    },
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API (contracts)
 // ---------------------------------------------------------------------------
 
@@ -742,11 +887,26 @@ async function enrichProgrammeUncached(req: EnrichProgrammeRequest): Promise<Unc
     }
   }
 
-  // Levels 2/3: verified sports event / team-league artwork via the
-  // provider hook (high/medium sport only; timeout + failure isolated).
+  // Level 2: verified sports event artwork via the provider hook
+  // (high/medium sport only; timeout + failure isolated).
   if (isProviderEligible(classification)) {
     const providerArt = await lookupProviderArtwork(classification, req)
     if (providerArt) return { art: providerArt, negative: false, negativeTtlMs }
+  }
+
+  // Level 3: team/venue photography from the bundled manifest (W5).
+  // Cached under the composite sports-entry key with the short sports
+  // TTL, like provider outcomes: the same fixture on another date
+  // re-resolves, and a cached entry wins without re-running the
+  // hierarchy (see the fast path in enrichProgramme and the provider
+  // wrapper's cache check). No title-keyed entry is written: the
+  // date-keyed sports cache is the only home for this art.
+  if (classification.isSport) {
+    const teamVenueArt = teamVenueArtwork(classification, req.title)
+    if (teamVenueArt) {
+      cachePut(sportsCacheKey(req.title, classification, req.startMs), teamVenueArt, false, SPORTS_TTL_MS)
+      return { art: teamVenueArt, negative: false, negativeTtlMs }
+    }
   }
 
   // Level 4: generic sport photography from the bundled manifest.
@@ -787,7 +947,8 @@ function channelArtwork(req: EnrichProgrammeRequest): ProgrammeArtwork | null {
  * match" results are negatively cached 24h (6h for sport titles, so
  * event art appearing later still wins). Verified sports-event art is
  * cached separately under a composite title+sport+teams/event+date key;
- * generic sport photos are title-cached 6h while a TMDb key is
+ * team/venue art is cached under the same composite key with the 6h
+ * sports TTL; generic sport photos are title-cached 6h while a TMDb key is
  * configured, and never cached without one (a key added later must win).
  */
 export async function enrichProgramme(req: EnrichProgrammeRequest): Promise<ProgrammeArtwork> {
@@ -839,7 +1000,10 @@ export async function enrichProgramme(req: EnrichProgrammeRequest): Promise<Prog
     if (art.source === "sports") {
       // Verified event art lives only in the date-keyed sports cache —
       // a title-keyed entry would serve one date's fixture art for
-      // another. Generic sport photos ARE title-cached while a key is
+      // another. Team/venue (league-team) art likewise lives only
+      // there: the level-3 resolution writes it under the composite
+      // key with the short sports TTL, so nothing is written here.
+      // Generic sport photos ARE title-cached while a key is
       // configured (TMDb already had its chance) with the short sports
       // TTL, so event art appearing later still wins.
       if (art.artworkKind === "generic-sport" && isTmdbActive()) {
