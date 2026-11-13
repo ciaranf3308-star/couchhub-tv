@@ -400,6 +400,21 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
       RETURN_HOME_HINT,
     ],
   },
+  // 0.11.13 Sports Corner hub (/followed/sports): same mapping as
+  // the hub's own setControllerHints call in followed-sports-page.ts
+  // — A watches, X opens fixture actions. Kept in step deliberately.
+  "followed-sports": {
+    id: "followed-sports",
+    items: [
+      { glyph: "dpad", label: "Move" },
+      { glyph: "a", label: "Watch" },
+      { glyph: "b", label: "Back" },
+      { glyph: "x", label: "Actions" },
+      { glyph: "y", label: "Search" },
+      { glyph: "menu", label: "Settings" },
+      RETURN_HOME_HINT,
+    ],
+  },
   // 0.10.0 (W5): Library lists (Favourites / Watch Later) had no
   // config and fell back to the generic legend (no Search row). They
   // are plain card lists like Followed — same audited mapping: Y is
