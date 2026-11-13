@@ -447,3 +447,115 @@ export function guideCellViewModel(
     canCatchup: action !== "none",
   };
 }
+
+// ── Guide failure states (0.11.11 W4, shared with W3) ───────────
+//
+// The five data conditions a Guide panel can honestly be in.
+// W3 owns the data pipeline and defines the failure signal; this
+// classifier renders from conditions the Guide can already
+// observe, so panels never show a generic blank. The `loadFailed`
+// input is the seam: the Guide passes false until W3's signal
+// module lands, and integration wires that signal in here —
+// nothing else changes. Precedence is fixed: a genuine failure
+// beats loading, loading beats an empty catalogue, an empty
+// catalogue beats an unmapped scope, and an unmapped scope beats
+// an empty range. "ready" means rows exist (message is "").
+
+export type GuideDataStateId =
+  | "no-channels"
+  | "loading"
+  | "no-mapping"
+  | "no-programmes"
+  | "failure"
+  | "ready";
+
+export interface GuideDataStateInput {
+  /** Channels in the current scope (after category filtering). */
+  channelCount: number;
+  /** Scope channels with at least one matched programme. */
+  mappedChannelCount: number;
+  /** Rows the panel would show. */
+  rowCount: number;
+  /** True while activation / the EPG load is still in flight. */
+  loading: boolean;
+  /** True when the EPG load genuinely failed (W3 signal seam). */
+  loadFailed: boolean;
+  /** Human scope label, e.g. "Favourites" (default "this scope"). */
+  scopeLabel?: string;
+  /** Human range label, e.g. "on now" (default "in this range"). */
+  rangeLabel?: string;
+}
+
+export interface GuideDataState {
+  state: GuideDataStateId;
+  /** Honest panel text ("" when ready — the rows speak). */
+  message: string;
+}
+
+export function guideDataState(input: GuideDataStateInput): GuideDataState {
+  const scope = (input.scopeLabel ?? "").trim() || "this scope";
+  const range = (input.rangeLabel ?? "").trim() || "in this range";
+  const channels = Math.max(0, Math.floor(input.channelCount) || 0);
+  const mapped = Math.max(0, Math.floor(input.mappedChannelCount) || 0);
+  const rows = Math.max(0, Math.floor(input.rowCount) || 0);
+  if (input.loadFailed) {
+    return {
+      state: "failure",
+      message:
+        "The programme guide couldn't be loaded. Check the connection and try Live TV again — no listings are shown rather than guessed ones.",
+    };
+  }
+  if (input.loading) {
+    return { state: "loading", message: "Loading the programme guide…" };
+  }
+  if (channels === 0) {
+    return {
+      state: "no-channels",
+      message: `No channels in ${scope}. Choose a different scope to see listings.`,
+    };
+  }
+  if (mapped === 0) {
+    return {
+      state: "no-mapping",
+      message:
+        `None of the channels in ${scope} matched programme data, so there is nothing to list ${range}. ` +
+        "Change the scope to see other channels.",
+    };
+  }
+  if (rows === 0) {
+    return {
+      state: "no-programmes",
+      message: `No programmes listed ${range}.`,
+    };
+  }
+  return { state: "ready", message: "" };
+}
+
+// ── By Channel empty text (0.11.11 W4, §13) ─────────────────────
+//
+// A channel with no EPG data at all is NOT the same as a channel
+// with programmes on other days: the first reads exactly "No
+// schedule available for this channel." and the channel stays
+// listed and selectable — it is never hidden for lacking data.
+
+export interface ChannelScheduleEmptyInput {
+  /** Channels in the current scope (0 = empty category). */
+  visibleChannelCount: number;
+  /** True when the selected channel has any programmes at all. */
+  channelHasAnyProgrammes: boolean;
+  /** True when a search query is active. */
+  searching: boolean;
+}
+
+export function channelScheduleEmptyMessage(
+  input: ChannelScheduleEmptyInput,
+): string {
+  if (input.visibleChannelCount <= 0) return "No channels in this category.";
+  if (!input.channelHasAnyProgrammes) {
+    return "No schedule available for this channel.";
+  }
+  if (input.searching) {
+    return "No programmes match this search for this channel on this day.";
+  }
+  return "No programmes listed for this channel on this day.";
+}
