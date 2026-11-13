@@ -768,12 +768,9 @@ const nowMs = Date.now();
     guideCellViewModel,
     guideDayForOffset,
     jumpToNowWindow,
-    normaliseCategoryLabel,
-    nowNextRows,
     parseGuideMode,
     pickNowFeatured,
     programmesForGuideDay,
-    sanitiseGuideProgrammes,
     stableGuideSelection,
   } from "@/scripts/lib/livetv-guide.ts";
   import {
@@ -793,10 +790,14 @@ const nowMs = Date.now();
   } from "@/scripts/lib/couch-livetv-epg.ts";
   import {
     getProgrammesSync,
-    resolveTvgId,
-    shiftChannelProgrammes,
     EPG_LOADED_EVENT,
+    EPG_SOURCE_STATUS_EVENT,
   } from "@/scripts/lib/epg-data.js";
+  import {
+    collectTonightItems,
+    createNowNextRowsCache,
+    loadGuideProgrammes,
+  } from "@/scripts/lib/livetv-guide-data.ts";
   import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.ts";
   import { getActiveEntry } from "@/scripts/lib/creds.js";
   import {
@@ -917,6 +918,23 @@ const nowMs = Date.now();
     /** Grid data revision: bumped on every EPG load; part of the
      *  grid render signature so stale rows are never skipped. */
     let gridRevision = 0;
+    // ── Failure signal inputs (0.11.11 W3, §16) ──────────────────
+    // The two genuine-failure conditions behind W4's guideDataState
+    // `loadFailed` input (the single classifier — this file defines
+    // no second one). Integration wires them with one line at W4's
+    // seam; see resolveGuideLoadFailed in livetv-guide-data.ts.
+    // Both clear on a clean EPG load.
+    /** Last data-pipeline error, or null once a load succeeds. */
+    let guideDataError = null;
+    /** Every EPG source errored on the last source-status event. */
+    let epgLoadFailed = false;
+    /** Shared empty-panel text when activation itself fails (the
+     *  per-mode failure copy lives in W4's classifier). */
+    const GUIDE_LOAD_ERROR_TEXT =
+      "The Guide couldn't load its data — reopening the Guide tries again.";
+    /** Memoised Now/Next scan: focus moves reuse it instead of
+     *  rescanning the whole catalogue per arrow press. */
+    const nowNextCache = createNowNextRowsCache();
     /** Last grid render signature (skip redundant rebuilds). */
     let lastGridSignature = null;
     /** Next list render resets scroll to the top (filter/search change). */
@@ -1116,26 +1134,17 @@ const nowMs = Date.now();
       }
     }
 
-    /** The Tonight identity for a raw cached channel. */
-    function tonightChannelFor(channel) {
-      const favs = favouriteIds();
-      const watched = watchedIds();
-      return {
-        id: String(channel.id),
-        displayName: channel.displayName || channel.name || "",
-        logo: channel.logo ? String(channel.logo) : null,
-        categoryLabel: normaliseCategoryLabel(channel.category || ""),
-        favourite: favs.has(channel.id),
-        watched: watched.has(channel.id),
-      };
-    }
-
-    /** All sanitised programmes per channel (every day the EPG covers). */
+    /** All sanitised programmes per channel (every day the EPG covers).
+     *  Indexed resolution + per-channel isolation live in
+     *  loadGuideProgrammes (livetv-guide-data.ts): one shared name
+     *  index for the whole catalogue instead of a rebuild per
+     *  channel (the ~15s EPG-load freeze at 15k channels), and one
+     *  corrupt channel entry is skipped instead of aborting the
+     *  whole load. */
     function loadAllProgrammes() {
       programmesByChannel = new Map();
       const state = playlistId ? getProgrammesSync(playlistId) : null;
       const programmes = state && state.programmes instanceof Map ? state.programmes : null;
-      const channelNames = state && state.channelNames instanceof Map ? state.channelNames : null;
       if (!programmes) return;
       const overrides = {};
       for (const channel of allChannels) {
@@ -1146,17 +1155,8 @@ const nowMs = Date.now();
           // No override for this channel; resolution falls through.
         }
       }
-      for (const channel of allChannels) {
-        const tvgId = resolveTvgId(channel, overrides, programmes, channelNames);
-        if (!tvgId) continue;
-        const raw = programmes.get(String(tvgId).toLowerCase());
-        if (!raw) continue;
-        const shifted = shiftChannelProgrammes(raw, channel.tvgShift);
-        programmesByChannel.set(
-          String(channel.id),
-          sanitiseGuideProgrammes(String(channel.id), shifted),
-        );
-      }
+      const loaded = loadGuideProgrammes(allChannels, state, overrides);
+      programmesByChannel = loaded.programmesByChannel;
       gridRevision += 1;
     }
 
@@ -1511,14 +1511,20 @@ const nowMs = Date.now();
       }
     }
 
-    /** On Now rows for the current category/search filter. */
+    /** On Now rows for the current category/search filter. The
+     *  scan is memoised per (EPG revision, visible set, minute)
+     *  in livetv-guide-data.ts — focus moves reuse it instead of
+     *  rescanning every programme of every visible channel per
+     *  arrow press. The search filter still runs per call. */
     function currentNowEntries() {
       const nowMs = Date.now();
-      const visibleIds = new Set(visibleChannels.map((c) => String(c.id)));
-      const filtered = new Map(
-        [...programmesByChannel].filter(([id]) => visibleIds.has(id)),
-      );
-      let entries = nowNextRows(filtered, nowMs)
+      const rows = nowNextCache.getRows({
+        programmesByChannel,
+        visibleChannels,
+        nowMs,
+        revision: gridRevision,
+      });
+      let entries = rows
         .map((row) => ({
           row,
           channel: channelsById.get(row.channelId),
@@ -1653,23 +1659,24 @@ const nowMs = Date.now();
     function renderTonight() {
       if (!(tonightSectionsEl instanceof HTMLElement)) return;
       const nowMs = Date.now();
-      let items = [];
-      for (const channel of allChannels) {
-        const list = programmesByChannel.get(String(channel.id)) || [];
-        if (list.length === 0) continue;
-        const tonightChannel = tonightChannelFor(channel);
-        for (const programme of list) {
-          items.push({ programme, channel: tonightChannel });
-        }
-      }
-      if (searchQuery.trim()) {
-        const needle = searchQuery.trim().toLowerCase();
-        items = items.filter((item) =>
-          `${item.channel.displayName} ${item.programme.title} ${item.programme.desc ?? ""}`
-            .toLowerCase()
-            .includes(needle),
-        );
-      }
+      // Evening-window collection (0.11.11 W3): only programmes
+      // overlapping tonight are wrapped — the old loop wrapped
+      // every programme of every channel (2.25M objects at 15k
+      // channels) before the section builders filtered them back
+      // down. Same items out: the window predicate is exactly
+      // programmesForTonight's, and the search filter commutes.
+      // Favourite/watched sets are read once here, not per channel.
+      // SCOPE (0.11.11 W4 §12, preserved): the scoped channel set
+      // (visibleChannels), not the full catalogue — Tonight honours
+      // the shared category scope like every other mode.
+      const { windowStartMs, windowEndMs } = eveningWindowMs(nowMs);
+      const items = collectTonightItems(visibleChannels, programmesByChannel, {
+        favouriteIds: favouriteIds(),
+        watchedIds: watchedIds(),
+        windowStartMs,
+        windowEndMs,
+        searchNeedle: searchQuery.trim().toLowerCase(),
+      });
       const built = buildTonightSections(items, nowMs);
       const evening = chronologicalTonight(items, nowMs);
       if (evening.length === 0) {
@@ -2677,6 +2684,11 @@ const nowMs = Date.now();
     // longer waits for data (see activate).
     let activationFinished = false;
     let catalogRetryTimer = null;
+    /** Bounded activation-error retries (0.11.11 W3): a throw in
+     *  finishActivation retries twice, then stops — a
+     *  deterministic failure must never loop forever. Reset on
+     *  success, on activate, and on deactivate. */
+    let activationErrorRetries = 0;
 
     /**
      * Focus the first meaningful item of the active panel
@@ -2723,41 +2735,62 @@ const nowMs = Date.now();
     function finishActivation() {
       if (activationFinished) return;
       activationFinished = true;
-      if (catalogRetryTimer !== null) {
-        clearTimeout(catalogRetryTimer);
-        catalogRetryTimer = null;
-      }
-      hideEmpty();
-      resolveCategory();
-      loadAllProgrammes();
-      rebuildDays();
-      loadProgrammesForDay();
-      setGuideMode(guideMode);
-      if (guideMode === "grid") {
-        renderTimeHeader();
-        updateDayControls();
-        const all = [...dayProgrammes.values()].flat();
-        selectedKey =
-          stableGuideSelection(
-            liveState.guideProgrammeKey || selectedKey,
-            all,
-            Date.now(),
-          ) || selectedKey;
-        if (selectedKey) {
-          const [channelId, startRaw] = selectedKey.split("@");
-          selectProgramme(channelId, Number(startRaw), { openDetail: false });
+      try {
+        // A clean attempt clears a previous pipeline error (one
+        // half of the W4 `loadFailed` signal); a throw below sets
+        // it again in the catch.
+        guideDataError = null;
+        if (catalogRetryTimer !== null) {
+          clearTimeout(catalogRetryTimer);
+          catalogRetryTimer = null;
         }
-        renderRows();
-        scrollToViewStart();
-        restoreSelectionFocus();
-        // No stored selection (or its cell is off-window):
-        // land on the first rendered cell rather than nowhere.
-        if (!root.contains(document.activeElement)) focusFirstPanelItem();
-      } else {
-        // List modes had NO entry focus: focus stayed on the
-        // (now hidden) invoker and the first arrows went
-        // nowhere. Land on the first meaningful item (§11.2–4).
-        focusFirstPanelItem();
+        hideEmpty();
+        resolveCategory();
+        loadAllProgrammes();
+        rebuildDays();
+        loadProgrammesForDay();
+        setGuideMode(guideMode);
+        if (guideMode === "grid") {
+          renderTimeHeader();
+          updateDayControls();
+          const all = [...dayProgrammes.values()].flat();
+          selectedKey =
+            stableGuideSelection(
+              liveState.guideProgrammeKey || selectedKey,
+              all,
+              Date.now(),
+            ) || selectedKey;
+          if (selectedKey) {
+            const [channelId, startRaw] = selectedKey.split("@");
+            selectProgramme(channelId, Number(startRaw), { openDetail: false });
+          }
+          renderRows();
+          scrollToViewStart();
+          restoreSelectionFocus();
+          // No stored selection (or its cell is off-window):
+          // land on the first rendered cell rather than nowhere.
+          if (!root.contains(document.activeElement)) focusFirstPanelItem();
+        } else {
+          // List modes had NO entry focus: focus stayed on the
+          // (now hidden) invoker and the first arrows went
+          // nowhere. Land on the first meaningful item (§11.2–4).
+          focusFirstPanelItem();
+        }
+        activationErrorRetries = 0;
+      } catch (error) {
+        // 0.11.11 W3: activation used to set activationFinished
+        // FIRST with no try/catch, so any throw left the Guide
+        // on empty panels forever — the retry paths all check
+        // the flag. Reset it, surface the honest error state,
+        // and retry a bounded number of times so a transient
+        // failure recovers without leaving/re-entering.
+        activationFinished = false;
+        guideDataError = error;
+        showEmpty(GUIDE_LOAD_ERROR_TEXT);
+        if (activationErrorRetries < 2) {
+          activationErrorRetries += 1;
+          scheduleCatalogRetry(1);
+        }
       }
     }
 
@@ -2828,6 +2861,7 @@ const nowMs = Date.now();
       persistLivetvState(liveState);
       active = true;
       activationFinished = false;
+      activationErrorRetries = 0;
       root.hidden = false;
       // 0.11.0 integration (R9): html[data-livetv-mode] is written
       // only by the shell (livetv.astro setMode) — on the same
@@ -2870,6 +2904,7 @@ const nowMs = Date.now();
       if (!active) return;
       active = false;
       activationFinished = false;
+      activationErrorRetries = 0;
       if (catalogRetryTimer !== null) {
         clearTimeout(catalogRetryTimer);
         catalogRetryTimer = null;
@@ -3220,29 +3255,66 @@ const nowMs = Date.now();
       if (detail.kind && detail.kind !== "live" && detail.kind !== "m3u") return;
       maybeFinishActivation();
     });
-    document.addEventListener(EPG_LOADED_EVENT, () => {
+    document.addEventListener(EPG_LOADED_EVENT, (event) => {
       if (!active) return;
-      const previous = selectedKey;
-      loadChannels();
-      maybeFinishActivation();
-      loadAllProgrammes();
-      rebuildDays();
-      loadProgrammesForDay();
-      resolveCategory();
-      const all = [...dayProgrammes.values()].flat();
-      selectedKey = stableGuideSelection(previous, all, Date.now());
-      // EPG updates must not reset focus: the virtual lists keep
-      // keyed nodes mounted, the grid restores its focused cell,
-      // and this root-level preservation covers the fully-rendered
-      // panels (schedule / Tonight sections) too. Channel focus
-      // (selectedChannelId) is untouched here by design.
-      preserveGuideFocus(root, () => {
-        renderActivePanel();
-      });
-      if (guideMode === "grid" && selectedKey) {
-        const [channelId, startRaw] = selectedKey.split("@");
-        selectProgramme(channelId, Number(startRaw), { openDetail: false });
+      // Another playlist's EPG load must not rebuild this Guide.
+      const detail = event?.detail ?? {};
+      if (detail.playlistId && playlistId && detail.playlistId !== playlistId) return;
+      try {
+        const previous = selectedKey;
+        loadChannels();
+        maybeFinishActivation();
+        loadAllProgrammes();
+        rebuildDays();
+        loadProgrammesForDay();
+        resolveCategory();
+        const all = [...dayProgrammes.values()].flat();
+        selectedKey = stableGuideSelection(previous, all, Date.now());
+        // EPG updates must not reset focus: the virtual lists keep
+        // keyed nodes mounted, the grid restores its focused cell,
+        // and this root-level preservation covers the fully-rendered
+        // panels (schedule / Tonight sections) too. Channel focus
+        // (selectedChannelId) is untouched here by design.
+        preserveGuideFocus(root, () => {
+          renderActivePanel();
+        });
+        if (guideMode === "grid" && selectedKey) {
+          const [channelId, startRaw] = selectedKey.split("@");
+          selectProgramme(channelId, Number(startRaw), { openDetail: false });
+        }
+        // A clean load clears a previous pipeline error and any
+        // recorded source failure (the W4 `loadFailed` signal).
+        guideDataError = null;
+        epgLoadFailed = false;
+      } catch (error) {
+        // 0.11.11 W3: the handler used to have no try/catch, so a
+        // throw (e.g. a corrupt programme row) left the Guide on
+        // stale/empty panels with no recovery. Keep last-good
+        // panels: only surface the empty/error state when there
+        // is no programme data to preserve. The next EPG load
+        // clears the error.
+        guideDataError = error;
+        if (programmesByChannel.size === 0) {
+          showEmpty(GUIDE_LOAD_ERROR_TEXT);
+        }
       }
+    });
+    // EPG source failures (0.11.11 W3): every source erroring sets
+    // the `epgLoadFailed` half of the W4 `loadFailed` signal, so
+    // the failure state is honest instead of a loading state that
+    // never resolves. A later clean EPG load clears it (see the
+    // handler above).
+    document.addEventListener(EPG_SOURCE_STATUS_EVENT, (event) => {
+      if (!active) return;
+      const detail = event?.detail ?? {};
+      if (detail.playlistId && playlistId && detail.playlistId !== playlistId) return;
+      const sources = Array.isArray(detail.sources) ? detail.sources : [];
+      if (sources.length === 0) return;
+      const allFailed = sources.every(
+        (source) => source && source.status === "error",
+      );
+      if (allFailed === epgLoadFailed) return;
+      epgLoadFailed = allFailed;
     });
 
     // Deep link / reload: ?mode=guide or a persisted guide mode.
