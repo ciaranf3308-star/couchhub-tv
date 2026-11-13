@@ -23,7 +23,11 @@
 // the same path the keyboard Escape key takes),
 // `livetv:osd-action {action:"favourite"}` (OSD favourite button),
 // `livetv:playback-error {streamId, kind}` (dispatched by the
-// stream.ts seam). Tunes go through the engine seam only — this
+// stream.ts seam). `quick-surf:open-browser {action, channelId,
+// categoryScope}` (0.11.11 W2) is handled by
+// quick-surf-browser-handoff.ts: close Quick Surf, open the
+// playback Channel Browser, apply the action after the lazy
+// mount resolves. Tunes go through the engine seam only — this
 // shell never builds a stream URL. Confirmed switches go through
 // `switchChannel`: the prior stream is released before the
 // replacement opens.
@@ -185,7 +189,11 @@ import TvLogo from "./TvLogo.astro";
   } from "@/scripts/lib/livetv-data";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
   import { getFavorites } from "@/scripts/lib/preferences.js";
-  import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
+  import { mountCachedChannelBrowser, type ChannelBrowserHandle } from "@/scripts/lib/livetv-browser";
+  import {
+    installQuickSurfBrowserHandoff,
+    isQuickSurfPanelOpen,
+  } from "@/scripts/lib/quick-surf-browser-handoff";
   import { resolvePlaybackOrigin } from "@/scripts/lib/livetv-nav";
   // Recovery actions the legacy failure panel used to own (0.11.0
   // W5): HEVC install via the public lib, external-player launch
@@ -265,8 +273,12 @@ import TvLogo from "./TvLogo.astro";
     const errorEl = shell.querySelector<HTMLElement>("[data-livetv-error]");
     const browserEl = shell.querySelector<HTMLElement>("[data-livetv-play-browser]");
     const browserMount = shell.querySelector<HTMLElement>("[data-livetv-play-browser-mount]");
-    let browserHandle: { destroy: () => void } | null = null;
+    let browserHandle: ChannelBrowserHandle | null = null;
     let browserMounting: Promise<unknown> | null = null;
+    // Set by the Quick Surf handoff install below: closing the
+    // browser invalidates any handoff whose mount is still
+    // resolving, so a late mount never reopens it.
+    let cancelPendingHandoff: (() => void) | null = null;
 
     // Channel Browser inside playback (integration 0.7.0): W1's
     // mountCachedChannelBrowser, lazily mounted on first open so a
@@ -313,11 +325,46 @@ import TvLogo from "./TvLogo.astro";
     };
 
     const closeBrowser = () => {
+      // Cancel any handoff mid-mount first: the browser is
+      // closing, so a mount that resolves later must apply
+      // nothing (generation guard). Mode-leave and tune closes
+      // funnel through here too, so playback is never disturbed
+      // by a stale handoff.
+      cancelPendingHandoff?.();
       if (!browserEl) return;
       browserEl.hidden = true;
       browserEl.dataset.hidden = "true";
       restoreFocus();
     };
+
+    // ── Quick Surf → Channel Browser handoff (0.11.11 W2) ─────
+    // Listens for W1's `quick-surf:open-browser`, closes Quick
+    // Surf, then opens this browser and applies the requested
+    // action through the real handle APIs — only after the lazy
+    // mount resolves, and never after a close. See
+    // quick-surf-browser-handoff.ts for the contract. The shell
+    // keeps owning the container, the mount and Back; the
+    // handoff owns nothing else.
+    const quickSurfHandoff = installQuickSurfBrowserHandoff({
+      isQuickSurfPresent: () => isQuickSurfPanelOpen(),
+      openBrowser: () => openBrowser(),
+      isBrowserOpen: () => !!browserEl && !browserEl.hidden,
+      awaitBrowserHandle: async () => {
+        if (browserHandle) return browserHandle;
+        if (browserMounting) {
+          await browserMounting;
+          return browserHandle;
+        }
+        return null;
+      },
+      focusBrowserList: () => {
+        browserEl
+          ?.querySelector<HTMLElement>("[data-browser-list]")
+          ?.focus?.({ preventScroll: true });
+      },
+      getTunedChannelId: () => tunedId,
+    });
+    cancelPendingHandoff = () => quickSurfHandoff.cancelPending();
 
     const showOsd = () => {
       window.dispatchEvent(new CustomEvent("couch-osd:show"));
@@ -801,7 +848,15 @@ import TvLogo from "./TvLogo.astro";
         return;
       }
       if (key === "y" || key === "Y") {
-        window.dispatchEvent(new CustomEvent("livetv:overlay", { detail: { overlay: "browser" } }));
+        // Y: the full Channel Browser through the Quick Surf
+        // handoff path (mount-guarded, focuses the tuned
+        // channel's row). The browser owns Y while it is open
+        // (its own search key) and Quick Surf owns Y while it
+        // is open (W1 dispatches `quick-surf:open-browser`) —
+        // both are left alone here.
+        if (browserEl && !browserEl.hidden) return;
+        if (isQuickSurfPanelOpen()) return;
+        quickSurfHandoff.openFullBrowser();
         return;
       }
       if (key === "g" || key === "G") {
