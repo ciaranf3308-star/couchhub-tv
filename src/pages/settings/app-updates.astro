@@ -10,6 +10,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-svelte"
 import TvLogo from "@/components/couch/TvLogo.astro"
+import { SPORT_ARTWORK_MANIFEST } from "@/scripts/lib/sports-artwork-manifest.ts"
 ---
 <SettingsShell
   title="App & Updates"
@@ -316,6 +317,41 @@ import TvLogo from "@/components/couch/TvLogo.astro"
                 Metadata provided by <a href="https://www.thetvdb.com/" data-external class="underline hover:text-fg">TheTVDB</a>.
                 Please consider <a href="https://www.thetvdb.com/subscribe" data-external class="underline hover:text-fg">adding missing information or subscribing</a>.
               </p>
+            </div>
+
+            <!-- Sports photography: bundled generic sport photos for live TV artwork. -->
+            <!-- Credits render from the manifest so they can never drift from the bundle. -->
+            <div class="flex flex-col gap-1">
+              <div class="flex items-baseline justify-between">
+                <span class="text-sm font-medium text-fg">Sports photography</span>
+                <span class="text-2xs uppercase tracking-wide text-fg-3 shrink-0 ms-3">Wikimedia Commons</span>
+              </div>
+              <p class="text-xs text-fg-3">
+                Generic sport photos shown for live TV programmes come from Wikimedia Commons. Each photo is used under its licence, credited below.
+              </p>
+              <ul class="flex flex-col gap-1">
+                {SPORT_ARTWORK_MANIFEST.map((entry) => (
+                  <li class="text-xs text-fg-3">
+                    <span class="text-2xs uppercase tracking-wide text-fg-3">{entry.sport}</span>
+                    {" — "}
+                    <span class="text-fg-2">{entry.attribution}</span>
+                    {" "}
+                    <a
+                      href={entry.sourcePage}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-external
+                      class="text-accent underline">Source</a>
+                    {" · "}
+                    <a
+                      href={entry.licenceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      data-external
+                      class="text-accent underline">{entry.licence}</a>
+                  </li>
+                ))}
+              </ul>
             </div>
 
             <div class="flex flex-col gap-1">
