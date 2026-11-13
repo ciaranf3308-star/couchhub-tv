@@ -336,6 +336,13 @@ function init(): void {
   let suppressKeyboardReopen = false
   input.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
     suppressKeyboardReopen = true
+    // Expire at the end of the task: the refocus (if it fires a
+    // focus event at all — none fires when the input was already
+    // focused) is synchronous inside closeCouchKeyboard, so a
+    // lingering flag must never eat a later, deliberate focus.
+    queueMicrotask(() => {
+      suppressKeyboardReopen = false
+    })
   })
   input.addEventListener("focus", () => {
     if (suppressKeyboardReopen) {

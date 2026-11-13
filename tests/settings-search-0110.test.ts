@@ -2,16 +2,29 @@
  * @vitest-environment jsdom
  */
 // W5 — Controller Experience 2.0 (0.11.10) §34: Settings search Back
-// hierarchy, one step per press:
-//   1. Escape with text clears ONLY the text (input keeps focus).
-//   2. Escape/B with an empty input while editing exits search and
-//      restores the previously focused setting.
-//   3. Escape/B with an unfocused, non-empty search clears the
-//      search and restores the previous focus.
-// Y focuses the input; Enter commits to the first result. The
-// trailing Escape after leaving the input is swallowed, never a
-// page step.
+// hierarchy, one step per press (merged coordinator semantics):
+//   1. B/Escape while a keyboard session is open closes the session
+//      (Contract E — the keyboard layer owns the press, as on every
+//      screen; Settings mounts no OSK grid, so the session is
+//      grid-less and closing it only releases the hints override).
+//   2. Escape with text clears ONLY the text (input keeps focus) —
+//      the input's own keydown handler, reached once no session is
+//      open (the coordinator falls through to the migration bridge,
+//      which dispatches the Escape to the focused input).
+//   3. B with an empty input while editing exits search and restores
+//      the previously focused setting (editing layer).
+//   4. B with an unfocused, non-empty search clears the search and
+//      restores the previous focus (active-search layer).
+// Y focuses the input; Enter commits to the first result. There is
+// no trailing-Escape window in the merged tree: the coordinator
+// resolves each press exactly once, so no second Escape exists to
+// swallow — a press after leaving the input to nowhere closes the
+// keyboard session and the query survives.
+// Back presses go through resolveBack(): jsdom events are
+// untrusted and never reach the coordinator's capture listener.
 import { describe, it, expect, beforeAll } from "vitest"
+import { resolveBack } from "../src/scripts/lib/back-handler"
+import { isCouchKeyboardOpen } from "../src/scripts/lib/couch-keyboard"
 
 const INPUT_ID = "settings-search-input"
 
@@ -91,27 +104,35 @@ describe("settings search (§34)", () => {
     expect(rows[1].dataset.search).toBeUndefined()
   })
 
-  it("Escape with an empty input while editing exits search and restores previous focus", () => {
+  it("B with an empty input while editing closes the keyboard, then exits search and restores previous focus", () => {
     rows[1].focus()
     input.focus()
     expect(input.value).toBe("")
-    keydown(input, "Escape")
+    expect(isCouchKeyboardOpen()).toBe(true)
+    // First press: the keyboard layer closes the session; focus
+    // returns to the input (the close-refocus contract) and the
+    // search is untouched.
+    expect(resolveBack()).toBe(true)
+    expect(isCouchKeyboardOpen()).toBe(false)
+    expect(document.activeElement).toBe(input)
+    // Second press: the editing layer exits search and restores
+    // the setting focused before search was entered.
+    expect(resolveBack()).toBe(true)
     expect(document.activeElement).toBe(rows[1])
     expect(input.value).toBe("")
   })
 
-  it("Escape with an unfocused non-empty search clears it without moving focus", async () => {
+  it("B with an unfocused non-empty search clears it without moving focus", () => {
     rows[2].focus()
     input.focus()
     input.value = "display"
     input.dispatchEvent(new Event("input", { bubbles: true }))
     rows[1].focus()
     expect(document.activeElement).toBe(rows[1])
-    // Leaving the input starts the 500ms trailing-Escape window;
-    // a B press right after navigating away is swallowed by
-    // design, so wait it out like a real second press would.
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    keydown(rows[1], "Escape")
+    // Blur to a real element ends the keyboard session silently,
+    // so the active-search layer owns the press outright.
+    expect(isCouchKeyboardOpen()).toBe(false)
+    expect(resolveBack()).toBe(true)
     expect(input.value).toBe("")
     // Focus was already on a live setting row; exiting search
     // leaves it there and un-filters the list.
@@ -127,18 +148,25 @@ describe("settings search (§34)", () => {
     expect(document.activeElement).toBe(rows[2])
   })
 
-  it("the trailing Escape after leaving the input is swallowed", () => {
+  it("B after leaving the input to nowhere closes the keyboard; the query survives", () => {
     input.focus()
     input.value = "play"
     input.dispatchEvent(new Event("input", { bubbles: true }))
     input.dispatchEvent(new FocusEvent("focusout", { relatedTarget: null }))
     input.blur()
     expect(document.activeElement).toBe(document.body)
-    keydown(document.body, "Escape")
-    // The swallow is silent: nothing ran — the query survives, the
-    // active-search layer did not clear it, focus stays put.
+    // Blur to nowhere keeps the session: the keyboard layer owns
+    // the press, so B closes the session (focus returns to the
+    // input per the close-refocus contract) and the query and
+    // the filter survive — no page step, no clear.
+    expect(isCouchKeyboardOpen()).toBe(true)
+    expect(resolveBack()).toBe(true)
+    expect(isCouchKeyboardOpen()).toBe(false)
     expect(input.value).toBe("play")
-    expect(document.activeElement).toBe(document.body)
+    expect(document.activeElement).toBe(input)
+    // "play" matches every row (Display contains "play"), so the
+    // filter surviving means the rows stay marked as matches.
+    expect(rows[1].dataset.search).toBe("match")
     // Clean up for later tests in this file.
     input.value = ""
     input.dispatchEvent(new Event("input", { bubbles: true }))

@@ -2032,6 +2032,12 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	let suppressKeyboardReopen = false;
 	loginFormEl?.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
 		suppressKeyboardReopen = true;
+		// Expire at the end of the task (see the Guide search
+		// suppress): the refocus is synchronous inside the close,
+		// and no focusin fires when the field was already focused.
+		queueMicrotask(() => {
+			suppressKeyboardReopen = false;
+		});
 	});
 	loginFormEl?.addEventListener("focusin", (event) => {
 		const field = loginFieldTarget(event.target);

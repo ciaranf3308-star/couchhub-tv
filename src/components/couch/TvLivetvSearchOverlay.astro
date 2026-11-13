@@ -457,6 +457,12 @@ import TvKeyboard from "@/components/couch/TvKeyboard.svelte";
     // and the B hierarchy — stay truthful for the whole visit.
     input?.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
       suppressKeyboardReopen = true;
+      // Expire at the end of the task (see the Guide search
+      // suppress): the refocus is synchronous inside the close,
+      // and no focusin fires when the input was already focused.
+      queueMicrotask(() => {
+        suppressKeyboardReopen = false;
+      });
     });
     input?.addEventListener("focusin", () => {
       if (suppressKeyboardReopen) {
