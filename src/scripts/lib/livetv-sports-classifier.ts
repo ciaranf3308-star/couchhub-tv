@@ -489,12 +489,29 @@ function normaliseForMatch(text: string): string {
     .trim()
 }
 
-function normaliseSideForAlias(side: string): string {
+/**
+ * Exported for the Sports Corner matcher (0.11.13): the alias
+ * normalisation semantics are shared, never reimplemented, so the
+ * matcher and the classifier cannot drift apart. Export-only; the
+ * function itself is unchanged.
+ */
+export function normaliseSideForAlias(side: string): string {
   return normaliseForMatch(side)
     .replace(/\s+(fc|afc|cf)$/, "")
     .replace(/\s+u\d{2}$/, "")
     .replace(/\s+women$/, "")
     .trim()
+}
+
+/**
+ * Sport evidence for one already-normalised fixture side, or null
+ * when the side is not a known team. Exported for the Sports Corner
+ * corroboration rule (0.11.13): a bare-"United" fixture is only
+ * flaggable when the OTHER side names a known club. The lookup is
+ * the same table the classifier itself reads — no second copy.
+ */
+export function teamAliasSportForSide(normalisedSide: string): SportId | null {
+  return TEAM_ALIASES.get(normalisedSide) ?? null
 }
 
 function cleanSide(raw: string): string {
@@ -589,7 +606,9 @@ function parseSportPrefix(text: string): { sport: SportId; remainder: string } |
   return { sport, remainder }
 }
 
-function hasSportsChannelSupport(opts?: { channelName?: string; category?: string }): boolean {
+/** Exported for the Sports Corner corroboration rule (0.11.13): the
+ *  channel/category sports test is reused, not reimplemented. */
+export function hasSportsChannelSupport(opts?: { channelName?: string; category?: string }): boolean {
   if (opts?.channelName && SPORTS_CHANNEL_HINT.test(opts.channelName)) return true
   if (opts?.category && SPORTS_CATEGORY_HINT.test(opts.category)) return true
   return false
