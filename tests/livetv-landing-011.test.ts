@@ -130,8 +130,12 @@ describe("livetv-enrichment (W2 contract)", () => {
     expect(art.matchedTitle).toBeNull();
   });
 
+  // 0.11.12: the title here is deliberately non-sport. The original
+  // F1 title now resolves through the sports fallbacks (generic
+  // motorsport photo from the bundled manifest, no key needed), so
+  // it can no longer pin the no-key placeholder behaviour.
   it("enrichProgramme without a TMDb key resolves placeholder and never throws", async () => {
-    const art = await enrichProgramme({ title: "F1: Brazilian Grand Prix — Qualifying" });
+    const art = await enrichProgramme({ title: "A Programme That Does Not Exist" });
     expect(art.source).toBe("placeholder");
     expect(art.backdropUrl).toBeNull();
     expect(await enrichProgramme({ title: "" })).toEqual(placeholderArtwork());
@@ -214,6 +218,10 @@ describe("hero artwork", () => {
     const art = placeholderArtwork();
     art.backdropUrl = "https://image.tmdb.org/t/p/w1280/backdrop.jpg";
     art.source = "tmdb-series";
+    // 0.11.12: the fixture represents exact TMDb art, so it carries
+    // the displayable kind — a placeholder kind would (correctly)
+    // refuse to paint under the display rule.
+    art.artworkKind = "exact-programme";
     expect(applyHeroArtwork(el, art, "Qualifying")).toBe(true);
     const img = el.querySelector("[data-hero-art] img");
     expect(img?.getAttribute("src")).toBe("https://image.tmdb.org/t/p/w1280/backdrop.jpg");
@@ -227,6 +235,9 @@ describe("hero artwork", () => {
     const art = placeholderArtwork();
     art.backdropUrl = "https://image.tmdb.org/t/p/w1280/other.jpg";
     art.source = "tmdb-movie";
+    // 0.11.12: displayable kind, so the stale-title guard (not the
+    // kind gate) is what refuses this art.
+    art.artworkKind = "exact-programme";
     expect(applyHeroArtwork(el, art, "Some Other Show")).toBe(false);
     expect(el.querySelector("[data-hero-art] img")).toBeNull();
   });
@@ -374,6 +385,9 @@ describe("buildLandingHeroModel (0.11.4 hero)", () => {
     const art = placeholderArtwork();
     art.backdropUrl = "https://image.tmdb.org/t/p/w1280/backdrop.jpg";
     art.source = "tmdb-series";
+    // 0.11.12: the fixture represents exact TMDb art, so it carries
+    // the displayable kind (see the hero-artwork tests above).
+    art.artworkKind = "exact-programme";
     expect(applyHeroArtwork(el, art, "F1: Brazilian Grand Prix — Qualifying")).toBe(true);
     expect(el.classList.contains("rs-livetv-landing-hero--has-art")).toBe(true);
     expect(el.classList.contains("rs-livetv-landing-hero--no-art")).toBe(false);

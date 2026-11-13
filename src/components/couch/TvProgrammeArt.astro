@@ -32,10 +32,30 @@ interface Props {
 const { title, channelName, channelLogoUrl, variant = "card", class: className } = Astro.props;
 
 const cached = getProgrammeArtworkSync(title);
+// 0.11.12 DISPLAY RULE: when the resolver reports an artworkKind,
+// only a displayable kind may supply the initial image —
+// channel-branding / placeholder kinds keep the branded
+// placeholder. A missing kind is legacy resolver output and keeps
+// the slot order below unchanged (card: poster first; wide
+// variants: backdrop first, so sports fallback photos arrive as
+// the wide image). The live client upgrade path
+// (upgradeProgrammeArtElements / pickArtworkUrl in
+// livetv-enrichment.ts) is owned by the resolver module —
+// integration must apply the same kind rule there, since this
+// frontmatter path only fires for a pre-seeded cache.
+const cachedKind = cached?.artworkKind;
+const kindDisplayable =
+  cachedKind == null ||
+  cachedKind === "exact-programme" ||
+  cachedKind === "exact-sports-event" ||
+  cachedKind === "league-team" ||
+  cachedKind === "generic-sport";
 const initialUrl =
-  variant === "card"
-    ? (cached?.posterUrl ?? cached?.backdropUrl ?? cached?.stillUrl ?? null)
-    : (cached?.backdropUrl ?? cached?.stillUrl ?? cached?.posterUrl ?? null);
+  !kindDisplayable || !cached
+    ? null
+    : variant === "card"
+      ? (cached.posterUrl ?? cached.backdropUrl ?? cached.stillUrl ?? null)
+      : (cached.backdropUrl ?? cached.stillUrl ?? cached.posterUrl ?? null);
 const initialSource = cached && initialUrl ? cached.source : "placeholder";
 ---
 

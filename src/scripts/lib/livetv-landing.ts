@@ -41,6 +41,10 @@
 // no artwork resolves, the branded fallback stands (channel logo /
 // gradient + small glyph). Enrichment runs only for visible
 // titles, never on focus/scroll, and never starts a stream.
+// 0.11.12: both surfaces honour the resolver's artworkKind
+// (wideArtworkUrl) — sports fallback photos arrive as backdrops,
+// channel-branding / placeholder kinds never paint here, and a
+// missing kind keeps the legacy backdrop-only behaviour.
 import {
   enrichProgramme,
   getProgrammeArtworkSync,
@@ -1140,6 +1144,37 @@ export function fillLandingHero(
 }
 
 /**
+ * 0.11.12 DISPLAY RULE (brief §10–§13): the artwork kinds a consumer
+ * may show. The resolver (W1) assigns the kind; consumers trust it and
+ * never re-derive classification. Generic-sport art is NOT gated on
+ * identity confidence — a confidently classified snooker title gets
+ * the snooker photo even though no exact event identity is
+ * established — while channel-branding / placeholder kinds never
+ * paint as programme art. A missing kind is legacy resolver output:
+ * the pre-0.11.12 behaviour applies. (Mirrored in livetv-browser.ts,
+ * TvGuideView.astro and TvQuickSurf.astro; post-merge, one shared
+ * predicate in the resolver module is the natural home for this.)
+ */
+export const DISPLAYABLE_PROGRAMME_ARTWORK_KINDS: ReadonlyArray<
+  NonNullable<ProgrammeArtwork["artworkKind"]>
+> = ["exact-programme", "exact-sports-event", "league-team", "generic-sport"];
+
+/**
+ * The wide (backdrop-slot) URL for a hero / category tile, or null.
+ * Wide slots take backdropUrl ONLY — a portrait poster/logo would
+ * crop or stretch across the band, so poster-only art (including a
+ * channel logo) never lands here. Kind-gated per the DISPLAY RULE
+ * above; kind-less legacy art keeps the old backdrop-only rule.
+ */
+export function wideArtworkUrl(art: ProgrammeArtwork): string | null {
+  const kind = art.artworkKind;
+  if (kind != null && !DISPLAYABLE_PROGRAMME_ARTWORK_KINDS.includes(kind)) {
+    return null;
+  }
+  return art.backdropUrl;
+}
+
+/**
  * Swap a hero art layer ([data-hero-art], the TvProgrammeArt
  * placeholder) to real programme artwork. Backdrop only — a
  * poster aspect would stretch across the band. A failed image
@@ -1157,7 +1192,7 @@ export function applyHeroArtwork(
   if (expectedTitle != null && artMount.getAttribute("data-art-title") !== expectedTitle) {
     return false;
   }
-  const url = art.backdropUrl;
+  const url = wideArtworkUrl(art);
   if (!url) return false;
   const placeholder = artMount.querySelector("[data-programme-art]");
   const img = document.createElement("img");
@@ -1202,7 +1237,7 @@ export async function upgradeLandingHeroArt(
   const title = model.current.title;
   const channelName = model.channel.displayName || model.channel.name;
   const cached = getProgrammeArtworkSync(title);
-  if (cached && cached.backdropUrl) {
+  if (cached && wideArtworkUrl(cached)) {
     return applyHeroArtwork(heroEl, cached, title);
   }
   let art: ProgrammeArtwork;
@@ -1259,13 +1294,15 @@ export async function enrichCategoryTiles(
       const tile = byId.get(category.id);
       if (!title || !tile) return;
       const cached = getProgrammeArtworkSync(title);
-      if (cached?.backdropUrl) {
-        applyCategoryTileArtwork(tile, cached.backdropUrl);
+      const cachedWide = cached ? wideArtworkUrl(cached) : null;
+      if (cachedWide) {
+        applyCategoryTileArtwork(tile, cachedWide);
         return;
       }
       try {
         const art = await enrichProgramme({ title });
-        if (art.backdropUrl) applyCategoryTileArtwork(tile, art.backdropUrl);
+        const wide = wideArtworkUrl(art);
+        if (wide) applyCategoryTileArtwork(tile, wide);
       } catch {
         // No artwork for this tile: gradient + glyph stand.
       }
