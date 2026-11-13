@@ -1,5 +1,5 @@
 ---
-// TvQuickSurf — Quick Surf overlay for fullscreen Live TV playback (0.9.0).
+// TvQuickSurf — Quick Surf overlay for fullscreen Live TV playback (0.11.11).
 //
 // Controller-first, INSIDE fullscreen playback (not a page). Up/Down
 // browses ADJACENT channels while the current video KEEPS PLAYING:
@@ -10,18 +10,61 @@
 // playing; the shell's error overlay (not Quick Surf) offers the
 // retry.
 //
-// 0.9.0 shape (mockup): ONE compact floating panel docked right,
-// video visible behind it — a short window of nearby channels (two
-// before, highlighted, two after) as shared TvChannelRow tiles
-// (rounded, hairline border, gap between rows), never cards-in-
-// cards. Header names the panel and shows the highlight's position
-// in the full list ("5 / 11"). Each row: number, logo, name,
-// current programme; the highlighted row also shows the next
-// programme. A row click highlights; clicking the highlighted row
-// tunes. Category + Guide via the contextual shortcuts below the
-// list. Confirmed switches go through `switchChannel` — the prior
-// stream is released before the
+// 0.11.11 shape (brief §3–§7): ONE compact floating panel docked
+// right, video visible behind it — a short window of nearby
+// channels (two before, highlighted, two after) as shared
+// TvChannelRow tiles (rounded, hairline border, gap between rows),
+// never cards-in-cards. The header names the panel, shows the
+// currently relevant channel group, and the highlight's position
+// WITHIN the current scope ("Irish & UK · 5 / 42") — never a bare
+// "15319 / 15319" without category context. Each row: number,
+// logo, name, current programme; the highlighted row also shows
+// the next programme. A row click highlights; clicking the
+// highlighted row tunes. Confirmed switches go through
+// `switchChannel` — the prior stream is released before the
 // replacement opens.
+//
+// The raw provider-category button wall is DELETED (0.11.11): the
+// old paint() built one button per raw provider category on EVERY
+// highlight change. Quick Surf never builds category buttons and
+// never recalculates categories on highlight change. Discovery is
+// four real focusable actions below the list — Favourites,
+// Recently Watched, Categories, Search — which hand off to the
+// playback Channel Browser (W2) via the seam contract below.
+//
+// Navigation is BOUNDED: at either end of the scoped list the
+// highlight retains its position — it never wraps to the other
+// end of a 15,319-channel catalogue. When a scope is selected,
+// stepping stays inside that scope only. The surfable list
+// resolves through the shared Live TV 2.0 category index
+// (livetv-category-index.ts) when the scope or catalogue changes
+// ONLY; per-press work is an index lookup plus a ≤5-entry slice.
+//
+// Focus zones (one keydown listener — the existing v0.11.10 shared
+// pipeline, no second handler): the channel list is the default
+// zone (Up/Down steps, A watches, B closes). Left/Right move
+// focus into the discovery actions (Up/Down return to the list,
+// Left/Right move between actions, A activates). Focus movement
+// never tunes. X (Guide) intentionally falls through to the
+// playback shell's handler — Quick Surf never claims it. Y is
+// Quick Surf's own key while the panel is open (the shell's Y
+// handler returns early over Quick Surf): Y dispatches the seam
+// event with action 'browse', the unfiltered full-browser open.
+//
+// Seam contract with W2 (playback browser handoff, exact):
+//   Quick Surf dispatches `quick-surf:open-browser` with detail
+//   `{ action, channelId, categoryScope }` when a discovery action
+//   activates (`action` is 'favourites' | 'recents' |
+//   'categories' | 'search'; `channelId` is the tuned channel's
+//   id or null; `categoryScope` is the current scope group id or
+//   null). Y dispatches the same event with action 'browse'
+//   (unfiltered full-browser open, focus on the tuned channel's
+//   row). Quick Surf listens for `quick-surf:close` and closes
+//   itself as the active input owner, leaving the tuned stream
+//   untouched — W2 dispatches `quick-surf:close` FIRST, then
+//   opens the browser after its mount resolves. B still closes
+//   Quick Surf directly when no browser handoff is in flight. Additive inbound seam:
+//   `quick-surf:set-scope { categoryScope }` sets the surf scope.
 //
 // Opens on `livetv:overlay {overlay:"quicksurf"}` and on ArrowUp /
 // ArrowDown while playback is active with no overlay open. Channel
@@ -38,23 +81,29 @@ import TvChannelRow from "./TvChannelRow.astro";
 >
   <div class="rs-livetv-play-quicksurf__panel">
     <div class="rs-livetv-play-quicksurf__header">
-      <p class="rs-livetv-play-quicksurf__eyebrow">» Quick Surf</p>
+      <div class="rs-livetv-play-quicksurf__titles">
+        <p class="rs-livetv-play-quicksurf__eyebrow">» Quick Surf</p>
+        <p class="rs-livetv-play-quicksurf__group" data-qs-group aria-label="Channel group"></p>
+      </div>
       <p class="rs-livetv-play-quicksurf__position" data-qs-position aria-label="Position in channel list"></p>
     </div>
     <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="-1" aria-label="Previous channel">⌃</button>
     <div class="rs-livetv-play-quicksurf__list" data-qs-list role="listbox" aria-label="Nearby channels"></div>
     <button type="button" class="rs-livetv-play-quicksurf__step" data-qs-step="1" aria-label="Next channel">⌄</button>
-    <!-- INTEGRATION 0.9.0 — mockup 2: the panel is rows + chevrons
-         only. The note and the six-button action grid (Watch /
-         Previous / Favourite / Guide / Channels / Back) made the
-         panel ~900px tall against the mockup's ~525px; every one of
-         those actions is already a key (A / X / Y / B, documented
-         in the hint line below) or an OSD button once surf closes,
-         so the grid is removed rather than kept as decoration. The
-         category filter stays: it changes what is surfable. -->
-    <div class="rs-livetv-play-quicksurf__categories" data-qs-categories role="group" aria-label="Category"></div>
+    <!-- 0.11.11 — the raw provider-category button wall is DELETED,
+         not hidden: paint() must never generate a button per
+         category. Discovery is these four focusable actions, which
+         dispatch `quick-surf:open-browser` (see the seam contract
+         in the file header) for the W2 playback browser. They are
+         static markup — paint() never rebuilds them. -->
+    <div class="rs-livetv-play-quicksurf__discovery" data-qs-discovery-actions role="group" aria-label="Discover">
+      <button type="button" class="rs-livetv-play-quicksurf__discovery-action" data-qs-discovery="favourites">Favourites</button>
+      <button type="button" class="rs-livetv-play-quicksurf__discovery-action" data-qs-discovery="recents">Recently Watched</button>
+      <button type="button" class="rs-livetv-play-quicksurf__discovery-action" data-qs-discovery="categories">Categories</button>
+      <button type="button" class="rs-livetv-play-quicksurf__discovery-action" data-qs-discovery="search">Search</button>
+    </div>
     <p class="rs-livetv-play-quicksurf__shortcuts" aria-hidden="true">
-      ↑↓ browse · A watch · B back · X guide
+      ↑↓ browse · ←→ discovery · A select · B back · X guide · Y browser
     </p>
   </div>
 
@@ -77,11 +126,9 @@ import TvChannelRow from "./TvChannelRow.astro";
 
 <script>
   import {
-    stepHighlight,
     confirmHighlight,
     recordTune,
     switchChannel,
-    surfWindow,
     artworkUrlForSurf,
     windowPlaybackEngine,
     type SurfProgrammeArtwork,
@@ -91,9 +138,29 @@ import TvChannelRow from "./TvChannelRow.astro";
     loadLivetvProgrammes,
     nowNextForChannel,
     activeLivetvPlaylistId,
-    requestLivetvMode,
     type LivetvChannel,
   } from "@/scripts/lib/livetv-data";
+  import {
+    getCategoryIndex,
+    type CategoryIndex,
+  } from "@/scripts/lib/livetv-category-index";
+  import {
+    stepHighlightBounded,
+    surfWindowBounded,
+    resolveQuickSurfList,
+    quickSurfScopeLabel,
+    groupLabelForChannel,
+    resolveHighlightInList,
+    quickSurfPositionText,
+    createQuickSurfOpenBrowserDetail,
+    parseQuickSurfScopeDetail,
+    isQuickSurfBrowserAction,
+    QUICK_SURF_OPEN_BROWSER_EVENT,
+    QUICK_SURF_CLOSE_EVENT,
+    QUICK_SURF_SET_SCOPE_EVENT,
+    QUICK_SURF_WINDOW_SIZE,
+    type QuickSurfBrowserRequestAction,
+  } from "@/scripts/lib/livetv-quicksurf";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
   import { getFavorites } from "@/scripts/lib/preferences.js";
 
@@ -106,18 +173,43 @@ import TvChannelRow from "./TvChannelRow.astro";
     let tunedId: string | number | null = null;
     let previousId: string | number | null = null;
     let highlightedId: string | number | null = null;
-    let category: string | null = null;
+    // 0.11.11 — scope is a category-index GROUP id (or null for
+    // the whole catalogue). The surfable list is resolved from the
+    // shared index ONLY when the scope or catalogue changes, and
+    // cached in `scopedList`; highlight moves never re-filter.
+    let scopeGroupId: string | null = null;
+    let categoryIndex: CategoryIndex | null = null;
+    let scopedList: LivetvChannel[] = [];
+    // Focus zone: "channels" (default — Up/Down steps the
+    // highlight) or "actions" (the four discovery actions).
+    // Left/Right switch zones; focus movement never tunes.
+    let focusZone: "channels" | "actions" = "channels";
+    let lastActionIndex = 0;
     let open = false;
     let loaded = false;
 
     const $ = <T extends Element>(sel: string): T | null =>
       root.querySelector<T>(sel);
 
-    const surfList = () =>
-      category ? channels.filter((c) => c.category === category) : channels;
+    // Resolve the surfable list for the current scope. Called ONLY
+    // on load and on scope change — never per press. The index is
+    // held by reference so other surfaces sharing the global
+    // category-index cache cannot force a rebuild here.
+    const resolveScopedList = () => {
+      if (!categoryIndex) {
+        categoryIndex = getCategoryIndex(channels, `quicksurf:${playlistId}`);
+      }
+      scopedList = resolveQuickSurfList(categoryIndex, scopeGroupId);
+      if (scopedList.length === 0 && channels.length > 0 && scopeGroupId !== null) {
+        // Unknown or stale scope: fall back to All channels
+        // rather than stranding the user on an empty surf.
+        scopeGroupId = null;
+        scopedList = resolveQuickSurfList(categoryIndex, null);
+      }
+    };
 
     const highlightedChannel = () =>
-      channels.find((c) => String(c.id) === String(highlightedId)) ?? null;
+      scopedList.find((c) => String(c.id) === String(highlightedId)) ?? null;
 
     // ── Highlighted-row programme artwork (0.11.0 W5) ──────────
     // W2's enrichment module (`livetv-enrichment.ts`) is loaded
@@ -260,6 +352,10 @@ import TvChannelRow from "./TvChannelRow.astro";
     // hooks, drop the parts this row does not need (Next + progress
     // only exist on the highlighted row; the favourite heart only
     // where the channel is one). Never build row markup by hand.
+    // EPG lookups here run ONLY for the ≤5 mounted rows, through
+    // the memoised now/next path (Map + binary search) — never a
+    // catalogue scan. Artwork enrichment stays highlighted-only
+    // (scheduleHighlightedArt, with cancellation).
     const rowTemplate = root.querySelector<HTMLTemplateElement>(
       "[data-qs-row-template]",
     );
@@ -331,8 +427,11 @@ import TvChannelRow from "./TvChannelRow.astro";
     };
 
     const paint = () => {
-      const list = surfList();
-      const { entries, position, total } = surfWindow(list, highlightedId, 5);
+      const { entries, position, total } = surfWindowBounded(
+        scopedList,
+        highlightedId,
+        QUICK_SURF_WINDOW_SIZE,
+      );
       const listEl = $("[data-qs-list]");
       if (listEl) {
         listEl.innerHTML = "";
@@ -342,57 +441,69 @@ import TvChannelRow from "./TvChannelRow.astro";
           );
         }
       }
+      // Header: the currently relevant group + position WITHIN the
+      // current scope. A scope shows its own label; unscoped, the
+      // highlighted channel's group gives the position context.
+      const groupEl = $("[data-qs-group]");
+      if (groupEl) {
+        groupEl.textContent =
+          scopeGroupId !== null && categoryIndex
+            ? quickSurfScopeLabel(categoryIndex, scopeGroupId)
+            : groupLabelForChannel(highlightedChannel());
+      }
       const posEl = $("[data-qs-position]");
-      if (posEl) posEl.textContent = total > 0 ? `${position} / ${total}` : "";
+      if (posEl) posEl.textContent = quickSurfPositionText(position, total);
       // Enrich the highlighted row's current programme artwork only
       // (never the whole list) — scheduleHighlightedArt is a no-op
       // until W2's module lands.
       scheduleHighlightedArt();
-      // Category shortcuts (from the catalog, not invented).
-      const catsEl = $("[data-qs-categories]");
-      if (catsEl) {
-        catsEl.innerHTML = "";
-        const cats = Array.from(
-          new Set(channels.map((c) => c.category).filter((c): c is string => !!c)),
-        );
-        const all = document.createElement("button");
-        all.type = "button";
-        all.className = "rs-livetv-play-quicksurf__chip";
-        all.textContent = "All channels";
-        all.setAttribute("aria-pressed", category === null ? "true" : "false");
-        all.addEventListener("click", () => {
-          category = null;
-          highlightedId = tunedId;
-          paint();
-        });
-        catsEl.appendChild(all);
-        for (const cat of cats) {
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "rs-livetv-play-quicksurf__chip";
-          chip.textContent = cat;
-          chip.setAttribute("aria-pressed", category === cat ? "true" : "false");
-          chip.addEventListener("click", () => {
-            category = cat;
-            const filtered = surfList();
-            highlightedId = filtered.length ? filtered[0].id : tunedId;
-            paint();
-          });
-          catsEl.appendChild(chip);
-        }
-      }
       // 0.11.10 W4 §12: paint() rebuilds the rows, destroying
       // the focused node — every U/D step lost DOM focus while
       // the highlight ring moved on. Re-focus the highlighted
-      // row whenever the surf is open, so focus and highlight
-      // never diverge (A then confirms the focused row).
+      // row whenever the surf is open AND the channel list owns
+      // focus, so focus and highlight never diverge (A then
+      // confirms the focused row). Never yank focus out of the
+      // discovery actions: when that zone owns focus, paint()
+      // leaves it alone (the actions are static markup and
+      // survive every repaint).
       // openSurf paints BEFORE show() sets `open`, so this
       // does not double-focus on open (show() focuses once).
-      if (open) {
+      if (open && focusZone === "channels") {
         const highlighted =
           listEl?.querySelector<HTMLElement>(".rs-channel-row--highlighted");
         highlighted?.focus?.({ preventScroll: true });
       }
+    };
+
+    // ── Discovery actions → W2 playback browser (seam contract) ──
+    const discoveryButtons = () =>
+      [...root.querySelectorAll<HTMLElement>("[data-qs-discovery]")];
+
+    const focusDiscoveryAction = (index: number) => {
+      const buttons = discoveryButtons();
+      if (!buttons.length) return;
+      lastActionIndex = Math.max(0, Math.min(index, buttons.length - 1));
+      buttons[lastActionIndex]?.focus?.({ preventScroll: true });
+    };
+
+    const focusHighlightedRow = () => {
+      const highlighted =
+        root.querySelector<HTMLElement>(".rs-channel-row--highlighted");
+      highlighted?.focus?.({ preventScroll: true });
+    };
+
+    const openBrowser = (action: QuickSurfBrowserRequestAction) => {
+      // Exact seam detail: the tuned channel's id (or null) and
+      // the current scope group id (or null). Quick Surf does NOT
+      // hide itself here — W2's browser closes it via
+      // `quick-surf:close` (or the `livetv:overlay` browser claim),
+      // and B still closes it directly while no handoff is in
+      // flight. No tune happens on this path.
+      window.dispatchEvent(
+        new CustomEvent(QUICK_SURF_OPEN_BROWSER_EVENT, {
+          detail: createQuickSurfOpenBrowserDetail(action, tunedId, scopeGroupId),
+        }),
+      );
     };
 
     const emitOverlay = (overlay: string) => {
@@ -443,11 +554,12 @@ import TvChannelRow from "./TvChannelRow.astro";
     const openSurf = async () => {
       await ensureLoaded();
       readTunedFromShell();
-      // Highlight starts on the tuned channel; browsing from there is
-      // adjacent stepping. Highlighting never tunes.
-      if (highlightedId === null || !channels.some((c) => String(c.id) === String(highlightedId))) {
-        highlightedId = tunedId;
-      }
+      resolveScopedList();
+      // Highlight starts on the tuned channel (or the previous
+      // highlight when it is still inside the scope); browsing
+      // from there is adjacent stepping. Highlighting never tunes.
+      highlightedId = resolveHighlightInList(scopedList, highlightedId, tunedId);
+      focusZone = "channels";
       paint();
       show();
     };
@@ -472,13 +584,45 @@ import TvChannelRow from "./TvChannelRow.astro";
       }
     };
 
+    // Focus truth for Tab / pointer focus as well as the D-pad:
+    // whichever zone holds DOM focus owns the arrows. Without
+    // this, tabbing into a discovery action would leave the
+    // channel zone claiming Up/Down and paint() yanking focus
+    // back to the highlighted row.
+    root.addEventListener("focusin", (ev) => {
+      const target = ev.target as HTMLElement | null;
+      if (!target) return;
+      const discovery = target.closest?.("[data-qs-discovery]") as HTMLElement | null;
+      if (discovery) {
+        focusZone = "actions";
+        const at = discoveryButtons().indexOf(discovery);
+        if (at >= 0) lastActionIndex = at;
+        return;
+      }
+      if (target.closest?.("[data-qs-row]")) focusZone = "channels";
+    });
+
     root.addEventListener("click", async (ev) => {
+      // Discovery actions: hand off to the playback browser (W2)
+      // via the seam contract — never a tune, never a category
+      // button rebuild.
+      const discoveryBtn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-discovery]") as HTMLElement | null;
+      if (discoveryBtn) {
+        const action = discoveryBtn.dataset.qsDiscovery;
+        if (isQuickSurfBrowserAction(action)) {
+          const at = discoveryButtons().indexOf(discoveryBtn);
+          if (at >= 0) lastActionIndex = at;
+          openBrowser(action);
+        }
+        return;
+      }
       // Step chevrons (^ / v above and below the list): move the
-      // highlight one adjacent channel, never a tune.
+      // highlight one adjacent channel, never a tune. Bounded:
+      // at either end the highlight retains its position.
       const stepBtn = (ev.target as HTMLElement | null)?.closest?.("[data-qs-step]") as HTMLElement | null;
       if (stepBtn) {
         const delta = stepBtn.dataset.qsStep === "-1" ? -1 : 1;
-        const next = stepHighlight(surfList(), highlightedId, delta as 1 | -1);
+        const next = stepHighlightBounded(scopedList, highlightedId, delta as 1 | -1);
         if (next !== null) {
           highlightedId = next;
           paint();
@@ -490,7 +634,7 @@ import TvChannelRow from "./TvChannelRow.astro";
       const row = (ev.target as HTMLElement | null)?.closest?.("[data-qs-row]") as HTMLElement | null;
       if (row?.dataset.channelId) {
         const id = row.dataset.channelId;
-        const canonical = channels.find((c) => String(c.id) === id)?.id ?? id;
+        const canonical = scopedList.find((c) => String(c.id) === id)?.id ?? id;
         if (String(highlightedId) === id) {
           tuneTo(canonical);
         } else {
@@ -499,15 +643,42 @@ import TvChannelRow from "./TvChannelRow.astro";
         }
         return;
       }
-      // INTEGRATION 0.9.0 — the action-button grid was removed
-      // with the markup above (mockup 2); its keys (A/X/Y/B) are
-      // handled by the shell / keydown path, not by this panel.
     });
 
     window.addEventListener("livetv:overlay", (ev) => {
       const overlay = (ev as CustomEvent).detail?.overlay;
       if (overlay === "quicksurf" && !open) void openSurf();
       if (overlay !== "quicksurf" && open) hide(false);
+    });
+
+    // Seam contract: the playback browser (W2) closes Quick Surf
+    // when it takes input ownership — W2 dispatches
+    // `quick-surf:close` FIRST, then opens the browser after its
+    // mount resolves. hide(false): no `livetv:overlay "none"`
+    // emit to fight the browser's overlay claim, focus blurs to
+    // <body> (the browser focuses the tuned channel's row once
+    // mounted), and the tuned stream is untouched. B still closes
+    // Quick Surf directly (keydown / shell back path) when no
+    // browser handoff is in flight.
+    window.addEventListener(QUICK_SURF_CLOSE_EVENT, () => {
+      if (!open) return;
+      hide(false);
+    });
+
+    // Additive inbound seam: a scope chosen in the browser
+    // (`quick-surf:set-scope { categoryScope }`) re-scopes the
+    // surf. Ignored when the detail carries no usable scope or
+    // the scope is unchanged. The list re-resolves ONLY here (and
+    // on load) — never per press. When closed, the scope is
+    // stored and applied on the next open.
+    window.addEventListener(QUICK_SURF_SET_SCOPE_EVENT, (ev) => {
+      const scope = parseQuickSurfScopeDetail((ev as CustomEvent).detail);
+      if (scope === undefined || scope === scopeGroupId) return;
+      scopeGroupId = scope;
+      if (!loaded) return;
+      resolveScopedList();
+      highlightedId = resolveHighlightInList(scopedList, highlightedId, tunedId);
+      if (open) paint();
     });
 
     window.addEventListener("livetv:tune", (ev) => {
@@ -525,10 +696,50 @@ import TvChannelRow from "./TvChannelRow.astro";
       if (!playbackActive) return;
       if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLTextAreaElement) return;
       if (open) {
+        // X (Guide) intentionally falls through to the playback
+        // shell's handler — Quick Surf never claims it.
+        // Y is Quick Surf's own key while the panel is open: the
+        // shell's Y handler returns early over Quick Surf
+        // (overlay-owns-input discipline, W2), so without this
+        // branch Y-from-Quick-Surf would do nothing. Y dispatches
+        // the seam event with action 'browse' (unfiltered
+        // full-browser open, focus on the tuned channel's row)
+        // from EITHER focus zone. preventDefault keeps the shell
+        // from ALSO firing its legacy browser-overlay path.
+        if (ev.key === "y" || ev.key === "Y") {
+          ev.preventDefault();
+          openBrowser("browse");
+          return;
+        }
+        if (focusZone === "actions") {
+          if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
+            ev.preventDefault();
+            focusDiscoveryAction(lastActionIndex + (ev.key === "ArrowRight" ? 1 : -1));
+          } else if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
+            ev.preventDefault();
+            focusZone = "channels";
+            focusHighlightedRow();
+          } else if (ev.key === "Enter") {
+            // A on a focused action button clicks it; Enter with
+            // focus elsewhere activates the last-used action.
+            const target = ev.target as HTMLElement | null;
+            if (target && target.closest("button")) return;
+            ev.preventDefault();
+            const action = discoveryButtons()[lastActionIndex]?.dataset.qsDiscovery;
+            if (isQuickSurfBrowserAction(action)) openBrowser(action);
+          } else if (ev.key === "Escape") {
+            // B dismisses WITHOUT changing channels — no tune here.
+            ev.preventDefault();
+            hide();
+          }
+          return;
+        }
         if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
           ev.preventDefault();
-          const list = surfList();
-          const next = stepHighlight(list, highlightedId, ev.key === "ArrowDown" ? 1 : -1);
+          // Bounded: at either end stepHighlightBounded returns
+          // null and the highlight retains its position — no
+          // wrap to the other end of the catalogue, no repaint.
+          const next = stepHighlightBounded(scopedList, highlightedId, ev.key === "ArrowDown" ? 1 : -1);
           if (next !== null) {
             highlightedId = next;
             paint();
@@ -545,14 +756,16 @@ import TvChannelRow from "./TvChannelRow.astro";
           ev.preventDefault();
           hide();
         } else if (ev.key === "ArrowLeft" || ev.key === "ArrowRight") {
-          // §12: Left/Right inside Quick Surf do NOTHING
-          // (claimed). The rows already show the highlighted
-          // channel's current programme; the old code
-          // dispatched `livetv:programme`, whose consumer
-          // PLAYS catch-up — focus movement tuning/playing,
-          // against the global rule. Programme info outside
-          // the surf is the shell's Left/Right → OSD path.
+          // 0.11.11: Left/Right move focus into the discovery
+          // actions (Up/Down return to the list). The pre-0.11.11
+          // claimed no-op is repurposed — the actions must be
+          // controller-reachable, and no other directional input
+          // is free. Focus movement never tunes; programme info
+          // stays on the rows, and the shell's Left/Right → OSD
+          // path still owns the arrows once the surf closes.
           ev.preventDefault();
+          focusZone = "actions";
+          focusDiscoveryAction(lastActionIndex);
         }
         return;
       }
