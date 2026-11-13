@@ -689,6 +689,28 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	} from "@/scripts/lib/epg-data.js";
 	import { ICON_X } from "@/scripts/lib/icons.ts";
 	import { snifferAvailable } from "@/scripts/lib/stream-sniffer.ts";
+	import { confirmDialog } from "@/scripts/lib/confirm-dialog.ts";
+	import {
+		registerBackLayer,
+		BACK_PRIORITY,
+	} from "@/scripts/lib/back-handler.ts";
+	import {
+		recordOriginFromReferrer,
+		navigateBackWithOrigin,
+	} from "@/scripts/lib/route-origin.ts";
+	import { setLogicalView } from "@/scripts/lib/couch-focus.ts";
+	import {
+		COUCH_KEYBOARD_CLOSED_EVENT,
+		openCouchKeyboard,
+		closeCouchKeyboard,
+		endCouchKeyboardSession,
+	} from "@/scripts/lib/couch-keyboard.ts";
+	import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts";
+	import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts";
+	import {
+		RETURN_HOME_HINT,
+		setControllerHints,
+	} from "@/scripts/lib/couch-button-hints.ts";
 
 	const EPG_URL_RX = /^https?:\/\/[^\s]+$/i;
 
@@ -1945,4 +1967,134 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 	} else {
 		setMode("xtream");
 	}
+
+	// ---- Controller Experience 2.0 (§36): Back hierarchy + unsaved-entry handling ----
+	// B steps: editing (blur the field) -> form (confirm when the
+	// entry is dirty, so nothing is silently lost) -> origin
+	// (Settings/Playlists, else Playlists). The file picker stays
+	// explicit-only (the Pick button); credentials are never logged
+	// or exposed — the dirty snapshot below compares values in
+	// memory only and is never printed or persisted.
+	setLogicalView("login");
+	setControllerHints({
+		id: "login",
+		items: [
+			{ glyph: "dpad", label: "Move" },
+			{ glyph: "a", label: "Select / Edit" },
+			{ glyph: "b", label: "Back" },
+			{ glyph: "y", label: "Search" },
+			{ glyph: "menu", label: "Settings" },
+			RETURN_HOME_HINT,
+		],
+	});
+	recordOriginFromReferrer();
+	const loginFormEl = $("playlist-form");
+	function snapshotLoginForm() {
+		const parts = [`mode=${mode}`, `accent=${selectedPlaylistAccent()}`];
+		parts.push(`picked=${pickedLocal ? pickedLocal.name || "1" : ""}`);
+		const fields = loginFormEl?.querySelectorAll("input, select, textarea") || [];
+		let index = 0;
+		for (const field of fields) {
+			const input = /** @type {HTMLInputElement} */ (field);
+			if (input.type === "file") continue;
+			const key = input.id || input.name || `field-${index++}`;
+			const value =
+				input.type === "checkbox" || input.type === "radio"
+					? String(input.checked)
+					: input.value;
+			parts.push(`${key}=${value}`);
+		}
+		return parts.join("\n");
+	}
+	const loginBaseline = snapshotLoginForm();
+	function loginIsDirty() {
+		try {
+			return snapshotLoginForm() !== loginBaseline;
+		} catch {
+			return false;
+		}
+	}
+	function loginFieldTarget(target) {
+		if (!(target instanceof HTMLElement)) return null;
+		const tag = target.tagName.toLowerCase();
+		if (tag === "textarea") return target;
+		if (tag !== "input") return null;
+		const type = (target.getAttribute("type") || "text").toLowerCase();
+		if (["text", "password", "url", "search", "email", "tel"].includes(type)) {
+			return target;
+		}
+		return null;
+	}
+	// Reopen suppression: closeCouchKeyboard re-focuses the field,
+	// and the focusin handler below would immediately reopen the
+	// session — B could never exit editing. The closed event fires
+	// before the refocus, so it arms a one-shot suppress.
+	let suppressKeyboardReopen = false;
+	loginFormEl?.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+		suppressKeyboardReopen = true;
+		// Expire at the end of the task (see the Guide search
+		// suppress): the refocus is synchronous inside the close,
+		// and no focusin fires when the field was already focused.
+		queueMicrotask(() => {
+			suppressKeyboardReopen = false;
+		});
+	});
+	loginFormEl?.addEventListener("focusin", (event) => {
+		const field = loginFieldTarget(event.target);
+		if (!field) return;
+		if (suppressKeyboardReopen) {
+			suppressKeyboardReopen = false;
+			return;
+		}
+		openCouchKeyboard(field);
+	});
+	loginFormEl?.addEventListener("focusout", (event) => {
+		if (!loginFieldTarget(event.target)) return;
+		// Blur to nowhere (gamepad B) keeps the session: the keyboard
+		// Back layer owns that press. Blur to a real non-field element
+		// ends it silently (closeCouchKeyboard would refocus the field
+		// and fight the focus move) and releases the hints override.
+		// Field-to-field moves skip the end: focusin opens the new
+		// session, which ends the previous one.
+		const next = event.relatedTarget;
+		if (!(next instanceof Element)) return;
+		if (loginFieldTarget(next)) return;
+		endCouchKeyboardSession();
+		setControllerHints(null);
+	});
+	registerBackLayer({
+		id: "login-editing",
+		priority: BACK_PRIORITY.KEYBOARD,
+		isActive: () =>
+			!!loginFieldTarget(document.activeElement) &&
+			!findOpenModal() &&
+			!isTitleContextMenuOpen(),
+		handle: () => {
+			closeCouchKeyboard(false);
+			const field = document.activeElement;
+			if (field instanceof HTMLElement) field.blur();
+			return true;
+		},
+	});
+	registerBackLayer({
+		id: "login-root",
+		priority: BACK_PRIORITY.ROUTE,
+		isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+		handle: () => {
+			if (!loginIsDirty()) {
+				navigateBackWithOrigin("/settings/playlists");
+				return true;
+			}
+			void confirmDialog({
+				title: editing ? t("login.title.edit") : t("login.title.add"),
+				message: "You have unsaved playlist details. Leave without saving?",
+				confirmLabel: "Discard",
+				cancelLabel: t("common.cancel"),
+				destructive: true,
+			}).then((confirmed) => {
+				if (confirmed) navigateBackWithOrigin("/settings/playlists");
+			});
+			return true;
+		},
+	});
 </script>

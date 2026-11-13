@@ -36,8 +36,24 @@
     loadHomeRails,
     loadFollowedEpisodes,
     mergeHomePayload,
+    detailHrefWithoutAutoplay,
   } from "@/scripts/lib/home-rails.ts"
-  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
+  import {
+    restoreCouchFocus,
+    setLogicalView,
+  } from "@/scripts/lib/couch-focus.ts"
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts"
+  import {
+    openTitleContextMenu,
+    isTitleContextMenuOpen,
+  } from "@/scripts/lib/poster-menu.ts"
+  import {
+    buildCardContextActions,
+    cardContextLabels,
+  } from "@/scripts/lib/title-context-actions.ts"
+  import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+  import { t } from "@/scripts/lib/i18n.js"
+  import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
   import { kindLabel } from "@/scripts/lib/taxonomy.ts"
   import {
     armTvImageFallbacks,
@@ -189,12 +205,132 @@
     }, delayMs)
   }
 
+  // W5 (0.11.10): X on a card opens the title context menu (Open
+  // details without autoplay / Play-Resume / favourite / watchlist /
+  // watched). Controller X reaches here as the "x" key (gamepad.ts
+  // dispatch-first routing; the autoplay-strip fallback runs only
+  // when no handler claims the key). Cards carry
+  // explicit data-couch-detail-href / data-couch-play-href so no
+  // handler ever has to parse ?autoplay out of a URL.
+  function cardMenuEntry(item) {
+    return {
+      kind: item.kind === "live" ? "live" : item.kind === "series" ? "series" : "vod",
+      id: item.id,
+      detailHref: detailHrefWithoutAutoplay(item.detailHref),
+      playHref: item.playHref,
+    }
+  }
+
+  async function openHomeCardMenu(anchor, item) {
+    const prefs = await import("@/scripts/lib/preferences.js")
+    const entry = cardMenuEntry(item)
+    const kind = entry.kind
+    const state = playlistId
+      ? {
+          favorited: prefs.isFavorite(playlistId, kind, item.id),
+          onWatchlist: kind === "live" ? false : prefs.isOnWatchlist(playlistId, kind, item.id),
+          watched:
+            kind === "live"
+              ? false
+              : kind === "vod"
+                ? prefs.isCompleted(playlistId, "vod", item.id)
+                : prefs.hasSeriesWatchedOverride(playlistId, item.id),
+        }
+      : { favorited: false, onWatchlist: false, watched: false }
+    const extras = { name: item.title || "", logo: item.posterUrl || null }
+    const labels = {
+      ...cardContextLabels(t),
+      play:
+        typeof item.progress === "number" && item.progress > 0 ? "Resume" : "Play",
+    }
+    openTitleContextMenu(
+      anchor,
+      buildCardContextActions(
+        entry,
+        state,
+        {
+          onOpen: () => {
+            window.location.href = entry.detailHref
+          },
+          onPlay: () => {
+            window.location.href = entry.playHref
+          },
+          onToggleFavorite: (currently) => {
+            if (playlistId) prefs.toggleFavorite(playlistId, kind, item.id, extras)
+          },
+          onToggleWatchlist: (currently) => {
+            if (playlistId) prefs.toggleWatchlist(playlistId, kind, item.id, extras)
+          },
+          onToggleWatched: (currently) => {
+            if (!playlistId) return
+            if (kind === "vod") {
+              if (currently) prefs.clearProgress(playlistId, "vod", item.id)
+              else prefs.markCompleted(playlistId, "vod", item.id, extras)
+            } else {
+              prefs.setSeriesWatchedOverride(playlistId, item.id, !currently)
+            }
+          },
+        },
+        labels,
+      ),
+    )
+  }
+
+  function onCardKey(event) {
+    if (event.key !== "x" && event.key !== "X") return
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+    const target = event.target
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return
+    }
+    if (findOpenModal() || isTitleContextMenuOpen()) return
+    const anchor = target?.closest?.("[data-nylah-item]")
+    if (!anchor) return
+    // Hero actions act on the hero title; rail cards look up by key.
+    if (anchor.closest("[data-nylah-hero]")) {
+      if (!heroItem) return
+      event.preventDefault()
+      void openHomeCardMenu(anchor, heroItem)
+      return
+    }
+    const key = anchor.getAttribute("data-couch-key")
+    if (!key) return
+    for (const rail of rails) {
+      const item = rail.items.find((candidate) => candidate.key === key)
+      if (item) {
+        event.preventDefault()
+        void openHomeCardMenu(anchor, item)
+        return
+      }
+    }
+  }
+
   function onVisibilityChange() {
     if (!document.hidden) scheduleRefresh()
   }
 
   onMount(async () => {
     mounted = true
+    setLogicalView("home")
+    // X opens the card context menu on this screen (see onCardKey);
+    // B is a root no-op and is deliberately not hinted.
+    setControllerHints({
+      id: "home",
+      items: [
+        { glyph: "dpad", label: "Move" },
+        { glyph: "a", label: "Play / Select" },
+        { glyph: "x", label: "Actions" },
+        { glyph: "y", label: "Search" },
+        { glyph: "menu", label: "Settings" },
+        RETURN_HOME_HINT,
+      ],
+    })
+    document.addEventListener("keydown", onCardKey)
     // Cached first paint: render synchronously, before any network.
     const cached = getCachedHomeRails()
     if (cached && (cached.hero || cached.rails.length > 0)) {
@@ -230,6 +366,7 @@
     // onDestroy also runs during SSR prerender, where there is no DOM.
     if (typeof document !== "undefined") {
       document.removeEventListener("visibilitychange", onVisibilityChange)
+      document.removeEventListener("keydown", onCardKey)
     }
   })
 
@@ -353,11 +490,17 @@
         {#if heroItem}
           <div class="rs-hero__actions">
             {#if heroItem.playHref}
-              <a class="rs-hero__action" data-nylah-item href={heroItem.playHref}>▶ {heroActionLabel}</a>
+              <a
+                class="rs-hero__action"
+                data-nylah-item
+                data-couch-detail-href={detailHrefWithoutAutoplay(heroItem.detailHref)}
+                data-couch-play-href={heroItem.playHref}
+                href={heroItem.playHref}>▶ {heroActionLabel}</a>
             {/if}
             <a
               class="rs-hero__action rs-hero__action--secondary"
               data-nylah-item
+              data-couch-detail-href={detailHrefWithoutAutoplay(heroItem.detailHref)}
               href={heroItem.detailHref}
             >More Info</a>
           </div>
@@ -420,6 +563,8 @@
     class="rs-card rs-card--{display.cardKind}"
     data-nylah-item
     data-couch-key={item.key}
+    data-couch-detail-href={detailHrefWithoutAutoplay(item.detailHref)}
+    data-couch-play-href={item.playHref}
     data-content-kind={item.contentKind}
     href={item.detailHref}
     aria-label={item.title}

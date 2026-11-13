@@ -310,6 +310,81 @@ export function navLayerIds(stack: LivetvNavStack): LivetvNavLayerId[] {
   return stack.map((layer) => layer.id);
 }
 
+// ── Origin resolution (0.11.10 W4 — pure, no DOM) ───────────────
+// Leaving a surface must return to the surface it was entered
+// from — never a surprise jump. The Guide and playback both
+// derive their return destination from the same inputs, but the
+// evidence differs per surface, so each has its own resolver.
+// Both normalise the legacy mode name "home" to "landing".
+
+/** Modes the Guide can return to on B (its entry mode). */
+export type GuideOriginMode = "landing" | "browser" | "playback";
+
+/** Modes playback's B-exit can return to (its entry mode). */
+export type PlaybackOriginMode = "landing" | "browser" | "guide";
+
+function normaliseOriginMode(
+  mode: string | null | undefined,
+): string | null {
+  if (!mode) return null;
+  const trimmed = mode.trim();
+  if (!trimmed) return null;
+  return trimmed === "home" ? "landing" : trimmed;
+}
+
+/**
+ * Where the Guide returns on B. Evidence, in order:
+ *
+ *   1. The invoker's mount (`mountMode` — the data-livetv-mode
+ *      of the mount containing the focused invoker when the
+ *      Guide opened): browser / playback / landing win outright.
+ *      This is order-proof: it reads the focused element, not a
+ *      mode the shell may or may not have persisted yet.
+ *   2. The persisted mode (`persistedMode` — the mode stored
+ *      before this entry): playback / browser win when the
+ *      invoker carried no mount (focus on <body>).
+ *   3. A held stream (`hasTunedSession`): a tuned channel can
+ *      only be held while the user came from playback (leaving
+ *      for landing releases it), so an otherwise-unknown origin
+ *      with a held session returns to playback.
+ *   4. Landing, the default.
+ *
+ * The Guide's own `guideReturnMode` (livetv-guide.ts) only knows
+ * the home/playback binary; this resolver adds the browser
+ * origin without touching that module.
+ */
+export function resolveGuideOrigin(
+  mountMode: string | null | undefined,
+  persistedMode: string | null | undefined,
+  hasTunedSession = false,
+): GuideOriginMode {
+  const mount = normaliseOriginMode(mountMode);
+  if (mount === "browser" || mount === "playback" || mount === "landing") {
+    return mount;
+  }
+  const persisted = normaliseOriginMode(persistedMode);
+  if (persisted === "browser" || persisted === "playback") {
+    return persisted;
+  }
+  if (hasTunedSession) return "playback";
+  return "landing";
+}
+
+/**
+ * Where playback's B-exit returns: the last non-playback mode.
+ * Browser and Guide keep the tuned session by design (the
+ * release rule only fires for landing), so returning to either
+ * is stream-safe; anything else (including the legacy "home"
+ * and unknown values) returns to landing, which releases.
+ */
+export function resolvePlaybackOrigin(
+  previousMode: string | null | undefined,
+): PlaybackOriginMode {
+  const previous = normaliseOriginMode(previousMode);
+  if (previous === "browser" || previous === "guide") return previous;
+  return "landing";
+}
+
 // ── Controller ──────────────────────────────────────────────────
 
 /** Event dispatched on window whenever the stack changes. */

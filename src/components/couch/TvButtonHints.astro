@@ -12,13 +12,19 @@
 // come from html[data-livetv-mode]; a focused text field switches to
 // the minimal editing legend (only B + View+Menu work while typing,
 // per gamepad.ts) and focus on an on-screen keyboard key switches to
-// the OSK legend (A types, B deletes, X clears — the clear poll is
-// scoped to [data-couch-keyboard], see couch-button-hints.ts *9).
+// the OSK legend (A types, B closes the keyboard, the ⌫ key deletes,
+// the Clear key clears — B never deletes, see couch-keyboard.ts).
+// Controller 2.0 (§42): a surface that owns input claims the legend
+// via setControllerHints() and its config wins over the view-derived
+// one until it clears (null) — hints always name the actual owner.
 // The legend hides while a modal dialog owns input,
 // and in fullscreen playback while the OSD or any playback overlay
 // (options / Quick Surf / channel browser / error) is visible — those
 // surfaces already name their own keys (OSD shortcuts line, overlay
 // buttons), so the legend would only duplicate them over the video.
+// While Controller Cursor Mode is active (0.11.10 W6,
+// html[data-cursor-mode="active"]) the legend shows the cursor hint
+// set (CURSOR_MODE_HINTS) instead of the view's config.
 // View+Menu held 2 s = return home is global and is never hidden
 // with the legend: the hold is owned by gamepad.ts, not by this bar.
 import {
@@ -53,9 +59,19 @@ const initial: HintConfig = hintsForView(view);
 
 <script>
   import {
+    CONTROLLER_HINTS_CHANGE_EVENT,
+    getControllerHints,
     hintsForView,
     hintItemHtml,
   } from "@/scripts/lib/couch-button-hints.ts";
+  // 0.11.10 (W6): while Cursor Mode is active (cursor-mode.ts sets
+  // html[data-cursor-mode="active"]) the legend shows the cursor
+  // hint set instead of the view's — the attribute is the signal,
+  // so this render() stays the single writer of the legend and no
+  // other module fights it. W1's setControllerHints (Contract C)
+  // may replace this branch at integration; CURSOR_MODE_HINTS is
+  // the config it should show.
+  import { CURSOR_MODE_HINTS } from "@/scripts/lib/cursor-mode.ts";
 
   const nav = document.querySelector<HTMLElement>("[data-button-hints]");
   const list = nav?.querySelector<HTMLElement>("[data-button-hints-list]");
@@ -105,12 +121,30 @@ const initial: HintConfig = hintsForView(view);
       // (day nav in By Channel, time nav in grid). Unset → the
       // base guide config.
       const guideMode = document.documentElement.dataset.livetvGuideMode ?? null;
-      const config = hintsForView(view, { livetvMode: mode, guideMode, editing, osk });
+      // Controller 2.0 (§42): an owner-claimed config wins over the
+      // view-derived one — hints reflect the actual current input
+      // owner (drawer, overlay, keyboard, playback mode). Owners
+      // route every update through setControllerHints and clear on
+      // close; with no claim, the audited view config applies.
+      // Cursor Mode (W6) wins over both while active — the
+      // pointer's legend, not the screen's — via the
+      // html[data-cursor-mode] signal cursor-mode.ts owns.
+      const override = getControllerHints();
+      const cursorActive =
+        document.documentElement.dataset.cursorMode === "active";
+      const config = cursorActive
+        ? CURSOR_MODE_HINTS
+        : (override ?? hintsForView(view, { livetvMode: mode, guideMode, editing, osk }));
       // Hide while a dialog owns input; in Live TV playback hide
       // while the OSD / an overlay is up (it names its own keys).
+      // An owner-claimed config bypasses the hide: the owner claimed
+      // the legend for its own surface (e.g. a modal's hints), so
+      // hiding it would leave the surface legend-less.
       const hidden =
-        dialogOpen() ||
-        (view === "livetv" && mode === "playback" && overlayVisible());
+        !override &&
+        !cursorActive &&
+        (dialogOpen() ||
+          (view === "livetv" && mode === "playback" && overlayVisible()));
       nav.toggleAttribute("hidden", hidden);
       nav.dataset.config = config.id;
       if (list.dataset.config !== config.id) {
@@ -122,7 +156,9 @@ const initial: HintConfig = hintsForView(view);
     const modeObserver = new MutationObserver(render);
     modeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode"],
+      // 0.11.10 (W6): data-cursor-mode joins the filter so Cursor
+      // Mode activation/exit re-renders the legend immediately.
+      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode", "data-cursor-mode"],
     });
     const domObserver = new MutationObserver(render);
     domObserver.observe(document.body, {
@@ -133,6 +169,7 @@ const initial: HintConfig = hintsForView(view);
     });
     document.addEventListener("focusin", render);
     document.addEventListener("focusout", render);
+    window.addEventListener(CONTROLLER_HINTS_CHANGE_EVENT, render);
     render();
   }
 </script>

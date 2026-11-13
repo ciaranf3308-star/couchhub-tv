@@ -5,15 +5,18 @@
 // VOD screen); genre tiles and the Browse Everything entry are the
 // only new card shapes, and they live here, in W4-owned code.
 //
-// CONTROLLER CONTRACT (brief §16): every shelf is a
-// `section[data-nylah-rail]` and every card's primary focusable
-// carries `data-nylah-item` + a stable `data-couch-key`, so the
-// existing gamepad rail model (gamepad.ts) and focus memory
-// (couch-focus.ts) drive Series Home with no new input handling.
-// D-pad L/R moves within a shelf, U/D moves between shelves, A
-// activates, X opens details on episode cards (the shared pipeline
-// strips the autoplay param), Y opens search, Menu opens Settings,
-// B goes back — all through the shared XInput action pipeline.
+// CONTROLLER CONTRACT (brief §16, 0.11.10 §20–§22): every shelf
+// is a `section[data-nylah-rail]` and every card's primary
+// focusable carries `data-nylah-item` + a stable `data-couch-key`,
+// so the existing gamepad rail model (gamepad.ts) and focus
+// memory (couch-focus.ts) drive Series Home. D-pad L/R moves
+// within a shelf, U/D moves between shelves, A activates the
+// card's own action (Continue cards resume the exact episode
+// named by the progress record — never episode 1). X opens the
+// title context menu, Y opens Search Series, B goes back —
+// through the Home controller keys in couch-series-home.ts
+// (W1 routes the gamepad buttons as keys; see the note there).
+// Menu opens Settings (no page-options surface exists yet).
 //
 // METADATA DISCIPLINE (brief §1.8/§15.6): season counts come ONLY
 // from already-cached series info (getCachedSeasonCount — a sync

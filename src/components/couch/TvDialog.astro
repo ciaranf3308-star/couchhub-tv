@@ -50,6 +50,10 @@ const { id, title } = Astro.props;
     openCouchDialog,
     closeCouchDialog,
   } from "@/scripts/lib/couch-focus.ts";
+  import {
+    registerBackLayer,
+    BACK_PRIORITY,
+  } from "@/scripts/lib/back-handler.ts";
 
   document.querySelectorAll("dialog[data-nylah-dialog]").forEach((dlg) => {
     if (!(dlg instanceof HTMLDialogElement) || !dlg.id) return;
@@ -57,6 +61,16 @@ const { id, title } = Astro.props;
     dlg.dataset.dialogWired = "1";
     const dialogId = dlg.id;
     attachDialogSpatialNav(dlg);
+    // Back layer for the coordinator: while this dialog is open
+    // it owns B (close + invoker restore via closeCouchDialog).
+    // The coordinator runs this layer before its own
+    // close-topmost-chrome fallback, so it never double-closes.
+    registerBackLayer({
+      id: `tv-dialog:${dialogId}`,
+      priority: BACK_PRIORITY.MODAL,
+      isActive: () => dlg.open,
+      handle: () => closeCouchDialog(dialogId),
+    });
     // Native close (B/Escape) still needs focus returned to the
     // invoker — the dialog's own close event is the hook. The
     // invoker map is populated by openCouchDialog; a dialog opened

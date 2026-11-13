@@ -31,13 +31,28 @@
   import { resolvePersonTitleIds } from "@/scripts/lib/person-filter.ts"
   import { isTvDevice } from "@/scripts/lib/tv-detect"
   import { debounce } from "@/scripts/lib/debounce.ts"
-  import { goCouch } from "@/scripts/lib/couch-nav.ts"
   import {
     categorizeSearchResults,
     suggestionsFor,
   } from "@/scripts/lib/couch-search.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
   import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"
+  import {
+    openCouchKeyboard,
+    closeCouchKeyboard,
+    isCouchKeyboardOpen,
+    endCouchKeyboardSession,
+    nextSearchBackStep,
+    COUCH_KEYBOARD_CLOSED_EVENT,
+  } from "@/scripts/lib/couch-keyboard.ts"
+  import {
+    BACK_PRIORITY,
+    registerBackLayer,
+  } from "@/scripts/lib/back-handler.ts"
+  import {
+    recordOriginFromReferrer,
+    navigateBackWithOrigin,
+  } from "@/scripts/lib/route-origin.ts"
 
   /** @type {{ focusOnMount?: boolean }} */
   let { focusOnMount = false } = $props()
@@ -58,6 +73,13 @@
   function onSearchInputFocus() {
     keyboard.onInputFocus()
     syncKeyboard()
+    // Contract E session: the keyboard Back layer and the B-close
+    // path need to know this input is being edited. Focus stays in
+    // the input (pointer / physical typing); the key grid is reached
+    // via ArrowDown or A on the input (W1 gamepad entry).
+    if (keyboard.open && inputEl) {
+      openCouchKeyboard(inputEl, focusFirstResult, { focusGrid: false })
+    }
   }
   function onSearchInputKeyDown(ev) {
     if (ev.key === "Escape") {
@@ -65,6 +87,7 @@
       // (no-op) when the keyboard is already closed, so the window
       // handler below still owns clear / go-back.
       if (keyboard.dismiss()) {
+        endCouchKeyboardSession()
         ev.preventDefault()
         ev.stopPropagation()
         syncKeyboard()
@@ -103,6 +126,12 @@
     syncKeyboard()
   }
   function dismissSearchKeyboard() {
+    // Shared lifecycle first (Back layer + focus return); without a
+    // session (defensive), dismiss the lifecycle directly.
+    if (isCouchKeyboardOpen()) {
+      closeCouchKeyboard(false)
+      return
+    }
     if (keyboard.dismissToInput()) {
       syncKeyboard()
       inputEl?.focus()
@@ -598,13 +627,62 @@
         ),
   )
 
-  // Back / close: return to the screen search was opened from when
-  // there is one, otherwise Home. B / Escape with an empty query
-  // lands here (see onKey); a non-empty query clears first.
+  // Back / close: return to the recorded origin screen, or Home when
+  // there is none. Origin-aware (Contract B) — never WebView-history
+  // based, which returns to whatever the history stack happened to
+  // hold. The search-launching control restores focus on the return
+  // trip via the existing markSearchReturn/consumeSearchReturn flag
+  // (TvSearchAction), which full-page origin navigation preserves.
   function goBack() {
     if (typeof window === "undefined") return
-    if (window.history.length > 1) window.history.back()
-    else goCouch("/")
+    navigateBackWithOrigin("/")
+  }
+
+  /** Focus is on a results / recent / filter control, not the input. */
+  function isSearchFocusInResults() {
+    const active = /** @type {HTMLElement | null} */ (document.activeElement)
+    if (!active || active === inputEl || active === document.body) return false
+    const view = document.querySelector('[data-couch-view="search"]')
+    return !!view?.contains(active)
+  }
+
+  /**
+   * One Back step (§27), shared by the window Escape handler and the
+   * Back layer (Android BACK): close keyboard -> exit person subview
+   * -> focus back to the input -> explicit query-clear step -> leave
+   * via provenance. Always performs exactly one step and returns true.
+   */
+  function searchBackStep() {
+    const step = nextSearchBackStep({
+      keyboardOpen: keyboard.open,
+      personMode: !!personMode,
+      focusInResults: isSearchFocusInResults(),
+      hasQuery: !!query.trim(),
+    })
+    if (step === "close-keyboard") {
+      if (isCouchKeyboardOpen()) closeCouchKeyboard(false)
+      else {
+        keyboard.dismissToInput()
+        syncKeyboard()
+        inputEl?.focus()
+      }
+      return true
+    }
+    if (step === "exit-person") {
+      exitPersonMode()
+      inputEl?.focus()
+      return true
+    }
+    if (step === "focus-input") {
+      inputEl?.focus()
+      return true
+    }
+    if (step === "clear-query") {
+      clearQuery()
+      return true
+    }
+    goBack()
+    return true
   }
 
   function applySuggestion(text) {
@@ -686,6 +764,7 @@
   // D-pad, or back to the input when there is nothing to open (the
   // input focus reopens the keyboard — they are still typing).
   function focusFirstResult() {
+    endCouchKeyboardSession()
     keyboard.commit()
     syncKeyboard()
     const first = document.querySelector(".couch-search__results .rs-card")
@@ -698,49 +777,38 @@
 
   function onKey(ev) {
     if (isTvDevice()) return
-    // Focus inside the on-screen keyboard belongs to the keyboard: B is
-    // backspace there (its own handler), arrows are spatial navigation,
-    // Enter/Space click the key. The search view must not clear the query
-    // or steal the key.
+    // Focus inside the on-screen keyboard belongs to the keyboard: B
+    // closes it there (its own handler), arrows are spatial
+    // navigation, Enter/Space click the key. The search view must not
+    // clear the query or steal the key.
     const targetEl = /** @type {HTMLElement | null} */ (ev.target)
     if (targetEl?.closest?.("[data-osk]")) return
-    // Keyboard dismiss owns Escape before the generic clear / go-back
-    // branches below — the first Escape closes the keyboard; a second
-    // one clears the query (or leaves, when empty).
     // Trailing Escape: the gamepad layer blurs the input and then
-    // dispatches Escape on the body for a B press. Swallow exactly that
-    // one Escape (focus on body, fresh scope exit while the keyboard
-    // was open) so B does not also clear the query or leave Search.
+    // dispatches Escape on the body for a B press. With the keyboard
+    // open that trailing Escape CLOSES it (focus returns to the
+    // input) — §28: one B press, one step. With the keyboard already
+    // closed the Escape falls through to the normal steps below.
     if (
       ev.key === "Escape" &&
+      keyboard.open &&
       keyboard.isFreshScopeExit() &&
       (document.activeElement === document.body || !document.activeElement)
     ) {
       ev.preventDefault()
       ev.stopImmediatePropagation()
+      searchBackStep()
       return
     }
     if (ev.key === "Escape" && keyboard.open) {
       ev.preventDefault()
       ev.stopImmediatePropagation()
-      if (document.activeElement === inputEl) {
-        keyboard.dismiss()
-      } else {
-        keyboard.dismissToInput()
-        inputEl?.focus()
-      }
-      syncKeyboard()
+      searchBackStep()
       return
     }
     const onInput = document.activeElement === inputEl
-    const inRecentSection = !!recentSectionEl?.contains(document.activeElement)
     if (onInput && personMode && ev.key === "Backspace" && !query) {
       ev.preventDefault()
       exitPersonMode()
-    } else if (ev.key === "Escape" && personMode) {
-      ev.preventDefault()
-      exitPersonMode()
-      inputEl?.focus()
     } else if (onInput && ev.key === "ArrowDown") {
       ev.preventDefault()
       ev.stopImmediatePropagation()
@@ -778,21 +846,16 @@
       ev.preventDefault()
       ev.stopImmediatePropagation()
       navigate(results[activeIndex])
-    } else if (ev.key === "Escape" && inRecentSection) {
-      ev.preventDefault()
-      inputEl?.focus()
     } else if (ev.key === "Escape") {
-      if (query) {
-        ev.preventDefault()
-        query = ""
-        queryDebounced = ""
-        syncUrl("")
-      } else {
-        // Empty query + Escape/B = leave search, restoring the
-        // previous screen (history) or Home.
-        ev.preventDefault()
-        goBack()
-      }
+      // One Back step (§27): person -> focus input -> clear query ->
+      // leave via provenance. Keyboard-open Escapes were handled
+      // above; this branch never runs two steps. stopImmediatePropagation
+      // matters: this is a window capture listener, and the Back
+      // coordinator's capture listener must not run the same step
+      // again for this press (listener order is mount order).
+      ev.preventDefault()
+      ev.stopImmediatePropagation()
+      searchBackStep()
     }
   }
 
@@ -800,6 +863,31 @@
     loadIndex().then(() => {
       if (personMode) resolvePersonMode()
     })
+    // Origin for Back (Contract B): the screen that launched search.
+    recordOriginFromReferrer(window.location.pathname)
+    // Back layer (Contract A): Android BACK runs the same single step
+    // as Escape on Windows. The keyboard layer (priority 80) wins
+    // while the keyboard is open; this page layer (30) runs below it.
+    const unregisterSearchBack = registerBackLayer({
+      id: "search-page",
+      priority: BACK_PRIORITY.PAGE_STATE,
+      isActive: () => true,
+      handle: () => searchBackStep(),
+    })
+    // Shared keyboard lifecycle: a close (B in the grid, Back layer)
+    // arrives as an event on this input — hide the lifecycle keyboard
+    // and return focus to the input. Commit hides without suppressing
+    // the reopen (the commit handler moves focus onward).
+    function onKeyboardClosed(ev) {
+      if (ev.target !== inputEl) return
+      if (ev.detail?.commit) keyboard.commit()
+      else {
+        keyboard.dismissToInput()
+        inputEl?.focus()
+      }
+      syncKeyboard()
+    }
+    window.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
     function onWarmed() {
       loadIndex({ warm: false })
     }
@@ -827,6 +915,8 @@
       })
     }
     return () => {
+      unregisterSearchBack()
+      window.removeEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
       document.removeEventListener("xt:catalog-warmed", onWarmed)
       document.removeEventListener(EPG_LOADED_EVENT, onEpgLoaded)
       document.removeEventListener("xt:active-changed", onActiveChanged)
@@ -952,7 +1042,7 @@
       </div>
     {/if}
 
-    <!-- Controller path to typing: QWERTY grid, A types, B deletes, X clears.
+    <!-- Controller path to typing: QWERTY grid, A types, B closes, ⌫ deletes.
          Hidden until the search input is focused; hides on dismiss / blur / commit. -->
     <TvKeyboard
       bind:value={query}

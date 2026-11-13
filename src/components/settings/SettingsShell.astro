@@ -44,7 +44,7 @@ const { title, titleKey, sub, subKey, current } = Astro.props
 ---
 
 <CouchLayout pageTitle={title} activeNav="settings" view="settings">
-  <div class="settings-page">
+  <div class="settings-page" data-settings-current={current}>
     <header class="route-hero settings-pagehead">
       {
         current !== "home" && (
@@ -63,6 +63,7 @@ const { title, titleKey, sub, subKey, current } = Astro.props
           <a
             href="/settings"
             class="settings-nav-link"
+            data-couch-key="settings-nav:home"
             aria-current={current === "home" ? "true" : undefined}>
             All settings
           </a>
@@ -72,6 +73,7 @@ const { title, titleKey, sub, subKey, current } = Astro.props
                 href={section.href}
                 data-i18n={section.titleKey || undefined}
                 class="settings-nav-link"
+                data-couch-key={`settings-nav:${section.slug}`}
                 {...(section.danger ? { "data-danger": "true" } : {})}
                 aria-current={current === section.slug ? "true" : undefined}>
                 {section.title}
@@ -144,6 +146,93 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     import "@/scripts/settings/receiver-card.ts"
     import "@/scripts/settings/play-on-tv-card.ts"
     import "@/scripts/settings/followed-card.ts"
+    import {
+      registerBackLayer,
+      BACK_PRIORITY,
+    } from "@/scripts/lib/back-handler.ts"
+    import {
+      recordOriginFromReferrer,
+      navigateBackWithOrigin,
+    } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+    import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts"
+    import { initListFocusMemory } from "@/scripts/lib/couch-list-focus.ts"
+    import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+    import {
+      RETURN_HOME_HINT,
+      setControllerHints,
+    } from "@/scripts/lib/couch-button-hints.ts"
+
+    // W5 (0.11.10): Settings Back hierarchy (common contract §33).
+    // Modals/editing own B first (native dialog cancel + the search
+    // layers in settings_search.ts, which outrank these); then a
+    // section page steps to All Settings, and Settings home steps
+    // to the origin page (or Home). Menu never navigates inside
+    // Settings — gamepad.ts openSettings() already no-ops here.
+    setLogicalView("settings")
+    setControllerHints({
+      id: "settings",
+      items: [
+        { glyph: "dpad", label: "Move" },
+        { glyph: "a", label: "Select" },
+        { glyph: "b", label: "Back" },
+        { glyph: "y", label: "Settings search" },
+        RETURN_HOME_HINT,
+      ],
+    })
+    recordOriginFromReferrer()
+    initListFocusMemory(document, window.location.pathname)
+    const settingsCurrent =
+      document.querySelector("[data-settings-current]")?.getAttribute("data-settings-current") ?? "home"
+    if (settingsCurrent === "home") {
+      registerBackLayer({
+        id: "settings-home-root",
+        priority: BACK_PRIORITY.ROUTE,
+        isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+        handle: () => {
+          navigateBackWithOrigin("/")
+          return true
+        },
+      })
+    } else {
+      registerBackLayer({
+        id: "settings-section-root",
+        priority: BACK_PRIORITY.PAGE_STATE,
+        isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+        handle: () => {
+          window.location.assign("/settings")
+          return true
+        },
+      })
+    }
+
+    // Dialog focus restore: Settings dialogs opened via showModal
+    // directly (New Custom Playlist, backup import) have no invoker
+    // restore of their own — when one closes and focus is left on
+    // the body, return it to the last control focused outside any
+    // dialog. Runs a frame after close so a dialog's own restore
+    // (reset dialog, confirm-dialog) wins when it acts.
+    let lastSettingsFocus = null
+    document.addEventListener("focusin", (event) => {
+      const target = event.target
+      if (!(target instanceof HTMLElement)) return
+      if (target.closest("dialog")) return
+      lastSettingsFocus = target
+    })
+    document.addEventListener(
+      "close",
+      () => {
+        requestAnimationFrame(() => {
+          const active = document.activeElement
+          if (active && active !== document.body) return
+          if (findOpenModal()) return
+          if (lastSettingsFocus && lastSettingsFocus.isConnected) {
+            lastSettingsFocus.focus({ preventScroll: true })
+          }
+        })
+      },
+      true,
+    )
 
     // Sticky offsets, measured live (0.11.4 W1): the topnav height moves
     // with font scale, so the subheader's `top` and the anchor

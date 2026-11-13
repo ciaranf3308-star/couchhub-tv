@@ -78,7 +78,15 @@
     aiDiscoveryProgressText,
   } from "@/scripts/lib/ai/discovery-presentation.ts"
   import { summarizeTaste } from "@/scripts/lib/taste.ts"
-  import { registerBackInterceptor } from "@/scripts/lib/back-handler.ts"
+  import {
+    BACK_PRIORITY,
+    registerBackLayer,
+  } from "@/scripts/lib/back-handler.ts"
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts"
+  import {
+    recordOriginFromReferrer,
+    navigateBackWithOrigin,
+  } from "@/scripts/lib/route-origin.ts"
   import { initAI } from "@/scripts/lib/ai/init.ts"
   import {
     getAiStatus,
@@ -95,6 +103,14 @@
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
   import { CouchKeyboardLifecycle } from "@/scripts/lib/couch-keyboard.ts"
+  import {
+    openCouchKeyboard,
+    closeCouchKeyboard,
+    isCouchKeyboardOpen,
+    endCouchKeyboardSession,
+    nextDiscoverBackStep,
+    COUCH_KEYBOARD_CLOSED_EVENT,
+  } from "@/scripts/lib/couch-keyboard.ts"
   import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
   import {
     armTvImageFallbacks,
@@ -116,10 +132,18 @@
   function onSearchInputFocus() {
     keyboard.onInputFocus()
     syncKeyboard()
+    // Contract E session: the keyboard Back layer and the B-close
+    // path need to know this input is being edited. Focus stays in
+    // the input (pointer / physical typing); the key grid is reached
+    // via ArrowDown or A on the input (W1 gamepad entry).
+    if (keyboard.open && inputEl) {
+      openCouchKeyboard(inputEl, onKeyboardCommit, { focusGrid: false })
+    }
   }
   function onSearchInputKeyDown(ev) {
     if (ev.key === "Escape") {
       if (keyboard.dismiss()) {
+        endCouchKeyboardSession()
         ev.preventDefault()
         ev.stopPropagation()
         syncKeyboard()
@@ -146,12 +170,19 @@
     syncKeyboard()
   }
   function dismissKeyboardToInput() {
+    // Shared lifecycle first (Back layer + focus return); without a
+    // session (defensive), dismiss the lifecycle directly.
+    if (isCouchKeyboardOpen()) {
+      closeCouchKeyboard(false)
+      return
+    }
     if (keyboard.dismissToInput()) {
       syncKeyboard()
       inputEl?.focus()
     }
   }
   function onKeyboardCommit() {
+    endCouchKeyboardSession()
     keyboard.commit()
     syncKeyboard()
     focusFirstResult()
@@ -736,7 +767,10 @@
     // the quick-pick row half-under the sticky nav (0.11.5 seam 6).
     // The dismiss flushes before the rAF below runs, so the scroll
     // and focus below measure the settled layout.
-    if (keyboard.dismiss()) syncKeyboard()
+    if (keyboard.dismiss()) {
+      endCouchKeyboardSession()
+      syncKeyboard()
+    }
     requestAnimationFrame(() => {
       // Scroll the FIRST RESULT CARD into view (nearest), not the
       // rail and not the Ask AI button: the rail is taller than the
@@ -912,27 +946,111 @@
   }
 
   /**
+   * Back-to-root (§25 step 4): reset the RESULTS VIEW only. The
+   * refinement conversation is deliberately preserved — only the
+   * explicit New Search button clears it — and the "Available in My
+   * Library" filter is untouched. Never sends an AI request:
+   * cancellation only (debounce timer, abort, token bump). Focus
+   * returns to the search control, the Discover root state.
+   */
+  function backToDiscoverRoot() {
+    cancelQueryTimer()
+    if (aiAbort) aiAbort.abort()
+    searchToken++
+    query = ""
+    queryDebounced = ""
+    activeMood = null
+    searchResults = null
+    aiResults = null
+    resultsSource = null
+    receipt = null
+    aiUnavailable = null
+    localSimilar = null
+    aiPhase = null
+    searching = false
+    searchingAi = false
+    diagnosticsOpen = false
+    window.scrollTo(0, 0)
+    inputEl?.focus()
+  }
+
+  /**
+   * One Back step (§25), shared by the Escape handler, the
+   * body-focused Escape listener, and the Back layer (Android BACK)
+   * — the 0.11.9 Escape/Android divergence is gone: both paths run
+   * this one function. Order: close diagnostics -> close keyboard ->
+   * focus back to the search control (state untouched — a focus move
+   * never discards the refinement conversation) -> results view back
+   * to the root state -> leave via provenance. Always performs
+   * exactly one step and returns true. Never triggers an AI request
+   * and never submits a prompt.
+   */
+  function discoverBackStep() {
+    const active = /** @type {HTMLElement | null} */ (document.activeElement)
+    const step = nextDiscoverBackStep({
+      diagnosticsOpen,
+      keyboardOpen: keyboard.open,
+      focusInResults:
+        !!active?.closest?.("[data-discover-results]") && active !== inputEl,
+      hasResultsView:
+        aiResults !== null ||
+        searchResults !== null ||
+        query.trim() !== "" ||
+        queryDebounced.trim() !== "" ||
+        activeMood !== null ||
+        localSimilar !== null,
+    })
+    if (step === "close-diagnostics") {
+      diagnosticsOpen = false
+      return true
+    }
+    if (step === "close-keyboard") {
+      if (isCouchKeyboardOpen()) closeCouchKeyboard(false)
+      else {
+        keyboard.dismissToInput()
+        syncKeyboard()
+        inputEl?.focus()
+      }
+      return true
+    }
+    if (step === "focus-search") {
+      inputEl?.focus()
+      return true
+    }
+    if (step === "root-state") {
+      backToDiscoverRoot()
+      return true
+    }
+    navigateBackWithOrigin("/")
+    return true
+  }
+
+  /**
    * B / Escape back steps (gamepad B dispatches Escape outside Live
-   * TV; Android BACK goes through the registered interceptor below).
-   * Predictable order: close diagnostics -> back out of the results
-   * to the search box -> otherwise fall through (at the landing
-   * state, B does nothing — Home is one D-pad move up, in the nav).
-   * The input's own Escape handler runs first for the on-screen
-   * keyboard and stops propagation when it dismisses it.
+   * TV; Android BACK goes through the registered Back layer, which
+   * runs the same discoverBackStep). The input's own Escape handler
+   * runs first for the on-screen keyboard and stops propagation when
+   * it dismisses it; the key-grid handler stops its own Escape.
    */
   function onDiscoverKeyDown(ev) {
     if (ev.key !== "Escape") return
+    ev.preventDefault()
+    ev.stopPropagation()
+    discoverBackStep()
+  }
+
+  /** Diagnostics toggle, with controller hints for the open state. */
+  function toggleDiagnostics() {
+    diagnosticsOpen = !diagnosticsOpen
     if (diagnosticsOpen) {
-      diagnosticsOpen = false
-      ev.preventDefault()
-      ev.stopPropagation()
-      return
-    }
-    const active = /** @type {HTMLElement | null} */ (document.activeElement)
-    const inResults = active?.closest?.("[data-discover-results]")
-    if (inResults && active !== inputEl) {
-      ev.preventDefault()
-      inputEl?.focus()
+      setControllerHints({
+        id: "discover-diagnostics",
+        items: [
+          { glyph: "b", label: "Close diagnostics" },
+          { glyph: "menu", label: "Settings" },
+          { glyph: "view-menu", label: "Return home" },
+        ],
+      })
     }
   }
 
@@ -960,25 +1078,75 @@
 
   onMount(async () => {
     aiAuto = getAiAutoRequests()
-    // Android BACK: same back steps as the Escape handler (close
-    // diagnostics -> back out of results to the landing state ->
-    // otherwise fall through to the WebView default).
-    const unregisterBack = registerBackInterceptor(() => {
-      if (diagnosticsOpen) {
-        diagnosticsOpen = false
-        return true
-      }
-      if (
-        aiResults !== null ||
-        searchResults !== null ||
-        queryDebounced.trim() !== "" ||
-        activeMood !== null
-      ) {
-        newSearch()
-        return true
-      }
-      return false
+    // Origin for Back (Contract B): the screen that launched Discover.
+    recordOriginFromReferrer(window.location.pathname)
+    // Back layer (Contract A): Android BACK runs the SAME single step
+    // as Escape on Windows (discoverBackStep) — the 0.11.9 divergence
+    // (Escape only refocused, Android cleared everything) is gone.
+    // The keyboard layer (priority 80) wins while it is open.
+    const unregisterBack = registerBackLayer({
+      id: "discover-page",
+      priority: BACK_PRIORITY.PAGE_STATE,
+      isActive: () => true,
+      handle: () => discoverBackStep(),
     })
+    // Body-focused Escape = the gamepad B-blur trailing Escape: the
+    // root handler never sees body-targeted keys, so this capture
+    // listener routes them through the same single step. It stays
+    // out of the way whenever focus is inside the view.
+    function onWindowKeyDown(ev) {
+      if (ev.key !== "Escape") return
+      if (document.activeElement && document.activeElement !== document.body) return
+      ev.preventDefault()
+      ev.stopImmediatePropagation()
+      discoverBackStep()
+    }
+    window.addEventListener("keydown", onWindowKeyDown, true)
+    // Shared keyboard lifecycle: a close (B in the grid, Back layer)
+    // arrives as an event on this input — hide the lifecycle keyboard
+    // and return focus to the input.
+    function onKeyboardClosed(ev) {
+      if (ev.target !== inputEl) return
+      if (ev.detail?.commit) keyboard.commit()
+      else {
+        keyboard.dismissToInput()
+        inputEl?.focus()
+      }
+      syncKeyboard()
+    }
+    window.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
+    // Discover's OWN search (§25): Y on Discover focuses this input
+    // instead of opening global Search. The Y handler below routes
+    // the key here via this event; the input focus opens the keyboard.
+    function onDiscoverFocusSearch() {
+      inputEl?.focus()
+    }
+    window.addEventListener("couch:discover-focus-search", onDiscoverFocusSearch)
+    // Y wiring (0.11.10 integration): the gamepad layer dispatches
+    // the "y" key first and only falls back to global Search when
+    // no handler claims it — this handler claims it on Discover
+    // (outside editable fields, where "y" must type) and routes it
+    // through the focus-search event above. Without this, Y on
+    // Discover navigated away to /search.
+    function onDiscoverYKey(ev) {
+      if (ev.key !== "y" && ev.key !== "Y") return
+      if (ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return
+      if (ev.defaultPrevented) return
+      const target = /** @type {HTMLElement | null} */ (ev.target)
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      if (document.querySelector("dialog[open]")) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      window.dispatchEvent(new CustomEvent("couch:discover-focus-search"))
+    }
+    document.addEventListener("keydown", onDiscoverYKey)
     // Re-evaluate "just now" freshness while a validated receipt is on
     // screen; cheap, and it keeps the note honest without a new search.
     const clock = setInterval(() => {
@@ -1010,6 +1178,10 @@
     return () => {
       clearInterval(clock)
       unregisterBack()
+      window.removeEventListener("keydown", onWindowKeyDown, true)
+      window.removeEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
+      window.removeEventListener("couch:discover-focus-search", onDiscoverFocusSearch)
+      document.removeEventListener("keydown", onDiscoverYKey)
       // Leaving Discover cancels any in-flight AI run.
       if (aiAbort) aiAbort.abort()
       document.removeEventListener("xt:ai-settings-changed", refreshAiStatus)
@@ -1383,9 +1555,7 @@
         <section class="rs-discover-diag" data-ai-diagnostics aria-label="Why these results">
           <button
             type="button"
-            onclick={() => {
-              diagnosticsOpen = !diagnosticsOpen
-            }}
+            onclick={toggleDiagnostics}
             aria-expanded={diagnosticsOpen}
             data-nylah-item
             class="rs-discover-diag__toggle">

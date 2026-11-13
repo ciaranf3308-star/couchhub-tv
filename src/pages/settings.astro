@@ -29,6 +29,7 @@ import ExitAppCard from "@/components/ExitAppCard.svelte"
           data-search-text={`${section.title} ${section.desc} ${section.keywords}`.toLowerCase()}
           href={section.href}
           data-nylah-item
+          data-couch-key={`settings-home:${section.slug}`}
           {...(section.danger ? { "data-danger": "true" } : {})}>
           <span class="settings-home-row__text">
             <span class="settings-home-row__title" data-i18n={section.titleKey || undefined}>

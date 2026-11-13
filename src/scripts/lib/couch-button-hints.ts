@@ -133,9 +133,9 @@ export const EDITING_HINTS: HintConfig = {
 
 /**
  * Legend while focus is on an on-screen keyboard key ([data-osk]).
- * A types the focused key, B backspaces (OnScreenKeyboard's own
- * keydown handler), X clears the query (the clear poll fires while
- * focus is inside [data-couch-keyboard] — W2 fix). D-pad moves
+ * A types the focused key, B closes the keyboard (B never deletes —
+ * the ⌫ key deletes, see oskKeyAction in couch-keyboard.ts), and
+ * there is no X shortcut (the Clear key clears). D-pad moves
  * between keys. Y goes to Search except on the Search screen
  * itself, where it is a no-op.
  */
@@ -143,8 +143,7 @@ export function hintsForOsk(view: string | null | undefined): HintConfig {
   const items: HintItem[] = [
     { glyph: "dpad", label: "Move" },
     { glyph: "a", label: "Type" },
-    { glyph: "b", label: "Delete" },
-    { glyph: "x", label: "Clear" },
+    { glyph: "b", label: "Close keyboard" },
   ];
   if ((view ?? "").trim() !== "search") {
     items.push({ glyph: "y", label: "Search" });
@@ -166,6 +165,20 @@ export const GENERIC_HINTS: HintConfig = {
   ],
 } as const;
 
+/** Live TV landing config, defined once — HINT_CONFIGS references it under both its current and deprecated keys. */
+const LIVETV_LANDING_HINTS: HintConfig = {
+  id: "livetv-landing",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Watch" },
+    { glyph: "b", label: "Back" },
+    { glyph: "x", label: "Contextual action" },
+    { glyph: "y", label: "Open Guide" },
+    { glyph: "menu", label: "Options" },
+    RETURN_HOME_HINT,
+  ],
+};
+
 export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
   home: {
     id: "home",
@@ -184,31 +197,13 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
   // Supersedes the 0.8.0 W6 audit (*2) for this mode — those
   // buttons were dead in 0.8.0 because no handler consumed the
   // "home" context; in 0.9.0 W1 implements them.
-  "livetv-landing": {
-    id: "livetv-landing",
-    items: [
-      { glyph: "dpad", label: "Move" },
-      { glyph: "a", label: "Watch" },
-      { glyph: "b", label: "Back" },
-      { glyph: "x", label: "Contextual action" },
-      { glyph: "y", label: "Open Guide" },
-      { glyph: "menu", label: "Options" },
-      RETURN_HOME_HINT,
-    ],
-  },
-  /** @deprecated 0.8.0 name for the landing config — use "livetv-landing". */
-  "livetv-home": {
-    id: "livetv-landing",
-    items: [
-      { glyph: "dpad", label: "Move" },
-      { glyph: "a", label: "Watch" },
-      { glyph: "b", label: "Back" },
-      { glyph: "x", label: "Contextual action" },
-      { glyph: "y", label: "Open Guide" },
-      { glyph: "menu", label: "Options" },
-      RETURN_HOME_HINT,
-    ],
-  },
+  // Single source: the config object is defined once above
+  // (LIVETV_LANDING_HINTS) and both keys reference it — the old
+  // duplicated "livetv-home" literal was a second source that
+  // could drift from the landing config.
+  "livetv-landing": LIVETV_LANDING_HINTS,
+  /** @deprecated 0.8.0 name for the landing config — use "livetv-landing". Same object, not a copy. */
+  "livetv-home": LIVETV_LANDING_HINTS,
   // 0.9.0 Channel Browser (W5/W2): A watches the highlighted
   // channel live, LB/RB step categories, LT/RT step pages, X
   // toggles the favourite, Y opens search, B returns to the
@@ -487,6 +482,45 @@ export function hintsForView(
 /** Glyphs a config uses, in order — for tests and the renderer. */
 export function glyphsOf(config: HintConfig): HintGlyph[] {
   return config.items.map((item) => item.glyph);
+}
+
+// ── Controller hints override (Controller Experience 2.0, §42) ───────
+// Single source of truth, enforced at runtime: the shared legend
+// (TvButtonHints.astro) renders getControllerHints() when an owner
+// has set one, else the view-derived hintsForView() config. Owners —
+// drawers, overlays, playback modes, the keyboard — route ALL hint
+// updates through setControllerHints; no inline hint bars, no second
+// legend component, no duplicate legends on one screen.
+//
+// Rules the owner must honour (the API cannot check them):
+//   - hints reflect the actual current input owner; never hint an
+//     unimplemented action, and never hint page actions behind an
+//     active modal — set the modal's own hints, or clear (null) and
+//     let the view config + modal-hide rule apply;
+//   - update on mode / playback / cursor change, and clear (null)
+//     when the surface closes, so a stale legend never outlives it;
+//   - restrained design: only buttons that do something right now.
+
+/** Window event fired whenever the override changes (renderers re-render on it). */
+export const CONTROLLER_HINTS_CHANGE_EVENT = "couchhints:change";
+
+let controllerHintsOverride: HintConfig | null = null;
+
+/** Claim the legend with this config, or pass null to release it back to the view-derived config. */
+export function setControllerHints(config: HintConfig | null): void {
+  controllerHintsOverride = config;
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(new CustomEvent(CONTROLLER_HINTS_CHANGE_EVENT));
+    } catch {
+      // No window / dispatch unavailable: the stored value still wins on the next render.
+    }
+  }
+}
+
+/** The currently claimed legend config, or null when no owner has claimed it. */
+export function getControllerHints(): HintConfig | null {
+  return controllerHintsOverride;
 }
 
 /** True when the config hints an action for the given glyph. */

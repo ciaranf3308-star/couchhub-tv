@@ -9,14 +9,61 @@
     ensureLoaded as ensurePrefsLoaded,
     getAllGlobalWatchlist,
     setWatchlistMeta,
+    isFavorite,
+    toggleFavorite,
+    isOnWatchlist,
+    toggleWatchlist,
+    isCompleted,
+    markCompleted,
+    clearProgress,
+    hasSeriesWatchedOverride,
+    setSeriesWatchedOverride,
   } from "@/scripts/lib/preferences.js"
+  import {
+    registerBackLayer,
+    BACK_PRIORITY,
+  } from "@/scripts/lib/back-handler.ts"
+  import {
+    recordOriginFromReferrer,
+    navigateBackWithOrigin,
+  } from "@/scripts/lib/route-origin.ts"
+  import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+  import { setControllerHints } from "@/scripts/lib/couch-button-hints.ts"
+  import {
+    openTitleContextMenu,
+    isTitleContextMenuOpen,
+  } from "@/scripts/lib/poster-menu.ts"
+  import {
+    initListFocusMemory,
+    restoreListFocus,
+    readListFilter,
+    writeListFilter,
+  } from "@/scripts/lib/couch-list-focus.ts"
+  import {
+    buildCardContextActions,
+    cardContextLabels,
+  } from "@/scripts/lib/title-context-actions.ts"
+  import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
+  import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
+
+  const ROUTE = "/watchlist"
+  const FILTERS = ["all", "vod", "series"]
+  /** Filter restored from the last visit (detail return keeps the filter). */
+  function initialFilter() {
+    try {
+      const saved = readListFilter(sessionStorage, ROUTE, "all")
+      return FILTERS.includes(saved) ? saved : "all"
+    } catch {
+      return "all"
+    }
+  }
   import { getCached, hydrate as hydrateCache } from "@/scripts/lib/cache.js"
   import { kindLabel, isKindFallbackName, KIND_ICON_SVG } from "@/scripts/lib/kinds.js"
   import { cachedImg } from "@/scripts/lib/img-cache.ts"
   import { IconExternalLink } from "@tabler/icons-svelte"
 
   /** @type {"all"|"vod"|"series"} */
-  let filter = $state("all")
+  let filter = $state(initialFilter())
   let activePlaylistId = $state("")
   let locale = $state(0)
   // Wrappers read the locale rune so {tr(...)} / {kl(...)} template effects
@@ -52,6 +99,15 @@
   function buildHref(kind, id) {
     if (kind === "vod") return `/movies/detail?id=${encodeURIComponent(id)}`
     return `/series/detail?id=${encodeURIComponent(id)}`
+  }
+
+  /** Play destination: detail autoplays. */
+  function playHrefFor(entry) {
+    return `${entry.href}&autoplay=1`
+  }
+
+  function entryKey(entry) {
+    return `${entry.playlistId}:${entry.kind}:${entry.id}`
   }
 
   let reloadGeneration = 0
@@ -152,19 +208,135 @@
   async function openCard(event, entry) {
     if (!entry.isCrossPlaylist) return
     event.preventDefault()
-    try {
-      await selectEntry(entry.playlistId)
-    } catch (err) {
-      log.error("[xt:watchlist] selectEntry failed:", err)
+    await openEntryAt(entry, entry.href)
+  }
+
+  async function openEntryAt(entry, href) {
+    if (entry.isCrossPlaylist) {
+      try {
+        await selectEntry(entry.playlistId)
+      } catch (err) {
+        log.error("[xt:watchlist] selectEntry failed:", err)
+      }
     }
-    window.location.href = entry.href
+    window.location.href = href
   }
 
   function setFilter(next) {
     filter = next
+    try {
+      writeListFilter(sessionStorage, ROUTE, next)
+    } catch {
+      // Filter memory is a nicety, never fatal.
+    }
   }
 
+  // W5 (0.11.10): X on a card opens the title context menu — the
+  // controller path to Remove from Watch Later (Contract F). This
+  // view previously had no context menu at all (mouse/touch only
+  // had the card itself). Controller X reaches here as the "x" key
+  // (gamepad.ts dispatch-first routing).
+  function openEntryMenu(anchor, entry) {
+    const extras = { name: entry.name || "", logo: entry.logo || null }
+    const labels = cardContextLabels(t)
+    openTitleContextMenu(
+      anchor,
+      buildCardContextActions(
+        {
+          kind: entry.kind,
+          id: entry.id,
+          detailHref: entry.href,
+          playHref: playHrefFor(entry),
+        },
+        {
+          favorited: isFavorite(entry.playlistId, entry.kind, entry.id),
+          onWatchlist: isOnWatchlist(entry.playlistId, entry.kind, entry.id),
+          watched:
+            entry.kind === "vod"
+              ? isCompleted(entry.playlistId, "vod", entry.id)
+              : hasSeriesWatchedOverride(entry.playlistId, entry.id),
+        },
+        {
+          onOpen: () => void openEntryAt(entry, entry.href),
+          onPlay: () => void openEntryAt(entry, playHrefFor(entry)),
+          onToggleFavorite: () => {
+            toggleFavorite(entry.playlistId, entry.kind, entry.id, extras)
+          },
+          onToggleWatchlist: () => {
+            toggleWatchlist(entry.playlistId, entry.kind, entry.id, extras)
+            void reload()
+          },
+          onToggleWatched: (currently) => {
+            if (entry.kind === "vod") {
+              if (currently) clearProgress(entry.playlistId, "vod", entry.id)
+              else markCompleted(entry.playlistId, "vod", entry.id, extras)
+            } else {
+              setSeriesWatchedOverride(entry.playlistId, entry.id, !currently)
+            }
+          },
+        },
+        labels,
+      ),
+    )
+  }
+
+  function onCardKey(event) {
+    if (event.key !== "x" && event.key !== "X") return
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+    const target = event.target
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return
+    }
+    if (findOpenModal() || isTitleContextMenuOpen()) return
+    const anchor = target?.closest?.("[data-couch-key]")
+    if (!anchor) return
+    const key = anchor.getAttribute("data-couch-key")
+    const entry = visible.find((row) => entryKey(row) === key)
+    if (!entry) return
+    event.preventDefault()
+    openEntryMenu(anchor, entry)
+  }
+
+  // Returning from a detail page restores the same card (list focus
+  // memory); restore is a no-op while anything holds focus, so list
+  // refreshes never yank focus.
+  $effect(() => {
+    void visible
+    void loading
+    if (!loading) restoreListFocus(document, ROUTE)
+  })
+
   onMount(() => {
+    setLogicalView("watchlist")
+    setControllerHints({
+      id: "watchlist",
+      items: [
+        { glyph: "dpad", label: "Move" },
+        { glyph: "a", label: "Select" },
+        { glyph: "b", label: "Back" },
+        { glyph: "x", label: "Actions" },
+        { glyph: "y", label: "Search" },
+        { glyph: "menu", label: "Settings" },
+        RETURN_HOME_HINT,
+      ],
+    })
+    recordOriginFromReferrer()
+    const stopFocusMemory = initListFocusMemory(document, ROUTE)
+    const unregisterBack = registerBackLayer({
+      id: "watchlist-root",
+      priority: BACK_PRIORITY.ROUTE,
+      isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+      handle: () => {
+        navigateBackWithOrigin("/")
+        return true
+      },
+    })
+    document.addEventListener("keydown", onCardKey)
     reload()
     const onLocale = () => { locale++ }
     let warmedRaf = 0
@@ -186,6 +358,9 @@
       document.addEventListener(eventName, handler)
     }
     return () => {
+      stopFocusMemory()
+      unregisterBack()
+      document.removeEventListener("keydown", onCardKey)
       for (const [eventName, handler] of Object.entries(handlers)) {
         document.removeEventListener(eventName, handler)
       }
@@ -244,6 +419,8 @@
         onclick={(event) => openCard(event, entry)}
         data-nylah-item
         data-couch-key={entry.playlistId + ":" + entry.kind + ":" + entry.id}
+        data-couch-detail-href={entry.href}
+        data-couch-play-href={playHrefFor(entry)}
         aria-label={tr("watchlist.cardAriaLabel", { name: entry.name, playlist: entry.playlistTitle })}
         class="rs-card rs-card--poster">
         <span class="rs-card__media couch-library__media couch-library__media--poster">

@@ -99,6 +99,7 @@ import {
 } from "./livetv-category-index";
 import { livetvNav } from "./livetv-nav";
 import {
+  LIVETV_CLOSE_OVERLAY_EVENT,
   applyCategoryChangeToSearch,
   readPersistedLivetvSort,
   writePersistedLivetvSort,
@@ -1805,15 +1806,25 @@ export function mountChannelBrowser(
     syncSearchForSelection();
     invalidateDerived();
     // Restore the remembered highlight for the incoming selection
-    // where it is still in the list.
+    // where it is still in the list — and scroll it into view:
+    // resetting scrollTop to 0 with a deep remembered highlight
+    // left the highlight off-screen (detail panel showing a
+    // channel the list did not show) until the next arrow move.
     const remembered = selectionMemory.get(selectionKey({ groupId, subcategoryId }));
+    let restoredIndex = -1;
     if (remembered != null) {
       const list = deriveVisibleChannels();
-      if (list.some((c) => String(c.id) === String(remembered))) {
+      const index = list.findIndex((c) => String(c.id) === String(remembered));
+      if (index >= 0) {
         highlightedId = remembered;
+        restoredIndex = index;
       }
     }
-    listEl.scrollTop = 0;
+    if (restoredIndex >= 0) {
+      ensureIndexVisible(restoredIndex);
+    } else {
+      listEl.scrollTop = 0;
+    }
     paintNow();
   }
 
@@ -2074,8 +2085,15 @@ export function mountChannelBrowser(
     entry: BrowserEntryFilter | null | undefined,
     entryOpts?: { openSearch?: boolean },
   ): void {
-    const selection = browserSelectionFromEntry(entry);
-    setSelection(selection.groupId, selection.subcategoryId);
+    // 0.11.10 W4: an entry WITHOUT a filter keeps the current
+    // selection — it is a return (Guide / playback B-exit), not a
+    // fresh navigation. Resetting to "all" here silently dropped
+    // the user's category on every filter-less return. Callers
+    // that mean "all" pass { kind: "all" } explicitly.
+    if (entry) {
+      const selection = browserSelectionFromEntry(entry);
+      setSelection(selection.groupId, selection.subcategoryId);
+    }
     if (entryOpts?.openSearch) openSearch();
   }
 
@@ -2335,6 +2353,13 @@ export function mountChannelBrowser(
       | undefined;
     if (!detail || detail.mode !== "browser") return;
     applyEntry(detail.browserFilter, { openSearch: detail.openSearch });
+    // 0.11.10 W4: entering the browser focuses its list (or the
+    // highlighted row) — without this, focus stays on the
+    // now-hidden invoker and the browser's key gate (target must
+    // be inside the browser or <body>) ignores controller keys.
+    // A requested search overlay focuses its own input after
+    // this, so the order is harmless there.
+    if (!detail.openSearch) focusListOrRow();
   };
   if (opts.acceptModeEntry) window.addEventListener("livetv:mode", onMode);
 
@@ -2395,6 +2420,26 @@ export function mountChannelBrowser(
     applySortSubmit(detail);
   };
   window.addEventListener(LIVETV_SORT_SUBMIT_EVENT, onSortSubmit);
+
+  // 0.11.10 W4 (§10): a search/sort overlay closed WITHOUT a
+  // submit (B / Cancel) reports `livetv:close-overlay` — nobody
+  // consumed it before, so focus after a cancel relied solely
+  // on the nav stack's push-time restore. When that element was
+  // recycled out of the row pool, focus stranded on <body>.
+  // Refocus the list / highlighted row here (the nav restore
+  // runs after this dispatch and wins when its target is still
+  // connected, so the two never fight). Gated on visibility:
+  // only the browser instance on screen answers.
+  const onCloseOverlay = (event: Event) => {
+    if (destroyed) return;
+    const detail = (event as CustomEvent).detail as
+      | { overlay?: string }
+      | undefined;
+    if (detail?.overlay !== "search" && detail?.overlay !== "sort") return;
+    if (!root.isConnected || root.closest("[hidden]")) return;
+    focusListOrRow();
+  };
+  window.addEventListener(LIVETV_CLOSE_OVERLAY_EVENT, onCloseOverlay);
 
   // Initial paint. The initial highlight scrolls into view first
   // so the first paint already shows the right window (one paint,
@@ -2494,6 +2539,7 @@ export function mountChannelBrowser(
       window.removeEventListener("livetv:guide-channel", onGuideChannel);
       window.removeEventListener(LIVETV_SEARCH_SUBMIT_EVENT, onSearchSubmit);
       window.removeEventListener(LIVETV_SORT_SUBMIT_EVENT, onSortSubmit);
+      window.removeEventListener(LIVETV_CLOSE_OVERLAY_EVENT, onCloseOverlay);
       root.replaceChildren();
       root.classList.remove("rs-livetv-browser");
       root.removeAttribute("data-livetv-browser");

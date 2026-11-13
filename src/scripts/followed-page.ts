@@ -23,6 +23,32 @@ import {
 import { isCompleted } from "@/scripts/lib/preferences.js"
 import { toast, toastError } from "@/scripts/lib/toast.ts"
 import { t } from "@/scripts/lib/i18n.js"
+import { confirmDialog } from "@/scripts/lib/confirm-dialog.js"
+import {
+  registerBackLayer,
+  BACK_PRIORITY,
+} from "@/scripts/lib/back-handler.js"
+import {
+  recordOriginFromReferrer,
+  navigateBackWithOrigin,
+} from "@/scripts/lib/route-origin.js"
+import { setLogicalView } from "@/scripts/lib/couch-focus.js"
+import {
+  openTitleContextMenu,
+  isTitleContextMenuOpen,
+  type TitleContextAction,
+} from "@/scripts/lib/poster-menu.js"
+import {
+  initListFocusMemory,
+  restoreListFocus,
+  captureFocusKeyWithin,
+  restoreFocusKeyWithin,
+} from "@/scripts/lib/couch-list-focus.js"
+import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
+import {
+  RETURN_HOME_HINT,
+  setControllerHints,
+} from "@/scripts/lib/couch-button-hints.js"
 import {
   armTvImageFallbacks,
   fallbackMarkFor,
@@ -58,13 +84,89 @@ function actionButton(
   label: string,
   onClick: () => void,
   primary = false,
+  focusKey?: string,
 ): HTMLButtonElement {
   const btn = document.createElement("button")
   btn.type = "button"
   btn.className = primary ? "rs-followed-btn rs-followed-btn--primary" : "rs-followed-btn"
   btn.textContent = label
+  if (focusKey) btn.setAttribute("data-couch-key", focusKey)
   btn.addEventListener("click", onClick)
   return btn
+}
+
+// Last rendered data, for the X context menu's lookups.
+let lastGroups: FollowedNotificationGroup[] = []
+let lastSubs: FollowedSubscription[] = []
+
+/**
+ * Focus preservation across re-renders (background checks must NEVER
+ * steal focus): capture the focused control's stable key before a
+ * render, restore it after — exact control first, else the first
+ * control in the same card, else leave focus alone (the shared
+ * couch-focus replacement only engages when a whole card vanished).
+ * Implemented by the shared helpers in couch-list-focus.ts.
+ */
+function captureFocusedKey(): string | null {
+  return captureFocusKeyWithin(document, [newListEl, listEl])
+}
+
+function restoreFocusedKey(key: string | null): void {
+  restoreFocusKeyWithin(document, key)
+}
+
+function findByFocusKey(key: string): HTMLElement | null {
+  const candidates = document.querySelectorAll<HTMLElement>("[data-couch-key]")
+  for (const candidate of candidates) {
+    if (candidate.getAttribute("data-couch-key") === key) return candidate
+  }
+  return null
+}
+
+async function confirmUnfollow(sub: FollowedSubscription): Promise<void> {
+  const confirmed = await confirmDialog({
+    title: t("followed.unfollow"),
+    message: `Stop following "${sub.seriesTitle}"? New-episode checks for this show will stop.`,
+    confirmLabel: t("followed.unfollow"),
+    cancelLabel: t("common.cancel"),
+    destructive: true,
+  })
+  if (!confirmed) return
+  await unfollowSeries(sub.playlistId, sub.seriesId)
+  toast({ title: t("followed.unfollowed"), description: sub.seriesTitle })
+  await render()
+}
+
+async function confirmRebaseline(
+  sub: FollowedSubscription,
+  trigger: HTMLButtonElement,
+): Promise<void> {
+  const confirmed = await confirmDialog({
+    title: t("followed.rebaseline"),
+    message: `Re-baseline "${sub.seriesTitle}" to its current episodes? No alerts will be sent for episodes already in your library.`,
+    confirmLabel: t("followed.rebaseline"),
+    cancelLabel: t("common.cancel"),
+  })
+  if (!confirmed) return
+  trigger.disabled = true
+  try {
+    const { xtreamApiFetch } = await import("@/scripts/lib/xtream-api.js")
+    const response = await xtreamApiFetch(
+      "get_series_info",
+      { series_id: sub.seriesId, series: sub.seriesId },
+      { entryId: sub.playlistId },
+    )
+    if (!response.ok) throw new Error(`get_series_info HTTP ${response.status}`)
+    const info = await response.json()
+    const result = await rebaselineSeries(sub.playlistId, sub.seriesId, info)
+    if (result.ok) toast({ title: t("followed.rebaselined") })
+    else toastError(t("followed.rebaselineFailed"))
+  } catch (err) {
+    log.warn("[xt:followed] re-baseline failed:", err)
+    toastError(t("followed.rebaselineFailed"))
+  } finally {
+    await render()
+  }
 }
 
 /**
@@ -161,6 +263,7 @@ function renderNewEpisodes(groups: FollowedNotificationGroup[]): void {
           })
         },
         true,
+        `new:${group.id}:watch:${ep.season}x${ep.episode}`,
       )
       li.appendChild(watchBtn)
       eps.appendChild(li)
@@ -169,15 +272,25 @@ function renderNewEpisodes(groups: FollowedNotificationGroup[]): void {
     const actions = el("div", "rs-followed-actions")
     if (!group.read) {
       actions.appendChild(
-        actionButton(t("followed.markRead"), () => {
-          void markNotificationRead(group.id).then(render)
-        }),
+        actionButton(
+          t("followed.markRead"),
+          () => {
+            void markNotificationRead(group.id).then(render)
+          },
+          false,
+          `new:${group.id}:mark-read`,
+        ),
       )
     }
     actions.appendChild(
-      actionButton(t("followed.dismiss"), () => {
-        void dismissNotification(group.id).then(render)
-      }),
+      actionButton(
+        t("followed.dismiss"),
+        () => {
+          void dismissNotification(group.id).then(render)
+        },
+        false,
+        `new:${group.id}:dismiss`,
+      ),
     )
     body.appendChild(actions)
     card.appendChild(body)
@@ -204,41 +317,36 @@ function renderFollowedList(subs: FollowedSubscription[]): void {
     status.textContent = statusText(sub)
     body.appendChild(status)
     const actions = el("div", "rs-followed-actions")
+    const subKey = `sub:${sub.playlistId}:${sub.seriesId}`
     if (sub.needsRebaseline) {
-      const rebaselineBtn = actionButton(t("followed.rebaseline"), async () => {
-        rebaselineBtn.disabled = true
-        try {
-          const { xtreamApiFetch } = await import("@/scripts/lib/xtream-api.js")
-          const response = await xtreamApiFetch(
-            "get_series_info",
-            { series_id: sub.seriesId, series: sub.seriesId },
-            { entryId: sub.playlistId },
-          )
-          if (!response.ok) throw new Error(`get_series_info HTTP ${response.status}`)
-          const info = await response.json()
-          const result = await rebaselineSeries(sub.playlistId, sub.seriesId, info)
-          if (result.ok) toast({ title: t("followed.rebaselined") })
-          else toastError(t("followed.rebaselineFailed"))
-        } catch (err) {
-          log.warn("[xt:followed] re-baseline failed:", err)
-          toastError(t("followed.rebaselineFailed"))
-        } finally {
-          await render()
-        }
-      })
+      const rebaselineBtn = actionButton(
+        t("followed.rebaseline"),
+        () => {
+          void confirmRebaseline(sub, rebaselineBtn)
+        },
+        false,
+        `${subKey}:rebaseline`,
+      )
       actions.appendChild(rebaselineBtn)
     }
     actions.appendChild(
-      actionButton(t("followed.unfollow"), () => {
-        void unfollowSeries(sub.playlistId, sub.seriesId).then(() => {
-          toast({ title: t("followed.unfollowed"), description: sub.seriesTitle })
-          void render()
-        })
-      }),
+      actionButton(
+        t("followed.unfollow"),
+        () => {
+          void confirmUnfollow(sub)
+        },
+        false,
+        `${subKey}:unfollow`,
+      ),
     )
-    const openBtn = actionButton(t("followed.openSeries"), () => {
-      window.location.href = buildSeriesDetailUrl({ seriesId: sub.seriesId })
-    })
+    const openBtn = actionButton(
+      t("followed.openSeries"),
+      () => {
+        window.location.href = buildSeriesDetailUrl({ seriesId: sub.seriesId })
+      },
+      false,
+      `${subKey}:open`,
+    )
     actions.appendChild(openBtn)
     body.appendChild(actions)
     card.appendChild(body)
@@ -247,12 +355,15 @@ function renderFollowedList(subs: FollowedSubscription[]): void {
 }
 
 async function render(): Promise<void> {
+  const focusKey = captureFocusedKey()
   try {
     const [groups, subs, lastCheck] = await Promise.all([
       listNotificationGroups({ includeDismissed: false }),
       listSubscriptions(),
       getFollowedLastCheckAt(),
     ])
+    lastGroups = groups
+    lastSubs = subs
     renderNewEpisodes(groups)
     renderFollowedList(subs)
     if (lastCheckEl) {
@@ -262,10 +373,19 @@ async function render(): Promise<void> {
     }
   } catch (err) {
     log.warn("[xt:followed] page render failed:", err)
+  } finally {
+    // Background re-renders restore the focused control (or its
+    // same-card survivor) and never move focus elsewhere.
+    restoreFocusedKey(focusKey)
+    restoreListFocus(document, "/followed")
   }
 }
 
+let checkRunning = false
+
 checkNowBtn?.addEventListener("click", async () => {
+  if (checkRunning) return
+  checkRunning = true
   checkNowBtn.setAttribute("disabled", "")
   try {
     const summary = await runFollowedCheck({ manual: true })
@@ -283,13 +403,131 @@ checkNowBtn?.addEventListener("click", async () => {
     log.warn("[xt:followed] manual check failed:", err)
     toastError(t("followed.checkFailed"))
   } finally {
+    checkRunning = false
     checkNowBtn.removeAttribute("disabled")
     await render()
   }
 })
 
+function openFollowedMenu(anchor: HTMLElement, focusKey: string): void {
+  const actions: TitleContextAction[] = []
+  if (focusKey.startsWith("sub:")) {
+    const [, playlistId, seriesId] = focusKey.split(":")
+    const sub = lastSubs.find(
+      (candidate) =>
+        String(candidate.playlistId) === playlistId &&
+        String(candidate.seriesId) === seriesId,
+    )
+    if (!sub) return
+    actions.push({
+      id: "open",
+      label: t("followed.openSeries"),
+      action: () => {
+        window.location.href = buildSeriesDetailUrl({ seriesId: sub.seriesId })
+      },
+    })
+    if (sub.needsRebaseline) {
+      actions.push({
+        id: "rebaseline",
+        label: t("followed.rebaseline"),
+        action: () => {
+          const trigger =
+            findByFocusKey(`sub:${sub.playlistId}:${sub.seriesId}:rebaseline`) ??
+            anchor
+          void confirmRebaseline(sub, trigger as HTMLButtonElement)
+        },
+      })
+    }
+    actions.push({
+      id: "unfollow",
+      label: t("followed.unfollow"),
+      action: () => {
+        void confirmUnfollow(sub)
+      },
+    })
+  } else if (focusKey.startsWith("new:")) {
+    const groupId = focusKey.split(":")[1]
+    const group = lastGroups.find((candidate) => String(candidate.id) === groupId)
+    if (!group) return
+    actions.push({
+      id: "open",
+      label: t("followed.openSeries"),
+      action: () => {
+        window.location.href = buildSeriesDetailUrl({ seriesId: group.seriesId })
+      },
+    })
+    if (!group.read) {
+      actions.push({
+        id: "mark-read",
+        label: t("followed.markRead"),
+        action: () => {
+          void markNotificationRead(group.id).then(render)
+        },
+      })
+    }
+    actions.push({
+      id: "dismiss",
+      label: t("followed.dismiss"),
+      action: () => {
+        void dismissNotification(group.id).then(render)
+      },
+    })
+  }
+  if (actions.length === 0) return
+  openTitleContextMenu(anchor, actions)
+}
+
+// W5 (0.11.10): X on a followed card opens its series actions.
+// Controller X reaches here as the "x" key (gamepad.ts
+// dispatch-first routing); physical keyboards get it today.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "x" && event.key !== "X") return
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+  const target = event.target as HTMLElement | null
+  if (!target || target === document.body) return
+  const tag = target.tagName?.toLowerCase()
+  if (tag === "input" || tag === "textarea" || tag === "select") return
+  if (target.isContentEditable) return
+  if (findOpenModal() || isTitleContextMenuOpen()) return
+  const anchor = target.closest?.("[data-couch-key]") as HTMLElement | null
+  if (!anchor) return
+  const focusKey = anchor.getAttribute("data-couch-key") ?? ""
+  if (!focusKey.startsWith("sub:") && !focusKey.startsWith("new:")) return
+  event.preventDefault()
+  openFollowedMenu(anchor, focusKey)
+})
+
 document.addEventListener(FOLLOWED_CHANGED_EVENT, () => void render())
 document.addEventListener(FOLLOWED_NOTIFICATIONS_EVENT, () => void render())
+
+// W5 (0.11.10): controller contract — logical view + hints (Y is the
+// global gamepad search binding, hinted as Search), provenance, and
+// the one-level Back step (confirmations own B first via their
+// native dialogs and CONFIRM_DIALOG layer).
+setLogicalView("followed")
+setControllerHints({
+  id: "followed",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Select" },
+    { glyph: "b", label: "Back" },
+    { glyph: "x", label: "Actions" },
+    { glyph: "y", label: "Search" },
+    { glyph: "menu", label: "Settings" },
+    RETURN_HOME_HINT,
+  ],
+})
+recordOriginFromReferrer()
+initListFocusMemory(document, "/followed")
+registerBackLayer({
+  id: "followed-root",
+  priority: BACK_PRIORITY.ROUTE,
+  isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+  handle: () => {
+    navigateBackWithOrigin("/")
+    return true
+  },
+})
 
 // W1 image fallback for the runtime-built posters (capture-phase error
 // handler; idempotent, safe to arm once per page load).

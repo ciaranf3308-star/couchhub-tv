@@ -64,7 +64,7 @@ import {
 } from "./livetv-data";
 import { buildCategoryIndex } from "./livetv-category-index";
 import type { GuideMode } from "./livetv-state";
-import { LIVETV_BACK_EVENT } from "./livetv-keys";
+import { LIVETV_BACK_EVENT, livetvKeyActionForKey } from "./livetv-keys";
 import { livetvNav } from "./livetv-nav";
 import { formatTimeRange, type Programme } from "./now-next";
 import { fallbackMarkFor } from "./couch-image";
@@ -533,7 +533,9 @@ export const LANDING_BACK_TARGET = "/";
  * the app Home. Events for another context are ignored, and so
  * are events while another Live TV layer is on top of the nav
  * stack (a hidden landing must never steal B from the browser,
- * Guide, playback, or an overlay). `navigate`
+ * Guide, playback, or an overlay) or while the landing options
+ * menu is open (B closes the menu first — the menu's own
+ * handler owns that press). `navigate`
  * defaults to window.location.assign (the gamepad.ts pattern);
  * tests inject a stub. Returns true when navigation happened.
  */
@@ -543,6 +545,7 @@ export function handleLandingBack(
 ): boolean {
   const context = event?.detail?.context;
   if (context != null && context !== "landing") return false;
+  if (isLandingOptionsMenuOpen()) return false;
   const top = livetvNav.topId();
   if (top != null && top !== "landing") return false;
   navigate(LANDING_BACK_TARGET);
@@ -562,6 +565,338 @@ export function mountLandingBack(
   };
   window.addEventListener(LIVETV_BACK_EVENT, onBack);
   return () => window.removeEventListener(LIVETV_BACK_EVENT, onBack);
+}
+
+// ── Controller keys + options menu (0.11.10 W4, §7) ────────────
+// The 0.11.9 tree advertised landing X/Y/Menu in the hints legend
+// but consumed NONE of them: no keydown handler existed on the
+// landing, so the gamepad layer's synthesised "x"/"y"/"m" keys
+// fell through to nothing. This section is the landing's key
+// owner (the shared livetv-keys table resolves; this module
+// interprets, exactly like the browser):
+//   Y (open-guide)     → the Guide (the established shortcut).
+//   X (contextual)     → the Guide, but ONLY with focus inside
+//                        the hero: the hero's secondary action
+//                        is its Guide button, so X is that
+//                        button from the controller. Anywhere
+//                        else X is deliberately a no-op — an
+//                        unadvertised action must not fire in
+//                        the background.
+//   Menu (open-options)→ the landing options menu below — a
+//                        Live TV surface, never a Settings jump.
+//   Escape (back)      → the same Home step as `livetv:back`
+//                        (physical keyboard; gamepad B arrives
+//                        as the event, never also as Escape).
+// Arrows and A/Enter are NOT claimed here: spatial navigation
+// moves between the hero, quick actions and category tiles, and
+// native activation clicks the focused control.
+
+/** What a landing key press does (null = deliberately nothing). */
+export type LandingKeyAction = "guide" | "options" | "back" | null;
+
+/**
+ * Pure: resolve one key to a landing action. `inHero` is true
+ * when focus is inside the hero band — the only context where X
+ * means anything on the landing.
+ */
+export function resolveLandingKeyAction(
+  key: string | null | undefined,
+  inHero: boolean,
+): LandingKeyAction {
+  const action = livetvKeyActionForKey("landing", key);
+  if (action === "open-guide") return "guide";
+  if (action === "open-options") return "options";
+  if (action === "back") return "back";
+  if (action === "contextual") return inHero ? "guide" : null;
+  return null;
+}
+
+/** True when the landing options menu is open in this document. */
+export function isLandingOptionsMenuOpen(
+  root: ParentNode | null | undefined = typeof document !== "undefined"
+    ? document
+    : null,
+): boolean {
+  if (!root?.querySelector) return false;
+  return root.querySelector('[data-landing-options][data-open="true"]') != null;
+}
+
+const LANDING_OPTIONS_LABELS: Array<{
+  action: LandingQuickAction;
+  label: string;
+  glyph: string;
+}> = [
+  { action: "continue", label: "Continue Watching", glyph: "▶" },
+  { action: "favourites", label: "Favourites", glyph: "☆" },
+  { action: "recent", label: "Recently Watched", glyph: "↺" },
+  { action: "all", label: "All Channels", glyph: "☰" },
+  { action: "guide", label: "TV Guide", glyph: "▦" },
+  { action: "search", label: "Search", glyph: "⌕" },
+];
+
+/** Element that held focus when the options menu opened (focus restore). */
+let landingOptionsOpener: HTMLElement | null = null;
+
+/** Focus-containment guard for the open options menu (document focusin listener). */
+let landingOptionsFocusGuard: ((event: FocusEvent) => void) | null = null;
+
+/** Last element focused inside the open options menu (containment fallback). */
+let landingOptionsLastInside: HTMLElement | null = null;
+
+/**
+ * Open the landing options menu (Menu key): the quick actions as
+ * one focusable list plus Close. Returns a close function.
+ * Opening records the opener for focus restore; closing (B /
+ * Escape / Menu again / scrim / Close / any action) removes the
+ * menu and returns focus to the opener. Actions run through
+ * performLandingQuickAction, so the menu can never tune on
+ * highlight — only an explicit A/Enter on an action acts.
+ * Opening while already open just refocuses the first action.
+ */
+export function openLandingOptions(
+  host: HTMLElement,
+  getHeroChannelId: () => string | number | null = () => null,
+): () => void {
+  const existing = host.querySelector<HTMLElement>("[data-landing-options]");
+  if (existing) {
+    existing.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+    return () => closeLandingOptions(host);
+  }
+  landingOptionsOpener = (
+    typeof document !== "undefined" ? document.activeElement : null
+  ) as HTMLElement | null;
+  const menu = document.createElement("div");
+  menu.className = "rs-livetv-landing-options";
+  menu.setAttribute("data-landing-options", "");
+  menu.setAttribute("data-open", "true");
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-modal", "true");
+  menu.setAttribute("aria-label", "Live TV options");
+
+  const scrim = document.createElement("div");
+  scrim.className = "rs-livetv-landing-options__scrim";
+  scrim.setAttribute("data-landing-options-scrim", "");
+  scrim.setAttribute("aria-hidden", "true");
+  menu.appendChild(scrim);
+
+  const panel = document.createElement("div");
+  panel.className = "rs-livetv-landing-options__panel";
+  menu.appendChild(panel);
+
+  const title = document.createElement("h2");
+  title.className = "rs-livetv-landing-options__title";
+  title.textContent = "Live TV options";
+  panel.appendChild(title);
+
+  const heroChannelId = getHeroChannelId();
+  for (const entry of LANDING_OPTIONS_LABELS) {
+    if (entry.action === "continue" && heroChannelId == null) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className =
+      "rs-livetv-landing-quick__action rs-livetv-landing-options__action";
+    button.setAttribute("data-landing-action", entry.action);
+    button.setAttribute("data-nylah-item", "");
+    button.setAttribute("data-focus-key", `landing-options-${entry.action}`);
+    const glyph = document.createElement("span");
+    glyph.className = "rs-livetv-landing-quick__glyph";
+    glyph.setAttribute("aria-hidden", "true");
+    glyph.textContent = entry.glyph;
+    const label = document.createElement("span");
+    label.className = "rs-livetv-landing-quick__label";
+    label.textContent = entry.label;
+    button.appendChild(glyph);
+    button.appendChild(label);
+    panel.appendChild(button);
+  }
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className =
+    "rs-livetv-landing-quick__action rs-livetv-landing-options__action";
+  closeBtn.setAttribute("data-landing-options-close", "");
+  closeBtn.setAttribute("data-nylah-item", "");
+  closeBtn.setAttribute("data-focus-key", "landing-options-close");
+  closeBtn.textContent = "Close";
+  panel.appendChild(closeBtn);
+
+  const close = (): void => {
+    closeLandingOptions(host);
+  };
+  const onClick = (event: MouseEvent): void => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.("[data-landing-options-scrim]")) {
+      close();
+      return;
+    }
+    if (target?.closest?.("[data-landing-options-close]")) {
+      close();
+      return;
+    }
+    const actionBtn = target?.closest?.("[data-landing-action]") as HTMLElement | null;
+    if (actionBtn) {
+      const action = actionBtn.getAttribute(
+        "data-landing-action",
+      ) as LandingQuickAction | null;
+      close();
+      if (action === "continue") {
+        performLandingQuickAction("continue", {
+          lastWatchedChannelId: heroChannelId,
+        });
+      } else if (action) {
+        performLandingQuickAction(action);
+      }
+    }
+  };
+  const onKeyDown = (event: KeyboardEvent): void => {
+    // B / Escape / Menu close exactly this menu — claimed so no
+    // window handler below can also act on the same press.
+    if (
+      event.key === "Escape" ||
+      event.key === "m" ||
+      event.key === "M"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+    }
+  };
+  menu.addEventListener("click", onClick);
+  menu.addEventListener("keydown", onKeyDown);
+  host.appendChild(menu);
+  const first = panel.querySelector<HTMLElement>("button");
+  first?.focus({ preventScroll: true });
+  // Focus containment (§7 global rule: A never activates behind
+  // an overlay). Spatial navigation is geometric and cannot see
+  // the scrim, so arrows could otherwise carry focus to a landing
+  // tile behind the menu. While the menu is open, focus leaving
+  // it is pulled back to the last element focused inside — the
+  // same rule the search/sort overlays use. A stale guard from a
+  // menu removed without closeLandingOptions is dropped first
+  // (its menu is detached, so it is already inert).
+  if (landingOptionsFocusGuard && typeof document !== "undefined") {
+    document.removeEventListener("focusin", landingOptionsFocusGuard);
+    landingOptionsFocusGuard = null;
+  }
+  landingOptionsLastInside = first;
+  const guard = (event: FocusEvent): void => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (menu.contains(target)) {
+      landingOptionsLastInside = target;
+      return;
+    }
+    if (!menu.isConnected) return;
+    const back = landingOptionsLastInside?.isConnected
+      ? landingOptionsLastInside
+      : menu.querySelector<HTMLElement>("button");
+    back?.focus({ preventScroll: true });
+  };
+  landingOptionsFocusGuard = guard;
+  document.addEventListener("focusin", guard);
+  return close;
+}
+
+/**
+ * Remove the landing options menu and return focus to the
+ * opener recorded at open time (when it is still connected).
+ * The focus-containment guard is removed BEFORE the opener is
+ * refocused, so the restore is never pulled back inside.
+ */
+export function closeLandingOptions(host: ParentNode): void {
+  host.querySelector("[data-landing-options]")?.remove();
+  if (landingOptionsFocusGuard && typeof document !== "undefined") {
+    document.removeEventListener("focusin", landingOptionsFocusGuard);
+    landingOptionsFocusGuard = null;
+  }
+  landingOptionsLastInside = null;
+  const opener = landingOptionsOpener;
+  landingOptionsOpener = null;
+  if (opener?.isConnected) opener.focus({ preventScroll: true });
+}
+
+/**
+ * Mount the landing's controller-key handling on window, plus
+ * the options menu's `livetv:back` close step. Gated on the
+ * landing being the visible Live TV surface (host connected +
+ * visible + nav top is the landing); keys aimed at another
+ * surface or an editable target are ignored. Returns an unmount
+ * function.
+ */
+export function mountLandingKeys(
+  host: HTMLElement,
+  opts: {
+    getHeroChannelId?: () => string | number | null;
+    navigate?: (url: string) => void;
+  } = {},
+): () => void {
+  if (typeof window === "undefined") return () => {};
+  let closeOptions: (() => void) | null = null;
+  const getHeroChannelId = opts.getHeroChannelId ?? (() => null);
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (!host.isConnected || host.closest("[hidden]")) return;
+    if (isLandingOptionsMenuOpen(host.ownerDocument ?? document)) return;
+    // A modal dialog owns the controller while open.
+    if (document.querySelector("dialog[open]")) return;
+    const target = event.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable)
+    ) {
+      return;
+    }
+    if (
+      target &&
+      target !== document.body &&
+      !(target instanceof Node && host.contains(target))
+    ) {
+      return;
+    }
+    const top = livetvNav.topId();
+    if (top != null && top !== "landing") return;
+    const inHero =
+      document.activeElement?.closest?.("[data-livetv-hero]") != null;
+    const resolved = resolveLandingKeyAction(event.key, inHero);
+    if (resolved === "guide") {
+      event.preventDefault();
+      dispatchLandingMode("guide");
+    } else if (resolved === "options") {
+      event.preventDefault();
+      closeOptions = openLandingOptions(host, getHeroChannelId);
+    } else if (resolved === "back") {
+      event.preventDefault();
+      handleLandingBack(null, opts.navigate);
+    }
+  };
+
+  const onBack = (event: Event): void => {
+    // The menu open means B closes the menu and NOTHING else:
+    // stop the press here so the landing's Home step (and every
+    // other surface) never sees it.
+    if (!isLandingOptionsMenuOpen(host.ownerDocument ?? document)) return;
+    if (closeOptions) {
+      closeOptions();
+      closeOptions = null;
+    } else {
+      closeLandingOptions(host);
+    }
+    event.preventDefault();
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    } else {
+      event.stopPropagation();
+    }
+  };
+
+  window.addEventListener("keydown", onKeyDown);
+  window.addEventListener(LIVETV_BACK_EVENT, onBack);
+  return () => {
+    window.removeEventListener("keydown", onKeyDown);
+    window.removeEventListener(LIVETV_BACK_EVENT, onBack);
+  };
 }
 
 // ── DOM builders ────────────────────────────────────────────────
@@ -1017,10 +1352,15 @@ export async function mountLivtvLanding(
   }
   host.querySelector("[data-landing-empty]")?.setAttribute("hidden", "");
 
+  let heroChannelId: string | number | null = null;
   const unmounts: Array<() => void> = [];
   unmounts.push(mountLandingFocusMemory(host));
   unmounts.push(mountLandingBack());
-  let heroChannelId: string | number | null = null;
+  unmounts.push(
+    mountLandingKeys(host, {
+      getHeroChannelId: () => heroChannelId,
+    }),
+  );
 
   const render = async (): Promise<void> => {
     let data: LivetvHomeData;

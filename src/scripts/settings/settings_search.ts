@@ -17,6 +17,19 @@
 
 import { LOCALE_EVENT } from "@/scripts/lib/i18n.js"
 import { searchSettingsIndex } from "@/scripts/settings/settings-index.ts"
+import {
+  registerBackLayer,
+  BACK_PRIORITY,
+} from "@/scripts/lib/back-handler.js"
+import {
+  COUCH_KEYBOARD_CLOSED_EVENT,
+  openCouchKeyboard,
+  closeCouchKeyboard,
+  endCouchKeyboardSession,
+} from "@/scripts/lib/couch-keyboard.js"
+import { setControllerHints } from "@/scripts/lib/couch-button-hints.js"
+import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.js"
+import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
 
 const INPUT_ID = "settings-search-input"
 const CLEAR_ID = "settings-search-clear"
@@ -243,6 +256,157 @@ function init(): void {
     if (clearBtn) clearBtn.hidden = input.value.length === 0
   }
 
+  // ── Controller Experience 2.0 (§34) ──────────────────────────────
+  // Back hierarchy for search, one step per press:
+  //   1. Escape with text in the input clears ONLY the text (the
+  //      input's own keydown handler below, which preventDefaults —
+  //      the Back dispatcher skips default-prevented presses, so
+  //      one press never clears text AND leaves the page).
+  //   2. Escape/B with an empty input while editing exits search
+  //      and restores the setting focused before search was
+  //      entered (editing layer). The gamepad path blurs the field
+  //      and resolves Back through the coordinator, whose keyboard
+  //      layer owns the press, so B exits editing without
+  //      navigating.
+  //   3. B with a query but focus elsewhere clears the query and
+  //      restores the previous setting focus (active-search layer).
+  //   4. Then the shell's section/home layers navigate normally.
+  // Y focuses the search input: the gamepad layer dispatches the
+  // "y" key first and this handler claims it, so controller Y
+  // reaches Settings search instead of the global goSearch
+  // fallback. Enter in the input commits to the first result.
+  let lastNonSearchFocus: HTMLElement | null = null
+  document.addEventListener("focusin", (event) => {
+    const target = event.target as HTMLElement | null
+    if (!target || target === input) return
+    if (target === clearBtn) return
+    if (target.closest?.("#settings-search-xpage")) return
+    lastNonSearchFocus = target
+  })
+
+  const restorePreviousFocus = (): void => {
+    if (lastNonSearchFocus && lastNonSearchFocus.isConnected) {
+      lastNonSearchFocus.focus({ preventScroll: true })
+      try {
+        lastNonSearchFocus.scrollIntoView({ block: "nearest", inline: "nearest" })
+      } catch {
+        // Scroll failure never blocks the focus restore.
+      }
+    } else {
+      input.blur()
+    }
+  }
+
+  const focusFirstResult = (): void => {
+    const firstHit = xpageEl?.querySelector<HTMLElement>("a.settings-xpage__hit")
+    if (firstHit) {
+      firstHit.focus({ preventScroll: true })
+      return
+    }
+    if (homeList) {
+      const firstRow = homeList.querySelector<HTMLElement>(
+        ".settings-home-row:not([data-search='miss'])",
+      )
+      if (firstRow) {
+        firstRow.focus({ preventScroll: true })
+        return
+      }
+    }
+    const firstControl = stack?.querySelector<HTMLElement>(
+      "[data-settings-item]:not([data-search='miss']) a[href], " +
+        "[data-settings-item]:not([data-search='miss']) button:not([disabled]), " +
+        "[data-settings-item]:not([data-search='miss']) input:not([disabled]), " +
+        "[data-settings-item]:not([data-search='miss']) select:not([disabled])",
+    )
+    firstControl?.focus({ preventScroll: true })
+  }
+
+  const exitSearch = (): void => {
+    input.value = ""
+    syncClearVisibility()
+    apply()
+    closeCouchKeyboard(false)
+    restorePreviousFocus()
+  }
+
+  // Reopen suppression: closeCouchKeyboard re-focuses the input,
+  // and the focus handler would immediately reopen the session —
+  // B could never exit editing. The closed event fires before the
+  // refocus, so it arms a one-shot suppress for the next focus.
+  let suppressKeyboardReopen = false
+  input.addEventListener(COUCH_KEYBOARD_CLOSED_EVENT, () => {
+    suppressKeyboardReopen = true
+    // Expire at the end of the task: the refocus (if it fires a
+    // focus event at all — none fires when the input was already
+    // focused) is synchronous inside closeCouchKeyboard, so a
+    // lingering flag must never eat a later, deliberate focus.
+    queueMicrotask(() => {
+      suppressKeyboardReopen = false
+    })
+  })
+  input.addEventListener("focus", () => {
+    if (suppressKeyboardReopen) {
+      suppressKeyboardReopen = false
+      return
+    }
+    openCouchKeyboard(input, focusFirstResult)
+  })
+  input.addEventListener("blur", (event) => {
+    // Blur to nowhere (gamepad B) keeps the session: the keyboard
+    // Back layer owns that press. Blur to a real element ends it
+    // silently (closeCouchKeyboard would refocus the input and
+    // fight the focus move) and releases the hints override.
+    const next = (event as FocusEvent).relatedTarget
+    if (!(next instanceof Element)) return
+    endCouchKeyboardSession()
+    setControllerHints(null)
+  })
+
+  registerBackLayer({
+    id: "settings-search-editing",
+    priority: BACK_PRIORITY.KEYBOARD,
+    isActive: () =>
+      document.activeElement === input &&
+      input.value === "" &&
+      !findOpenModal() &&
+      !isTitleContextMenuOpen(),
+    handle: () => {
+      exitSearch()
+      return true
+    },
+  })
+  registerBackLayer({
+    id: "settings-search-active",
+    priority: BACK_PRIORITY.DRAWER,
+    isActive: () =>
+      document.activeElement !== input &&
+      input.value !== "" &&
+      !findOpenModal() &&
+      !isTitleContextMenuOpen(),
+    handle: () => {
+      exitSearch()
+      return true
+    },
+  })
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "y" && event.key !== "Y") return
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+    const target = event.target as Element | null
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return
+    }
+    if (findOpenModal() || isTitleContextMenuOpen()) return
+    event.preventDefault()
+    input.focus()
+    input.select()
+  })
+
   let reindexQueued = false
   const scheduleReindex = (): void => {
     if (reindexQueued) return
@@ -278,7 +442,14 @@ function init(): void {
   })
 
   input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault()
+      closeCouchKeyboard(true)
+      return
+    }
     if (event.key === "Escape" && input.value) {
+      // Clear text ONLY — preventDefault keeps the Back dispatcher
+      // from also treating this press as a navigation step.
       event.preventDefault()
       input.value = ""
       syncClearVisibility()

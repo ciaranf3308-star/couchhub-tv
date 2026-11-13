@@ -1,9 +1,10 @@
 <script>
   // TvKeyboard — couch-sized wrapper around the existing
-  // OnScreenKeyboard.svelte (D-pad navigable, A types, B deletes,
-  // X clears — see that component). Physical keyboard input goes to
-  // the owning view's input as normal; this wrapper only owns the
-  // on-screen keys.
+  // OnScreenKeyboard.svelte (D-pad navigable, A types, B CLOSES the
+  // keyboard, the ⌫ key deletes, the Clear key clears — see that
+  // component; 0.11.10 §28: B never deletes). Physical keyboard input
+  // goes to the owning view's input as normal; this wrapper only owns
+  // the on-screen keys.
   //
   // VISIBILITY CONTRACT (Browse consolidation, W2): the keyboard renders
   // ONLY when `open` is true. Svelte owners (Discover mood field,
@@ -13,15 +14,17 @@
   // the Astro dialog usage (Movies / Series search dialogs, where the
   // <dialog> itself gates visibility) keeps working unchanged.
   //
-  // DISMISS: B / Escape while focus is inside the key grid is backspace
-  // (the OSK's own handler, unchanged). The Hide button below the grid
-  // is the keyboard's own dismiss path — controller users D-pad down
-  // to it from the bottom row; it calls onDismiss and the owner hides
-  // the keyboard and returns focus to the search input. The button only
-  // renders when onDismiss is passed, so dialog usage is visually
-  // untouched. Escape on the button also dismisses (the wrapper
-  // keydown handler below; the grid's handler stops propagation, so
-  // this never fires for keys inside the grid).
+  // DISMISS: B / Escape while focus is inside the key grid closes the
+  // keyboard (the OSK's own handler, via the shared lifecycle in
+  // couch-keyboard.ts — closeCouchKeyboard — with the onDismiss prop
+  // as the fallback for owners without a session). The Hide button
+  // below the grid is the keyboard's own dismiss path — controller
+  // users D-pad down to it from the bottom row; it calls onDismiss and
+  // the owner hides the keyboard and returns focus to the search
+  // input. The button only renders when onDismiss is passed, so dialog
+  // usage is visually untouched. Escape on the button also dismisses
+  // (the wrapper keydown handler below; the grid's handler stops
+  // propagation, so this never fires for keys inside the grid).
   //
   // Two consumption paths, because Astro pages cannot pass callbacks
   // to hydrated components but Svelte views can:
@@ -57,8 +60,8 @@
     onDismiss?.();
   }
   function handleKeyDown(ev) {
-    // Only reachable from the Hide button (the grid swallows its own
-    // Escape as backspace before it can bubble here).
+    // Only reachable from the Hide button (the grid handles its own
+    // Escape as dismiss before it can bubble here).
     if (ev.key === "Escape") {
       ev.preventDefault();
       ev.stopPropagation();
@@ -86,6 +89,7 @@
       bind:value
       onInput={handleInput}
       onCommit={handleCommit}
+      onDismiss={handleDismiss}
     />
     {#if onDismiss}
       <button

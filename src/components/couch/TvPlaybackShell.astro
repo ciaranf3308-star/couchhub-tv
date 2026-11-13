@@ -186,6 +186,7 @@ import TvLogo from "./TvLogo.astro";
   import { programmeProgress } from "@/scripts/lib/couch-livetv-epg";
   import { getFavorites } from "@/scripts/lib/preferences.js";
   import { mountCachedChannelBrowser } from "@/scripts/lib/livetv-browser";
+  import { resolvePlaybackOrigin } from "@/scripts/lib/livetv-nav";
   // Recovery actions the legacy failure panel used to own (0.11.0
   // W5): HEVC install via the public lib, external-player launch
   // via the engine's own button (see showError). The audio fix has
@@ -208,6 +209,15 @@ import TvLogo from "./TvLogo.astro";
     // Options-overlay Restart action); null when unknown.
     let currentStartMs: number | null = null;
     let returnFocusKey: string | null = null;
+    // 0.11.10 W4 §12: B-exit origin. The last non-playback
+    // mode seen on `livetv:mode` (landing / browser / guide)
+    // is where playback was entered FROM; B's final step
+    // returns there instead of always landing on the landing
+    // screen. Resolved when playback is entered, so a tune
+    // from the in-playback browser overlay (no mode event)
+    // keeps the original origin.
+    let lastNonPlaybackMode: string | null = null;
+    let playbackOrigin: "landing" | "browser" | "guide" = "landing";
 
     // Slim top-bar clock (0.11.0 W5 — mockup 2: "18:24 / Tue
     // 10 Nov", 24-hour, two lines). Device-local time; ticks every
@@ -282,8 +292,24 @@ import TvLogo from "./TvLogo.astro";
           return handle;
         });
       }
-      const search = browserEl.querySelector<HTMLElement>("[data-browser-search]");
-      search?.focus?.({ preventScroll: true });
+      // 0.11.10 W4: focus the browser's list. The old
+      // [data-browser-search] selector matched NOTHING — the
+      // browser has a search button, not a search field — so
+      // opening the in-playback browser left focus behind on
+      // the playback surface and controller keys went nowhere
+      // until a click. Focus again once the first mount
+      // resolves: the list node only exists after mounting.
+      const focusBrowserList = () => {
+        browserEl
+          .querySelector<HTMLElement>("[data-browser-list]")
+          ?.focus?.({ preventScroll: true });
+      };
+      focusBrowserList();
+      if (browserMounting) {
+        void browserMounting.then(() => {
+          if (!browserEl.hidden) focusBrowserList();
+        });
+      }
     };
 
     const closeBrowser = () => {
@@ -318,17 +344,20 @@ import TvLogo from "./TvLogo.astro";
     // ── B / back (0.9.0) ──────────────────────────────────────────
     // One B press, resolved in order (resolveBackStep): dismiss
     // Quick Surf → close the open overlay (options / browser / error
-    // / visible OSD) → return to the landing screen. Both entry
-    // points share this path: the gamepad `livetv:back
+    // / visible OSD) → return to the ORIGIN mode playback was
+    // entered from (0.11.10 W4 §12 — landing, browser, or guide;
+    // the old code always returned to landing, so a Guide → Watch
+    // → B round trip dumped the viewer on the landing screen).
+    // Both entry points share this path: the gamepad `livetv:back
     // {context:"playback"}` event (W5's contract) and the keyboard
     // Escape key. A single physical press must advance exactly one
     // step even if it arrives as both (gamepad B synthesising an
     // Escape AND dispatching livetv:back): the 250 ms dedupe window
     // swallows the second signal. The error overlay counts as an
-    // overlay — B never jumps to landing from under a failure state;
-    // closing it reveals the OSD so the kept stream still has a way
-    // out. Landing is LIVETV_LANDING_MODE ("home" — see
-    // livetv-playback.ts; there is no "landing" mode in 0.9.0).
+    // overlay — B never jumps to the origin from under a failure
+    // state; closing it reveals the OSD so the kept stream still
+    // has a way out. Stream release on leaving is unchanged
+    // (setMode below: landing/home releases, Guide/browser keep).
     let lastBackHandledAt = 0;
     const BACK_DEDUPE_MS = 250;
 
@@ -357,7 +386,9 @@ import TvLogo from "./TvLogo.astro";
           showOsd();
         } else hideOsd();
       } else {
-        requestLivetvMode("landing");
+        // Final B step: return to the origin mode (see
+        // playbackOrigin above), never a surprise jump.
+        requestLivetvMode(playbackOrigin);
       }
     };
 
@@ -618,7 +649,16 @@ import TvLogo from "./TvLogo.astro";
 
     // ── Events ──────────────────────────────────────────────────
     window.addEventListener("livetv:mode", (ev) => {
-      setMode((ev as CustomEvent).detail?.mode ?? "home");
+      const mode = (ev as CustomEvent).detail?.mode ?? "home";
+      // Track the B-exit origin BEFORE setMode runs: every
+      // non-playback mode is a potential origin; entering
+      // playback freezes the last one as the return target.
+      if (mode === "playback") {
+        playbackOrigin = resolvePlaybackOrigin(lastNonPlaybackMode);
+      } else {
+        lastNonPlaybackMode = mode;
+      }
+      setMode(mode);
     });
 
     window.addEventListener("livetv:tune", async (ev) => {
@@ -725,6 +765,39 @@ import TvLogo from "./TvLogo.astro";
       }
       if (key === "x" || key === "X") {
         requestLivetvMode("guide");
+        return;
+      }
+      if (key === "ArrowLeft" || key === "ArrowRight") {
+        // §12 programme info: Left/Right with no overlay open
+        // reveals the OSD (programme info for the tuned
+        // channel) and focuses its first action, so the info
+        // is controller-reachable. Claimed ONLY in that state:
+        // with an overlay open the overlay owns the arrows
+        // (Quick Surf's own listener preventDefaults first,
+        // and overlayOpen() is checked here too), and with
+        // focus already inside the OSD the arrows stay
+        // spatial (OSD buttons ↔ volume). Focus movement
+        // never tunes: revealing the OSD changes no channel.
+        const target = ev.target as HTMLElement | null;
+        if (overlayOpen() !== "none") return;
+        if (target?.closest?.("[data-livetv-osd]")) return;
+        ev.preventDefault();
+        showOsd();
+        const first = osd?.querySelector<HTMLElement>("[data-osd-action]");
+        first?.focus?.({ preventScroll: true });
+        return;
+      }
+      if (key === "m" || key === "M" || key === "ContextMenu") {
+        // Menu (keyboard): playback options. Gamepad Menu
+        // arrives via `livetv:overlay {overlay:"options"}`
+        // (gamepad.ts), so this branch only serves keyboards.
+        // Already-open guard: Menu toggles nothing — B closes
+        // options; a second Menu press must not re-remember
+        // focus or re-dispatch. No preventDefault for "m":
+        // the engine's own mute path listens for it.
+        if (key === "ContextMenu") ev.preventDefault();
+        if (optionsEl && !optionsEl.hidden) return;
+        openOptions();
         return;
       }
       if (key === "y" || key === "Y") {

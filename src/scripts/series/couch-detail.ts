@@ -59,9 +59,47 @@ import {
 } from "@/scripts/series/couch-series.ts";
 import {
   createCouchVodPlayer,
+  closeOpenTrackLists,
   type CouchVodPlayerHandle,
 } from "@/scripts/movies/couch-player.ts";
 import { renderCouchCards } from "@/scripts/movies/couch-cards.ts";
+import { installDetailBackLayers } from "@/scripts/lib/back-handler.ts";
+import {
+  navigateBackWithOrigin,
+  recordRouteOrigin,
+} from "@/scripts/lib/route-origin.ts";import {
+  RETURN_HOME_HINT,
+  setControllerHints,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+
+const SERIES_DETAIL_HINTS: HintConfig = {
+  id: "series-detail",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Play / Select" },
+    { glyph: "b", label: "Back" },
+    { glyph: "x", label: "More options" },
+    { glyph: "y", label: "Search Series" },
+    { glyph: "menu", label: "Settings" },
+    RETURN_HOME_HINT,
+  ],
+};
+
+const SERIES_PLAYBACK_HINTS: HintConfig = {
+  id: "series-detail-playback",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Show controls" },
+    { glyph: "b", label: "Exit player" },
+    { glyph: "x", label: "Play / Pause" },
+    { glyph: "y", label: "Fullscreen" },
+    { glyph: "lb", label: "Seek −10s" },
+    { glyph: "rb", label: "Seek +10s" },
+    { glyph: "lt-rt", label: "Volume" },
+    RETURN_HOME_HINT,
+  ],
+};
 import {
   detailArtwork,
   paintDetailArtwork,
@@ -261,12 +299,47 @@ function renderSeasonPicker() {
       current: currentSeason,
       counts: seasonCounts(),
       onSelect: (season: number) => {
+        // Focus survives the content update (§23): the picker
+        // remounts on every select, so re-focus the newly
+        // mounted button for the chosen season when focus was
+        // inside the picker (controller selection).
+        const hadFocus = !!seasonPickerMount?.contains(document.activeElement);
         currentSeason = season;
         renderSeasonPicker();
         renderEpisodes();
+        if (hadFocus) {
+          seasonPickerMount
+            ?.querySelector<HTMLElement>(`[data-season="${season}"]`)
+            ?.focus({ preventScroll: true });
+        }
       },
     },
   });
+}
+
+/**
+ * Focus an episode card's Play button (§24). The card article
+ * carries data-couch-key but is NOT focusable — focusing the
+ * article is a no-op, so playback return and deep links must
+ * target the Play button inside it. Returns false when the card
+ * is not mounted.
+ */
+export function focusEpisodeCard(
+  episodeList: HTMLElement | null,
+  episodeId: number,
+): boolean {
+  const card = episodeList?.querySelector(
+    `[data-couch-key="episode-${episodeId}"]`,
+  );
+  const playBtn = card?.querySelector<HTMLElement>(".rs-episode__play");
+  if (!playBtn) return false;
+  try {
+    playBtn.scrollIntoView({ block: "center" });
+  } catch {
+    // Focus still lands; scroll just doesn't follow.
+  }
+  playBtn.focus({ preventScroll: true });
+  return true;
 }
 
 function renderEpisodes(scrollToEpisodeId?: number) {
@@ -350,9 +423,7 @@ function renderEpisodes(scrollToEpisodeId?: number) {
     (window as any).SpatialNavigation?.makeFocusable?.();
   } catch {}
   if (scrollToEpisodeId) {
-    const card = episodeListEl.querySelector(`[data-couch-key="episode-${scrollToEpisodeId}"]`);
-    (card as HTMLElement | null)?.scrollIntoView({ block: "center" });
-    (card as HTMLElement | null)?.focus?.();
+    focusEpisodeCard(episodeListEl, scrollToEpisodeId);
   }
 }
 
@@ -458,11 +529,11 @@ function hidePlayer(focusEpisodeId?: number) {
   renderEpisodes();
   renderSeasonPicker();
   syncResumeButton();
+  setControllerHints(SERIES_DETAIL_HINTS);
+  // Return restores the current season + playing episode card
+  // (§24) — never a collapse to the page top.
   if (focusEpisodeId) {
-    const card = episodeListEl?.querySelector(
-      `[data-couch-key="episode-${focusEpisodeId}"]`,
-    ) as HTMLElement | null;
-    card?.focus?.();
+    if (!focusEpisodeCard(episodeListEl, focusEpisodeId)) resumeBtn?.focus();
   } else {
     resumeBtn?.focus();
   }
@@ -582,6 +653,7 @@ async function playEpisode(ep: Episode) {
     return;
   }
   player = created;
+  setControllerHints(SERIES_PLAYBACK_HINTS);
   // The OSD info line names the episode that is actually playing.
   const infoTitle = $("series-osd-title");
   if (infoTitle) {
@@ -589,20 +661,79 @@ async function playEpisode(ep: Episode) {
   }
 }
 
-// B / Escape while the player is open exits to the episode listing —
-// never to Home. Capture phase so the global back handler does not fire first.
-document.addEventListener(
-  "keydown",
-  (ev) => {
-    if (!playerOpen) return;
-    if (ev.key === "Escape" || ev.key === "BrowserBack") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      hidePlayer(currentEpisode?.id);
+/** Focus the primary action area (Resume, else first visible action). */
+function focusPrimaryAction(): void {
+  const candidates = [resumeBtn, followBtn, favBtn, watchBtn];
+  for (const btn of candidates) {
+    if (btn && !btn.hidden) {
+      btn.focus({ preventScroll: true });
+      return;
     }
+  }
+}
+
+// Back stack (0.11.10 §23–§24): B closes an open track list first,
+// then exits playback to the episode listing (never Home), then —
+// from the episodes/seasons area — steps back to the primary
+// actions, then performs the same navigation as the Back button
+// via route provenance. The pre-0.11.10 capture handler only ran
+// while the player was open, so B on a closed detail did nothing.
+installDetailBackLayers({
+  isPlayerOpen: () => playerOpen,
+  closePlaybackSubLayer: () =>
+    closeOpenTrackLists(["series-osd-subtitles-list", "series-osd-audio-list"]),
+  onPlayerBack: () => hidePlayer(currentEpisode?.id),
+  isInDetailSubView: () => {
+    const active = document.activeElement as HTMLElement | null;
+    return !!active?.closest?.("#series-episode-list, #series-season-picker");
   },
-  true,
-);
+  onDetailSubViewBack: () => focusPrimaryAction(),
+  onDetailBack: () =>
+    navigateBackWithOrigin("/series", { backLink: $("series-detail-back") }),
+});
+
+// X/Y while browsing the detail (0.11.10 §23): X opens the More
+// options dialog (the contextual surface for this title), Y opens
+// Search Series. While playing, X/Y belong to the player
+// (play/pause, fullscreen). gamepad.ts dispatches "x"/"y" keys
+// first on detail pages (dispatch-first routing), so the
+// controller reaches these handlers; keyboard X/Y work too.
+document.addEventListener("keydown", (ev) => {
+  if (ev.defaultPrevented || ev.repeat || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  if (playerOpen) return;
+  if (document.querySelector("dialog[open]")) return;
+  const target = ev.target as HTMLElement | null;
+  const tag = target?.tagName?.toLowerCase() ?? "";
+  if (tag === "input" || tag === "textarea" || tag === "select" || target?.isContentEditable) {
+    return;
+  }
+  if (ev.key === "x" || ev.key === "X") {
+    const moreBtn = $("series-detail-more") as HTMLButtonElement | null;
+    if (!moreBtn) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    moreBtn.click();
+    return;
+  }
+  if (ev.key === "y" || ev.key === "Y") {
+    ev.preventDefault();
+    ev.stopPropagation();
+    window.location.assign("/series?view=browse&focus=search");
+  }
+});
+
+// Provenance: a Similar/Versions click records this detail as the
+// next detail's origin, so B returns here.
+for (const listEl of [similarListEl, variantsListEl]) {
+  listEl?.addEventListener("click", (event) => {
+    const link = (event.target as Element | null)?.closest?.("a[href], button");
+    if (!link) return;
+    recordRouteOrigin({
+      route: window.location.pathname + window.location.search,
+      label: detail.title || "Series",
+    });
+  });
+}
 
 followBtn?.addEventListener("click", async () => {
   if (!activePlaylistId) return;
@@ -687,6 +818,15 @@ async function loadDetail() {
   renderSeasonPicker();
   renderEpisodes();
   renderVariants();
+  setControllerHints(SERIES_DETAIL_HINTS);
+  // Entry focus (§23): Resume/primary action, when focus is still
+  // on <body> or the top nav (never steal focus already moved;
+  // deep-link episode focus below wins when it applies).
+  const activeEl = document.activeElement as HTMLElement | null;
+  const inNav = !!activeEl?.closest?.("[data-couch-nav]");
+  if (!activeEl || activeEl === document.body || inNav) {
+    focusPrimaryAction();
+  }
 
   // Autoplay handoff (?episode=<id>&autoplay=1, e.g. from /downloads):
   // switch to the episode's season, then play it.

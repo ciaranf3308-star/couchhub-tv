@@ -29,7 +29,22 @@
 // installHomeShelfJump (movies-home-mount.ts) via the gamepad seam,
 // which routes LB/RB to PageUp/PageDown on Home.
 
-import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts";
+import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts";
+import {
+  BACK_PRIORITY,
+  registerBackLayer,
+} from "@/scripts/lib/back-handler.ts";
+import {
+  RETURN_HOME_HINT,
+  setControllerHints,
+  type HintConfig,
+} from "@/scripts/lib/couch-button-hints.ts";
+import { recordRouteOrigin } from "@/scripts/lib/route-origin.ts";
+import {
+  isTitleContextMenuOpen,
+  openTitleContextMenu,
+  titleContextActionsForEntry,
+} from "@/scripts/lib/poster-menu.ts";
 import {
   FOLLOWED_CHANGED_EVENT,
   FOLLOWED_NOTIFICATIONS_EVENT,
@@ -136,6 +151,30 @@ let catalog: SeriesHomeCatalog | null = null;
 let browseController: BrowseController | null = null;
 let refreshQueued = false;
 let booted = false;
+/** data-couch-key of the Home tile that entered Browse (return focus). */
+let lastHomeEntryKey: string | null = null;
+
+export const SERIES_HOME_HINTS: HintConfig = {
+  id: "series-home",
+  items: [
+    { glyph: "dpad", label: "Move" },
+    { glyph: "a", label: "Play / Select" },
+    { glyph: "b", label: "Home" },
+    { glyph: "x", label: "Options" },
+    { glyph: "y", label: "Search Series" },
+    { glyph: "lb", label: "Prev shelf" },
+    { glyph: "rb", label: "Next shelf" },
+    { glyph: "menu", label: "Settings" },
+    RETURN_HOME_HINT,
+  ],
+};
+
+function escapeAttr(value: string): string {
+  const css = (globalThis as unknown as { CSS?: { escape?: (s: string) => string } }).CSS;
+  return css && typeof css.escape === "function"
+    ? css.escape(value)
+    : value.replace(/["\\]/g, "\\$&");
+}
 
 function resolveLabel(
   selection: Parameters<typeof resolveBrowseCategoryLabel>[1],
@@ -270,6 +309,14 @@ function loadTasteFor(playlistId: string): TasteModel {
 
 async function renderHome(gen: number): Promise<void> {
   if (!homeRoot || !catalog) return;
+  // Focus preservation (§20): a follow/progress refresh re-renders
+  // the shelves with fresh nodes. Remember the focused card so it
+  // can be re-focused after paint instead of stranding the viewer.
+  const activeBefore = document.activeElement as HTMLElement | null;
+  const prevKey =
+    activeBefore && homeRoot.contains(activeBefore)
+      ? activeBefore.getAttribute("data-couch-key")
+      : null;
   const { groups, subs } = await loadFollowedData(catalog.playlistId);
   if (gen !== generation) return;
   const { inputs, hasProgressIds } = buildContinueInputs(catalog.rows, catalog.playlistId);
@@ -289,6 +336,15 @@ async function renderHome(gen: number): Promise<void> {
     return;
   }
   renderSeriesHome(homeRoot, sections, { playlistId: catalog.playlistId });
+  if (prevKey) {
+    const activeAfter = document.activeElement as HTMLElement | null;
+    if (!activeAfter || activeAfter === document.body || !activeAfter.isConnected) {
+      const target = homeRoot.querySelector<HTMLElement>(
+        `[data-couch-key="${escapeAttr(prevKey)}"]`,
+      );
+      if (target) target.focus({ preventScroll: true });
+    }
+  }
   restoreCouchFocus();
 }
 
@@ -323,11 +379,14 @@ function setHeaderForCatalog(index: SeriesHomeCatalog | null, status: string): v
 
 function showMode(mode: "home" | "browse"): void {
   currentMode = mode;
+  setLogicalView(mode === "home" ? "series-home" : "series-browse");
   if (homeRoot) homeRoot.hidden = mode !== "home";
   if (browseRoot) browseRoot.hidden = mode !== "browse";
   if (actionsHomeEl) actionsHomeEl.hidden = mode !== "home";
   if (actionsBrowseEl) actionsBrowseEl.hidden = mode !== "browse";
   document.documentElement.setAttribute("data-series-mode", mode);
+  if (mode === "home") setControllerHints(SERIES_HOME_HINTS);
+  else browseController?.refreshHints();
 }
 
 /**
@@ -388,19 +447,51 @@ function switchToHome(): void {
   showMode("home");
   const gen = generation;
   void renderHome(gen).then(() => {
-    if (gen === generation) restoreCouchFocus();
+    if (gen !== generation) return;
+    // Return focus: the Home tile that entered Browse (genre tile,
+    // view-all, browse entry) wins over generic focus memory.
+    if (lastHomeEntryKey && homeRoot) {
+      const target = homeRoot.querySelector<HTMLElement>(
+        `[data-couch-key="${escapeAttr(lastHomeEntryKey)}"]`,
+      );
+      if (target) {
+        target.focus({ preventScroll: true });
+        return;
+      }
+    }
+    restoreCouchFocus();
   });
 }
 
+/** Consume `focus=search` (detail-page Y / Search Series deep link). */
+function consumeFocusSearchParam(): boolean {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("focus") !== "search") return false;
+    params.delete("focus");
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${query ? `?${query}` : ""}`,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function applyModeFromUrl(): void {
+  const focusSearch = consumeFocusSearchParam();
   const mode = parseModeFromUrl("series", resolveLabel);
-  if (mode.view === "browse") switchToBrowse(mode);
+  if (mode.view === "browse") switchToBrowse(mode, { focusSearch });
   else switchToHome();
 }
 
 async function boot(): Promise<void> {
   const gen = ++generation;
   if (!homeRoot) return;
+  const focusSearch = consumeFocusSearchParam();
   const mode = parseModeFromUrl("series", resolveLabel);
   showMode(mode.view);
   setHeaderForCatalog(null, "Loading…");
@@ -447,7 +538,7 @@ async function boot(): Promise<void> {
       index.totalGroups === 0 ? "This library is empty." : `${result.playlistTitle || "Your library"}`,
     );
     if (mode.view === "browse") {
-      switchToBrowse(mode);
+      switchToBrowse(mode, { focusSearch });
       return;
     }
     await renderHome(gen);
@@ -490,12 +581,152 @@ document.addEventListener("click", (event) => {
   }
 });
 
+document.addEventListener("click", (event) => {
+  const target = (event.target as Element | null)?.closest?.("[data-series-home-mode]");
+  if (!(target instanceof HTMLElement)) return;
+  const modeAttr = target.getAttribute("data-series-home-mode");
+  if (modeAttr !== "home" && modeAttr !== "browse") return;
+  event.preventDefault();
+  if (modeAttr === "browse") {
+    // Remember the entry tile so B from Browse returns focus here.
+    lastHomeEntryKey = target.getAttribute("data-couch-key");
+    const genre = target.getAttribute("data-series-home-genre");
+    const sort = target.getAttribute("data-series-home-sort");
+    const mode: HomeBrowseMode = {
+      view: "browse",
+      kind: "series",
+      category: genre ? `genre:${genre}` : undefined,
+      sort: sort && isBrowseSortId(sort) ? sort : undefined,
+    };
+    // Home→browse ENTER pushes a history entry, so Back returns to Home.
+    setModeInUrl(mode, { replace: false });
+    switchToBrowse(mode);
+  } else {
+    setModeInUrl({ view: "home", kind: "series" });
+    switchToHome();
+  }
+});
+
 // Search Series: browse mode with the search layer opened.
-document.getElementById("series-home-search")?.addEventListener("click", () => {
+function openSeriesSearch(): void {
   const mode: HomeBrowseMode = { view: "browse", kind: "series" };
   setModeInUrl(mode, { replace: false });
   switchToBrowse(mode, { focusSearch: true });
+}
+
+document.getElementById("series-home-search")?.addEventListener("click", () => {
+  openSeriesSearch();
 });
+
+// Provenance: a detail link from Home records Series Home as the
+// detail's origin, so B on the detail returns here.
+document.addEventListener("click", (event) => {
+  const link = (event.target as Element | null)?.closest?.('a[href*="/series/detail"]');
+  if (!link) return;
+  recordRouteOrigin({
+    route: window.location.pathname + window.location.search,
+    label: "Series Home",
+  });
+});
+
+// --- Controller keys for Series Home (0.11.10 §20–§22) -------------
+// B → NylahBox Home (Back layer, ROUTE; Browse-mode B is owned by
+// the browse controller's layers), Y → Search Series, X → the
+// title context menu for the focused series card. ONLY the visible
+// mode accepts input: every handler gates on currentMode ===
+// "home" and the suspended browse mount ignores its keys.
+// gamepad.ts dispatches "y"/"x" keys here first (dispatch-first
+// routing — the global-search / autoplay-strip fallbacks run only
+// when no handler claims the key), so the controller reaches these
+// handlers. Keyboard X/Y work too.
+
+function seriesHomeOwnsInput(): boolean {
+  if (currentMode !== "home") return false;
+  if (!homeRoot || homeRoot.hidden) return false;
+  if (document.querySelector("dialog[open]")) return false;
+  if (isTitleContextMenuOpen()) return false;
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active === document.body) return true;
+  const tag = active.tagName.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select" || active.isContentEditable) {
+    return false;
+  }
+  if (homeRoot.contains(active)) return true;
+  return !!active.closest?.("[data-couch-nav]");
+}
+
+/** Series identity from a focused Home card (no URL parsing). */
+export function seriesHomeCardIdentity(
+  anchor: HTMLElement,
+): { id: number; name: string; logo: string | null } | null {
+  const key = anchor.getAttribute("data-couch-key") ?? "";
+  // `series-<id>` (continue/followed/shelves) and
+  // `series-<id>-s<season>e<ep>-<ts>` (new-episode cards).
+  const match = /^series-(\d+)/.exec(key);
+  if (!match) return null;
+  const titleEl = anchor.querySelector(".rs-card__title");
+  const img = anchor.querySelector<HTMLImageElement>("img");
+  return {
+    id: Number(match[1]),
+    name: titleEl?.textContent?.trim() || anchor.getAttribute("aria-label") || "",
+    logo: img?.getAttribute("src") || null,
+  };
+}
+
+export function installSeriesHomeControllerKeys(): () => void {
+  const unregisterBack = registerBackLayer({
+    id: "series-home-route",
+    priority: BACK_PRIORITY.ROUTE,
+    isActive: () => seriesHomeOwnsInput(),
+    handle: () => {
+      window.location.assign("/");
+      return true;
+    },
+  });
+
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.repeat) return;
+    const key = event.key;
+    if (key !== "x" && key !== "X" && key !== "y" && key !== "Y") return;
+    if (!seriesHomeOwnsInput()) return;
+    if (key === "y" || key === "Y") {
+      event.preventDefault();
+      event.stopPropagation();
+      openSeriesSearch();
+      return;
+    }
+    const active = document.activeElement as HTMLElement | null;
+    const card = active?.closest?.("[data-couch-key]") as HTMLElement | null;
+    if (!card || !homeRoot?.contains(card)) return;
+    const identity = seriesHomeCardIdentity(card);
+    if (!identity) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void titleContextActionsForEntry({
+      kind: "series",
+      entryId: identity.id,
+      name: identity.name,
+      logo: identity.logo,
+      playlistId: catalog?.playlistId ?? "",
+      onOpen: () => {
+        window.location.assign(`/series/detail?id=${identity.id}`);
+      },
+      onChanged: () => scheduleHomeRefresh(),
+    }).then((actions) => {
+      if (!card.isConnected) return;
+      openTitleContextMenu(card, actions);
+    });
+  };
+  document.addEventListener("keydown", onKeyDown);
+
+  return () => {
+    unregisterBack();
+    document.removeEventListener("keydown", onKeyDown);
+  };
+}
+
+if (homeRoot) installSeriesHomeControllerKeys();
 
 // Error-state retry.
 document.addEventListener("click", (event) => {

@@ -158,3 +158,57 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
 		void mountLivtvLanding(host);
 	}
 </script>
+
+<style is:global>
+	/* Landing options menu (0.11.10 W4, §7 — Menu key). is:global
+	   is required: the menu is built by livetv-landing.ts, so its
+	   nodes never carry Astro's scoped-style CID. Selectors are
+	   rooted at .rs-livetv-landing-options, so nothing leaks. The
+	   action buttons reuse the quick-action classes (global, in
+	   couch.css) for their look; this block only positions the
+	   overlay and stacks the actions. */
+	.rs-livetv-landing-options {
+		position: fixed;
+		inset: 0;
+		z-index: 80;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.rs-livetv-landing-options__scrim {
+		position: absolute;
+		inset: 0;
+		background: color-mix(in srgb, var(--rs-bg) 72%, transparent);
+	}
+	.rs-livetv-landing-options__panel {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		width: min(26rem, calc(100vw - 3rem));
+		padding: 1.5rem;
+		border-radius: 1rem;
+		border: 1px solid var(--rs-line);
+		background: var(--rs-surface, var(--rs-bg-2));
+		box-shadow: var(--rs-shadow);
+	}
+	.rs-livetv-landing-options__title {
+		margin: 0 0 0.5rem;
+		font-family: var(--rs-font-display);
+		font-size: 1.5rem;
+		font-weight: 800;
+		line-height: 1.2;
+		color: var(--rs-text);
+	}
+	.rs-livetv-landing-options__action {
+		width: 100%;
+		justify-content: flex-start;
+	}
+	.rs-livetv-landing-options__action:focus-visible {
+		outline: none;
+		border-color: var(--rs-focus);
+		box-shadow:
+			0 0 0 3px var(--rs-focus),
+			0 0 1.5rem 0.25rem var(--rs-focus-glow);
+	}
+</style>

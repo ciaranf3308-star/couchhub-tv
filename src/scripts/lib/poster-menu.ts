@@ -14,6 +14,11 @@ import { t } from "@/scripts/lib/i18n.js"
 import { log } from "@/scripts/lib/log.js"
 import { toast } from "@/scripts/lib/toast.js"
 import {
+  BACK_PRIORITY,
+  registerBackLayer,
+} from "@/scripts/lib/back-handler.ts"
+import { isFollowing, unfollowSeries } from "@/scripts/lib/followed.ts"
+import {
   isFavorite,
   toggleFavorite,
   isOnWatchlist,
@@ -58,6 +63,8 @@ export interface PosterMenuOptions {
 const MENU_ID = "xt-poster-menu"
 
 let menuEl: HTMLElement | null = null
+/** Runs once when the current menu closes (focus restore / layer unregister). */
+let menuOnClose: (() => void) | null = null
 
 function closeMenu() {
   if (!menuEl) return
@@ -68,6 +75,13 @@ function closeMenu() {
   window.removeEventListener("blur", closeMenu)
   window.removeEventListener("resize", closeMenu)
   window.removeEventListener("scroll", closeMenu, true)
+  const onClose = menuOnClose
+  menuOnClose = null
+  try {
+    onClose?.()
+  } catch {
+    // A throwing close callback never breaks dismissal.
+  }
 }
 
 function onMenuOutside(event: PointerEvent) {
@@ -79,6 +93,9 @@ function onMenuOutside(event: PointerEvent) {
 function onMenuKey(event: KeyboardEvent) {
   if (event.key === "Escape") {
     event.preventDefault()
+    // Stop the press here: without this, a grid/dialog handler
+    // downstream would pop a SECOND layer for the same B press.
+    event.stopPropagation()
     closeMenu()
   }
 }
@@ -327,4 +344,252 @@ export function attachPosterContextMenu(
     },
     true
   )
+}
+
+// ── CONTRACT F (Controller 2.0, 0.11.10) — X context menu ───────
+//
+// The controller X menu: generic actions supplied by the caller,
+// rendered with the same menu machinery as openPosterMenu (same
+// singleton, same dismissal, same visual style), plus controller
+// behaviour the pointer menu never needed: D-pad U/D between
+// items, a MODAL-priority Back layer (B closes exactly this menu),
+// and focus restored to the anchor card on close. W5 consumes
+// this export for the remaining X surfaces.
+//
+// Actions use the EXISTING preference functions only — no
+// competing title-management store. See
+// titleContextActionsForEntry for the Browse/Home action set.
+
+export interface TitleContextAction {
+  id: string
+  label: string
+  action: () => void
+  disabled?: boolean
+}
+
+export function openTitleContextMenu(
+  anchor: HTMLElement,
+  actions: TitleContextAction[],
+): void {
+  closeMenu()
+  if (actions.length === 0) return
+  const returnFocus = anchor.isConnected
+    ? anchor
+    : (document.activeElement as HTMLElement | null)
+
+  const menu = document.createElement("div")
+  menu.id = MENU_ID
+  menu.className =
+    "fixed z-50 min-w-[12rem] rounded-xl border border-line bg-surface text-fg shadow-2xl " +
+    "p-1 flex flex-col gap-0.5 poster-menu-enter"
+  menu.setAttribute("role", "menu")
+  menu.setAttribute("data-title-context-menu", "")
+  menu.setAttribute("aria-label", t("list.menu.ariaFor", { name: t("list.fallbackTitle") }))
+
+  const buttons: HTMLButtonElement[] = []
+  for (const item of actions) {
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.setAttribute("role", "menuitem")
+    btn.dataset.actionId = item.id
+    btn.className =
+      "w-full text-left px-3 py-2.5 min-h-11 rounded-lg text-sm " +
+      "hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-accent " +
+      "outline-none transition-colors disabled:opacity-50"
+    btn.textContent = item.label
+    btn.disabled = !!item.disabled
+    btn.addEventListener("click", () => {
+      closeMenu()
+      try {
+        item.action()
+      } catch (error) {
+        log.warn("[xt:poster-menu] context action threw:", error)
+      }
+    })
+    buttons.push(btn)
+    menu.appendChild(btn)
+  }
+
+  // D-pad / keyboard: U/D move between ENABLED items (wrap);
+  // Enter/Space activate natively. Spatial nav never sees the
+  // menu as a rail, so the menu owns its own movement.
+  menu.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return
+    const enabled = buttons.filter((b) => !b.disabled)
+    if (enabled.length === 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const at = enabled.indexOf(document.activeElement as HTMLButtonElement)
+    const next =
+      event.key === "ArrowDown"
+        ? enabled[(at + 1) % enabled.length]
+        : enabled[(at - 1 + enabled.length) % enabled.length]
+    next?.focus({ preventScroll: true })
+  })
+
+  document.body.appendChild(menu)
+
+  // Position next to the anchor card; clamp to viewport.
+  const margin = 8
+  const rect = menu.getBoundingClientRect()
+  const anchorRect = anchor.getBoundingClientRect()
+  const left = Math.min(anchorRect.right + 6, window.innerWidth - rect.width - margin)
+  const top = Math.min(anchorRect.top, window.innerHeight - rect.height - margin)
+  menu.style.left = `${Math.max(margin, left)}px`
+  menu.style.top = `${Math.max(margin, top)}px`
+
+  menuEl = menu
+  let unregisterBack: (() => void) | null = null
+  menuOnClose = () => {
+    try {
+      unregisterBack?.()
+    } catch {
+      // Ignore.
+    }
+    unregisterBack = null
+    if (returnFocus && returnFocus.isConnected) {
+      returnFocus.focus({ preventScroll: true })
+    }
+  }
+  document.addEventListener("pointerdown", onMenuOutside, true)
+  document.addEventListener("keydown", onMenuKey, true)
+  window.addEventListener("blur", closeMenu)
+  window.addEventListener("resize", closeMenu)
+  window.addEventListener("scroll", closeMenu, true)
+
+  // B closes exactly this menu (MODAL priority — above drawers,
+  // below confirm dialogs). The Back coordinator claims the press
+  // before any grid/dialog handler sees it.
+  unregisterBack = registerBackLayer({
+    id: "title-context-menu",
+    priority: BACK_PRIORITY.MODAL,
+    isActive: () => menuEl != null,
+    handle: () => {
+      closeMenu()
+      return true
+    },
+  })
+
+  const first = buttons.find((b) => !b.disabled)
+  first?.focus({ preventScroll: true })
+}
+
+/** Close the title context menu if one is open (no-op otherwise). */
+export function closeTitleContextMenu(): void {
+  closeMenu()
+}
+
+export function isTitleContextMenuOpen(): boolean {
+  return menuEl != null && menuEl.hasAttribute("data-title-context-menu")
+}
+
+// Preferences functions are typed for numeric ids; at runtime
+// they key by whatever id the catalogue uses (the existing
+// openPosterMenu passes the same string|number ids). The cast
+// keeps the checker quiet without changing runtime behaviour.
+function prefId(id: string | number): number {
+  return id as unknown as number
+}
+
+export interface TitleContextEntryOptions {
+  kind: "vod" | "series"
+  entryId: string | number
+  name?: string | null
+  logo?: string | null
+  playlistId: string
+  onOpen: () => void
+  /** Called after any toggle, so the view can refresh its sets. */
+  onChanged?: () => void
+  /**
+   * Include the Follow/Unfollow row for series. Follow itself is
+   * NEVER offered from Browse/Home: followSeries needs an episode
+   * baseline from a get_series_info payload, which only the detail
+   * page holds — offering it here would always fail. Unfollow is
+   * offered when the series is already followed (it needs no
+   * payload). Pass false to omit the row entirely.
+   */
+  includeFollow?: boolean
+}
+
+/**
+ * The Browse/Home X-menu action set, from the existing preference
+ * functions only: Open, Favourite, Watch Later, Watched, plus
+ * Unfollow for followed series. Labels flip with current state.
+ */
+export async function titleContextActionsForEntry(
+  opts: TitleContextEntryOptions,
+): Promise<TitleContextAction[]> {
+  const { kind, entryId, playlistId } = opts
+  const extras = { name: opts.name || "", logo: opts.logo || null }
+  const changed = () => {
+    try {
+      opts.onChanged?.()
+    } catch {
+      // A throwing refresh never breaks the toggle.
+    }
+  }
+  const actions: TitleContextAction[] = [
+    {
+      id: "open",
+      label: t("list.menu.open"),
+      action: () => opts.onOpen(),
+    },
+  ]
+  if (playlistId) {
+    const favOn = isFavorite(playlistId, kind, prefId(entryId))
+    actions.push({
+      id: "favourite",
+      label: t(favOn ? "list.menu.favoriteRemove" : "list.menu.favoriteAdd"),
+      action: () => {
+        toggleFavorite(playlistId, kind, prefId(entryId), extras)
+        changed()
+      },
+    })
+    const watchOn = isOnWatchlist(playlistId, kind, prefId(entryId))
+    actions.push({
+      id: "watchlater",
+      label: t(watchOn ? "list.menu.watchlistRemove" : "list.menu.watchlistAdd"),
+      action: () => {
+        toggleWatchlist(playlistId, kind, prefId(entryId), extras)
+        changed()
+      },
+    })
+    const watchedOn =
+      kind === "vod"
+        ? isCompleted(playlistId, "vod", prefId(entryId))
+        : hasSeriesWatchedOverride(playlistId, prefId(entryId))
+    actions.push({
+      id: "watched",
+      label: t(watchedOn ? "list.menu.watchedUnmark" : "list.menu.watchedMark"),
+      action: () => {
+        if (kind === "vod") {
+          if (watchedOn) clearProgress(playlistId, "vod", prefId(entryId))
+          else markCompleted(playlistId, "vod", prefId(entryId), extras)
+        } else {
+          setSeriesWatchedOverride(playlistId, prefId(entryId), !watchedOn)
+        }
+        changed()
+      },
+    })
+    if (kind === "series" && opts.includeFollow !== false) {
+      let following: boolean
+      try {
+        following = await isFollowing(playlistId, String(entryId))
+      } catch {
+        following = false
+      }
+      if (following) {
+        actions.push({
+          id: "unfollow",
+          label: "Unfollow",
+          action: () => {
+            void unfollowSeries(playlistId, String(entryId)).then(changed, changed)
+          },
+        })
+      }
+      // Not following: no Follow row (see includeFollow doc) —
+      // the detail page's Follow button is the follow path.
+    }
+  }
+  return actions
 }

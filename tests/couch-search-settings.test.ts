@@ -393,7 +393,11 @@ describe("couch-search page: SearchView wiring", () => {
     expect(src).toContain('data-nylah-rail={"search-"');
     expect(src).toContain("groupedSections");
     expect(src).toContain("goBack()");
-    expect(src).toContain("history.back()");
+    // 0.11.10 §27: Back is origin-aware (Contract B), never
+    // history-based — the old history.back() reliance is gone.
+    expect(src).toContain("navigateBackWithOrigin");
+    expect(src).not.toContain("history.back()");
+    expect(src).not.toContain("history.length");
     expect(src).toContain('data-nylah-item');
   });
 });

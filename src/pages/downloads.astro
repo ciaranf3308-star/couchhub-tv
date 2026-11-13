@@ -187,11 +187,21 @@ import {
     } from "@/scripts/lib/downloads.js"
     import { getDownloadDir } from "@/scripts/lib/app-settings.js"
     import { prettifyAndroidUri } from "@/scripts/lib/android-fs.js"
-    import { attachDialogSpatialNav } from "@/scripts/lib/dialog-spatial-nav.js"
+    import { attachDialogSpatialNav, findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
     import { t } from "@/scripts/lib/i18n.js"
     import { toastError } from "@/scripts/lib/toast.ts"
     import { log } from "@/scripts/lib/log.ts"
     import { mountCachedImage } from "@/scripts/lib/img-cache.ts"
+    import {
+      registerBackLayer,
+      BACK_PRIORITY,
+    } from "@/scripts/lib/back-handler.ts"
+    import {
+      recordOriginFromReferrer,
+      navigateBackWithOrigin,
+    } from "@/scripts/lib/route-origin.ts"
+    import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
+    import { isTitleContextMenuOpen } from "@/scripts/lib/poster-menu.ts"
 
     const isAndroid = /Android/i.test(navigator.userAgent || "")
     const isTauriEnv =
@@ -228,6 +238,22 @@ import {
     const deleteBodyEl = document.getElementById("downloads-delete-body")
 
     if (deleteDlg) attachDialogSpatialNav(deleteDlg, { defaultElement: "#downloads-delete-cancel" })
+
+    // W5 (0.11.10): B hierarchy — the delete confirmation owns B
+    // first (native dialog cancel), then the page steps to its
+    // origin (or Home). Delete stays explicitly confirmed; B never
+    // deletes.
+    setLogicalView("downloads")
+    recordOriginFromReferrer()
+    registerBackLayer({
+      id: "downloads-root",
+      priority: BACK_PRIORITY.ROUTE,
+      isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
+      handle: () => {
+        navigateBackWithOrigin("/")
+        return true
+      },
+    })
 
     // ----------------------------
     // Folder summary
@@ -963,6 +989,7 @@ import {
     // Delete confirm
     // ----------------------------
     let pendingDeleteId: string | null = null
+    let deleteInvoker: HTMLElement | null = null
 
     function confirmDelete(d: any, message?: string) {
       if (!deleteDlg) {
@@ -972,6 +999,10 @@ import {
         return
       }
       pendingDeleteId = d.id
+      deleteInvoker =
+        document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
       if (deleteBodyEl) {
         deleteBodyEl.textContent =
           message || `"${d.title}" will be removed from disk.`
@@ -986,6 +1017,14 @@ import {
     })
     deleteDlg?.addEventListener("close", () => {
       pendingDeleteId = null
+      // B/Cancel restores focus to the delete button that opened the
+      // dialog (when it survived — after a confirmed delete the row
+      // is gone and focus is left alone).
+      const target = deleteInvoker
+      deleteInvoker = null
+      if (target && target.isConnected) {
+        target.focus({ preventScroll: true })
+      }
     })
     deleteConfirmBtn?.addEventListener("click", () => {
       const id = pendingDeleteId

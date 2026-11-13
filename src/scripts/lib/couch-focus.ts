@@ -28,6 +28,10 @@
 //     of it (see findOpenModal).
 
 import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js";
+import {
+  BACK_PRIORITY,
+  registerBackLayer,
+} from "@/scripts/lib/back-handler.js";
 
 const STORAGE_KEY = "rs_couch_focus_memory";
 const MOUNT_FLAG = "__rsCouchFocusMounted" as const;
@@ -37,6 +41,39 @@ export interface CouchFocusMemory {
   rail: string;
   index: number;
   key?: string;
+  /**
+   * Logical view the memory belongs to (Controller 2.0, §39), e.g.
+   * "movies-home" vs "movies-browse" — same pathname, different
+   * visible content. Optional for backward compatibility: memory
+   * without a view restores as before. When present, restoration
+   * only happens while the same logical view is current, so Home
+   * focus is never restored into a hidden Browse view or vice versa.
+   */
+  view?: string;
+}
+
+// ── Logical view (§39) ──────────────────────────────────────────────
+// Module state, set by the page/mode owner on mount and on every mode
+// switch (setLogicalView). Full-page Astro navigations reset it to ""
+// (unset) until the new page's owner sets it — memory recorded while
+// unset carries no view and restores under the legacy rules.
+
+let logicalView = "";
+
+/** Name the logical view currently on screen (mode switches included). */
+export function setLogicalView(view: string): void {
+  logicalView = typeof view === "string" ? view : "";
+}
+
+/** The current logical view, or "" when no owner has named one. */
+export function getLogicalView(): string {
+  return logicalView;
+}
+
+/** True when the memory belongs to the current logical view (or to no view). */
+function viewMatches(memory: CouchFocusMemory): boolean {
+  if (!memory.view) return true;
+  return memory.view === logicalView;
 }
 
 function storage(): Storage | null {
@@ -81,6 +118,7 @@ export function readCouchFocusMemory(): CouchFocusMemory | null {
       rail: parsed.rail,
       index,
       key: typeof parsed.key === "string" ? parsed.key : undefined,
+      view: typeof parsed.view === "string" && parsed.view ? parsed.view : undefined,
     };
   } catch {
     return null;
@@ -135,14 +173,16 @@ export function scrollFocusedIntoView(el: HTMLElement): void {
  * Restore the remembered focus for the current route, if any.
  * Only acts when nothing is focused yet (body / null) and no modal is
  * open. Prefers the stable data-couch-key, falls back to rail + index.
- * Returns the focused element, or null when there was nothing to
- * restore. Pure apart from the focus() call itself.
+ * View-aware (§39): memory recorded for another logical view is never
+ * restored into this one. Returns the focused element, or null when
+ * there was nothing to restore. Pure apart from the focus() call itself.
  */
 export function restoreCouchFocus(
   doc: Document = document,
 ): HTMLElement | null {
   const memory = readCouchFocusMemory();
   if (!memory) return null;
+  if (!viewMatches(memory)) return null;
   let route = "";
   try {
     route = doc.defaultView?.location.pathname ?? "";
@@ -199,7 +239,9 @@ export function findReplacementFocus(
   } catch {
     route = "";
   }
-  if (mem && mem.route === route) {
+  // View-aware like restoreCouchFocus: memory from another logical
+  // view never picks the replacement either.
+  if (mem && mem.route === route && viewMatches(mem)) {
     const rail = doc.querySelector(
       `[data-nylah-rail="${cssEscape(mem.rail)}"]`,
     );
@@ -228,10 +270,29 @@ export function findReplacementFocus(
  * invoker so focus returns to it on close. Falls back to the `open`
  * attribute when showModal() is unavailable (jsdom / old webviews).
  * Returns false when no such dialog exists.
+ *
+ * Controller 2.0 (§38): opening registers a MODAL-priority Back layer
+ * for the dialog, so B resolves through the Back coordinator — the
+ * dialog closes before anything underneath it backs out, and closing
+ * never triggers a second Back (the coordinator stops after one
+ * consumed layer). The layer unregisters on close (here, or via the
+ * dialog's own close event when it closes natively). A dialog opened
+ * with `dismissible: false` still owns B, but swallows it: B does
+ * nothing rather than leaking through to the page underneath.
  */
 const dialogInvokers = new Map<string, HTMLElement | null>();
+const dialogBackLayers = new Map<string, () => void>();
 
-export function openCouchDialog(id: string, invoker?: HTMLElement | null): boolean {
+export interface OpenCouchDialogOptions {
+  /** False when B must not close the dialog (confirm flows). Default true. */
+  dismissible?: boolean;
+}
+
+export function openCouchDialog(
+  id: string,
+  invoker?: HTMLElement | null,
+  opts: OpenCouchDialogOptions = {},
+): boolean {
   const dlg = document.getElementById(id) as HTMLDialogElement | null;
   if (!dlg) return false;
   dialogInvokers.set(id, invoker ?? (document.activeElement as HTMLElement | null));
@@ -241,6 +302,34 @@ export function openCouchDialog(id: string, invoker?: HTMLElement | null): boole
   } catch {
     dlg.setAttribute("open", "");
   }
+  // Replace any stale layer from an earlier open that never closed
+  // cleanly (a body swap can drop a dialog without firing close).
+  dialogBackLayers.get(id)?.();
+  dialogBackLayers.delete(id);
+  const dismissible = opts.dismissible !== false;
+  const unregisterBackLayer = registerBackLayer({
+    id: `dialog:${id}`,
+    priority: BACK_PRIORITY.MODAL,
+    isActive: () => {
+      const current = document.getElementById(id);
+      return !!current && current.hasAttribute("open");
+    },
+    handle: () => {
+      if (!dismissible) return true;
+      return closeCouchDialog(id);
+    },
+  });
+  dialogBackLayers.set(id, unregisterBackLayer);
+  // Native close (browser cancel, .close() elsewhere) must also drop
+  // the layer; closeCouchDialog does the same on its own path.
+  dlg.addEventListener(
+    "close",
+    () => {
+      dialogBackLayers.get(id)?.();
+      dialogBackLayers.delete(id);
+    },
+    { once: true },
+  );
   const first = dlg.querySelector<HTMLElement>(
     "button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex='-1'])",
   );
@@ -248,10 +337,17 @@ export function openCouchDialog(id: string, invoker?: HTMLElement | null): boole
   return true;
 }
 
-/** Close a Couch dialog; focus returns to its invoker. */
+/**
+ * Close a Couch dialog; focus returns to its invoker, or to the
+ * nearest surviving focus target when the invoker left the DOM while
+ * the dialog was open (list refresh) — never to <body>, never to a
+ * hidden element, and never by activating anything behind the dialog.
+ */
 export function closeCouchDialog(id: string): boolean {
   const dlg = document.getElementById(id) as HTMLDialogElement | null;
   if (!dlg) return false;
+  dialogBackLayers.get(id)?.();
+  dialogBackLayers.delete(id);
   try {
     if (typeof dlg.close === "function" && dlg.open) dlg.close();
     else dlg.removeAttribute("open");
@@ -262,6 +358,12 @@ export function closeCouchDialog(id: string): boolean {
   dialogInvokers.delete(id);
   if (invoker && invoker.isConnected) {
     invoker.focus({ preventScroll: true });
+    return true;
+  }
+  const replacement = findReplacementFocus(dlg, document);
+  if (replacement) {
+    replacement.focus({ preventScroll: true });
+    scrollFocusedIntoView(replacement);
   }
   return true;
 }
@@ -335,6 +437,9 @@ export function initCouchFocus(): () => void {
         rail: railId,
         index: at,
         key: target.getAttribute("data-couch-key") ?? undefined,
+        // View-scoped memory (§39): only when a logical view is
+        // current; unset views record legacy view-less memory.
+        view: logicalView || undefined,
       });
     }
     scrollFocusedIntoView(target);

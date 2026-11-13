@@ -199,6 +199,40 @@ import ExitAppCard from "@/components/ExitAppCard.svelte"
               </script>
             </div>
 
+            <!-- 0.11.10 (W6): Controller Cursor Mode — opt-in R3 pointer. Default Disabled. -->
+            <div id="card-cursor-mode" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 data-i18n="settings.cursorMode.title" class="text-sm font-medium leading-snug">Controller Cursor Mode</h3>
+                <p data-i18n="settings.cursorMode.helperLong" class="text-xs text-fg-3">
+                  Press the right stick (R3) to show an on-screen pointer you move with the right stick. A clicks, RB right-clicks, and B or R3 exits. Off by default; when off, R3 does nothing.
+                </p>
+              </div>
+              <div class="settings-row__control">
+                <div
+                  id="settings-cursor-mode"
+                  class="settings-seg"
+                  role="radiogroup"
+                  aria-label="Controller Cursor Mode"
+                  data-i18n-attr="aria-label:settings.cursorMode.label">
+                  <button type="button" data-cursor="on"  aria-pressed="false" data-i18n="settings.cursorMode.enabled"  class="cursor-mode-btn btn">Enabled</button>
+                  <button type="button" data-cursor="off" aria-pressed="false" data-i18n="settings.cursorMode.disabled" class="cursor-mode-btn btn">Disabled</button>
+                </div>
+              </div>
+              <script is:inline>
+                try {
+                  var cursorOn = localStorage.getItem("xt_cursor_mode") === "1";
+                  var cursorGroup = document.getElementById("settings-cursor-mode");
+                  if (cursorGroup) {
+                    var cursorBtns = cursorGroup.querySelectorAll(".cursor-mode-btn");
+                    for (var cIdx = 0; cIdx < cursorBtns.length; cIdx++) {
+                      var cursorBtnOn = cursorBtns[cIdx].getAttribute("data-cursor") === "on";
+                      cursorBtns[cIdx].setAttribute("aria-pressed", cursorBtnOn === cursorOn ? "true" : "false");
+                    }
+                  }
+                } catch (e) {}
+              </script>
+            </div>
+
             <!-- TV safe area -->
             <div id="card-tv-overscan" data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
               <div class="settings-row__text">

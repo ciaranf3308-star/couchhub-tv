@@ -30,13 +30,24 @@
 //   D-pad / left stick .... move focus (spatial navigation; on the home
 //                            page the rail-aware model below takes over)
 //   A .................... activate the focused item
-//   B .................... back (Escape — closes dialogs, exits fullscreen
-//                            playback, per the app's own handlers)
+//   B .................... back — resolves through the Back
+//                            coordinator (back-handler.ts: layers,
+//                            dialog/fullscreen, route origin, then
+//                            the synthetic-Escape migration bridge);
+//                            Live TV contexts keep their own stack
 //   X .................... details of the focused card (opens its detail
-//                            page without autoplay); in the player it
-//                            stays play / pause — see inPlayerContext()
-//   Y .................... search; in the player it stays fullscreen
-//                            toggle — see inPlayerContext()
+//                            page without autoplay) — but the "x" key is
+//                            dispatched FIRST so a page handler (Home /
+//                            detail context menus) can claim it; the
+//                            details fallback runs only when no handler
+//                            consumes the key. In the player it stays
+//                            play / pause — see inPlayerContext()
+//   Y .................... search — the "y" key is dispatched FIRST so
+//                            a page handler (scoped search) can claim
+//                            it; the global-search fallback runs only
+//                            when no handler consumes the key. In the
+//                            player it stays fullscreen toggle — see
+//                            inPlayerContext()
 //   LB / RB .............. seek -10s / +10s (video with a duration only)
 //   LT / RT .............. volume down / up
 //   Menu (Start) ......... open Settings
@@ -67,6 +78,20 @@ import {
   firstFocusableInModal,
 } from "@/scripts/lib/dialog-spatial-nav.js";
 import { dispatchLivetvBack } from "@/scripts/lib/livetv-keys.ts";
+import {
+  markSyntheticBackEvent,
+  resolveBack,
+} from "@/scripts/lib/back-handler.ts";
+// 0.11.10 (W6): Cursor Mode guard — see the guard at the top of
+// handleGamepadButtonPress. This module owns the guard region only;
+// cursor-mode.ts owns the pointer state machine.
+import {
+  dispatchCursorClick,
+  isCursorModeActive,
+  isCursorModeEnabled,
+  setCursorModeActive,
+  toggleCursorMode,
+} from "@/scripts/lib/cursor-mode.ts";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -84,6 +109,10 @@ const BTN_LT = 6;
 const BTN_RT = 7;
 const BTN_VIEW = 8;
 const BTN_MENU = 9;
+// 0.11.10 (W6): R3 — right-stick click. Toggles Cursor Mode when the
+// setting is enabled; otherwise the same no-op it always was. L3 (10)
+// stays unmapped.
+const BTN_RIGHT_THUMB = 11;
 const BTN_DPAD_UP = 12;
 const BTN_DPAD_DOWN = 13;
 const BTN_DPAD_LEFT = 14;
@@ -258,11 +287,43 @@ function handleDirection(dir: Direction | null, now: number): void {
  * B works (blur + back), every other button is swallowed.
  */
 export function handleGamepadButtonPress(index: number, _now: number): void {
+  // 0.11.10 (W6) CURSOR MODE GUARD — runs before ALL button routing.
+  // Both input paths (native XInput + browser Gamepad API) share this
+  // function, so guarding once here consumes A / RB everywhere: while
+  // Cursor Mode is active they can never also activate a focused
+  // control, change Live TV categories, turn Browse pages, seek
+  // playback, or open a second context menu. R3 toggles (only when
+  // the setting is enabled); B exits without changing the page.
+  // View+Menu return-home is unaffected: the chord fires in
+  // noteViewMenuHeld before this function runs on either path.
+  if (index === BTN_RIGHT_THUMB) {
+    if (isCursorModeEnabled()) {
+      markGamepadActive();
+      toggleCursorMode();
+    }
+    return;
+  }
+  if (isCursorModeActive()) {
+    markGamepadActive();
+    if (index === BTN_B) setCursorModeActive(false);
+    else if (index === BTN_A) dispatchCursorClick("left");
+    else if (index === BTN_RB) dispatchCursorClick("right");
+    // Every other button is swallowed while Cursor Mode is active.
+    return;
+  }
   if (isEditingTarget(document.activeElement)) {
     if (index === BTN_B) {
+      // Controller 2.0 (§4.4 / W3 keyboard semantics): B while editing
+      // blurs the field, then resolves Back through the coordinator —
+      // the keyboard layer (when registered) consumes it: close the
+      // keyboard, focus the input. Never a blind synthetic Escape:
+      // the coordinator's fallback dispatches one only for screens
+      // with no layer, and never at Home root. The keyboard layer
+      // must key off its own lifecycle state, not on the input still
+      // being focused — the blur above already happened.
       markGamepadActive();
       (document.activeElement as HTMLElement | null)?.blur?.();
-      dispatchKey("Escape");
+      resolveBack();
     }
     return;
   }
@@ -284,12 +345,16 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     // step must run exactly once, and keyboard Escape keeps its
     // own keydown path (the mode components' existing handlers).
     // While a modal dialog is open the dialog still owns B, so
-    // Escape goes to it as before.
+    // the coordinator resolves it as before.
+    // Controller 2.0 (§4.1): outside Live TV, B resolves through
+    // the Back coordinator (back-handler.ts) — layers, then
+    // dialog/popover/fullscreen, then route origin, then the
+    // synthetic-Escape migration bridge for unmigrated screens.
     const liveContext = livetvContext();
     if (liveContext && findOpenModal() === null) {
       dispatchLivetvBack(window, liveContext);
     } else {
-      dispatchKey("Escape");
+      resolveBack();
     }
     return;
   }
@@ -310,7 +375,17 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // for the controller's layer routing.
       dispatchKey("x");
     } else if (inPlayerContext()) togglePlayPause();
-    else openDetailsOfFocused();
+    // Controller 2.0 (0.11.10, W2 dependency): everywhere else the
+    // "x" key is dispatched FIRST, so page keydown handlers — the
+    // Movies/Series Home context menus and the detail More-options
+    // handlers — receive controller X exactly as they receive
+    // keyboard X. Only when no handler consumes the key
+    // (preventDefault, the convention every x/y handler follows)
+    // does the legacy fallback run: open the focused card's detail
+    // without autoplay. The player branch above deliberately stays
+    // key-less: couch-player.ts has its own "x" keydown handler
+    // that toggles play, so dispatching there would double-toggle.
+    else if (!dispatchKey("x")) openDetailsOfFocused();
     return;
   }
   if (index === BTN_Y && findOpenModal() === null) {
@@ -331,7 +406,17 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       // button (D19).
       dispatchKey("y");
     } else if (inPlayerContext()) toggleFullscreen();
-    else goSearch();
+    // Controller 2.0 (0.11.10, W2 dependency): everywhere else the
+    // "y" key is dispatched FIRST, so page keydown handlers — the
+    // Movies/Series Home and detail scoped-search handlers — receive
+    // controller Y exactly as they receive keyboard Y. Only when no
+    // handler consumes the key does the global-search fallback run.
+    // (D19 superseded: scoped search now claims Y on Home/detail
+    // through its handler; pages with no handler keep global
+    // search.) The player branch above stays key-less for the same
+    // reason as X: the player's own "y" handler toggles fullscreen,
+    // so dispatching there would double-toggle.
+    else if (!dispatchKey("y")) goSearch();
     return;
   }
   if (index === BTN_LB) {
@@ -525,7 +610,17 @@ function isEditingTarget(target: EventTarget | null): boolean {
   return el.isContentEditable === true;
 }
 
-function dispatchKey(key: string): void {
+/**
+ * Dispatch a synthetic keydown + keyup pair for `key` to the focused
+ * element (bubbling, so document-level page handlers see it exactly
+ * as they see a physical key). Returns true when a keydown handler
+ * consumed the press (preventDefault) — the X/Y generic branches use
+ * that to decide whether their legacy fallback still runs. The keyup
+ * is dispatched unconditionally (a real key always comes back up),
+ * and only the keydown's consumption counts: every x/y handler in
+ * the tree consumes on keydown.
+ */
+function dispatchKey(key: string): boolean {
   const target = document.activeElement ?? document.body;
   const init: KeyboardEventInit = { key, code: key, bubbles: true, cancelable: true };
   // A synthetic KeyboardEvent reads keyCode 0 in Chromium (the
@@ -536,6 +631,7 @@ function dispatchKey(key: string): void {
   // Chromium); if an old webview refuses it, e.key readers still see
   // the press.
   const keyCode = keyCodeForKey(key);
+  let consumed = false;
   for (const type of ["keydown", "keyup"] as const) {
     const event = new KeyboardEvent(type, init);
     if (keyCode !== undefined) {
@@ -546,8 +642,17 @@ function dispatchKey(key: string): void {
         // Very old webviews: the key-only event still goes out.
       }
     }
-    target.dispatchEvent(event);
+    // Synthetic Escape must never re-enter the Back coordinator's
+    // physical-Escape listener (one press, one resolution): mark it
+    // so the listener skips it. Other synthetic keys need no mark —
+    // the coordinator only listens for Escape.
+    if (key === "Escape") markSyntheticBackEvent(event);
+    // dispatchEvent returns false when a handler preventDefaulted a
+    // cancelable event — that is the consumption signal.
+    const cancelled = !target.dispatchEvent(event);
+    if (type === "keydown" && cancelled) consumed = true;
   }
+  return consumed;
 }
 
 function currentVideo(): HTMLVideoElement | null {
@@ -996,8 +1101,11 @@ export function mountGamepad(): void {
       // In a text field the controller only gets B (blur/back) and the
       // View+Menu return-home hold — arrows and A belong to the field.
       // The gate lives in handleGamepadButtonPress; calling it for B
-      // is enough here.
+      // is enough here. R3 is routed too, so Cursor Mode can always
+      // be exited from a field on the fallback path (0.11.10 W6).
       if (justPressed(BTN_B)) handleGamepadButtonPress(BTN_B, now);
+      if (justPressed(BTN_RIGHT_THUMB))
+        handleGamepadButtonPress(BTN_RIGHT_THUMB, now);
       actionState.held = null;
       return;
     }
@@ -1012,7 +1120,8 @@ export function mountGamepad(): void {
     handleDirection(dir, now);
 
     // Every button runs the shared pipeline (same code the native
-    // XInput path calls) — see handleGamepadButtonPress.
+    // XInput path calls) — see handleGamepadButtonPress. R3 (11) is
+    // the Cursor Mode toggle (0.11.10 W6); L3 (10) stays unmapped.
     for (const index of [
       BTN_A,
       BTN_B,
@@ -1023,6 +1132,7 @@ export function mountGamepad(): void {
       BTN_LT,
       BTN_RT,
       BTN_MENU,
+      BTN_RIGHT_THUMB,
     ]) {
       if (justPressed(index)) handleGamepadButtonPress(index, now);
     }
