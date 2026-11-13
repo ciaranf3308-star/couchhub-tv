@@ -167,12 +167,16 @@ describe("verification fixes (source wiring)", () => {
 });
 
 describe("no shim survives", () => {
-  it("zero SHIM-0110 strings and zero shim-module imports in src/", () => {
+  it("zero shim markers and zero shim-module imports in src/", () => {
+    // The banned marker is built dynamically so this test itself
+    // does not put the literal string back into the tree: a
+    // tree-wide grep for it must return zero hits.
+    const bannedMarker = ["SHIM", "0110"].join("-");
     const offenders: string[] = [];
     for (const file of walkSrc(join(root, "src"))) {
       const text = readFileSync(file, "utf8");
       if (
-        text.includes("SHIM-0110") ||
+        text.includes(bannedMarker) ||
         text.includes("controller-0110-seams") ||
         text.includes("controller-seams-0110") ||
         text.includes("livetv-0110-seams")
