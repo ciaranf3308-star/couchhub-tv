@@ -6,6 +6,9 @@
 // T25–T28 (controller), and the sandbox-verifiable halves of the
 // [H] round-trip tests (T29–T31 stay open until hardware testing).
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { readFileSync } from "node:fs"
+import { join, dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { resolveBack } from "@/scripts/lib/back-handler.ts"
 import { HINT_CONFIGS } from "@/scripts/lib/couch-button-hints.ts"
 import { getLogicalView } from "@/scripts/lib/couch-focus.ts"
@@ -609,8 +612,7 @@ describe("§7.4 landing-B return (sandbox half of T29)", () => {
   })
 })
 
-describe("tune-in deep links (sandbox halves of T30/T31)", () => {
-  it("live tune: /livetv?channel=<numeric id>", () => {
+describe("tune-in deep links (sandbox halves of T30/T31)", () => {  it("live tune: /livetv?channel=<numeric id>", () => {
     const target = buildLiveTuneUrl(fixture({ title: "Man Utd v Sunderland" }))
     expect(target?.url).toBe("/livetv?channel=101")
   })
@@ -644,5 +646,40 @@ describe("tune-in deep links (sandbox halves of T30/T31)", () => {
         "pl1",
       ),
     ).toBeNull()
+  })
+})
+
+describe("channel-cache hydration (plan §2.4 gap fix)", () => {
+  it("both mounts hydrate the live/m3u cache from IndexedDB before reading channels", () => {
+    const here = dirname(fileURLToPath(import.meta.url))
+    // The in-memory channel cache is per-page-load: without
+    // hydration a fresh hub load always reads zero channels and
+    // shows the no-channels state. Both mounts must warm the
+    // cache first (the livetv-data.ts / home.ts pattern).
+    const hubSource = readFileSync(
+      join(here, "..", "src", "scripts", "followed-sports-page.ts"),
+      "utf8",
+    )
+    const hubMount = hubSource.slice(
+      hubSource.indexOf("async function resolvePlaylist"),
+    )
+    expect(hubMount).toContain('hydrateCache(runtime.playlistId, "live")')
+    expect(hubMount).toContain('hydrateCache(runtime.playlistId, "m3u")')
+    expect(
+      hubMount.indexOf("hydrateCache(runtime.playlistId"),
+    ).toBeLessThan(hubMount.indexOf("readCachedLiveChannels("))
+
+    const followedSource = readFileSync(
+      join(here, "..", "src", "scripts", "followed-page.ts"),
+      "utf8",
+    )
+    const cardMount = followedSource.slice(
+      followedSource.indexOf("async function mountSportsEntryCard"),
+    )
+    expect(cardMount).toContain('hydrateCache(playlistId, "live")')
+    expect(cardMount).toContain('hydrateCache(playlistId, "m3u")')
+    expect(cardMount.indexOf("hydrateCache(playlistId")).toBeLessThan(
+      cardMount.indexOf("readCachedLiveChannels("),
+    )
   })
 })

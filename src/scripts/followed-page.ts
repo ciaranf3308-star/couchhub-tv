@@ -54,6 +54,7 @@ import {
   fallbackMarkFor,
 } from "@/scripts/lib/couch-image.ts"
 import { getActiveEntry } from "@/scripts/lib/creds.js"
+import { hydrate as hydrateCache } from "@/scripts/lib/cache.js"
 import {
   EPG_LOADED_EVENT,
   EPG_SOURCE_STATUS_EVENT,
@@ -639,6 +640,14 @@ async function mountSportsEntryCard(): Promise<void> {
     const entry = await getActiveEntry()
     if (!entry?._id) return
     playlistId = String(entry._id)
+    // Warm the channel cache from IndexedDB before reading it (see
+    // the hub mount: the in-memory cache is per-page-load). A local
+    // read, not a fetch and not an EPG load — the card still never
+    // triggers an EPG load (§2.4).
+    await Promise.allSettled([
+      hydrateCache(playlistId, "live"),
+      hydrateCache(playlistId, "m3u"),
+    ])
     const rawChannels = readCachedLiveChannels(playlistId)
     channels = (Array.isArray(rawChannels) ? rawChannels : []).filter(
       (channel): channel is SportsScanChannel =>

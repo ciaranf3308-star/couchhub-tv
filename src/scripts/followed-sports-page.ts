@@ -41,6 +41,7 @@ import {
   getActiveEntry,
   loadCreds,
 } from "@/scripts/lib/creds.js"
+import { hydrate as hydrateCache } from "@/scripts/lib/cache.js"
 import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.js"
 import {
   enrichProgramme,
@@ -1186,6 +1187,16 @@ export function mountSportsHubPage(): void {
         runtime.playlistId,
         SPORTS_HUB_ROUTE,
       )
+      // Warm the channel cache from IndexedDB before reading it:
+      // the in-memory cache is per-page-load, so a fresh hub load
+      // would otherwise always read zero channels. Same hydration
+      // livetv-data.ts / home.ts perform before their reads — a
+      // local read, not a fetch, and not an EPG load.
+      await Promise.allSettled([
+        hydrateCache(runtime.playlistId, "live"),
+        hydrateCache(runtime.playlistId, "m3u"),
+      ])
+      if (!mounted) return
       const rawChannels = readCachedLiveChannels(runtime.playlistId)
       runtime.channels = (Array.isArray(rawChannels) ? rawChannels : []).filter(
         (channel): channel is SportsScanChannel =>
