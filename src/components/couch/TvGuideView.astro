@@ -1053,12 +1053,24 @@ const nowMs = Date.now();
     // import of a file another worker owns. Only the featured
     // programme is ever enriched (never a list, never on scroll);
     // a 350ms settle delay keeps arrowing through rows from firing
-    // a lookup per row. Art is used only when the module returns a
-    // non-placeholder source at confidence >= 0.6; anything else
-    // keeps the channel-branded placeholder (logo on a burgundy
-    // gradient, never a giant initial letter).
+    // a lookup per row. 0.11.12 DISPLAY RULE (brief §12): when the
+    // resolver reports an artworkKind, usableArtUrl trusts it — a
+    // displayable kind shows its wide art regardless of identity
+    // confidence (a confidently classified snooker title gets the
+    // snooker photo even though no exact event identity is
+    // established), and channel-branding / placeholder kinds never
+    // paint as featured art. Without a kind (legacy resolver
+    // output) the confidence gate below still applies; anything
+    // unusable keeps the channel-branded placeholder (logo on a
+    // burgundy gradient, never a giant initial letter).
     const ENRICHMENT_GLOB_KEY = "/src/scripts/lib/livetv-enrichment.ts";
     const FEATURED_ART_CONFIDENCE_MIN = 0.6;
+    const DISPLAYABLE_FEATURED_ART_KINDS = new Set([
+      "exact-programme",
+      "exact-sports-event",
+      "league-team",
+      "generic-sport",
+    ]);
     /** undefined = unresolved, null = module absent. */
     let enrichmentLoader = undefined;
     function getEnrichmentLoader() {
@@ -1080,9 +1092,22 @@ const nowMs = Date.now();
       }
       return enrichmentLoader;
     }
-    /** A usable wide-art URL from an enrichment result, or null. */
+    /** A usable wide-art URL from an enrichment result, or null.
+     *  Wide slot: backdrop or episode still only, never a poster.
+     *  Self-contained (only the two constants above): the 0.11.12
+     *  consumer tests evaluate this exact function source. */
     function usableArtUrl(art) {
-      if (!art || art.source === "placeholder") return null;
+      if (!art) return null;
+      const kind = art.artworkKind;
+      if (kind != null) {
+        // Resolver-reported kind: trust it. Displayable kinds show
+        // regardless of identity confidence; channel-branding /
+        // placeholder kinds never paint as featured art.
+        if (!DISPLAYABLE_FEATURED_ART_KINDS.has(kind)) return null;
+        return art.backdropUrl || art.stillUrl || null;
+      }
+      // Legacy (no kind): the pre-0.11.12 confidence gate.
+      if (art.source === "placeholder") return null;
       if (
         typeof art.confidence !== "number" ||
         art.confidence < FEATURED_ART_CONFIDENCE_MIN

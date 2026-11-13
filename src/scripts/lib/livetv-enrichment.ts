@@ -55,6 +55,10 @@ export interface ProgrammeArtwork {
   matchedTitle: string | null
   synopsis: string | null
   genres: string[]
+  // SHIM-0112: type-only, W1 owns the real definition
+  artworkKind?: "exact-programme" | "exact-sports-event" | "league-team" | "generic-sport" | "channel-branding" | "placeholder"
+  // SHIM-0112: type-only, W1 owns the real definition
+  provenance?: { source: string; attribution?: string; licence?: string; licenceUrl?: string; sourcePage?: string }
 }
 
 export interface EnrichProgrammeRequest {

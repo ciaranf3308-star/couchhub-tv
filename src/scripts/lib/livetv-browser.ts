@@ -614,6 +614,42 @@ export function browserSortLabel(sort: BrowserSort): string {
   }
 }
 
+/**
+ * 0.11.12 DISPLAY RULE (brief §11): the artwork kinds the detail
+ * panel may show. The resolver (W1) assigns the kind; this consumer
+ * trusts it and never re-derives classification. Generic-sport art
+ * is NOT gated on identity confidence — a confidently classified
+ * hockey title gets the hockey photo even though no exact event
+ * identity is established — while channel-branding / placeholder
+ * kinds never paint as programme art. A missing kind is legacy
+ * resolver output: the pre-0.11.12 slot order applies. (Mirrored in
+ * livetv-landing.ts, TvGuideView.astro and TvQuickSurf.astro;
+ * post-merge, one shared predicate in the resolver module is the
+ * natural home for this.)
+ */
+export const DISPLAYABLE_PROGRAMME_ARTWORK_KINDS: ReadonlyArray<
+  NonNullable<ProgrammeArtwork["artworkKind"]>
+> = ["exact-programme", "exact-sports-event", "league-team", "generic-sport"];
+
+/**
+ * The detail-panel artwork URL for one enrichment result, or null.
+ * The panel is a 16:9 slot: backdrop first, then the episode still,
+ * then the poster (the pre-0.11.12 order — a poster-only TMDb
+ * match still paints). Kind-gated per the DISPLAY RULE above, so
+ * a channel logo carried as channel-branding art never fills the
+ * panel; the branded placeholder stands instead.
+ */
+export function detailArtworkUrl(
+  art: ProgrammeArtwork | null | undefined,
+): string | null {
+  if (!art) return null;
+  const kind = art.artworkKind;
+  if (kind != null && !DISPLAYABLE_PROGRAMME_ARTWORK_KINDS.includes(kind)) {
+    return null;
+  }
+  return art.backdropUrl ?? art.stillUrl ?? art.posterUrl ?? null;
+}
+
 export interface ChannelBrowserOptions {
   channels: LivetvChannel[];
   /** Id this instance answers to for `livetv:browser-category` events (Home uses "home"). */
@@ -1337,7 +1373,7 @@ export function mountChannelBrowser(
     const seq = ++detailArtSeq;
     const paint = (art: ProgrammeArtwork | null): void => {
       if (seq !== detailArtSeq || destroyed) return;
-      const url = art?.backdropUrl ?? art?.stillUrl ?? art?.posterUrl ?? null;
+      const url = detailArtworkUrl(art);
       // Same artwork already painted: leave the <img> alone (a
       // rebuild per scroll frame would re-fetch and flicker).
       if (artEl.dataset.artUrl !== (url ?? "")) {
