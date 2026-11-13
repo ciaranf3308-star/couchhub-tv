@@ -152,7 +152,7 @@ function normaliseDetail(
 }
 
 /**
- * Focus a real channel row after a filter/browse action: the
+ * Focus a real channel row after a filter or browse action: the
  * preferred channel when it is visible, else the first visible
  * channel (recents keep their actual most-recent-first order —
  * getVisibleChannels() already returns it). An empty list falls
