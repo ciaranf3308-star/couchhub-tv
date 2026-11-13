@@ -134,4 +134,69 @@ describe("sports artwork manifest (0.11.12)", () => {
     expect(page).toContain("SPORT_ARTWORK_MANIFEST");
     expect(page).toContain("Sports photography");
   });
+
+  it("subjects, where present, are well-formed normalised match keys", () => {
+    const keyPattern = /^[a-z0-9]+( [a-z0-9]+)*$/;
+    for (const entry of SPORT_ARTWORK_MANIFEST) {
+      if (entry.subjects === undefined) continue;
+      expect(Array.isArray(entry.subjects), `${entry.path} subjects`).toBe(true);
+      expect(entry.subjects.length, `${entry.path} subjects non-empty`).toBeGreaterThan(0);
+      expect(new Set(entry.subjects).size, `${entry.path} subjects unique`).toBe(entry.subjects.length);
+      for (const key of entry.subjects) {
+        expect(key, `${entry.path} subject ${JSON.stringify(key)}`).toMatch(keyPattern);
+      }
+    }
+  });
+
+  it("team/venue coverage (0.11.12 W5): every Premier League club, the Original Six, and the key venues", () => {
+    const covered = new Set(SPORT_ARTWORK_MANIFEST.flatMap((entry) => entry.subjects ?? []));
+    const withSubjects = SPORT_ARTWORK_MANIFEST.filter(
+      (entry) => entry.subjects && entry.subjects.length > 0,
+    ).length;
+    expect(withSubjects).toBeGreaterThanOrEqual(40);
+    const required = [
+      // Premier League (canonical names).
+      "arsenal",
+      "aston villa",
+      "bournemouth",
+      "brentford",
+      "brighton and hove albion",
+      "burnley",
+      "chelsea",
+      "crystal palace",
+      "everton",
+      "fulham",
+      "leeds united",
+      "liverpool",
+      "manchester city",
+      "manchester united",
+      "newcastle united",
+      "nottingham forest",
+      "sunderland",
+      "tottenham hotspur",
+      "west ham united",
+      "wolverhampton wanderers",
+      // NHL Original Six.
+      "toronto maple leafs",
+      "boston bruins",
+      "chicago blackhawks",
+      "detroit red wings",
+      "montreal canadiens",
+      "new york rangers",
+      // Venues / competitions.
+      "world snooker championship",
+      "crucible theatre",
+      "premier league darts",
+      "pdc world darts championship",
+      "monaco grand prix",
+      "british grand prix",
+      "wimbledon",
+      "motogp",
+      "six nations",
+      "twickenham",
+    ];
+    for (const key of required) {
+      expect(covered.has(key), `no entry depicts ${key}`).toBe(true);
+    }
+  });
 });
