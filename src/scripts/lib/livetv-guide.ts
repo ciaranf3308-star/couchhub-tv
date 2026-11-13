@@ -59,13 +59,17 @@ export interface RawGuideProgramme {
  * Clean a channel's raw programme list for the grid. Drops entries
  * with missing / non-finite / inverted times (never crash, never
  * invent a duration or a title — an untitled programme renders as
- * "No programme information"). Result is sorted by start, then stop.
+ * "No programme information"). Exact duplicates (same start, stop
+ * and title — the same listing twice in one EPG file) collapse to
+ * one entry; programmes that merely share a start time are kept.
+ * Non-array input (a corrupt cached row) yields [] instead of
+ * throwing out of the for...of. Result is sorted by start, then stop.
  */
 export function sanitiseGuideProgrammes(
   channelId: string,
   programmes: ReadonlyArray<RawGuideProgramme> | null | undefined,
 ): GuideProgramme[] {
-  if (!programmes) return [];
+  if (!Array.isArray(programmes)) return [];
   const cleaned: GuideProgramme[] = [];
   for (const raw of programmes) {
     if (!raw || typeof raw !== "object") continue;
@@ -96,7 +100,22 @@ export function sanitiseGuideProgrammes(
     });
   }
   cleaned.sort((a, b) => a.startMs - b.startMs || a.stopMs - b.stopMs);
-  return cleaned;
+  // Exact duplicates are adjacent after the sort (same start + stop
+  // sorts together); drop the repeats, keep everything else.
+  const deduped: GuideProgramme[] = [];
+  for (const programme of cleaned) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      prev.startMs === programme.startMs &&
+      prev.stopMs === programme.stopMs &&
+      prev.title === programme.title
+    ) {
+      continue;
+    }
+    deduped.push(programme);
+  }
+  return deduped;
 }
 
 /**
@@ -119,6 +138,18 @@ export function programmesForGuideDay(
  * anywhere in the guide, within [today - maxPastDays, today +
  * maxFutureDays]. The Guide only offers day navigation where EPG
  * exists — days with no data are never offered.
+ *
+ * Performance (0.11.11 W3): the old loop constructed two Dates per
+ * programme — ~900ms at 15k channels x 150 programmes on every EPG
+ * load. Sanitised lists are sorted by start, so within one channel
+ * consecutive programmes almost always share a local day: the
+ * current day and its exact next-midnight boundary are reused
+ * while programme starts stay monotonic and inside the boundary.
+ * The reuse is exact, not approximate — the boundary comes from
+ * the real calendar (a local day is 23, 24 or 25 hours), and any
+ * programme outside [dayStart, nextMidnight), or any list that is
+ * not sorted, falls back to the exact per-programme computation.
+ * Output is identical to the naive loop for every input order.
  */
 export function availableGuideDays(
   programmesByChannel: ReadonlyMap<string, ReadonlyArray<GuideProgramme>>,
@@ -130,10 +161,34 @@ export function availableGuideDays(
   const latest = startOfLocalDayMs(nowMs) + maxFutureDays * GUIDE_DAY_MS;
   const days = new Set<number>();
   for (const programmes of programmesByChannel.values()) {
+    let runDayStart: number | null = null;
+    let runNextMidnight = 0;
+    let prevStartMs: number | null = null;
     for (const programme of programmes) {
-      const day = startOfLocalDayMs(programme.startMs);
+      let day: number;
+      if (
+        runDayStart !== null &&
+        prevStartMs !== null &&
+        programme.startMs >= prevStartMs &&
+        programme.startMs < runNextMidnight
+      ) {
+        day = runDayStart;
+      } else {
+        day = startOfLocalDayMs(programme.startMs);
+        runDayStart = day;
+        runNextMidnight = startOfLocalDayMs(day + GUIDE_DAY_MS);
+        if (runNextMidnight <= day) {
+          // 25-hour day: day + 24h is still this day; step further.
+          runNextMidnight = startOfLocalDayMs(day + GUIDE_DAY_MS + 3_600_000);
+        }
+      }
+      prevStartMs = programme.startMs;
       if (day >= earliest && day <= latest) days.add(day);
-      const endDay = startOfLocalDayMs(programme.stopMs - 1);
+      const endMs = programme.stopMs - 1;
+      const endDay =
+        endMs >= day && endMs < runNextMidnight
+          ? day
+          : startOfLocalDayMs(endMs);
       if (endDay >= earliest && endDay <= latest) days.add(endDay);
     }
   }
