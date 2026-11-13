@@ -59,13 +59,17 @@ export interface RawGuideProgramme {
  * Clean a channel's raw programme list for the grid. Drops entries
  * with missing / non-finite / inverted times (never crash, never
  * invent a duration or a title — an untitled programme renders as
- * "No programme information"). Result is sorted by start, then stop.
+ * "No programme information"). Exact duplicates (same start, stop
+ * and title — the same listing twice in one EPG file) collapse to
+ * one entry; programmes that merely share a start time are kept.
+ * Non-array input (a corrupt cached row) yields [] instead of
+ * throwing out of the for...of. Result is sorted by start, then stop.
  */
 export function sanitiseGuideProgrammes(
   channelId: string,
   programmes: ReadonlyArray<RawGuideProgramme> | null | undefined,
 ): GuideProgramme[] {
-  if (!programmes) return [];
+  if (!Array.isArray(programmes)) return [];
   const cleaned: GuideProgramme[] = [];
   for (const raw of programmes) {
     if (!raw || typeof raw !== "object") continue;
@@ -96,7 +100,22 @@ export function sanitiseGuideProgrammes(
     });
   }
   cleaned.sort((a, b) => a.startMs - b.startMs || a.stopMs - b.stopMs);
-  return cleaned;
+  // Exact duplicates are adjacent after the sort (same start + stop
+  // sorts together); drop the repeats, keep everything else.
+  const deduped: GuideProgramme[] = [];
+  for (const programme of cleaned) {
+    const prev = deduped[deduped.length - 1];
+    if (
+      prev &&
+      prev.startMs === programme.startMs &&
+      prev.stopMs === programme.stopMs &&
+      prev.title === programme.title
+    ) {
+      continue;
+    }
+    deduped.push(programme);
+  }
+  return deduped;
 }
 
 /**
@@ -119,6 +138,18 @@ export function programmesForGuideDay(
  * anywhere in the guide, within [today - maxPastDays, today +
  * maxFutureDays]. The Guide only offers day navigation where EPG
  * exists — days with no data are never offered.
+ *
+ * Performance (0.11.11 W3): the old loop constructed two Dates per
+ * programme — ~900ms at 15k channels x 150 programmes on every EPG
+ * load. Sanitised lists are sorted by start, so within one channel
+ * consecutive programmes almost always share a local day: the
+ * current day and its exact next-midnight boundary are reused
+ * while programme starts stay monotonic and inside the boundary.
+ * The reuse is exact, not approximate — the boundary comes from
+ * the real calendar (a local day is 23, 24 or 25 hours), and any
+ * programme outside [dayStart, nextMidnight), or any list that is
+ * not sorted, falls back to the exact per-programme computation.
+ * Output is identical to the naive loop for every input order.
  */
 export function availableGuideDays(
   programmesByChannel: ReadonlyMap<string, ReadonlyArray<GuideProgramme>>,
@@ -130,10 +161,34 @@ export function availableGuideDays(
   const latest = startOfLocalDayMs(nowMs) + maxFutureDays * GUIDE_DAY_MS;
   const days = new Set<number>();
   for (const programmes of programmesByChannel.values()) {
+    let runDayStart: number | null = null;
+    let runNextMidnight = 0;
+    let prevStartMs: number | null = null;
     for (const programme of programmes) {
-      const day = startOfLocalDayMs(programme.startMs);
+      let day: number;
+      if (
+        runDayStart !== null &&
+        prevStartMs !== null &&
+        programme.startMs >= prevStartMs &&
+        programme.startMs < runNextMidnight
+      ) {
+        day = runDayStart;
+      } else {
+        day = startOfLocalDayMs(programme.startMs);
+        runDayStart = day;
+        runNextMidnight = startOfLocalDayMs(day + GUIDE_DAY_MS);
+        if (runNextMidnight <= day) {
+          // 25-hour day: day + 24h is still this day; step further.
+          runNextMidnight = startOfLocalDayMs(day + GUIDE_DAY_MS + 3_600_000);
+        }
+      }
+      prevStartMs = programme.startMs;
       if (day >= earliest && day <= latest) days.add(day);
-      const endDay = startOfLocalDayMs(programme.stopMs - 1);
+      const endMs = programme.stopMs - 1;
+      const endDay =
+        endMs >= day && endMs < runNextMidnight
+          ? day
+          : startOfLocalDayMs(endMs);
       if (endDay >= earliest && endDay <= latest) days.add(endDay);
     }
   }
@@ -446,4 +501,116 @@ export function guideCellViewModel(
     watchLive: state === "now",
     canCatchup: action !== "none",
   };
+}
+
+// ── Guide failure states (0.11.11 W4, shared with W3) ───────────
+//
+// The five data conditions a Guide panel can honestly be in.
+// W3 owns the data pipeline and defines the failure signal; this
+// classifier renders from conditions the Guide can already
+// observe, so panels never show a generic blank. The `loadFailed`
+// input is the seam: W3's signal module defines it and
+// integration wired it into renderNow — nothing else changes.
+// Precedence is fixed: a genuine failure
+// beats loading, loading beats an empty catalogue, an empty
+// catalogue beats an unmapped scope, and an unmapped scope beats
+// an empty range. "ready" means rows exist (message is "").
+
+export type GuideDataStateId =
+  | "no-channels"
+  | "loading"
+  | "no-mapping"
+  | "no-programmes"
+  | "failure"
+  | "ready";
+
+export interface GuideDataStateInput {
+  /** Channels in the current scope (after category filtering). */
+  channelCount: number;
+  /** Scope channels with at least one matched programme. */
+  mappedChannelCount: number;
+  /** Rows the panel would show. */
+  rowCount: number;
+  /** True while activation / the EPG load is still in flight. */
+  loading: boolean;
+  /** True when the EPG load genuinely failed (W3 signal seam). */
+  loadFailed: boolean;
+  /** Human scope label, e.g. "Favourites" (default "this scope"). */
+  scopeLabel?: string;
+  /** Human range label, e.g. "on now" (default "in this range"). */
+  rangeLabel?: string;
+}
+
+export interface GuideDataState {
+  state: GuideDataStateId;
+  /** Honest panel text ("" when ready — the rows speak). */
+  message: string;
+}
+
+export function guideDataState(input: GuideDataStateInput): GuideDataState {
+  const scope = (input.scopeLabel ?? "").trim() || "this scope";
+  const range = (input.rangeLabel ?? "").trim() || "in this range";
+  const channels = Math.max(0, Math.floor(input.channelCount) || 0);
+  const mapped = Math.max(0, Math.floor(input.mappedChannelCount) || 0);
+  const rows = Math.max(0, Math.floor(input.rowCount) || 0);
+  if (input.loadFailed) {
+    return {
+      state: "failure",
+      message:
+        "The programme guide couldn't be loaded. Check the connection and try Live TV again — no listings are shown rather than guessed ones.",
+    };
+  }
+  if (input.loading) {
+    return { state: "loading", message: "Loading the programme guide…" };
+  }
+  if (channels === 0) {
+    return {
+      state: "no-channels",
+      message: `No channels in ${scope}. Choose a different scope to see listings.`,
+    };
+  }
+  if (mapped === 0) {
+    return {
+      state: "no-mapping",
+      message:
+        `None of the channels in ${scope} matched programme data, so there is nothing to list ${range}. ` +
+        "Change the scope to see other channels.",
+    };
+  }
+  if (rows === 0) {
+    return {
+      state: "no-programmes",
+      message: `No programmes listed ${range}.`,
+    };
+  }
+  return { state: "ready", message: "" };
+}
+
+// ── By Channel empty text (0.11.11 W4, §13) ─────────────────────
+//
+// A channel with no EPG data at all is NOT the same as a channel
+// with programmes on other days: the first reads exactly "No
+// schedule available for this channel." and the channel stays
+// listed and selectable — it is never hidden for lacking data.
+
+export interface ChannelScheduleEmptyInput {
+  /** Channels in the current scope (0 = empty category). */
+  visibleChannelCount: number;
+  /** True when the selected channel has any programmes at all. */
+  channelHasAnyProgrammes: boolean;
+  /** True when a search query is active. */
+  searching: boolean;
+}
+
+export function channelScheduleEmptyMessage(
+  input: ChannelScheduleEmptyInput,
+): string {
+  if (input.visibleChannelCount <= 0) return "No channels in this category.";
+  if (!input.channelHasAnyProgrammes) {
+    return "No schedule available for this channel.";
+  }
+  if (input.searching) {
+    return "No programmes match this search for this channel on this day.";
+  }
+  return "No programmes listed for this channel on this day.";
 }

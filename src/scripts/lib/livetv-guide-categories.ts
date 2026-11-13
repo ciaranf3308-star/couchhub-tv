@@ -292,6 +292,29 @@ export function guideCategoryValueToDrawer(
   return { groupId: selection.groupId, subcategoryId: selection.subcategoryId };
 }
 
+/**
+ * The Guide's FIRST scope (0.11.11 W4, §11): On Now must not
+ * default to the exhaustive catalogue — at 15,319 channels that
+ * is an endless list the user never asked for. Start with the
+ * most familiar non-empty scope instead: Favourites when the
+ * user has any, else Recently Watched when there is history,
+ * else All Channels. All Channels stays one deliberate drawer
+ * selection away, and an explicit user choice always wins over
+ * this default (the Guide only applies it once, before any
+ * explicit selection). Counts come from the adapter's own
+ * resolution groups — never a second count.
+ */
+export function pickDefaultGuideScope(input: {
+  favouriteCount: number;
+  recentCount: number;
+}): GuideCategoryValue {
+  const favourites = Math.max(0, Math.floor(input.favouriteCount) || 0);
+  const recents = Math.max(0, Math.floor(input.recentCount) || 0);
+  if (favourites > 0) return { kind: "favourites" };
+  if (recents > 0) return { kind: "recents" };
+  return { kind: "all" };
+}
+
 /** True when two selections name the same filter. */
 export function sameGuideCategoryValue(
   a: GuideCategoryValue,
