@@ -38,6 +38,7 @@ import {
   scrollFocusedIntoView,
   setLogicalView,
 } from "@/scripts/lib/couch-focus.ts";
+import { repaintHomePreserving } from "@/scripts/lib/home-repaint.ts";
 import {
   BACK_PRIORITY,
   registerBackLayer,
@@ -757,73 +758,13 @@ export function repaintPicks(
   repaintHomeShelves(root, model, { onRefreshPicks });
 }
 
-/**
- * Focus/scroll preservation for shelf repaints (§24, W1 contract):
- * capture the focused card (rail + couch key), the page scroll, and
- * every rail row's horizontal scroll; repaint; restore all three.
- * Focus lands on the same card when it survives, the nearest
- * surviving card in the same rail when it doesn't, and never jumps
- * to an unrelated control. Builds on the shared couch-focus memory
- * (data-couch-key / rail) — no parallel focus mechanism.
- */
-export function preserveFocusAndScroll(root: HTMLElement, repaint: () => void): void {
-  const doc = root.ownerDocument ?? document;
-  const active = doc.activeElement as HTMLElement | null;
-  const focusedKey =
-    active && root.contains(active) ? active.getAttribute("data-couch-key") : null;
-  const focusedRail = active?.closest?.("[data-nylah-rail]")?.getAttribute("data-nylah-rail") ?? null;
-  const pageScrollY = typeof window !== "undefined" ? window.scrollY : 0;
-  const railScrolls = new Map<string, number>();
-  for (const row of root.querySelectorAll("[data-nylah-rail] .rs-rail__row")) {
-    const rail = row.closest("[data-nylah-rail]")?.getAttribute("data-nylah-rail");
-    if (rail) railScrolls.set(rail, (row as HTMLElement).scrollLeft || 0);
-  }
-  const focusedIndex = (() => {
-    if (!active || !focusedRail) return -1;
-    const railEl = root.querySelector(`[data-nylah-rail="${escapeAttr(focusedRail)}"]`);
-    if (!railEl) return -1;
-    return couchRailItems(railEl).indexOf(active);
-  })();
-
-  repaint();
-
-  for (const [rail, left] of railScrolls) {
-    const row = root.querySelector(
-      `[data-nylah-rail="${escapeAttr(rail)}"] .rs-rail__row`,
-    ) as HTMLElement | null;
-    if (row) row.scrollLeft = left;
-  }
-  if (typeof window !== "undefined" && window.scrollY !== pageScrollY) {
-    window.scrollTo(0, pageScrollY);
-  }
-  if (!focusedKey) return;
-  const after = doc.activeElement as HTMLElement | null;
-  if (after && after !== doc.body && after.isConnected && root.contains(after)) return;
-  let target: HTMLElement | null = null;
-  if (focusedRail) {
-    const railEl = root.querySelector(`[data-nylah-rail="${escapeAttr(focusedRail)}"]`);
-    if (railEl) {
-      const items = couchRailItems(railEl);
-      target =
-        items.find((item) => item.getAttribute("data-couch-key") === focusedKey) ??
-        items[Math.min(Math.max(focusedIndex, 0), items.length - 1)] ??
-        null;
-    }
-  }
-  target ??= root.querySelector<HTMLElement>(`[data-couch-key="${escapeAttr(focusedKey)}"]`);
-  if (target) {
-    target.focus({ preventScroll: true });
-    scrollFocusedIntoView(target);
-  }
-}
-
 /** Repaint the recommendation shelves + featured from a rebuilt model, preserving focus/scroll. */
 export function repaintHomeShelves(
   root: HTMLElement,
   model: MoviesHomeModel,
   opts: PaintMoviesHomeOptions = {},
 ): void {
-  preserveFocusAndScroll(root, () => {
+  repaintHomePreserving(root, () => {
     paintFeatured($(ID.featured, root), model.featured, opts.onRefreshPicks);
     paintAiShelf($(ID.ai, root), model, opts);
     paintDiscoverEntries($(ID.discover, root), opts);
@@ -911,7 +852,7 @@ export function repaintAiShelf(
   model: MoviesHomeModel,
   opts: PaintMoviesHomeOptions = {},
 ): void {
-  preserveFocusAndScroll(root, () => {
+  repaintHomePreserving(root, () => {
     paintAiShelf($(ID.ai, root), model, opts);
     try {
       armTvImageFallbacks(document);
@@ -926,7 +867,7 @@ export function repaintDiscoverResults(
   root: HTMLElement,
   results: MoviesDiscoverResults | null,
 ): HTMLElement | null {
-  preserveFocusAndScroll(root, () => {
+  repaintHomePreserving(root, () => {
     paintDiscoverResults($(ID.discoverResults, root), results);
     try {
       armTvImageFallbacks(document);

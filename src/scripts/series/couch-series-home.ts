@@ -30,6 +30,7 @@
 // which routes LB/RB to PageUp/PageDown on Home.
 
 import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts";
+import { repaintHomePreserving } from "@/scripts/lib/home-repaint.ts";
 import {
   BACK_PRIORITY,
   registerBackLayer,
@@ -557,14 +558,6 @@ async function autoRefreshSeriesAi(): Promise<void> {
 
 async function renderHome(gen: number): Promise<void> {
   if (!homeRoot || !catalog) return;
-  // Focus preservation (§20): a follow/progress refresh re-renders
-  // the shelves with fresh nodes. Remember the focused card so it
-  // can be re-focused after paint instead of stranding the viewer.
-  const activeBefore = document.activeElement as HTMLElement | null;
-  const prevKey =
-    activeBefore && homeRoot.contains(activeBefore)
-      ? activeBefore.getAttribute("data-couch-key")
-      : null;
   const { groups, subs } = await loadFollowedData(catalog.playlistId);
   if (gen !== generation) return;
   const { inputs, hasProgressIds } = buildContinueInputs(catalog.rows, catalog.playlistId);
@@ -591,14 +584,23 @@ async function renderHome(gen: number): Promise<void> {
     renderSeriesHomeState(homeRoot, "empty");
     return;
   }
-  renderSeriesHome(homeRoot, sections, {
-    playlistId: catalog.playlistId,
-    onAiAction: () => void onSeriesAiAction(),
-    aiBusy: homeAiBusy,
-    onDiscoverPrompt: (prompt) => void onSeriesDiscoverPrompt(prompt),
-    activeDiscoverPromptId,
-  });
+  // Focus/scroll preservation (§24): the wholesale re-render runs
+  // inside W1's withPreservedFocus (via repaintHomePreserving,
+  // which adds rail scrollLeft) — focus stays on the same card, or
+  // the same rail/index, and is never stolen. The capture happens
+  // here, at mutation time, after the awaits above.
+  repaintHomePreserving(homeRoot, () =>
+    renderSeriesHome(homeRoot!, sections, {
+      playlistId: catalog!.playlistId,
+      onAiAction: () => void onSeriesAiAction(),
+      aiBusy: homeAiBusy,
+      onDiscoverPrompt: (prompt) => void onSeriesDiscoverPrompt(prompt),
+      activeDiscoverPromptId,
+    }),
+  );
   if (focusDiscoverResults) {
+    // User-initiated prompt tap: intentionally move focus to the
+    // first result AFTER preservation restored the old position.
     focusDiscoverResults = false;
     const firstResult = homeRoot.querySelector<HTMLElement>(
       '[data-nylah-rail="series-home-discover-results"] [data-nylah-item]',
@@ -607,15 +609,6 @@ async function renderHome(gen: number): Promise<void> {
       firstResult.focus({ preventScroll: false });
       restoreCouchFocus();
       return;
-    }
-  }
-  if (prevKey) {
-    const activeAfter = document.activeElement as HTMLElement | null;
-    if (!activeAfter || activeAfter === document.body || !activeAfter.isConnected) {
-      const target = homeRoot.querySelector<HTMLElement>(
-        `[data-couch-key="${escapeAttr(prevKey)}"]`,
-      );
-      if (target) target.focus({ preventScroll: true });
     }
   }
   restoreCouchFocus();
