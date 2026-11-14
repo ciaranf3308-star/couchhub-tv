@@ -492,6 +492,13 @@ export interface RequestHomeAiPicksInput {
   constraints?: { genres?: string[]; maxRuntimeMinutes?: number; mood?: string };
   /** Request-type dimension for the cache key. */
   requestType?: string;
+  /**
+   * Skip the fresh-cache shortcut and send a new request (explicit
+   * "Request fresh AI picks"). The result still overwrites the cache.
+   * Default false: an explicit Generate with a fresh cache answers
+   * from cache with zero requests.
+   */
+  force?: boolean;
 }
 
 export interface RequestHomeAiPicksDeps {
@@ -561,15 +568,17 @@ export async function requestHomeAiPicks(
   };
   const cacheKey = homeAiCacheKey(identity);
 
-  const cached = readCachedHomeAiPicks(identity, { nowMs, store: deps.store });
-  if (cached) {
-    return {
-      picks: cached.picks,
-      source: "cached-ai",
-      model: cached.model || undefined,
-      note: homeAiSourceNote("cached-ai"),
-      requestSent: false,
-    };
+  if (!input.force) {
+    const cached = readCachedHomeAiPicks(identity, { nowMs, store: deps.store });
+    if (cached) {
+      return {
+        picks: cached.picks,
+        source: "cached-ai",
+        model: cached.model || undefined,
+        note: homeAiSourceNote("cached-ai"),
+        requestSent: false,
+      };
+    }
   }
 
   if (!aiConfigured(deps)) {
