@@ -455,6 +455,25 @@ export function setAiAutoRequests(auto: boolean): void {
   writeLS(AUTO_REQUESTS_KEY, auto ? "1" : "0")
 }
 
+const HOME_AUTO_REFRESH_KEY = "xt_ai_home_auto_refresh"
+
+/**
+ * Automatic refresh of Movies/Series Home AI picks (0.11.14, §16).
+ * Default OFF. This is a SEPARATE preference from getAiAutoRequests()
+ * (automatic requests on Discover search submit) and must never be
+ * conflated with it: enabling search-submit automation does NOT
+ * authorise Home background requests, and vice versa. When on, Home
+ * refreshes at most once per content type per ~24h, serving valid
+ * cached picks meanwhile (see home-picks.ts decideHomeAiAutoRefresh).
+ */
+export function getAiHomeAutoRefresh(): boolean {
+  return readLS(HOME_AUTO_REFRESH_KEY) === "1"
+}
+
+export function setAiHomeAutoRefresh(auto: boolean): void {
+  writeLS(HOME_AUTO_REFRESH_KEY, auto ? "1" : "0")
+}
+
 export type AiProviderPreset = "openai" | "other"
 
 export function getAiProvider(): AiProviderPreset {
