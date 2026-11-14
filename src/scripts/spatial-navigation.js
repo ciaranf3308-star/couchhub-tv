@@ -26,7 +26,12 @@
     rememberSource: false,
     disabled: false,
     defaultElement: "", // <extSelector> except "@" syntax.
-    enterTo: "", // '', 'last-focused', 'default-element'
+    enterTo: "", // '', 'last-focused', 'default-element',
+    // 'nearest-column' (0.11.14 §3: on directional entry into the
+    // section, pick the element in the requested direction whose
+    // perpendicular centre is closest to the source's centre —
+    // column preservation across sections, instead of the first
+    // arbitrary DOM element or the geometrically closest centre).
     leaveFor: null, // {left: <extSelector>, right: <extSelector>,
     //  up: <extSelector>, down: <extSelector>}
     restrict: "self-first", // 'self-first', 'self-only', 'none'
@@ -623,6 +628,52 @@
     return lastFocusedElement
   }
 
+  // 0.11.14 (§3): column-preserving section entry. Among `candidates`
+  // (the target section's navigable elements), pick the one in the
+  // requested direction whose centre is closest to the source's
+  // centre along the PERPENDICULAR axis (x for up/down, y for
+  // left/right); ties resolve to the nearest element along the
+  // direction of travel. Returns null when no candidate lies in the
+  // requested direction, so the caller keeps the geometric result.
+  // Only used when the target section sets enterTo:
+  // "nearest-column"; every other enterTo value is untouched.
+  function getNearestColumnElement(target, direction, candidates) {
+    var targetRect = getRect(target)
+    var best = null
+    var bestPerp = Infinity
+    var bestAlong = Infinity
+    for (var i = 0; i < candidates.length; i++) {
+      var rect = getRect(candidates[i])
+      var perp, along, inDirection
+      if (direction === "down") {
+        inDirection = rect.center.y > targetRect.center.y
+        perp = Math.abs(rect.center.x - targetRect.center.x)
+        along = rect.top - targetRect.bottom
+      } else if (direction === "up") {
+        inDirection = rect.center.y < targetRect.center.y
+        perp = Math.abs(rect.center.x - targetRect.center.x)
+        along = targetRect.top - rect.bottom
+      } else if (direction === "right") {
+        inDirection = rect.center.x > targetRect.center.x
+        perp = Math.abs(rect.center.y - targetRect.center.y)
+        along = rect.left - targetRect.right
+      } else if (direction === "left") {
+        inDirection = rect.center.x < targetRect.center.x
+        perp = Math.abs(rect.center.y - targetRect.center.y)
+        along = targetRect.left - rect.right
+      } else {
+        return null
+      }
+      if (!inDirection) continue
+      if (perp < bestPerp || (perp === bestPerp && along < bestAlong)) {
+        best = candidates[i]
+        bestPerp = perp
+        bestAlong = along
+      }
+    }
+    return best
+  }
+
   function fireEvent(elem, type, details, cancelable) {
     if (arguments.length < 4) {
       cancelable = true
@@ -886,6 +937,16 @@
             break
           case "default-element":
             enterToElement = getSectionDefaultElement(nextSectionId)
+            break
+          case "nearest-column":
+            // §3: enter at the column under the source, not at the
+            // geometrically closest centre. Null (no candidate in
+            // the direction) keeps the navigate() result below.
+            enterToElement = getNearestColumnElement(
+              currentFocusedElement,
+              direction,
+              sectionNavigableElements[nextSectionId]
+            )
             break
         }
         if (enterToElement) {
