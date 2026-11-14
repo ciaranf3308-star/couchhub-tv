@@ -111,7 +111,14 @@
     nextDiscoverBackStep,
     COUCH_KEYBOARD_CLOSED_EVENT,
   } from "@/scripts/lib/couch-keyboard.ts"
-  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
+  import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts"
+  // SHIM-0114 (W3): region ownership until W1's API lands — see
+  // nav-regions-shim.ts. Integration deletes the shim and re-points
+  // these two calls; the data-nav-region markup stays.
+  import {
+    declareNavOwner,
+    installRegionNavigation,
+  } from "@/scripts/lib/nav-regions-shim.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
@@ -728,9 +735,25 @@
     })
   }
 
-  /** "Available in My Library" toggle: filter only, never a new call. */
+  /** "Available in My Library" toggle: filter only, never a new call.
+      Focus discipline (§7.3): the toggle must not jump to the top of
+      the page, and a focused card filtered out of the grid must not
+      strand focus on <body> — focus returns to the toggle, the
+      control the user just operated, with scroll untouched. */
   function toggleAvailableOnly() {
     availableOnly = !availableOnly
+    const active = /** @type {HTMLElement | null} */ (document.activeElement)
+    const lostCard =
+      active && active !== document.body
+        ? active.closest?.("[data-ai-results]") && active.getAttribute("data-couch-key")
+        : null
+    void tick().then(() => {
+      // The toggle button itself survives the re-render, so focus on
+      // it is untouched. Only a filtered-out card needs recovery.
+      if (lostCard && (document.activeElement === document.body || !document.activeElement)) {
+        document.querySelector("[data-available-toggle]")?.focus({ preventScroll: true })
+      }
+    })
   }
 
   /** New Search: clear EVERYTHING, including the conversation. */
@@ -943,6 +966,25 @@
     searching = false
     searchingAi = false
     inputEl?.focus()
+  }
+
+  /**
+   * Close diagnostics from any path (toggle, Back step, New Search,
+   * root reset): release the hints override (§8 — a stale "Close
+   * diagnostics" legend must never outlive the panel) and, when the
+   * close came from a Back step, return focus to the toggle (§7.3).
+   */
+  function closeDiagnostics(refocusToggle = false) {
+    if (!diagnosticsOpen) return
+    diagnosticsOpen = false
+    setControllerHints(null)
+    if (refocusToggle) {
+      void tick().then(() => {
+        document
+          .querySelector("[data-ai-diagnostics] .rs-discover-diag__toggle")
+          ?.focus({ preventScroll: true })
+      })
+    }
   }
 
   /**
