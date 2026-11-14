@@ -8,8 +8,9 @@
 // filler.
 //
 // Priority order (first shelf keeps a contested title):
-//   featured > AI Picks > Worth Watching/Starting > Something
-//   Different > Hidden Gems/Undiscovered > Recently Added.
+//   featured > AI Picks > Worth Watching/Starting > Recently Added
+//   (factual: its date order is truth, not a recommendation) >
+//   Something Different > Hidden Gems/Undiscovered.
 // Continue Watching is EXEMPT (a title can be both in progress and
 // recommended) and never consumes an id. Recently Added is factual:
 // it is deduped against the shelves above it (with backfill from
@@ -28,6 +29,17 @@ export interface ShelfPool<T extends ShelfPoolItem> {
   limit: number;
   /** Exempt shelves pass through untouched and never mark ids seen. */
   exempt?: boolean;
+  /**
+   * Factual shelves (Recently Added) must never be starved empty by
+   * dedup when their own pool has titles: when strict allocation
+   * leaves fewer than `minFill`, the shelf backfills from its own
+   * pool (allowing repeats) up to `minFill`. In a large catalogue
+   * the over-fetched pool fills the shelf with fresh titles and
+   * backfill never triggers; in a tiny catalogue the factual shelf
+   * still shows instead of vanishing. Recommendation shelves leave
+   * this unset (strict: an empty shelf is omitted, never padded).
+   */
+  minFill?: number;
 }
 
 export interface AllocatedShelf<T extends ShelfPoolItem> {
@@ -67,6 +79,17 @@ export function allocateShelves<T extends ShelfPoolItem>(
         continue;
       }
       kept.push(item);
+    }
+    // Factual-shelf backfill: never starve a factual shelf empty
+    // when its own pool has titles — refill from the pool in order,
+    // allowing repeats, up to minFill (never past the limit).
+    const minFill = Math.max(0, Math.min(pool.limit, pool.minFill ?? 0));
+    if (kept.length < minFill) {
+      for (const item of pool.items ?? []) {
+        if (kept.length >= minFill) break;
+        if (kept.some((keptItem) => keptItem.id === item.id)) continue;
+        kept.push(item);
+      }
     }
     for (const item of kept) seen.add(item.id);
     return { id: pool.id, items: kept, droppedRepeatCount: dropped };

@@ -8,6 +8,8 @@
 import { describe, it, expect } from "vitest";
 import {
   MOVIES_HOME_BROWSE_URLS,
+  RECENTLY_ADDED_LIMIT,
+  WORTH_WATCHING_LIMIT,
   applyHomeDiversity,
   buildMoviesHomeModel,
   chooseWorthWatchingLabel,
@@ -275,7 +277,7 @@ describe("buildMoviesHomeModel (§1.1, §2)", () => {
     expect(model.totalCount).toBe(30);
     expect(model.featured).not.toBeNull();
     expect(model.worthWatching.items.length).toBeGreaterThan(0);
-    expect(model.worthWatching.items.length).toBeLessThanOrEqual(12);
+    expect(model.worthWatching.items.length).toBeLessThanOrEqual(WORTH_WATCHING_LIMIT);
     expect(model.recentlyAdded.items.length).toBeGreaterThan(0);
     const featuredId = model.featured!.row.id;
     expect(model.worthWatching.items.map((row) => row.id)).not.toContain(featuredId);

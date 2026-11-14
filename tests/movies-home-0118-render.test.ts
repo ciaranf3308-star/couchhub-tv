@@ -23,7 +23,11 @@ import {
   showMoviesHomeMessage,
   writePicksSeed,
 } from "@/scripts/movies/movies-home-mount";
-import { buildMoviesHomeModel } from "@/scripts/movies/movies-home";
+import {
+  RECENTLY_ADDED_LIMIT,
+  WORTH_WATCHING_LIMIT,
+  buildMoviesHomeModel,
+} from "@/scripts/movies/movies-home";
 import { clearCouchFocusMemory, recordCouchFocus } from "@/scripts/lib/couch-focus";
 import { emptyTasteModel } from "@/scripts/lib/taste";
 import { daysAgoSeconds, movieRow } from "./movies-home-0118-fixtures";
@@ -159,10 +163,10 @@ describe("paintMoviesHome — structure (§1.1, §2, §3)", () => {
     ).toBe(3);
     expect(
       document.querySelectorAll('[data-nylah-rail="movies-worth"] .rs-card').length,
-    ).toBeLessThanOrEqual(12);
+    ).toBeLessThanOrEqual(WORTH_WATCHING_LIMIT);
     expect(
       document.querySelectorAll('[data-nylah-rail="movies-recent"] .rs-card').length,
-    ).toBeLessThanOrEqual(12);
+    ).toBeLessThanOrEqual(RECENTLY_ADDED_LIMIT);
 
     const tiles = root.querySelectorAll(".mh-genre-tile");
     expect(tiles.length).toBe(7);

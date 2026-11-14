@@ -796,9 +796,9 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
       { id: "featured", items: featuredPool, limit: 1 },
       { id: "ai", items: aiPool, limit: AI_PICKS_LIMIT },
       { id: "worth", items: worthPool, limit: WORTH_WATCHING_LIMIT },
+      { id: "recent", items: recentPool, limit: RECENTLY_ADDED_LIMIT, minFill: 4 },
       { id: "different", items: differentPool, limit: SOMETHING_DIFFERENT_LIMIT },
       { id: "gems", items: gemsPool, limit: HIDDEN_GEMS_LIMIT },
-      { id: "recent", items: recentPool, limit: RECENTLY_ADDED_LIMIT },
     ]);
 
   let allocated = allocate(recentPoolFor(cutoff90));

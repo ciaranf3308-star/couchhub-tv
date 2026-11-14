@@ -926,9 +926,9 @@ export function assembleSeriesHomeSections(
   const allocated = allocateShelves([
     { id: "ai", items: aiPool, limit: SERIES_AI_PICKS_LIMIT },
     { id: "worth", items: worthPool, limit: SERIES_WORTH_STARTING_LIMIT },
+    { id: "recent", items: recentPool, limit: SERIES_RECENTLY_ADDED_LIMIT, minFill: 4 },
     { id: "different", items: differentPool, limit: SERIES_SOMETHING_DIFFERENT_LIMIT },
     { id: "undiscovered", items: undiscoveredPool, limit: SERIES_UNDISCOVERED_LIMIT },
-    { id: "recent", items: recentPool, limit: SERIES_RECENTLY_ADDED_LIMIT },
   ]);
   const byId = new Map(allocated.map((shelf) => [shelf.id, shelf.items]));
   const aiItems: SeriesShelfItem[] = (byId.get("ai") ?? []).map((item) => ({
