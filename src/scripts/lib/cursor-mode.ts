@@ -45,6 +45,78 @@
 // toggleCursorMode / isCursorModeEnabled. gamepad.ts calls the guard
 // functions; R3 calls toggleCursorMode() (only when enabled).
 //
+// 0.11.14 (W2, §6) — LEFT-STICK SCROLLING + STICK-EVENT CONTRACT.
+// This header is the seam contract W1 (input ownership) and W3
+// (hints) build against. It is pushed before the implementation so
+// the contract is visible early; the code below implements it.
+//
+// STICK-EVENT CONTRACT (native XInput → Tauri events → this module):
+//   xinput-stick     { slot, x, y }  right-stick axes, raw i16.
+//                                    UNCHANGED since 0.11.10. Moves
+//                                    the pointer. Y up-positive.
+//   xinput-scroll    { slot, x, y }  NEW: left-stick axes, raw i16,
+//                                    same Rust poll loop, same 16 ms
+//                                    rate bound + one zero event on
+//                                    return to centre, emitted
+//                                    whenever deflected (the
+//                                    frontend ignores it unless
+//                                    Cursor Mode is active, exactly
+//                                    like xinput-stick). Y
+//                                    up-positive; inverted here to
+//                                    screen space. Drives scrolling
+//                                    ONLY — never focus movement.
+//   xinput-direction { slot, direction, phase, source }
+//                                    source is NEW: "dpad" | "stick"
+//                                    (which physical control produced
+//                                    the direction; D-pad wins ties
+//                                    in Rust, as before).
+//                                    NO-DUAL-ROUTE RULE: while Cursor
+//                                    Mode is active,
+//                                    native-gamepad.ts drops
+//                                    source:"stick" directions
+//                                    entirely (no focus move, no held
+//                                    ticker) and lets source:"dpad"
+//                                    through, so D-pad focus nav is
+//                                    retained per §6. On activation
+//                                    (couch:cursor-mode {active:true})
+//                                    native-gamepad.ts also cancels
+//                                    any held native direction ticker,
+//                                    so a stick held across R3 cannot
+//                                    keep moving focus. The browser
+//                                    Gamepad API fallback MUST behave
+//                                    the same: this module's own rAF
+//                                    loop reads axes 0/1 for scroll
+//                                    (axes 2/3 still move the pointer)
+//                                    under the same 1500 ms
+//                                    native-silence rule — and W1
+//                                    OWNS the gamepad.ts half:
+//                                    pollLoop must skip
+//                                    stickDirection() while
+//                                    isCursorModeActive() (D-pad
+//                                    buttons still flow). Until W1
+//                                    lands that guard, the FALLBACK
+//                                    path dual-routes the left stick
+//                                    (scroll + focus); the NATIVE
+//                                    path is correct without W1.
+//   couch:cursor-mode { active }    UNCHANGED activation signal.
+//
+// HINTS STATES (W3 seam): html[data-cursor-mode="active"] while
+// active (unchanged); html[data-cursor-scroll="available"|"none"]
+// reports whether a scroll target exists under the pointer, updated
+// only when the value changes (W3: add "data-cursor-scroll" to the
+// TvButtonHints MutationObserver filter to re-render on it).
+// CURSOR_MODE_HINTS is the legend config; the on-screen pill carries
+// the stick rows (no stick glyph exists in HintGlyph).
+//
+// CLICKS stay DOM-synthetic in 0.11.14 (no Win32 SendInput): every
+// Couch control is a DOM element with a click/contextmenu handler,
+// and the 0.11.14 change closes the default-behaviour gap (checkbox /
+// radio / range emulation) instead of moving the OS cursor. A native
+// click could open <select> dropdowns, which synthetic clicks cannot;
+// the Couch UI drives selects via focus + D-pad once the cursor click
+// focuses them, so the desktop-click risk of SendInput is not
+// justified. See dispatchCursorClick.
+//
 // HINTS — INTEGRATION-0110-W1: W1 owns the unified hints layer and
 // its `setControllerHints(config)` contract (couch-button-hints.ts).
 // That function does NOT exist in the 0.11.9 tree, so the cursor hint
