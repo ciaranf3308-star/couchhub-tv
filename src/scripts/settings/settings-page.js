@@ -138,6 +138,8 @@
       setAiShareTaste,
       getAiAutoRequests,
       setAiAutoRequests,
+      getAiHomeAutoRefresh,
+      setAiHomeAutoRefresh,
       getAiProvider,
       setAiProvider,
       resolveAiModelControl,
@@ -2721,6 +2723,7 @@
     const aiProviderGroup = document.getElementById("settings-ai-provider")
     const aiShareGroup = document.getElementById("settings-ai-share-taste")
     const aiAutoGroup = document.getElementById("settings-ai-auto")
+    const aiHomeAutoGroup = document.getElementById("settings-ai-home-auto")
     const aiKeysLink = /** @type {HTMLAnchorElement|null} */ (
       document.getElementById("settings-ai-keys-link")
     )
@@ -2819,6 +2822,20 @@
       if (!btn) return
       setAiAutoRequests(btn.getAttribute("data-auto") === "auto")
       syncAiAuto()
+    })
+
+    // Home auto-refresh (0.11.14, §16): one control, separate from
+    // the Discover search-submit preference above.
+    function syncAiHomeAuto() {
+      syncSeg(aiHomeAutoGroup, "data-home-auto", getAiHomeAutoRefresh() ? "on" : "off")
+    }
+    syncAiHomeAuto()
+
+    aiHomeAutoGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-home-auto-btn")
+      if (!btn) return
+      setAiHomeAutoRefresh(btn.getAttribute("data-home-auto") === "on")
+      syncAiHomeAuto()
     })
 
     async function syncAiKeyStatus() {

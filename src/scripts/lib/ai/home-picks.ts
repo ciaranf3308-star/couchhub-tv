@@ -1044,7 +1044,7 @@ export function decideHomeAiAutoRefresh(
   nowMs: number = Date.now()
 ): HomeAiAutoRefreshDecision {
   const cached = readCachedHomeAiPicks(request, nowMs)
-  let autoRefresh = false
+  let autoRefresh: boolean
   try {
     autoRefresh = !!getAiHomeAutoRefresh()
   } catch {
