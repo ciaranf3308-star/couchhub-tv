@@ -662,7 +662,13 @@ describe("37 — one press, one activation", () => {
 // ---------------------------------------------------------------------------
 
 describe("38 — repeated navigation keeps focus inside the grid", () => {
-  it("12 rounds of arrows / page keys / Home / End never leave the container", async () => {
+  // Timeout-only: this test mounts a 200-item catalogue and runs 12 navigation
+  // rounds (8 keys x flush(30) each), so it is load-sensitive under parallel
+  // full-suite contention on shared CPUs and crossed the 5000ms default twice
+  // (6159/6160, timeout — never an assertion failure). It passes in isolation
+  // on both the 0.11.13 baseline and this tree, with no slowdown from 0.11.14
+  // code (baseline file marginally slower). Zero assertion changes.
+  it("12 rounds of arrows / page keys / Home / End never leave the container", { timeout: 15000 }, async () => {
     const { movies } = generateCatalogueOfSize(200, 31337)
     const { container, mount } = mountCatalogue(movies)
     try {
