@@ -585,3 +585,15 @@ export function hintItemHtml(item: HintItem): string {
     : "";
   return `<li class="rs-hint">${glyphHtml(item.glyph)}<span class="rs-hint__label">${item.label}</span>${when}</li>`;
 }
+
+/**
+ * HTML for a whole config's item list. The legend renderers compare
+ * THIS string — not the config id — to decide whether to repaint:
+ * several view overrides reuse their view config's id with different
+ * items (Favourites, Followed, Settings, both detail pages), and an
+ * id-only guard left the override's items unpainted forever (0.11.14
+ * W3). Same id + different items must still repaint.
+ */
+export function hintListHtml(config: HintConfig): string {
+  return config.items.map((item) => hintItemHtml(item)).join("");
+}

@@ -12,6 +12,7 @@ import { join, dirname } from "node:path";
 import {
   HINT_CONFIGS,
   configHasGlyph,
+  hintListHtml,
 } from "@/scripts/lib/couch-button-hints";
 import { KEYBOARD_OPEN_HINTS } from "@/scripts/lib/couch-keyboard";
 import { hintsForLivetvLayer } from "@/scripts/lib/livetv-hints";
@@ -135,5 +136,46 @@ describe("Discover diagnostics hints release (§7.3/§8)", () => {
   it("the Back-step close returns focus to the diagnostics toggle", () => {
     expect(discover).toContain("closeDiagnostics(true)");
     expect(discover).toContain("[data-ai-diagnostics] .rs-discover-diag__toggle");
+  });
+});
+
+describe("repaint guard compares rendered content, not the config id (§8)", () => {
+  it("same id + different items renders different HTML (override must paint)", () => {
+    const view = HINT_CONFIGS.favorites;
+    const override = {
+      ...view,
+      items: [
+        ...view.items,
+        { glyph: "b" as const, label: "Back" },
+        { glyph: "x" as const, label: "Actions" },
+      ],
+    };
+    expect(hintListHtml(view)).not.toBe(hintListHtml(override));
+  });
+
+  it("identical configs render identical HTML (no redundant repaint)", () => {
+    expect(hintListHtml(HINT_CONFIGS.home)).toBe(hintListHtml(HINT_CONFIGS.home));
+  });
+
+  it("both legends gate repaints on rendered HTML, not the config id", () => {
+    for (const rel of [
+      "src/components/couch/TvButtonHints.astro",
+      "src/components/couch/TvLivetvHints.astro",
+    ]) {
+      const content = read(rel);
+      expect(content).toContain("lastHtml");
+      expect(content).not.toContain("list.dataset.config !== config.id");
+    }
+  });
+});
+
+describe("cursor scroll-availability signal re-renders the legends (W2 seam, §8)", () => {
+  it("both legends observe html[data-cursor-scroll]", () => {
+    for (const rel of [
+      "src/components/couch/TvButtonHints.astro",
+      "src/components/couch/TvLivetvHints.astro",
+    ]) {
+      expect(read(rel)).toContain('"data-cursor-scroll"');
+    }
   });
 });
