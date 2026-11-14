@@ -260,7 +260,11 @@ describe("DiscoverView keyboard wiring (Discover search field)", () => {
 
   it("restores the remembered card after the async rows render (return from a detail)", () => {
     const src = pageSource("src/components/DiscoverView.svelte");
-    expect(src).toContain('import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"');
+    // 0.11.14 (W3, §2): setLogicalView joins the couch-focus import
+    // (the view names itself "discover" so the rail model can never
+    // hijack it). restoreCouchFocus is still imported and still
+    // runs in the rows effect below — only the import line changed.
+    expect(src).toContain('import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts"');
     expect(src).toContain("restoreCouchFocus()");
     // The restore runs in the rows effect (after every rows render),
     // not only at mount — the rows arrive async, after CouchLayout's
