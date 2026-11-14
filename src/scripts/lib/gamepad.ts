@@ -276,7 +276,11 @@ function move(dir: Direction, source: CursorDirectionSource = "dpad"): void {
   // container under the pointer instead of moving focus. The seam
   // is inert until W2 registers a handler, and D-pad directions
   // always keep driving focus navigation — one press, one stream,
-  // never both.
+  // never both. (Both live input paths already keep stick
+  // directions out of here while Cursor Mode is active — the
+  // pollLoop guard below and native-gamepad's drop — so this
+  // branch is defense-in-depth for any other source:"stick"
+  // caller; W2's scrolling itself rides xinput-scroll / axes 0/1.)
   if (source === "stick" && isCursorModeActive() && routeDirectionToCursor(dir)) {
     return;
   }
@@ -313,7 +317,7 @@ function move(dir: Direction, source: CursorDirectionSource = "dpad"): void {
     try {
       entry = owner.sectionEntry(dir, null);
     } catch {
-      entry = null;
+      // A throwing sectionEntry never kills the press: fall through.
     }
     if (entry && entry.isConnected) {
       entry.focus({ preventScroll: true });
@@ -1306,15 +1310,25 @@ export function mountGamepad(): void {
     // The source travels with the press: in Cursor Mode a stick
     // direction scrolls (W2 seam) while a D-pad direction still
     // moves focus — one physical controller, one stream of actions.
-    let dir: Direction | null = null;
+    let dir: Direction | null;
     let dirSource: CursorDirectionSource = "dpad";
     if (snapshot[BTN_DPAD_UP]) dir = "up";
     else if (snapshot[BTN_DPAD_DOWN]) dir = "down";
     else if (snapshot[BTN_DPAD_LEFT]) dir = "left";
     else if (snapshot[BTN_DPAD_RIGHT]) dir = "right";
-    else {
+    else if (!isCursorModeActive()) {
       dir = stickDirection(gp);
       if (dir !== null) dirSource = "stick";
+    } else {
+      // 0.11.14 W2 seam (§6, no-dual-route rule): while Cursor Mode
+      // is active the left stick scrolls — cursor-mode.ts reads axes
+      // 0/1 itself on this fallback path (xinput-scroll natively) —
+      // and must NOT also move focus. The native XInput path drops
+      // source:"stick" directions the same way. D-pad buttons above
+      // still flow, so D-pad focus navigation is retained. dir stays
+      // null here, which also releases any direction held across
+      // the R3 activation instead of letting it keep repeating.
+      dir = null;
     }
     handleDirection(dir, now, dirSource);
 
