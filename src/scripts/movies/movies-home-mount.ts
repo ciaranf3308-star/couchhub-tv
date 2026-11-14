@@ -38,6 +38,7 @@ import {
   scrollFocusedIntoView,
   setLogicalView,
 } from "@/scripts/lib/couch-focus.ts";
+import { repaintHomePreserving } from "@/scripts/lib/home-repaint.ts";
 import {
   BACK_PRIORITY,
   registerBackLayer,
@@ -74,11 +75,44 @@ import {
   movieHomeCardView,
   type FeaturedFilm,
   type GenreTile,
+  type HomeShelfItem,
   type MoviesHomeModel,
   type MoviesHomeProgress,
   type ProgressById,
 } from "@/scripts/movies/movies-home.ts";
 import type { MovieRow } from "@/scripts/movies/couch-movies.ts";
+import { getCatalogIndex } from "@/scripts/lib/catalog-index.ts";
+import { getAiEnabled, getAiEndpoint, getAiModel } from "@/scripts/lib/app-settings.js";
+import { getAiShareTaste } from "@/scripts/lib/ai/status.ts";
+import {
+  homeAiAllowsSelectorBoost,
+  maybeAutoRefreshHomeAiPicks,
+  readCachedHomeAiPicks,
+  requestHomeAiDiscovery,
+  requestHomeAiPicks,
+  type HomeAiResult,
+} from "@/scripts/lib/ai/home-picks.ts";
+import {
+  buildHomeAiDiscoveryRequest,
+  buildHomeAiPicksRequest,
+  groundedReasonForAiCard,
+  homeAiShelfNote,
+  type HomeAiPick,
+  type HomeAiSource,
+} from "@/scripts/lib/home-ai-picks.ts";
+import {
+  discoverPromptForcesFresh,
+  discoverPromptsFor,
+  discoverUrlForPrompt,
+  type DiscoverEntryPrompt,
+} from "@/scripts/lib/home-discover-entries.ts";
+import {
+  localPromptRankedIds,
+  picksToEntries,
+  resolvePromptItems,
+} from "@/scripts/lib/home-prompt-results.ts";
+import { hasCredibleRating, normaliseRating } from "@/scripts/lib/rating-evidence.ts";
+import { genreLabelForId, genresForEntry } from "@/scripts/lib/genres.ts";
 
 // DOM ids provided by src/pages/movies/index.astro (home root).
 const ID = {
@@ -92,12 +126,26 @@ const ID = {
   retry: "movies-home-retry",
   featured: "movies-home-featured",
   continue: "movies-home-continue",
+  ai: "movies-home-ai",
+  discover: "movies-home-discover",
+  discoverResults: "movies-home-discover-results",
   worth: "movies-home-worth",
+  different: "movies-home-different",
+  gems: "movies-home-gems",
   recent: "movies-home-recent",
   genres: "movies-home-genres",
   browseEntry: "movies-home-browse-entry",
   browseCount: "movies-home-browse-count",
 } as const;
+
+/** On-page Discover entry-point results (brief §21), resolved to movie rows by the mount. */
+export interface MoviesDiscoverResults {
+  prompt: DiscoverEntryPrompt;
+  items: HomeShelfItem[];
+  source: HomeAiSource;
+  note: string;
+  discoverHref: string;
+}
 
 const PICKS_SEED_KEY_PREFIX = "movies-home-picks-seed:";
 
@@ -173,6 +221,16 @@ export function writePicksSeed(playlistId: string, seed: number): void {
 export interface PaintMoviesHomeOptions {
   /** Called when Refresh Picks is pressed (the mount rebuilds). */
   onRefreshPicks?: () => void;
+  /** Called when Generate / Request-fresh AI picks is pressed (explicit user action). */
+  onAiAction?: () => void;
+  /** True while an AI request is in flight — the AI action disables without moving focus. */
+  aiBusy?: boolean;
+  /** Called when a Discover entry-point chip is tapped (explicit user action). */
+  onDiscoverPrompt?: (prompt: DiscoverEntryPrompt) => void;
+  /** Id of the prompt whose results are showing (chip stays marked active). */
+  activeDiscoverPromptId?: string | null;
+  /** On-page Discover results to show, when the viewer tapped a prompt. */
+  discoverResults?: MoviesDiscoverResults | null;
 }
 
 /** Paint every Home section from a built model. No catalogue grid. */
@@ -216,10 +274,64 @@ export function paintMoviesHome(
     },
   );
 
+  paintAiShelf($(ID.ai, root), model, opts);
+  paintDiscoverEntries($(ID.discover, root), opts);
+  paintDiscoverResults($(ID.discoverResults, root), opts.discoverResults ?? null);
+
   paintShelf($(ID.worth, root), {
     railId: MOVIES_HOME_RAILS.worth,
     title: model.worthWatching.label,
-    cardViews: model.worthWatching.items.map((row) => movieHomeCardView(row, null)),
+    cardViews: model.worthWatching.items.map((row) =>
+      movieHomeCardView(row, null, { detail: model.worthWatching.reasons[String(row.id)] ?? null }),
+    ),
+    viewAll:
+      model.worthWatching.items.length > 0
+        ? {
+            label: "Browse more",
+            sub: "Highest rated in Browse Everything",
+            href: MOVIES_HOME_BROWSE_URLS.worthWatching,
+            key: "movies-viewall-worth",
+            ariaLabel: "Browse more worth watching films",
+          }
+        : undefined,
+  });
+
+  paintShelf($(ID.different, root), {
+    railId: MOVIES_HOME_RAILS.different,
+    title: "Something Different",
+    note: "Good films outside your usual genres",
+    cardViews: model.somethingDifferent.items.map((item) =>
+      movieHomeCardView(item.row, null, { detail: item.reason }),
+    ),
+    viewAll:
+      model.somethingDifferent.items.length > 0
+        ? {
+            label: "Browse more",
+            sub: "Recommended in Browse Everything",
+            href: MOVIES_HOME_BROWSE_URLS.somethingDifferent,
+            key: "movies-viewall-different",
+            ariaLabel: "Browse more different films",
+          }
+        : undefined,
+  });
+
+  paintShelf($(ID.gems, root), {
+    railId: MOVIES_HOME_RAILS.gems,
+    title: "Hidden Gems",
+    note: "Well-rated films that rarely get surfaced",
+    cardViews: model.hiddenGems.items.map((item) =>
+      movieHomeCardView(item.row, null, { detail: item.reason }),
+    ),
+    viewAll:
+      model.hiddenGems.items.length > 0
+        ? {
+            label: "Browse more",
+            sub: "Highest rated in Browse Everything",
+            href: MOVIES_HOME_BROWSE_URLS.hiddenGems,
+            key: "movies-viewall-gems",
+            ariaLabel: "Browse more hidden gems",
+          }
+        : undefined,
   });
 
   paintShelf($(ID.recent, root), {
@@ -275,6 +387,14 @@ interface ShelfSpec {
   note?: string;
   cardViews: ReturnType<typeof movieHomeCardView>[];
   viewAll?: ShelfViewAll;
+  /** Optional head action (e.g. Request fresh AI picks) — rendered as a focusable button. */
+  headAction?: {
+    label: string;
+    hint: string;
+    key: string;
+    busy?: boolean;
+    onClick?: () => void;
+  };
 }
 
 /** One shelf section — omitted entirely when it has no cards. */
@@ -297,6 +417,17 @@ function paintShelf(mount: HTMLElement | null, spec: ShelfSpec): void {
     const note = el("span", "mh-shelf__note");
     note.textContent = spec.note;
     head.appendChild(note);
+  }
+  if (spec.headAction) {
+    const action = el("button", "rs-hero__action rs-hero__action--secondary mh-shelf__action");
+    action.type = "button";
+    action.setAttribute("data-nylah-item", "");
+    action.setAttribute("data-couch-key", spec.headAction.key);
+    action.setAttribute("aria-label", `${spec.headAction.label}. ${spec.headAction.hint}`);
+    action.textContent = spec.headAction.busy ? "Asking AI…" : spec.headAction.label;
+    action.disabled = spec.headAction.busy === true;
+    action.addEventListener("click", () => spec.headAction?.onClick?.());
+    head.appendChild(action);
   }
   section.appendChild(head);
   const rowEl = el("div", "rs-rail__row");
@@ -321,6 +452,144 @@ function paintShelf(mount: HTMLElement | null, spec: ShelfSpec): void {
   }
   section.appendChild(rowEl);
   mount.appendChild(section);
+}
+
+/** AI Picks shelf — verified picks only, or the Generate prompt banner, or nothing (AI off). */
+function paintAiShelf(
+  mount: HTMLElement | null,
+  model: MoviesHomeModel,
+  opts: PaintMoviesHomeOptions,
+): void {
+  if (!mount) return;
+  mount.replaceChildren();
+  if (model.aiPicks.items.length > 0) {
+    paintShelf(mount, {
+      railId: MOVIES_HOME_RAILS.ai,
+      title: model.aiPicks.label,
+      note: model.aiPicks.note || undefined,
+      cardViews: model.aiPicks.items.map((item) =>
+        movieHomeCardView(item.row, null, { detail: item.reason }),
+      ),
+      headAction:
+        model.aiAction.kind === "request-fresh"
+          ? {
+              label: model.aiAction.label,
+              hint: model.aiAction.hint,
+              key: "movies-ai-refresh",
+              busy: opts.aiBusy,
+              onClick: opts.onAiAction,
+            }
+          : undefined,
+      viewAll: {
+        label: "Browse more",
+        sub: "Recommended in Browse Everything",
+        href: MOVIES_HOME_BROWSE_URLS.aiPicks,
+        key: "movies-viewall-ai",
+        ariaLabel: "Browse more recommended films",
+      },
+    });
+    return;
+  }
+  if (model.aiAction.kind === "generate") {
+    mount.hidden = false;
+    const section = el("section", "rs-rail rs-rail--large mh-shelf mh-ai-prompt");
+    section.setAttribute("data-nylah-rail", MOVIES_HOME_RAILS.ai);
+    section.setAttribute("aria-label", model.aiPicks.label);
+    const head = el("div", "rs-rail__head");
+    const h2 = el("h2", "rs-section-title");
+    h2.textContent = model.aiPicks.label;
+    head.appendChild(h2);
+    section.appendChild(head);
+    const sub = el("p", "rs-meta mh-ai-prompt__sub");
+    sub.textContent = "AI-ranked films from your own library";
+    section.appendChild(sub);
+    const button = el("button", "rs-hero__action rs-hero__action--secondary");
+    button.type = "button";
+    button.setAttribute("data-nylah-item", "");
+    button.setAttribute("data-couch-key", "movies-ai-generate");
+    button.setAttribute("aria-label", `${model.aiAction.label}. ${model.aiAction.hint}`);
+    button.textContent = opts.aiBusy ? "Asking AI…" : model.aiAction.label;
+    button.disabled = opts.aiBusy === true;
+    button.addEventListener("click", () => opts.onAiAction?.());
+    section.appendChild(button);
+    const hint = el("p", "rs-meta mh-ai-prompt__hint");
+    hint.textContent = model.aiAction.hint;
+    section.appendChild(hint);
+    if (model.aiNote) {
+      const note = el("p", "rs-meta mh-ai-prompt__note");
+      note.textContent = model.aiNote;
+      section.appendChild(note);
+    }
+    mount.appendChild(section);
+    return;
+  }
+  // AI not configured: no AI shelf, no AI button — local shelves carry the page.
+  mount.hidden = true;
+}
+
+/** Discover entry-point chips (§21): pre-scoped prompts, one explicit request per tap. */
+function paintDiscoverEntries(
+  mount: HTMLElement | null,
+  opts: PaintMoviesHomeOptions,
+): void {
+  if (!mount) return;
+  mount.replaceChildren();
+  mount.hidden = false;
+  const section = el("section", "rs-rail rs-rail--large mh-shelf mh-discover");
+  section.setAttribute("data-nylah-rail", MOVIES_HOME_RAILS.discover);
+  section.setAttribute("aria-label", "Find something with AI");
+  const head = el("div", "rs-rail__head");
+  const h2 = el("h2", "rs-section-title");
+  h2.textContent = "Find something with AI";
+  head.appendChild(h2);
+  section.appendChild(head);
+  const sub = el("p", "rs-meta mh-discover__sub");
+  sub.textContent = "Ask AI for in-library picks, right here — one request per tap";
+  section.appendChild(sub);
+  const rowEl = el("div", "mh-chips");
+  for (const prompt of discoverPromptsFor("movie")) {
+    const chip = el("button", "mh-chip");
+    chip.type = "button";
+    chip.setAttribute("data-nylah-item", "");
+    chip.setAttribute("data-couch-key", `movies-discover-${prompt.id}`);
+    chip.setAttribute("data-discover-prompt-id", prompt.id);
+    chip.setAttribute("aria-label", `Ask AI: ${prompt.label}`);
+    if (opts.activeDiscoverPromptId === prompt.id) chip.setAttribute("aria-pressed", "true");
+    chip.textContent = prompt.label;
+    chip.addEventListener("click", () => opts.onDiscoverPrompt?.(prompt));
+    rowEl.appendChild(chip);
+  }
+  section.appendChild(rowEl);
+  mount.appendChild(section);
+}
+
+/** On-page Discover results shelf (§21): AI-ranked in-library results, browsable here. */
+function paintDiscoverResults(
+  mount: HTMLElement | null,
+  results: MoviesDiscoverResults | null,
+): void {
+  if (!mount) return;
+  mount.replaceChildren();
+  if (!results || results.items.length === 0) {
+    mount.hidden = true;
+    return;
+  }
+  mount.hidden = false;
+  paintShelf(mount, {
+    railId: "movies-discover-results",
+    title: `Results for “${results.prompt.label}”`,
+    note: results.note || undefined,
+    cardViews: results.items.map((item) =>
+      movieHomeCardView(item.row, null, { detail: item.reason }),
+    ),
+    viewAll: {
+      label: "Open in Discover",
+      sub: "Refine in Discover",
+      href: results.discoverHref,
+      key: "movies-viewall-discover",
+      ariaLabel: "Open in Discover",
+    },
+  });
 }
 
 /** Featured film — cinematic hero, or the elegant compact fallback. */
@@ -424,8 +693,10 @@ function paintFeatured(
   refresh.type = "button";
   refresh.setAttribute("data-nylah-item", "");
   refresh.setAttribute("data-couch-key", "movies-refresh-picks");
-  refresh.setAttribute("aria-label", "Refresh picks — choose a different featured film");
-  refresh.textContent = "↻ Refresh picks";
+  // Honest label (§19): this rotates LOCAL selections only — it never
+  // calls the AI provider. Fresh AI picks have their own action.
+  refresh.setAttribute("aria-label", "Refresh local picks — rotates local selections, no AI request");
+  refresh.textContent = "↻ Refresh local picks";
   refresh.addEventListener("click", () => {
     onRefreshPicks?.();
   });
@@ -478,28 +749,135 @@ function paintGenres(mount: HTMLElement | null, tiles: GenreTile[]): void {
   mount.appendChild(section);
 }
 
-/** Repaint featured + worth sections after Refresh Picks (focus-safe). */
+/** Repaint featured + recommendation shelves after Refresh Picks (focus/scroll-safe). */
 export function repaintPicks(
   root: HTMLElement,
   model: MoviesHomeModel,
   onRefreshPicks: () => void,
 ): void {
-  paintFeatured($(ID.featured, root), model.featured, onRefreshPicks);
-  paintShelf($(ID.worth, root), {
-    railId: MOVIES_HOME_RAILS.worth,
-    title: model.worthWatching.label,
-    cardViews: model.worthWatching.items.map((row) => movieHomeCardView(row, null)),
+  repaintHomeShelves(root, model, { onRefreshPicks });
+}
+
+/** Repaint the recommendation shelves + featured from a rebuilt model, preserving focus/scroll. */
+export function repaintHomeShelves(
+  root: HTMLElement,
+  model: MoviesHomeModel,
+  opts: PaintMoviesHomeOptions = {},
+): void {
+  repaintHomePreserving(root, () => {
+    paintFeatured($(ID.featured, root), model.featured, opts.onRefreshPicks);
+    paintAiShelf($(ID.ai, root), model, opts);
+    paintDiscoverEntries($(ID.discover, root), opts);
+    paintDiscoverResults($(ID.discoverResults, root), opts.discoverResults ?? null);
+    paintShelf($(ID.worth, root), {
+      railId: MOVIES_HOME_RAILS.worth,
+      title: model.worthWatching.label,
+      cardViews: model.worthWatching.items.map((row) =>
+        movieHomeCardView(row, null, { detail: model.worthWatching.reasons[String(row.id)] ?? null }),
+      ),
+      viewAll:
+        model.worthWatching.items.length > 0
+          ? {
+              label: "Browse more",
+              sub: "Highest rated in Browse Everything",
+              href: MOVIES_HOME_BROWSE_URLS.worthWatching,
+              key: "movies-viewall-worth",
+              ariaLabel: "Browse more worth watching films",
+            }
+          : undefined,
+    });
+    paintShelf($(ID.different, root), {
+      railId: MOVIES_HOME_RAILS.different,
+      title: "Something Different",
+      note: "Good films outside your usual genres",
+      cardViews: model.somethingDifferent.items.map((item) =>
+        movieHomeCardView(item.row, null, { detail: item.reason }),
+      ),
+      viewAll:
+        model.somethingDifferent.items.length > 0
+          ? {
+              label: "Browse more",
+              sub: "Recommended in Browse Everything",
+              href: MOVIES_HOME_BROWSE_URLS.somethingDifferent,
+              key: "movies-viewall-different",
+              ariaLabel: "Browse more different films",
+            }
+          : undefined,
+    });
+    paintShelf($(ID.gems, root), {
+      railId: MOVIES_HOME_RAILS.gems,
+      title: "Hidden Gems",
+      note: "Well-rated films that rarely get surfaced",
+      cardViews: model.hiddenGems.items.map((item) =>
+        movieHomeCardView(item.row, null, { detail: item.reason }),
+      ),
+      viewAll:
+        model.hiddenGems.items.length > 0
+          ? {
+              label: "Browse more",
+              sub: "Highest rated in Browse Everything",
+              href: MOVIES_HOME_BROWSE_URLS.hiddenGems,
+              key: "movies-viewall-gems",
+              ariaLabel: "Browse more hidden gems",
+            }
+          : undefined,
+    });
+    paintShelf($(ID.recent, root), {
+      railId: MOVIES_HOME_RAILS.recent,
+      title: "Recently Added",
+      note: model.recentlyAdded.evidence.note,
+      cardViews: model.recentlyAdded.items.map((row) => movieHomeCardView(row, null)),
+      viewAll:
+        model.recentlyAdded.items.length > 0
+          ? {
+              label: "View all",
+              sub: "Sorted by date added",
+              href: MOVIES_HOME_BROWSE_URLS.recentlyAdded,
+              key: "movies-viewall-recent",
+              ariaLabel: "View all recently added",
+            }
+          : undefined,
+    });
+    try {
+      armTvImageFallbacks(document);
+    } catch {
+      // ignore — non-DOM runtimes
+    }
   });
-  try {
-    armTvImageFallbacks(document);
-  } catch {
-    // ignore — non-DOM runtimes
-  }
-  // Focus stays on Refresh Picks: the button node was replaced, so
-  // land focus on its replacement instead of stranding the viewer.
-  const refresh = root.querySelector<HTMLElement>('[data-couch-key="movies-refresh-picks"]');
-  refresh?.focus({ preventScroll: true });
-  if (refresh) scrollFocusedIntoView(refresh);
+}
+
+/** Repaint ONLY the AI shelf (async AI arrival must not touch other shelves, scroll or focus). */
+export function repaintAiShelf(
+  root: HTMLElement,
+  model: MoviesHomeModel,
+  opts: PaintMoviesHomeOptions = {},
+): void {
+  repaintHomePreserving(root, () => {
+    paintAiShelf($(ID.ai, root), model, opts);
+    try {
+      armTvImageFallbacks(document);
+    } catch {
+      // ignore — non-DOM runtimes
+    }
+  });
+}
+
+/** Repaint ONLY the Discover results shelf. Returns the first result card (focus target for a user-initiated prompt). */
+export function repaintDiscoverResults(
+  root: HTMLElement,
+  results: MoviesDiscoverResults | null,
+): HTMLElement | null {
+  repaintHomePreserving(root, () => {
+    paintDiscoverResults($(ID.discoverResults, root), results);
+    try {
+      armTvImageFallbacks(document);
+    } catch {
+      // ignore — non-DOM runtimes
+    }
+  });
+  return root.querySelector<HTMLElement>(
+    '[data-nylah-rail="movies-discover-results"] [data-nylah-item]',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -518,7 +896,7 @@ export function showMoviesHomeMessage(
   setHidden($(ID.nolist, root), kind !== "nolist");
   setHidden($(ID.empty, root), kind !== "empty");
   setHidden($(ID.error, root), kind !== "error");
-  const contentIds = [ID.featured, ID.continue, ID.worth, ID.recent, ID.genres, ID.browseEntry];
+  const contentIds = [ID.featured, ID.continue, ID.ai, ID.discover, ID.discoverResults, ID.worth, ID.different, ID.gems, ID.recent, ID.genres, ID.browseEntry];
   for (const id of contentIds) setHidden($(id, root), true);
   const countEl = $(ID.count, root);
   if (countEl) {
@@ -792,6 +1170,50 @@ let listenersInstalled = false;
 let bootRunId = 0;
 let currentPlaylistId = "";
 
+// --- Home AI state (0.11.14, W5) --------------------------------------
+// Picks are cached AI answers or fresh verified results; local
+// shelves render regardless. No request leaves on load, focus or
+// scroll — only from the explicit Generate action, a prompt tap, or
+// the optional auto-refresh preference (default off).
+let homeAiResult: HomeAiResult | null = null;
+let homeAiPicks: HomeAiPick[] | null = null;
+let homeAiSource: HomeAiSource = "local-only";
+let homeAiModel: string | undefined;
+let homeAiNote: string | null = null;
+let homeAiBusy = false;
+
+/** Adopt a core result as the Home AI state (single place). */
+function applyHomeAiResult(result: HomeAiResult | null): void {
+  homeAiResult = result;
+  homeAiPicks = result?.picks ?? null;
+  homeAiSource = result?.source ?? "local-only";
+  homeAiModel = result?.model;
+}
+let discoverResults: MoviesDiscoverResults | null = null;
+let activeDiscoverPromptId: string | null = null;
+
+/** Sync "an AI request could run" check: enabled + endpoint + model. */
+function aiConfiguredSync(): boolean {
+  try {
+    return getAiEnabled() && !!getAiEndpoint().trim() && !!getAiModel().trim();
+  } catch {
+    return false;
+  }
+}
+
+function movieAiReason(row: MovieRow, modelReason: string | null): string | null {
+  const rating = normaliseRating(row);
+  const genres = genresForEntry(row, "vod")
+    .slice(0, 2)
+    .map((id) => genreLabelForId(id, "vod"));
+  return groundedReasonForAiCard({
+    modelReason,
+    genres,
+    ratingLabel: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : "",
+    year: row.year ? String(row.year) : "",
+  });
+}
+
 export function mountMoviesHome(): void {
   if (typeof document === "undefined") return;
   const root = $(ID.root);
@@ -853,6 +1275,14 @@ async function boot(root: HTMLElement): Promise<void> {
 
   const playlistId = result.playlistId;
   currentPlaylistId = playlistId;
+  // A new catalogue invalidates Home AI state: cached picks are
+  // re-read against the new index below (core re-validates them
+  // against the current pool before serving).
+  applyHomeAiResult(null);
+  homeAiNote = null;
+  homeAiBusy = false;
+  discoverResults = null;
+  activeDiscoverPromptId = null;
   let taste: TasteModel;
   try {
     const profileId = getActiveProfileId() ?? SHARED_PROFILE_ID;
@@ -867,6 +1297,50 @@ async function boot(root: HTMLElement): Promise<void> {
     if (progress) (progressById as Map<number, MoviesHomeProgress>).set(row.id, progress);
   }
 
+  const index = getCatalogIndex("vod", rows, `${playlistId}:${rows.length}`, {
+    playlistId,
+  });
+  const profileId = (() => {
+    try {
+      return getActiveProfileId() ?? SHARED_PROFILE_ID;
+    } catch {
+      return SHARED_PROFILE_ID;
+    }
+  })();
+
+  const completedIds = new Set<string>();
+  for (const [id, progress] of progressById as Map<number, MoviesHomeProgress>) {
+    if (progress.completed) completedIds.add(String(id));
+  }
+
+  const picksRequest = (trigger: "explicit" | "auto-refresh", forceFresh: boolean) =>
+    buildHomeAiPicksRequest(index, taste, "movie", {
+      trigger,
+      profileId,
+      playlistId,
+      excludeIds: [...completedIds],
+      rotationSeed: readPicksSeed(playlistId),
+      forceFresh,
+    });
+
+  // Cached AI picks paint immediately (sync, zero requests). The
+  // core re-validates them against the current pool.
+  try {
+    const cached = readCachedHomeAiPicks(picksRequest("explicit", false));
+    if (cached) applyHomeAiResult(cached);
+  } catch {
+    // Cache unreadable: local shelves carry the page.
+  }
+
+  const paintOpts = (): PaintMoviesHomeOptions => ({
+    onRefreshPicks,
+    onAiAction: () => void onAiAction(),
+    aiBusy: homeAiBusy,
+    onDiscoverPrompt: (prompt) => void onDiscoverPrompt(prompt),
+    activeDiscoverPromptId,
+    discoverResults,
+  });
+
   const rebuild = (): MoviesHomeModel =>
     buildMoviesHomeModel({
       rows,
@@ -875,13 +1349,138 @@ async function boot(root: HTMLElement): Promise<void> {
       progressById,
       rotationSeed: readPicksSeed(playlistId),
       nowMs: Date.now(),
+      aiPicks: homeAiPicks,
+      aiAllowed: homeAiAllowsSelectorBoost(homeAiResult),
+      aiSource: homeAiSource,
+      aiModel: homeAiModel,
+      aiNote: homeAiNote,
+      aiConfigured: aiConfiguredSync(),
     });
 
   const onRefreshPicks = (): void => {
+    // Local only: rotates the seed. AI picks (cached answers) are
+    // untouched, and no request leaves — the button says so.
     writePicksSeed(playlistId, readPicksSeed(playlistId) + 1);
-    repaintPicks(root, rebuild(), onRefreshPicks);
+    repaintHomeShelves(root, rebuild(), paintOpts());
   };
 
-  paintMoviesHome(root, rebuild(), { onRefreshPicks });
+  const onAiAction = async (): Promise<void> => {
+    if (homeAiBusy) return;
+    homeAiBusy = true;
+    repaintAiShelf(root, rebuild(), paintOpts());
+    try {
+      // Explicit Generate: forceFresh is what makes the button
+      // promise fresh picks (core contract). At most one request.
+      const result = await requestHomeAiPicks(picksRequest("explicit", true));
+      if (result.picks.length > 0) {
+        applyHomeAiResult(result);
+        homeAiNote = null;
+      } else {
+        // Keep any previously cached picks; the core's honest
+        // fallback reason explains the failure.
+        homeAiNote = result.fallbackReason ?? "AI couldn't answer just now — showing local picks";
+      }
+    } catch {
+      homeAiNote = "AI couldn't answer just now — showing local picks";
+    } finally {
+      homeAiBusy = false;
+      repaintAiShelf(root, rebuild(), paintOpts());
+    }
+  };
+
+  const onDiscoverPrompt = async (prompt: DiscoverEntryPrompt): Promise<void> => {
+    activeDiscoverPromptId = prompt.id;
+    const discoverHref = discoverUrlForPrompt(prompt, "movie");
+    const localItems = (): HomeShelfItem[] =>
+      resolvePromptItems<MovieRow>(
+        index,
+        localPromptRankedIds(index, taste, "movie", prompt, playlistId).map((id) => ({ id })),
+        (row) => movieAiReason(row, null),
+      );
+    if (!aiConfiguredSync()) {
+      discoverResults = {
+        prompt,
+        items: localItems(),
+        source: "local-only",
+        note: "Local results — AI isn't set up, so no request was sent",
+        discoverHref,
+      };
+      const first = repaintDiscoverResults(root, discoverResults);
+      first?.focus({ preventScroll: false });
+      paintDiscoverEntries($(ID.discover, root), paintOpts());
+      return;
+    }
+    homeAiBusy = true;
+    repaintAiShelf(root, rebuild(), paintOpts());
+    try {
+      // Mood/brief entry points use the generation + TMDb
+      // verification path. Only "Surprise me" forces fresh; repeat
+      // briefs serve the cache. Verified-but-unmatched titles in
+      // result.verifiedUnmatched are NEVER rendered as playable —
+      // only result.picks (verified + matched) reach the shelf.
+      let shareTaste = false;
+      try {
+        shareTaste = getAiShareTaste();
+      } catch {
+        shareTaste = false;
+      }
+      const result = await requestHomeAiDiscovery(
+        buildHomeAiDiscoveryRequest(index, taste, "movie", {
+          brief: prompt.label,
+          profileId,
+          playlistId,
+          shareTaste,
+          forceFresh: discoverPromptForcesFresh(prompt),
+        }),
+      );
+      if (result.picks.length > 0) {
+        discoverResults = {
+          prompt,
+          items: resolvePromptItems<MovieRow>(index, picksToEntries(result.picks), movieAiReason),
+          source: result.source,
+          note: homeAiShelfNote(result.source, result.model),
+          discoverHref,
+        };
+      } else {
+        discoverResults = {
+          prompt,
+          items: localItems(),
+          source: "local-only",
+          note: `${result.fallbackReason ?? "AI couldn't answer just now"} — local results shown instead`,
+          discoverHref,
+        };
+      }
+    } catch {
+      discoverResults = {
+        prompt,
+        items: localItems(),
+        source: "local-only",
+        note: "AI couldn't answer just now — local results shown instead",
+        discoverHref,
+      };
+    } finally {
+      homeAiBusy = false;
+      const first = repaintDiscoverResults(root, discoverResults);
+      first?.focus({ preventScroll: false });
+      paintDiscoverEntries($(ID.discover, root), paintOpts());
+    }
+  };
+
+  paintMoviesHome(root, rebuild(), paintOpts());
   restoreMoviesHomeFocus(document);
+
+  // Quiet auto-refresh (optional preference, default off): only when
+  // no cached picks painted, at most one refresh per 24h via cache.
+  if (!homeAiPicks) {
+    void maybeAutoRefreshHomeAiPicks(picksRequest("auto-refresh", false))
+      .then((result) => {
+        if (result && result.picks.length > 0 && runId === bootRunId) {
+          applyHomeAiResult(result);
+          repaintAiShelf(root, rebuild(), paintOpts());
+        }
+      })
+      .catch(() => {
+        // Quiet refresh failure: local shelves stay, no note, no retry.
+      });
+  }
 }

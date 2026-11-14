@@ -21,6 +21,18 @@
 // "Ask AI" stays the only route to the model, and it lives in
 // Discover (rankDiscover with forceAi), not here.
 //
+// 0.11.14 (W5 Homes) — one narrow, still-local exception, added
+// where the brief explicitly wires AI in: `applyVerifiedAiOrder`
+// reorders ALREADY-RANKED local results by a list of VERIFIED AI
+// picks the caller supplies (ids the ranker proved are in the
+// catalogue, from home-ai-picks.ts). It makes no request, imports
+// no AI code, and invents nothing: picks naming ids outside the
+// ranked set are dropped, unranked items keep local order after the
+// AI-ordered head, and the caller — not this module — owns the
+// honest source label. The default paths (rankBrowseCandidates,
+// searchBrowse, recommendForBrowse) remain local-only and
+// unchanged.
+//
 // When W1's query-aware retrieval lands, it lands in the engine
 // this module wraps (or behind rankBrowseCandidates / searchBrowse),
 // and Home, Movies and Series inherit it together. Do not add a
@@ -160,6 +172,51 @@ export function recommendForBrowse(
 /** Composite key of a ranked result (`kind:id`). */
 export function browseResultKey(ranked: RankedCandidate): string {
   return candidateKey(ranked.candidate)
+}
+
+/**
+ * Reorder locally-ranked results by VERIFIED AI picks (0.11.14,
+ * brief §19/§20): picks the ranker proved are in the catalogue,
+ * supplied by the caller (home-ai-picks.ts). Pure and local — no
+ * request, no AI import. Model order wins for the head of the
+ * list; ranked items the model did not pick keep their local order
+ * after it; picks naming ids outside the ranked set are dropped
+ * (never fabricated into results). Kind is enforced: a pick only
+ * matches a result of the same kind. The caller must label the
+ * result with the picks' real source (fresh-ai / cached-ai via
+ * homeAiSourceLabel) — this function only orders, it never claims
+ * AI produced the list.
+ */
+export function applyVerifiedAiOrder(
+  ranked: RankedCandidate[],
+  aiPicks: Array<{ id: string | number; kind?: string; rank?: number }> | null | undefined,
+  kind?: BrowseKind,
+): RankedCandidate[] {
+  if (!Array.isArray(aiPicks) || aiPicks.length === 0) return [...ranked]
+  const orderedPicks = [...aiPicks].sort((a, b) => {
+    const ra = Number(a?.rank ?? 0)
+    const rb = Number(b?.rank ?? 0)
+    if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb
+    return 0
+  })
+  const byKey = new Map<string, RankedCandidate>()
+  for (const entry of ranked) {
+    const key = candidateKey(entry.candidate)
+    if (!byKey.has(key)) byKey.set(key, entry)
+  }
+  const head: RankedCandidate[] = []
+  const used = new Set<string>()
+  for (const pick of orderedPicks) {
+    const pickKind = pick.kind ?? kind
+    if (!pickKind) continue
+    const key = `${pickKind}:${String(pick.id)}`
+    const entry = byKey.get(key)
+    if (!entry || used.has(key)) continue
+    used.add(key)
+    head.push(entry)
+  }
+  const tail = ranked.filter((entry) => !used.has(candidateKey(entry.candidate)))
+  return [...head, ...tail]
 }
 
 /**

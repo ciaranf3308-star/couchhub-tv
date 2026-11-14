@@ -111,7 +111,15 @@
     nextDiscoverBackStep,
     COUCH_KEYBOARD_CLOSED_EVENT,
   } from "@/scripts/lib/couch-keyboard.ts"
-  import { restoreCouchFocus } from "@/scripts/lib/couch-focus.ts"
+  import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts"
+  // Region ownership (§7.3, W1 contract): the mixed-kind owner
+  // routes D-pad presses between the view's [data-nav-region]
+  // sections; see region-direction.ts.
+  import { registerNavigationOwner } from "@/scripts/lib/navigation-ownership.ts"
+  import {
+    createRegionDirectionHandler,
+    regionSectionEntry,
+  } from "@/scripts/lib/region-direction.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
@@ -124,6 +132,8 @@
   // commit moves focus to results).
   /** @type {HTMLInputElement | null} */
   let inputEl = null
+  /** @type {HTMLDivElement | null} */
+  let rootEl = null
   const keyboard = new CouchKeyboardLifecycle()
   let keyboardOpen = $state(false)
   function syncKeyboard() {
@@ -728,9 +738,25 @@
     })
   }
 
-  /** "Available in My Library" toggle: filter only, never a new call. */
+  /** "Available in My Library" toggle: filter only, never a new call.
+      Focus discipline (§7.3): the toggle must not jump to the top of
+      the page, and a focused card filtered out of the grid must not
+      strand focus on <body> — focus returns to the toggle, the
+      control the user just operated, with scroll untouched. */
   function toggleAvailableOnly() {
     availableOnly = !availableOnly
+    const active = /** @type {HTMLElement | null} */ (document.activeElement)
+    const lostCard =
+      active && active !== document.body
+        ? active.closest?.("[data-ai-results]") && active.getAttribute("data-couch-key")
+        : null
+    void tick().then(() => {
+      // The toggle button itself survives the re-render, so focus on
+      // it is untouched. Only a filtered-out card needs recovery.
+      if (lostCard && (document.activeElement === document.body || !document.activeElement)) {
+        document.querySelector("[data-available-toggle]")?.focus({ preventScroll: true })
+      }
+    })
   }
 
   /** New Search: clear EVERYTHING, including the conversation. */
@@ -755,7 +781,7 @@
     aiPhase = null
     searching = false
     searchingAi = false
-    diagnosticsOpen = false
+    closeDiagnostics()
     window.scrollTo(0, 0)
     inputEl?.focus()
   }
@@ -890,6 +916,7 @@
       receipt = null
       aiUnavailable = null
       localSimilar = null
+      closeDiagnostics()
       return
     }
     // Discover holds no genre state of its own (no genre control on
@@ -942,7 +969,27 @@
     aiPhase = null
     searching = false
     searchingAi = false
+    closeDiagnostics()
     inputEl?.focus()
+  }
+
+  /**
+   * Close diagnostics from any path (toggle, Back step, New Search,
+   * root reset): release the hints override (§8 — a stale "Close
+   * diagnostics" legend must never outlive the panel) and, when the
+   * close came from a Back step, return focus to the toggle (§7.3).
+   */
+  function closeDiagnostics(refocusToggle = false) {
+    if (!diagnosticsOpen) return
+    diagnosticsOpen = false
+    setControllerHints(null)
+    if (refocusToggle) {
+      void tick().then(() => {
+        document
+          .querySelector("[data-ai-diagnostics] .rs-discover-diag__toggle")
+          ?.focus({ preventScroll: true })
+      })
+    }
   }
 
   /**
@@ -969,7 +1016,7 @@
     aiPhase = null
     searching = false
     searchingAi = false
-    diagnosticsOpen = false
+    closeDiagnostics()
     window.scrollTo(0, 0)
     inputEl?.focus()
   }
@@ -1001,7 +1048,7 @@
         localSimilar !== null,
     })
     if (step === "close-diagnostics") {
-      diagnosticsOpen = false
+      closeDiagnostics(true)
       return true
     }
     if (step === "close-keyboard") {
@@ -1039,19 +1086,23 @@
     discoverBackStep()
   }
 
-  /** Diagnostics toggle, with controller hints for the open state. */
+  /** Diagnostics toggle, with controller hints for the open state.
+      Closing releases the override (§8) — the toggle button itself
+      keeps focus, so no refocus is needed on this path. */
   function toggleDiagnostics() {
-    diagnosticsOpen = !diagnosticsOpen
     if (diagnosticsOpen) {
-      setControllerHints({
-        id: "discover-diagnostics",
-        items: [
-          { glyph: "b", label: "Close diagnostics" },
-          { glyph: "menu", label: "Settings" },
-          { glyph: "view-menu", label: "Return home" },
-        ],
-      })
+      closeDiagnostics()
+      return
     }
+    diagnosticsOpen = true
+    setControllerHints({
+      id: "discover-diagnostics",
+      items: [
+        { glyph: "b", label: "Close diagnostics" },
+        { glyph: "menu", label: "Settings" },
+        { glyph: "view-menu", label: "Return home" },
+      ],
+    })
   }
 
   function dismissOnboarding() {
@@ -1078,6 +1129,20 @@
 
   onMount(async () => {
     aiAuto = getAiAutoRequests()
+    setLogicalView("discover")
+    // Region owner (§7.3): search -> examples -> quick picks ->
+    // results, column-preserving, no rail hijack (kind "mixed"
+    // via setLogicalView above). Unregistered on unmount.
+    const unregisterNavOwner = rootEl
+      ? registerNavigationOwner({
+          id: "discover",
+          kind: "mixed",
+          root: () => rootEl,
+          isActive: () => rootEl?.isConnected ?? false,
+          handleDirection: createRegionDirectionHandler(rootEl),
+          sectionEntry: regionSectionEntry(rootEl),
+        })
+      : () => {}
     // Origin for Back (Contract B): the screen that launched Discover.
     recordOriginFromReferrer(window.location.pathname)
     // Back layer (Contract A): Android BACK runs the SAME single step
@@ -1177,6 +1242,9 @@
     }
     return () => {
       clearInterval(clock)
+      unregisterNavOwner()
+      // Leaving with diagnostics open must not strand its legend.
+      setControllerHints(null)
       unregisterBack()
       window.removeEventListener("keydown", onWindowKeyDown, true)
       window.removeEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
@@ -1199,7 +1267,7 @@
   })
 </script>
 
-<div class="rs-discover" data-discover-root onkeydown={onDiscoverKeyDown}>
+<div class="rs-discover" data-discover-root bind:this={rootEl} onkeydown={onDiscoverKeyDown}>
   <!-- Hero: Discover is a destination, with its purpose and its AI
        mode stated up front. -->
   <header class="rs-discover__hero">
@@ -1259,8 +1327,12 @@
     </section>
   {/if}
 
+  <!-- Navigation regions (§7.3): search -> examples -> quick picks ->
+       results/rows. The registered region owner routes D-pad presses
+       between them; the OSK keys inside the search scope are
+       excluded (keyboard owns them). -->
   <div class="rs-discover__search">
-    <div class="rs-discover__keyboard-scope" onfocusout={onKeyboardScopeFocusOut}>
+    <div class="rs-discover__keyboard-scope" data-nav-region="search" onfocusout={onKeyboardScopeFocusOut}>
       <form
         class="rs-discover__input-row"
         onsubmit={(e) => {
@@ -1316,7 +1388,7 @@
     </div>
 
     <!-- Example prompts: tap one and it asks, exactly as typed. -->
-    <div class="rs-discover__examples">
+    <div class="rs-discover__examples" data-nav-region="examples">
       <p class="rs-discover__examples-title">Try asking</p>
       <div class="rs-discover__example-grid" role="group" aria-label="Example prompts">
         {#each EXAMPLE_PROMPTS.slice(0, 4) as prompt}
@@ -1333,7 +1405,7 @@
 
     <!-- Quick picks (B04): six large cards, one icon + label +
          honest subtitle each, consistent focus, no nested panels. -->
-    <div class="rs-discover__moods">
+    <div class="rs-discover__moods" data-nav-region="quick-picks">
       <p class="rs-discover__moods-title">Quick picks</p>
       <div class="rs-discover__mood-grid" role="group" aria-label="Quick picks">
         {#each MOOD_PRESETS as preset (preset.id)}
@@ -1373,7 +1445,7 @@
       <button type="button" class="rs-empty__action" onclick={() => location.reload()}>Try again</button>
     </div>
   {:else if showingSearch}
-    <section class="rs-rail" data-discover-results data-nylah-rail="discover-results" aria-label="Discover results">
+    <section class="rs-rail" data-discover-results data-nav-region="results" data-nylah-rail="discover-results" aria-label="Discover results">
       <div class="rs-rail__head">
         <!-- Rail title comes from the per-search receipt only: "AI
              picks" for a validated live answer, "Cached AI picks" for
@@ -1593,7 +1665,7 @@
     <div data-discover-rows class="rs-discover__rows">
       {#each rows as row (row.id)}
         {#if row.items.length}
-          <section class="rs-rail" data-nylah-rail={row.id} aria-label={row.title}>
+          <section class="rs-rail" data-nav-region={row.id} data-nylah-rail={row.id} aria-label={row.title}>
             <div class="rs-rail__head">
               <h2 class="rs-section-title">{row.title}</h2>
             </div>

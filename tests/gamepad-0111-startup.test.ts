@@ -14,6 +14,7 @@
 
 import { describe, it, expect, beforeAll, vi } from "vitest";
 import { mountGamepad } from "@/scripts/lib/gamepad";
+import { setCurrentNavigationView } from "@/scripts/lib/navigation-ownership";
 
 const BTN_DPAD_DOWN = 13;
 
@@ -57,6 +58,10 @@ describe("already-connected pad at cold launch", () => {
     };
     proto.getBoundingClientRect = () => fullRect();
     proto.scrollIntoView = () => {};
+
+    // 0.11.14 (§2): this fixture IS the Home page — it names the
+    // view "home" as HomeView does, so the rail model applies.
+    setCurrentNavigationView("home");
 
     document.body.innerHTML = `
       <header data-couch-nav><nav><div data-nylah-rail="couch-nav">

@@ -57,6 +57,7 @@
 import { AiError, chatCompletions } from "./client.js"
 import { getAiEnabled, getAiEndpoint, getAiModel } from "@/scripts/lib/app-settings.js"
 import { getAiShareTaste } from "./status.js"
+import type { AiChatTransport } from "./generation.js"
 
 export interface DiscoverCandidate {
   id: string
@@ -217,6 +218,23 @@ export interface RerankRequest {
   tasteSummary: TasteSummary
   constraints?: RankingConstraints
   context?: RerankContext
+  /**
+   * Optional chat transport override (0.11.14, Home core + tests).
+   * Defaults to chatCompletions; Discover passes nothing and is
+   * unaffected. The Home core injects its deps' transport so the
+   * same reranker serves Home without a second pipeline.
+   */
+  chat?: AiChatTransport
+  /**
+   * Skip the 60s same-query repeat guard + sent-marking (0.11.14,
+   * Home core only). Discover keeps the guard. Home enforces
+   * stronger discipline of its own (durable cache + 24h attempt
+   * ledger + in-flight dedup), and the guard keys on the query
+   * string alone — Home's empty query would otherwise block the
+   * second content type's refresh and every explicit re-generate
+   * within 60s of any other Home rank.
+   */
+  skipRepeatGuard?: boolean
 }
 
 /** Options for the legacy `rank()` seam (same fields, flat). */
@@ -1333,7 +1351,8 @@ async function runRerank(request: RerankRequest): Promise<RerankResult> {
   }
 
   // Same question within 60s: never send a second paid request.
-  if (wasRecentlySent(query)) {
+  // (Home skips this guard — see RerankRequest.skipRepeatGuard.)
+  if (!request.skipRepeatGuard && wasRecentlySent(query)) {
     const limited: AiRankStatus = {
       ...status,
       phase: "error",
@@ -1355,8 +1374,9 @@ async function runRerank(request: RerankRequest): Promise<RerankResult> {
     const { system, user } = buildAiPrompt(query, shortlist, effectiveTaste, request.constraints)
     emitAiActivity({ type: "start", at: Date.now(), query })
     emitAiRankStatus({ ...status, phase: "sending" })
-    markSent(query)
-    const result = await chatCompletions({
+    if (!request.skipRepeatGuard) markSent(query)
+    const chat = request.chat ?? chatCompletions
+    const result = await chat({
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

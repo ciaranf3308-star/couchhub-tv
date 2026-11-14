@@ -49,6 +49,10 @@
     BACK_PRIORITY,
     registerBackLayer,
   } from "@/scripts/lib/back-handler.ts"
+  // Names the view for the W1 navigation-ownership contract (§2):
+  // kind "search" — the rail model can never hijack Search, and the
+  // keyboard layer owns editing while results stay a grid.
+  import { setLogicalView } from "@/scripts/lib/couch-focus.ts"
   import {
     recordOriginFromReferrer,
     navigateBackWithOrigin,
@@ -860,6 +864,7 @@
   }
 
   onMount(() => {
+    setLogicalView("search")
     loadIndex().then(() => {
       if (personMode) resolvePersonMode()
     })

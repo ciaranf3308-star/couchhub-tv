@@ -59,8 +59,10 @@
 //     repeat after a 350 ms initial delay, then every 140 ms.
 //   - Dead zone 0.30 on the left stick, so drift never moves focus.
 //   - While a text field is focused, navigation keys are left to the
-//     field (only B / View+Menu keep working, so the user can always
-//     blur out and return home).
+//     field: only B (blur + Back, dismissing editing first), A
+//     (enter editing / open the on-screen keyboard, §7.3/§7.15) and
+//     View+Menu keep working, so the user can always blur out and
+//     return home. Every other button stays swallowed in a field.
 //   - While a modal dialog is open, directions / A / B belong to the
 //     dialog only (see modalFocusTarget below); X / Y / Menu do
 //     nothing, so the page behind the dialog receives no navigation
@@ -82,6 +84,15 @@ import {
   markSyntheticBackEvent,
   resolveBack,
 } from "@/scripts/lib/back-handler.ts";
+// 0.11.14 (W1b, §7.3/§7.15): A on a focused text field enters editing
+// through the shared keyboard lifecycle — see activateTextEditing.
+// gamepad.ts only consumes the lifecycle's public API; the lifecycle
+// itself (and its Back layer) stays owned by couch-keyboard.ts.
+import {
+  getCouchKeyboardInput,
+  isCouchKeyboardOpen,
+  openCouchKeyboard,
+} from "@/scripts/lib/couch-keyboard.ts";
 // 0.11.10 (W6): Cursor Mode guard — see the guard at the top of
 // handleGamepadButtonPress. This module owns the guard region only;
 // cursor-mode.ts owns the pointer state machine.
@@ -92,6 +103,19 @@ import {
   setCursorModeActive,
   toggleCursorMode,
 } from "@/scripts/lib/cursor-mode.ts";
+// 0.11.14 (W1): per-view navigation ownership (§2) + the §5 input
+// ladder + the W2 cursor-scroll seam. The rail model below runs only
+// when the current view owns rail/shelf navigation; scrolling goes
+// through couch-focus's container-aware reveal (§4).
+import {
+  drawerContaining,
+  railNavigationApplies,
+  railScopeRoot,
+  resolveNavigationOwner,
+  routeDirectionToCursor,
+  type CursorDirectionSource,
+} from "@/scripts/lib/navigation-ownership.ts";
+import { scrollFocusedIntoView } from "@/scripts/lib/couch-focus.ts";
 
 const RETURN_HOME_HOLD_MS = 2000;
 const STICK_DEAD_ZONE = 0.3;
@@ -163,6 +187,8 @@ interface HeldDirection {
   dir: Direction;
   since: number;
   lastRepeat: number;
+  /** Where the held direction came from — repeats keep the original source (stick repeats scroll in Cursor Mode). */
+  source: CursorDirectionSource;
 }
 
 // Action state shared by both input paths. It used to live inside
@@ -237,9 +263,12 @@ export function clearViewMenuHoldTimer(): void {
   actionState.viewMenuHoldStart = null;
 }
 
-function move(dir: Direction): void {
+function move(dir: Direction, source: CursorDirectionSource = "dpad"): void {
   markGamepadActive();
-  // A modal dialog owns all navigation while it is open (v0.2.1):
+  // §5 ownership chain — exactly ONE branch runs per press; the
+  // first applicable layer consumes it and nothing below runs.
+  //
+  // 1. Confirmation/modal owns all navigation while open (v0.2.1):
   // never run the rail model — it would carry focus into the page
   // behind the dialog. If focus never landed in the dialog (or
   // escaped it), pull it onto the dialog's first item and consume
@@ -254,37 +283,113 @@ function move(dir: Direction): void {
     dispatchKey(ARROW_KEY[dir]);
     return;
   }
-  // Home rails get the rail-aware model; everything else falls
-  // through to plain arrow keys into spatial navigation.
+  // 2. Cursor Mode + left stick (§6/W2 seam): the stick scrolls the
+  // container under the pointer instead of moving focus. The seam
+  // is inert until W2 registers a handler, and D-pad directions
+  // always keep driving focus navigation — one press, one stream,
+  // never both. (Both live input paths already keep stick
+  // directions out of here while Cursor Mode is active — the
+  // pollLoop guard below and native-gamepad's drop — so this
+  // branch is defense-in-depth for any other source:"stick"
+  // caller; W2's scrolling itself rides xinput-scroll / axes 0/1.)
+  if (source === "stick" && isCursorModeActive() && routeDirectionToCursor(dir)) {
+    return;
+  }
+  const active = document.activeElement as HTMLElement | null;
+  // 3. Drawer/popover: input inside an open drawer belongs to the
+  // drawer. The rail model and view owners must not carry focus
+  // out of it; the arrow goes to the drawer's own key handler
+  // (spatial sections for drawers are self-only). Focus outside an
+  // open, visible drawer is pulled in first (same contract as the
+  // modal pull above).
+  if (active && drawerContaining(active)) {
+    dispatchKey(ARROW_KEY[dir]);
+    return;
+  }
+  const drawerPull = drawerFocusTarget();
+  if (drawerPull) {
+    drawerPull.focus({ preventScroll: true });
+    return;
+  }
+  // 4. The registered navigation owner for the focused element
+  // (or, with no focus yet, its section-entry target). A consuming
+  // owner stops the chain; a declining one falls through to the
+  // kind's built-in behaviour below.
+  const owner = resolveNavigationOwner(active);
+  if (owner?.handleDirection && active && active !== document.body) {
+    try {
+      if (owner.handleDirection(dir, active)) return;
+    } catch {
+      // A throwing owner never kills the press: fall through.
+    }
+  }
+  if ((!active || active === document.body) && owner?.sectionEntry) {
+    let entry: HTMLElement | null = null;
+    try {
+      entry = owner.sectionEntry(dir, null);
+    } catch {
+      // A throwing sectionEntry never kills the press: fall through.
+    }
+    if (entry && entry.isConnected) {
+      entry.focus({ preventScroll: true });
+      scrollFocusedIntoView(entry);
+      return;
+    }
+  }
+  // 5. Built-in behaviour for the view's kind: the rail model ONLY
+  // on rail/shelf views (§2 — Discover/Search/grids/Guide/Settings
+  // never reach it), then the generic spatial engine as fallback.
   if (handleRailDirection(dir)) return;
   dispatchKey(ARROW_KEY[dir]);
 }
 
-function handleDirection(dir: Direction | null, now: number): void {
+function handleDirection(
+  dir: Direction | null,
+  now: number,
+  source: CursorDirectionSource = "dpad",
+): void {
   if (dir === null) {
     actionState.held = null;
     return;
   }
   if (actionState.held === null || actionState.held.dir !== dir) {
-    actionState.held = { dir, since: now, lastRepeat: now };
-    move(dir);
+    actionState.held = { dir, since: now, lastRepeat: now, source };
+    move(dir, source);
     return;
   }
+  // Same direction still held: the latest source wins (a D-pad
+  // press followed by a stick hold in the same direction scrolls
+  // in Cursor Mode, and vice versa).
+  actionState.held.source = source;
   if (
     now - actionState.held.since >= REPEAT_INITIAL_DELAY_MS &&
     now - actionState.held.lastRepeat >= REPEAT_INTERVAL_MS
   ) {
     actionState.held.lastRepeat = now;
-    move(dir);
+    move(dir, actionState.held.source);
   }
+}
+
+/**
+ * Drop any held direction / native repeat ticker (window blur, pad
+ * disconnect): a held D-pad must never resume repeating after the
+ * app lost focus. The 350 ms / 140 ms repeat mechanism itself is
+ * unchanged (§4: preserve it, improve its interaction with focus
+ * loss only).
+ */
+export function cancelHeldDirection(): void {
+  actionState.held = null;
+  nativeDirection = null;
+  cancelAnimationFrame(nativeRafId);
 }
 
 /**
  * One pressed button, from either input path. `index` is a
  * standard-mapping button index (see BTN_* above). Edge-triggered by
  * the caller: call only on the press edge, never while held. The
- * text-field gate lives here so both paths honour it: in a field only
- * B works (blur + back), every other button is swallowed.
+ * text-field gate lives here so both paths honour it: in a field B
+ * works (blur + back) and A enters editing through the shared
+ * keyboard lifecycle; every other button is swallowed.
  */
 export function handleGamepadButtonPress(index: number, _now: number): void {
   // 0.11.10 (W6) CURSOR MODE GUARD — runs before ALL button routing.
@@ -324,6 +429,15 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       markGamepadActive();
       (document.activeElement as HTMLElement | null)?.blur?.();
       resolveBack();
+    }
+    // 0.11.14 (W1b, §7.3/§7.15): A on a focused input must not be
+    // silently swallowed — it enters editing (activateFocused routes
+    // it through the shared keyboard lifecycle, with the modal/drawer
+    // pull taking priority as for every other A press). B above is
+    // unchanged; every other button stays swallowed in a field.
+    if (index === BTN_A) {
+      markGamepadActive();
+      activateFocused();
     }
     return;
   }
@@ -421,28 +535,25 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
   }
   if (index === BTN_LB) {
     markGamepadActive();
-    // W3: in the Guide LB shifts time earlier (Guide key "PageUp").
-    // W5: in the Browser LB steps to the previous category ("[").
-    // 0.11.8: in Browse Everything LB turns the page; on Movies /
-    // Series Home LB jumps to the previous shelf (the Home
-    // shelf-jump listener owns PageUp/PageDown). Both are gated on
-    // no open modal, so a dialog keeps owning the press.
-    if (livetvGuideActive()) dispatchKey("PageUp");
-    else if (livetvBrowserActive()) dispatchKey("[");
-    else if (browseEverythingActive() && findOpenModal() === null) dispatchKey("PageUp");
-    else if (moviesSeriesHomeActive() && findOpenModal() === null) dispatchKey("PageUp");
+    // §5: navigation branches never act behind an open modal — the
+    // dialog owns the press. Seek (a media control, not navigation)
+    // keeps working, per the safety rules in this file's header.
+    const modalOpen = findOpenModal() !== null;
+    if (!modalOpen && livetvGuideActive()) dispatchKey("PageUp");
+    else if (!modalOpen && livetvBrowserActive()) dispatchKey("[");
+    else if (!modalOpen && browseEverythingActive()) dispatchKey("PageUp");
+    else if (!modalOpen && moviesSeriesHomeActive()) dispatchKey("PageUp");
     else seekBy(-10);
     return;
   }
   if (index === BTN_RB) {
     markGamepadActive();
-    // W3: in the Guide RB shifts time later (Guide key "PageDown").
-    // W5: in the Browser RB steps to the next category ("]").
-    // 0.11.8: Browse Everything page turn / Home shelf jump (see LB).
-    if (livetvGuideActive()) dispatchKey("PageDown");
-    else if (livetvBrowserActive()) dispatchKey("]");
-    else if (browseEverythingActive() && findOpenModal() === null) dispatchKey("PageDown");
-    else if (moviesSeriesHomeActive() && findOpenModal() === null) dispatchKey("PageDown");
+    // §5: see LB — navigation branches are modal-gated, seek is not.
+    const modalOpen = findOpenModal() !== null;
+    if (!modalOpen && livetvGuideActive()) dispatchKey("PageDown");
+    else if (!modalOpen && livetvBrowserActive()) dispatchKey("]");
+    else if (!modalOpen && browseEverythingActive()) dispatchKey("PageDown");
+    else if (!modalOpen && moviesSeriesHomeActive()) dispatchKey("PageDown");
     else seekBy(10);
     return;
   }
@@ -451,7 +562,8 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     // W5 (0.9.0): triggers ARE plumbed (buttons 6/7, analog value
     // > 0.5 counts as pressed). In the Browser LT steps to the
     // previous page (PageUp); elsewhere it stays volume down.
-    if (livetvBrowserActive()) dispatchKey("PageUp");
+    // §5: the page-turn branch never acts behind an open modal.
+    if (livetvBrowserActive() && findOpenModal() === null) dispatchKey("PageUp");
     else adjustVolume(-0.1);
     return;
   }
@@ -459,7 +571,8 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
     markGamepadActive();
     // W5 (0.9.0): in the Browser RT steps to the next page
     // (PageDown); elsewhere it stays volume up.
-    if (livetvBrowserActive()) dispatchKey("PageDown");
+    // §5: the page-turn branch never acts behind an open modal.
+    if (livetvBrowserActive() && findOpenModal() === null) dispatchKey("PageDown");
     else adjustVolume(0.1);
     return;
   }
@@ -530,6 +643,7 @@ export function dispatchNativeButton(
 
 let nativeRafId = 0;
 let nativeDirection: Direction | null = null;
+let nativeDirectionSource: CursorDirectionSource = "dpad";
 
 /**
  * Native XInput direction edge, from native-gamepad.ts. `dir` is the
@@ -538,10 +652,17 @@ let nativeDirection: Direction | null = null;
  * requestAnimationFrame ticker with the same 350 ms / 140 ms timing
  * the browser loop uses, so a held native D-pad repeats exactly like
  * a held browser one.
+ *
+ * `source` names where the direction came from ("dpad" default):
+ * W2's native path passes "stick" for left-stick directions so
+ * Cursor Mode can scroll instead of moving focus. Until W2 passes
+ * it, every native direction is treated as D-pad — the pre-0.11.14
+ * behaviour, unchanged.
  */
 export function dispatchNativeDirection(
   dir: Direction | null,
   now: number = performance.now(),
+  source: CursorDirectionSource = "dpad",
 ): void {
   noteNativeInputActive();
   if (dir === null) {
@@ -550,14 +671,15 @@ export function dispatchNativeDirection(
     actionState.held = null;
     return;
   }
+  nativeDirectionSource = source;
   if (nativeDirection !== dir) {
     nativeDirection = dir;
-    handleDirection(dir, now);
+    handleDirection(dir, now, source);
   }
   cancelAnimationFrame(nativeRafId);
   const tick = (t: number): void => {
     if (nativeDirection === null) return;
-    handleDirection(nativeDirection, t);
+    handleDirection(nativeDirection, t, nativeDirectionSource);
     nativeRafId = requestAnimationFrame(tick);
   };
   nativeRafId = requestAnimationFrame(tick);
@@ -662,10 +784,158 @@ function currentVideo(): HTMLVideoElement | null {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// 0.11.14 (W1b) — A on a focused text field (§7.3/§7.15).
+//
+// "A on an input must not be silently swallowed" (§7.3) and "the
+// viewer must not be trapped in the search input" (§7.15). Both the
+// editing gate in handleGamepadButtonPress and activateFocused used
+// to return early for inputs, so the controller could never reach
+// the on-screen keyboard from the input itself — even though the
+// Discover/Search views already expect that entry ("the key grid is
+// reached via ArrowDown or A on the input") and the shared lifecycle
+// documents it (couch-keyboard.ts: focusGrid defaults to true as
+// "the explicit controller entry: A on a focused input").
+//
+// A enters editing through the EXISTING lifecycle only — no new
+// keyboard system, no B change, no new Back layer. Dispatching a
+// synthetic Enter is deliberately NOT the seam: Search navigates to
+// a result on Enter, Discover's form never submits from an
+// untrusted key, and neither opens the key grid. Dispatching
+// ArrowDown is not it either: surfaces without an ArrowDown handler
+// would move focus instead of entering editing. The seam is the
+// lifecycle's own public API, applied per state:
+//
+//   - Session already live for this input (the normal Discover /
+//     Search state — the view opens the session on focus with
+//     focusGrid:false, so focus stays in the input for typing):
+//     move focus into the already-mounted key grid. openCouchKeyboard
+//     is NOT re-called here: re-entry would overwrite the view's
+//     commit callback with undefined.
+//   - No session for this input but a keyboard surface is mounted
+//     (an Astro dialog surface, or a session that ended while the
+//     grid stayed rendered): openCouchKeyboard(input) with its
+//     default focusGrid:true — the designed explicit entry — which
+//     registers the session + keyboard Back layer and schedules the
+//     grid focus itself.
+//   - No session and no mounted keyboard (a plain form field with no
+//     OSK surface): A is a no-op, exactly as before. gamepad.ts never
+//     invents a keyboard session where no keyboard surface exists, so
+//     Settings form fields keep their current B behaviour and hints.
+//
+// B is untouched: the keyboard Back layer (priority 80) dismisses
+// editing first, without clearing the query or the conversation.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Input types that take free text — the tv-input-guard set. */
+const TEXT_INPUT_TYPES = new Set([
+  "",
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "number",
+]);
+
+/** First-key selector, matching couch-keyboard's grid-focus query. */
+const OSK_KEY_SELECTOR =
+  "[data-couch-keyboard] [data-osk-key], [data-osk] [data-osk-key]";
+
+function isTextEditingTarget(
+  el: HTMLInputElement | HTMLTextAreaElement,
+): boolean {
+  if (el.tagName.toLowerCase() === "textarea") return true;
+  const type = (el.getAttribute("type") || "").toLowerCase();
+  return TEXT_INPUT_TYPES.has(type);
+}
+
+function focusFirstOskKey(
+  input: HTMLInputElement | HTMLTextAreaElement,
+): boolean {
+  const key = document.querySelector<HTMLElement>(OSK_KEY_SELECTOR);
+  if (!key) return false;
+  // Never steal focus the user has already moved elsewhere.
+  const active = document.activeElement;
+  if (active !== input && active !== document.body) return false;
+  key.focus();
+  return true;
+}
+
+/**
+ * Move focus into the key grid, retrying across frames like
+ * couch-keyboard's own scheduler (the grid may mount on the next
+ * Svelte flush). Each attempt re-checks that the live session still
+ * belongs to this input, so a stale retry never steals focus after
+ * the user moved on or B dismissed editing.
+ */
+function scheduleOskGridFocus(
+  input: HTMLInputElement | HTMLTextAreaElement,
+): void {
+  const attempt = (): void => {
+    if (!isCouchKeyboardOpen() || getCouchKeyboardInput() !== input) return;
+    focusFirstOskKey(input);
+  };
+  attempt();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      attempt();
+      setTimeout(attempt, 80);
+    });
+  } else {
+    setTimeout(attempt, 80);
+  }
+}
+
+function activateTextEditing(
+  el: HTMLInputElement | HTMLTextAreaElement,
+): void {
+  if (!isTextEditingTarget(el)) {
+    // Checkbox / radio / button / range: controls, not text fields.
+    // A activates them natively instead of opening a keyboard.
+    el.click();
+    return;
+  }
+  if (isCouchKeyboardOpen() && getCouchKeyboardInput() === el) {
+    scheduleOskGridFocus(el);
+    return;
+  }
+  if (!document.querySelector("[data-couch-keyboard], [data-osk]")) return;
+  openCouchKeyboard(el);
+}
+
+function activateSelect(el: HTMLSelectElement): void {
+  // A opens the native option picker — the select equivalent of
+  // entering editing. showPicker is the programmatic equivalent of
+  // the trusted Enter/click that opens it; a synthetic Enter cannot.
+  // Best-effort throughout: where showPicker is unavailable or
+  // refused, click() is the fallback and a failure is a no-op.
+  const picker = (
+    el as HTMLSelectElement & { showPicker?: () => void }
+  ).showPicker;
+  if (typeof picker === "function") {
+    try {
+      picker.call(el);
+      return;
+    } catch {
+      // Fall through to click().
+    }
+  }
+  try {
+    el.click();
+  } catch {
+    // Best-effort: a failed activation is a no-op, never a throw.
+  }
+}
+
 function activateFocused(): void {
   // While a modal is open, A must never activate something behind
-  // it: pull stray focus into the dialog instead.
-  const pull = modalFocusTarget();
+  // it: pull stray focus into the dialog instead. Same for an open
+  // drawer (§5): A in a filter drawer must not activate a movie
+  // behind it, and A with focus outside the drawer pulls focus in
+  // instead of activating the page underneath.
+  const pull = modalFocusTarget() ?? drawerFocusTarget();
   if (pull) {
     pull.focus({ preventScroll: true });
     return;
@@ -676,7 +946,19 @@ function activateFocused(): void {
     return;
   }
   const tag = el.tagName.toLowerCase();
-  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if (tag === "input" || tag === "textarea") {
+    activateTextEditing(el as HTMLInputElement | HTMLTextAreaElement);
+    return;
+  }
+  if (tag === "select") {
+    activateSelect(el as HTMLSelectElement);
+    return;
+  }
+  if (el.isContentEditable) {
+    // No keyboard lifecycle exists for contentEditable surfaces
+    // (none exist in the Couch views); A stays swallowed there.
+    return;
+  }
   if (
     tag === "button" ||
     tag === "a" ||
@@ -837,7 +1119,36 @@ export function modalFocusTarget(): HTMLElement | null {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Nylah home rails — rail-aware navigation model (v0.2.0).
+// Div-based drawers own navigation while open (§5, priority 3) — the
+// same contract as modals, for surfaces findOpenModal cannot see:
+// the Browse filter/category drawers and the Live TV category
+// drawer are plain <div>s, not <dialog>s. A drawer root only exists
+// in the DOM while its drawer is open; the visibility check below
+// keeps a stale or hidden root from ever pulling focus.
+// ──────────────────────────────────────────────────────────────────────
+
+/** First visible focusable inside an open drawer, when focus sits outside every open drawer, else null. */
+export function drawerFocusTarget(): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null;
+  if (active && drawerContaining(active)) return null;
+  const drawers = Array.from(
+    document.querySelectorAll(
+      "[data-browse-filter-drawer], [data-browse-category-drawer], [data-category-drawer], [data-drawer-root]",
+    ),
+  ).filter((drawer) => drawer.isConnected && isVisible(drawer));
+  if (drawers.length === 0) return null;
+  // Last in document order wins: drawers append to the body as they open.
+  const drawer = drawers[drawers.length - 1];
+  if (active && drawer.contains(active)) return null;
+  const first = drawer.querySelector<HTMLElement>(
+    "button:not([disabled]), a[href], input:not([disabled]), [tabindex]:not([tabindex='-1'])",
+  );
+  return first && isVisible(first) ? first : null;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Nylah home rails — rail-aware navigation model (v0.2.0, scoped in
+// 0.11.14 per §2).
 //
 // Contract for rail components (worker 2's four rails + the Continue
 // Watching rail): each rail renders
@@ -847,18 +1158,29 @@ export function modalFocusTarget(): HTMLElement | null {
 // and row classes live in global.css (.nylah-rail__head / __title /
 // __row); a strip may reuse its existing .hub-section-head instead.
 //
+// 0.11.14 SCOPING (§2): this model runs ONLY on rail/shelf views
+// (Home, Movies Home, Series Home) — handleRailDirection returns
+// false immediately on every other view, however many
+// `[data-nylah-rail]` markers the page carries — and it queries
+// rails ONLY within the owning view's scope (the registered
+// owner's root, else `[data-nylah-rails]`, else the Movies/Series
+// Home root). Discover/Search/grids never see it.
+//
 // Behaviour, only while the focused element is inside a rail (or no
 // element is focused yet):
 //   left / right ... move within the rail; at either end the move is
 //                    NOT consumed, so spatial navigation can carry it
 //                    on into the sidebar (left edge) as before.
-//   up / down ...... move to the adjacent rail, restoring that rail's
-//                    remembered column (focus memory); at the top /
+//   up / down ...... move to the adjacent rail, preserving the
+//                    horizontal CENTRE (§3: geometry, not DOM
+//                    index — rows with different card widths keep
+//                    their column); ties and degenerate layouts
+//                    fall back to the remembered index. At the top /
 //                    bottom edge the move is NOT consumed, so spatial
 //                    navigation can carry it to the hero / nav.
 //   focus .......... is never lost: every handled move lands on a real
-//                    item, and a focusin handler scrolls the focused
-//                    item into view (both axes, nearest edge) so the
+//                    item, and a focusin handler reveals the focused
+//                    item in its owning containers (§4) so the
 //                    focused card is always visible.
 // Anything outside the rails (sidebar, dialogs, grids, player) keeps
 // the previous behaviour: plain arrow keys into spatial navigation.
@@ -892,7 +1214,9 @@ function railItems(rail: Element): HTMLElement[] {
 }
 
 function homeRails(): Element[] {
-  return Array.from(document.querySelectorAll("[data-nylah-rail]")).filter(
+  // §2: scoped to the owning view — never the whole document.
+  const scope = railScopeRoot();
+  return Array.from(scope.querySelectorAll("[data-nylah-rail]")).filter(
     (rail) => railItems(rail).length > 0 && isVisible(rail),
   );
 }
@@ -903,16 +1227,58 @@ function focusRailItem(rail: Element, index: number): void {
   const clamped = Math.max(0, Math.min(index, items.length - 1));
   railMemory.set(rail, clamped);
   items[clamped].focus({ preventScroll: true });
-  // The focusin handler below scrolls it into view; calling it here
-  // too covers the (rare) case where focus was already on the item.
-  items[clamped].scrollIntoView({ block: "nearest", inline: "nearest" });
+  // The focusin handler below reveals it too; calling it here covers
+  // the (rare) case where focus was already on the item. §4: reveal
+  // in the owning containers, with header/hint clearance — never a
+  // blind whole-document scrollIntoView.
+  scrollFocusedIntoView(items[clamped]);
+}
+
+function centreX(el: Element): number {
+  const rect = el.getBoundingClientRect();
+  return rect.left + rect.width / 2;
+}
+
+/**
+ * §3 column preservation: the index in `targetItems` whose centre-x
+ * is closest to `fromCentreX`. Ties (including degenerate layouts
+ * where every centre is 0) resolve toward `preferredIndex` — the
+ * current DOM column / remembered index — so rows with no usable
+ * geometry keep the pre-0.11.14 index behaviour exactly.
+ */
+export function nearestColumnIndex(
+  targetItems: readonly Element[],
+  fromCentreX: number,
+  preferredIndex: number,
+): number {
+  if (targetItems.length === 0) return 0;
+  let best = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestIndexGap = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < targetItems.length; i++) {
+    const distance = Math.abs(centreX(targetItems[i]) - fromCentreX);
+    const indexGap = Math.abs(i - preferredIndex);
+    if (
+      distance < bestDistance ||
+      (distance === bestDistance && indexGap < bestIndexGap)
+    ) {
+      best = i;
+      bestDistance = distance;
+      bestIndexGap = indexGap;
+    }
+  }
+  return best;
 }
 
 // Returns true when the direction was consumed by the rail model.
 function handleRailDirection(dir: Direction): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  // §2 gate: only rail/shelf views, only inside the rail scope.
+  // Discover, Search, grids, Guide, Settings and Live TV return
+  // false here before any rail is even queried.
+  if (!railNavigationApplies(active)) return false;
   const rails = homeRails();
   if (rails.length === 0) return false;
-  const active = document.activeElement as HTMLElement | null;
   const rail = active?.closest?.("[data-nylah-rail]") ?? null;
 
   if (dir === "left" || dir === "right") {
@@ -951,7 +1317,14 @@ function handleRailDirection(dir: Direction): boolean {
   const items = railItems(rail);
   const col = items.indexOf(active as HTMLElement);
   const remembered = railMemory.get(target) ?? 0;
-  const index = col === -1 ? remembered : Math.min(col, railItems(target).length - 1);
+  const targetItems = railItems(target);
+  // §3: preserve the horizontal centre, not the DOM index — a wide
+  // hero card above a row of narrow posters must not land on a
+  // distant card just because the indices line up. When geometry
+  // is unusable the tiebreak below reproduces index behaviour.
+  const preferred = col === -1 ? remembered : col;
+  const fromX = active ? centreX(active) : 0;
+  const index = nearestColumnIndex(targetItems, fromX, preferred);
   focusRailItem(target, Math.max(0, index));
   return true;
 }
@@ -970,11 +1343,12 @@ function mountRailAutoScroll(): void {
     const items = railItems(rail);
     const at = items.indexOf(target);
     if (at !== -1) railMemory.set(rail, at);
-    // Auto-scroll: keep the focused item fully in view, both axes.
-    // block/inline "nearest" is a no-op when it is already visible,
-    // so manual scrolling is never fought. Instant, not smooth: a
+    // Auto-scroll: keep the focused item fully in view in its
+    // owning containers (§4 — header/hint clearance, no whole-page
+    // scroll from inside a panel). A no-op when already visible, so
+    // manual scrolling is never fought. Instant, not smooth: a
     // held D-pad repeats faster than a smooth scroll settles.
-    target.scrollIntoView({ block: "nearest", inline: "nearest" });
+    scrollFocusedIntoView(target);
   });
 }
 
@@ -1098,11 +1472,16 @@ export function mountGamepad(): void {
     noteViewMenuHeld(snapshot[BTN_VIEW], snapshot[BTN_MENU], now);
 
     if (editing) {
-      // In a text field the controller only gets B (blur/back) and the
-      // View+Menu return-home hold — arrows and A belong to the field.
-      // The gate lives in handleGamepadButtonPress; calling it for B
-      // is enough here. R3 is routed too, so Cursor Mode can always
-      // be exited from a field on the fallback path (0.11.10 W6).
+      // In a text field the controller only gets A (enter editing,
+      // §7.3/§7.15 — routed through the shared pipeline so the
+      // fallback behaves exactly like the native path), B
+      // (blur/back) and the View+Menu return-home hold — arrows and
+      // every other button belong to the field. Directions stay
+      // swallowed here (the documented editing asymmetry: the native
+      // path dispatches Up/Down while editing, the fallback does
+      // not). R3 is routed too, so Cursor Mode can always be exited
+      // from a field on the fallback path (0.11.10 W6).
+      if (justPressed(BTN_A)) handleGamepadButtonPress(BTN_A, now);
       if (justPressed(BTN_B)) handleGamepadButtonPress(BTN_B, now);
       if (justPressed(BTN_RIGHT_THUMB))
         handleGamepadButtonPress(BTN_RIGHT_THUMB, now);
@@ -1111,13 +1490,30 @@ export function mountGamepad(): void {
     }
 
     // D-pad (edge + repeat) and left stick (repeat) share one direction.
-    let dir: Direction | null = null;
+    // The source travels with the press: in Cursor Mode a stick
+    // direction scrolls (W2 seam) while a D-pad direction still
+    // moves focus — one physical controller, one stream of actions.
+    let dir: Direction | null;
+    let dirSource: CursorDirectionSource = "dpad";
     if (snapshot[BTN_DPAD_UP]) dir = "up";
     else if (snapshot[BTN_DPAD_DOWN]) dir = "down";
     else if (snapshot[BTN_DPAD_LEFT]) dir = "left";
     else if (snapshot[BTN_DPAD_RIGHT]) dir = "right";
-    else dir = stickDirection(gp);
-    handleDirection(dir, now);
+    else if (!isCursorModeActive()) {
+      dir = stickDirection(gp);
+      if (dir !== null) dirSource = "stick";
+    } else {
+      // 0.11.14 W2 seam (§6, no-dual-route rule): while Cursor Mode
+      // is active the left stick scrolls — cursor-mode.ts reads axes
+      // 0/1 itself on this fallback path (xinput-scroll natively) —
+      // and must NOT also move focus. The native XInput path drops
+      // source:"stick" directions the same way. D-pad buttons above
+      // still flow, so D-pad focus navigation is retained. dir stays
+      // null here, which also releases any direction held across
+      // the R3 activation instead of letting it keep repeating.
+      dir = null;
+    }
+    handleDirection(dir, now, dirSource);
 
     // Every button runs the shared pipeline (same code the native
     // XInput path calls) — see handleGamepadButtonPress. R3 (11) is
@@ -1154,6 +1550,11 @@ export function mountGamepad(): void {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stop();
     else start();
+  });
+  // §4: losing window focus drops any held direction, so a D-pad
+  // held across an Alt-Tab never resumes repeating on return.
+  window.addEventListener("blur", () => {
+    cancelHeldDirection();
   });
   window.addEventListener("gamepadconnected", () => start());
   window.addEventListener("gamepaddisconnected", () => {

@@ -619,12 +619,22 @@ describe("assembleSeriesHomeSections — order and omission", () => {
   });
 
   it("never labels a shelf as AI picks or personalised", () => {
-    const text = JSON.stringify(assemble());
-    expect(text).not.toMatch(/\bAI picks\b/);
-    expect(text).not.toMatch(/\bAI\b/);
-    expect(text.toLowerCase()).not.toContain("personalised");
-    expect(text.toLowerCase()).not.toContain("personalized");
-    expect(text.toLowerCase()).not.toContain("picked for you");
+    // 0.11.14 §21: the Discover entry-points section honestly names
+    // the AI action it offers ("Find something with AI") — that is
+    // the one permitted "AI" surface without verified picks. The
+    // RECOMMENDATION shelves must still never claim AI or
+    // personalisation, and no AI-picks section may exist at all.
+    const sections = assemble();
+    expect(sections.map((section) => section.kind)).not.toContain("ai-picks");
+    expect(sections.map((section) => section.kind)).not.toContain("ai-prompt");
+    const recommendationText = JSON.stringify(
+      sections.filter((section) => section.kind !== "discover-entries"),
+    );
+    expect(recommendationText).not.toMatch(/\bAI picks\b/);
+    expect(recommendationText).not.toMatch(/\bAI\b/);
+    expect(recommendationText.toLowerCase()).not.toContain("personalised");
+    expect(recommendationText.toLowerCase()).not.toContain("personalized");
+    expect(recommendationText.toLowerCase()).not.toContain("picked for you");
   });
 
   it("Worth Starting entries are series-level and exclude in-progress series", () => {

@@ -138,6 +138,8 @@
       setAiShareTaste,
       getAiAutoRequests,
       setAiAutoRequests,
+      getAiHomeAutoRefresh,
+      setAiHomeAutoRefresh,
       getAiProvider,
       setAiProvider,
       resolveAiModelControl,
@@ -1144,9 +1146,11 @@
     syncPerfModeButtons()
 
     // ---------------------------------------------------------------------
-    // Controller Cursor Mode (0.11.10, W6): persisted to
-    // xt_cursor_mode, default off (absent key). cursor-mode.ts listens
-    // for `xt:cursor-mode-changed` and exits immediately on disable.
+    // Controller Cursor Mode (0.11.10, W6; 0.11.14, W2): persisted
+    // to xt_cursor_mode — "1" enabled, "0" deliberately disabled,
+    // absent key enabled (new-install default). cursor-mode.ts
+    // listens for `xt:cursor-mode-changed` and exits immediately on
+    // disable.
     // ---------------------------------------------------------------------
     const cursorModeGroup = document.getElementById("settings-cursor-mode")
     function syncCursorModeButtons() {
@@ -2721,6 +2725,7 @@
     const aiProviderGroup = document.getElementById("settings-ai-provider")
     const aiShareGroup = document.getElementById("settings-ai-share-taste")
     const aiAutoGroup = document.getElementById("settings-ai-auto")
+    const aiHomeAutoGroup = document.getElementById("settings-ai-home-auto")
     const aiKeysLink = /** @type {HTMLAnchorElement|null} */ (
       document.getElementById("settings-ai-keys-link")
     )
@@ -2819,6 +2824,20 @@
       if (!btn) return
       setAiAutoRequests(btn.getAttribute("data-auto") === "auto")
       syncAiAuto()
+    })
+
+    // Home auto-refresh (0.11.14, §16): one control, separate from
+    // the Discover search-submit preference above.
+    function syncAiHomeAuto() {
+      syncSeg(aiHomeAutoGroup, "data-home-auto", getAiHomeAutoRefresh() ? "on" : "off")
+    }
+    syncAiHomeAuto()
+
+    aiHomeAutoGroup?.addEventListener("click", (event) => {
+      const btn = /** @type {HTMLElement} */ (event.target).closest(".ai-home-auto-btn")
+      if (!btn) return
+      setAiHomeAutoRefresh(btn.getAttribute("data-home-auto") === "on")
+      syncAiHomeAuto()
     })
 
     async function syncAiKeyStatus() {

@@ -443,7 +443,20 @@ describe("controller contract (T25, T26, T27, T28)", () => {
   })
 
   it("T27: X on a row opens the menu with real actions only", () => {
-    const row = fixture({ title: "Man Utd v Sunderland" })
+    // 0.11.14 integration adjudication: the X-key menu path derives
+    // actions with the REAL wall clock (fixtureContextActions
+    // defaults nowMs to Date.now()), while mountHub renders against
+    // the fixed NOW. A fixed-clock fixture ages into "past" and the
+    // menu honestly drops Watch (past + no catch-up → Guide only,
+    // pinned by the sibling T27 below) — that failure is pre-existing
+    // on 0.11.13, not a 0.11.14 change. Anchor this fixture to the
+    // wall clock so the test keeps testing what it claims: an
+    // upcoming row without catch-up.
+    const row = fixture({
+      title: "Man Utd v Sunderland",
+      startMs: Date.now() + 2 * HOUR,
+      stopMs: Date.now() + 4 * HOUR,
+    })
     const { controller } = mountHub([row])
     const rowEl = document.querySelector<HTMLElement>(
       "[data-couch-key^='sports:fixture:']",

@@ -55,7 +55,12 @@ export function registerBackInterceptor(interceptor: BackInterceptor): () => voi
 
 // ── Back layers (Controller 2.0 contract) ───────────────────────────
 
-/** Priority ladder for Back layers. Higher number = handled first. */
+/** Priority ladder for Back layers. Higher number = handled first.
+ *  This IS the §5 input-ownership ladder for Back (see
+ *  INPUT_PRIORITY in navigation-ownership.ts, same order, 1 = top):
+ *  CONFIRM_DIALOG/MODAL → 1, KEYBOARD → 2, DRAWER → 3,
+ *  PLAYER_OPTIONS/PLAYBACK → 4, fullscreen (closeTopmostChrome) →
+ *  5, DETAIL_SUBVIEW/PAGE_STATE → 6, ROUTE → 7. */
 export const BACK_PRIORITY = {
   CONFIRM_DIALOG: 100,
   MODAL: 90,
@@ -241,6 +246,23 @@ function hasOpenNativeModal(): boolean {
 }
 
 function resolveBackInternal(fromPhysicalEscape: boolean): boolean {
+  // §5 (0.11.14): one press, one resolution. A layer's handle()
+  // must never re-enter the coordinator synchronously (e.g. a
+  // handler that closes a dialog, whose close handler resolves
+  // Back again): the nested call returns unconsumed immediately,
+  // so a single press can never pop two layers.
+  if (resolvingBack) return false
+  resolvingBack = true
+  try {
+    return resolveBackSteps(fromPhysicalEscape)
+  } finally {
+    resolvingBack = false
+  }
+}
+
+let resolvingBack = false
+
+function resolveBackSteps(fromPhysicalEscape: boolean): boolean {
   const modalOpen = hasOpenNativeModal()
   for (const layer of orderedLayers()) {
     // A dialog owns B: sub-MODAL layers (keyboard, drawers,
