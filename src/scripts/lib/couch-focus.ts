@@ -32,6 +32,10 @@ import {
   BACK_PRIORITY,
   registerBackLayer,
 } from "@/scripts/lib/back-handler.js";
+import {
+  drawerContaining,
+  setCurrentNavigationView,
+} from "@/scripts/lib/navigation-ownership.ts";
 
 const STORAGE_KEY = "rs_couch_focus_memory";
 const MOUNT_FLAG = "__rsCouchFocusMounted" as const;
@@ -63,6 +67,10 @@ let logicalView = "";
 /** Name the logical view currently on screen (mode switches included). */
 export function setLogicalView(view: string): void {
   logicalView = typeof view === "string" ? view : "";
+  // 0.11.14 (§2): the navigation-ownership registry keys off the
+  // same name, so a view that names itself here gets its movement
+  // kind (rail / grid / mixed / …) with no second registration.
+  setCurrentNavigationView(logicalView);
 }
 
 /** The current logical view, or "" when no owner has named one. */
@@ -160,13 +168,342 @@ export function couchRailItems(rail: Element): HTMLElement[] {
   ).filter(isVisible);
 }
 
-/** Scroll a focused item into view; no-op when already visible. */
+// ── §4 container-aware scrolling (0.11.14) ─────────────────────────
+// The old implementation called el.scrollIntoView({block:"nearest"})
+// and let the browser pick the containers. That scrolls the whole
+// document while the user moves inside a separately scrollable
+// panel, parks focus under the sticky header / hint bar, and gives
+// no control over which container moves. The replacement walks the
+// element's OWN scrollable ancestors nearest-first, moves each one
+// only by the amount the element is clipped within it, and stops:
+// no movement when already fully visible, never the wrong
+// direction, focus untouched (callers focus with preventScroll).
+// The sticky top nav and the fixed hint pill are clearance only
+// when the document itself scrolls — inner panels get a small
+// padding instead, so a shelf never jumps for chrome that does not
+// overlap it. The chain stops at a modal dialog / drawer boundary:
+// content behind an overlay is never scrolled.
+
+export interface ScrollRect {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+export interface ScrollClearance {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+const SCROLL_PADDING_PX = 4;
+
+/**
+ * Minimal scroll offsets that reveal `elRect` fully inside the
+ * container's visible rect, or null when it is already fully
+ * visible. Pure: every input is a number, so the "never scroll the
+ * wrong direction / never move when visible" rules are unit-tested
+ * without a DOM. `containerRect` must already be inset by whatever
+ * clearance applies (sticky header / hint bar). An element taller
+ * (or wider) than the visible area aligns to its leading edge.
+ */
+export function computeScrollAdjustment(
+  elRect: ScrollRect,
+  containerRect: ScrollRect,
+  current: { scrollTop: number; scrollLeft: number },
+  max: { scrollTop: number; scrollLeft: number },
+): { scrollTop: number; scrollLeft: number } | null {
+  let { scrollTop, scrollLeft } = current;
+  let moved = false;
+  const clamp = (value: number, limit: number): number =>
+    Math.max(0, Math.min(value, Math.max(0, limit)));
+  // Vertical: only the clipped side moves, only by the clipped amount.
+  if (elRect.top < containerRect.top) {
+    scrollTop = clamp(scrollTop - (containerRect.top - elRect.top), max.scrollTop);
+    moved = true;
+  } else if (elRect.bottom > containerRect.bottom) {
+    scrollTop = clamp(scrollTop + (elRect.bottom - containerRect.bottom), max.scrollTop);
+    moved = true;
+  }
+  if (elRect.left < containerRect.left) {
+    scrollLeft = clamp(scrollLeft - (containerRect.left - elRect.left), max.scrollLeft);
+    moved = true;
+  } else if (elRect.right > containerRect.right) {
+    scrollLeft = clamp(scrollLeft + (elRect.right - containerRect.right), max.scrollLeft);
+    moved = true;
+  }
+  if (!moved) return null;
+  return { scrollTop, scrollLeft };
+}
+
+function overflowIsScrollable(value: string): boolean {
+  return value === "auto" || value === "scroll";
+}
+
+function elementScrolls(el: Element): boolean {
+  try {
+    const style = getComputedStyle(el);
+    const html = el as HTMLElement;
+    const vertical =
+      overflowIsScrollable(style.overflowY) &&
+      html.scrollHeight > html.clientHeight;
+    const horizontal =
+      overflowIsScrollable(style.overflowX) &&
+      html.scrollWidth > html.clientWidth;
+    return vertical || horizontal;
+  } catch {
+    return false;
+  }
+}
+
+/** Scrollable ancestors of `el`, nearest first, stopping at a modal/drawer boundary. */
+export function scrollableAncestors(el: Element): Element[] {
+  const chain: Element[] = [];
+  const doc = el.ownerDocument ?? document;
+  const scrollingElement = doc.scrollingElement ?? doc.documentElement;
+  let node: Element | null = el.parentElement;
+  while (node) {
+    // The document scrolling element scrolls with overflow:visible
+    // (the viewport itself scrolls), so size alone decides there.
+    const isDocument = node === scrollingElement;
+    const html = node as HTMLElement;
+    const documentScrolls =
+      isDocument &&
+      (html.scrollHeight > html.clientHeight ||
+        html.scrollWidth > html.clientWidth);
+    if (documentScrolls || elementScrolls(node)) chain.push(node);
+    // Never scroll anything above an overlay boundary.
+    const tag = node.tagName.toLowerCase();
+    if (
+      (tag === "dialog" && (node as HTMLDialogElement).open) ||
+      node.hasAttribute("data-nylah-dialog") ||
+      node.hasAttribute("data-browse-filter-drawer") ||
+      node.hasAttribute("data-browse-category-drawer") ||
+      node.hasAttribute("data-category-drawer") ||
+      node.hasAttribute("data-drawer-root")
+    ) {
+      break;
+    }
+    node = node.parentElement;
+  }
+  return chain;
+}
+
+/**
+ * Viewport clearance for document-level scrolling: the sticky top
+ * nav's height at the top, the fixed hint pill's footprint at the
+ * bottom. Measured from the live DOM (0 when the chrome is absent,
+ * hidden, or not fixed/sticky), never hardcoded — the values are
+ * what the focused item must clear, as rendered.
+ */
+export function measureViewportClearance(
+  doc: Document = document,
+): { top: number; bottom: number } {
+  let top = 0;
+  let bottom = 0;
+  try {
+    const win = doc.defaultView;
+    if (!win) return { top, bottom };
+    const nav = doc.querySelector("[data-couch-nav]");
+    if (nav) {
+      const style = win.getComputedStyle(nav);
+      const rect = nav.getBoundingClientRect();
+      if (
+        (style.position === "sticky" || style.position === "fixed") &&
+        rect.height > 0 &&
+        rect.bottom > 0 &&
+        style.visibility !== "hidden" &&
+        style.display !== "none"
+      ) {
+        top = rect.height;
+      }
+    }
+    const hints = doc.querySelector("[data-button-hints]");
+    if (hints && !(hints as HTMLElement).hidden) {
+      const style = win.getComputedStyle(hints);
+      const rect = hints.getBoundingClientRect();
+      if (
+        style.position === "fixed" &&
+        rect.height > 0 &&
+        rect.bottom <= win.innerHeight + 1 &&
+        style.visibility !== "hidden" &&
+        style.display !== "none"
+      ) {
+        bottom = Math.max(0, win.innerHeight - rect.top);
+      }
+    }
+  } catch {
+    // Chrome measurement is best-effort; scrolling still proceeds.
+  }
+  return { top, bottom };
+}
+
+/**
+ * Reveal `el` fully inside its owning scroll containers (§4).
+ * Nearest container first, minimal movement, sticky-header / hint
+ * clearance on document scrolls only. No-op when already visible.
+ * Falls back to scrollIntoView("nearest") only when no scrollable
+ * ancestor reports layout (e.g. jsdom / no-layout webviews), so
+ * focus still lands visibly there.
+ */
 export function scrollFocusedIntoView(el: HTMLElement): void {
   try {
-    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const doc = el.ownerDocument ?? document;
+    const chain = scrollableAncestors(el);
+    if (chain.length === 0) {
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      return;
+    }
+    const clearance = measureViewportClearance(doc);
+    const scrollingElement = doc.scrollingElement ?? doc.documentElement;
+    for (const container of chain) {
+      const elRect = el.getBoundingClientRect();
+      if (elRect.width <= 0 && elRect.height <= 0) return;
+      const html = container as HTMLElement;
+      const isDocument = container === scrollingElement;
+      let visible: ScrollRect;
+      if (isDocument) {
+        const win = doc.defaultView;
+        const height = win ? win.innerHeight : elRect.bottom;
+        const width = win ? win.innerWidth : elRect.right;
+        visible = {
+          top: clearance.top + SCROLL_PADDING_PX,
+          bottom: height - clearance.bottom - SCROLL_PADDING_PX,
+          left: SCROLL_PADDING_PX,
+          right: width - SCROLL_PADDING_PX,
+        };
+      } else {
+        const rect = container.getBoundingClientRect();
+        visible = {
+          top: rect.top + SCROLL_PADDING_PX,
+          bottom: rect.bottom - SCROLL_PADDING_PX,
+          left: rect.left + SCROLL_PADDING_PX,
+          right: rect.right - SCROLL_PADDING_PX,
+        };
+      }
+      const adjustment = computeScrollAdjustment(
+        elRect,
+        visible,
+        { scrollTop: html.scrollTop, scrollLeft: html.scrollLeft },
+        {
+          scrollTop: Math.max(0, html.scrollHeight - html.clientHeight),
+          scrollLeft: Math.max(0, html.scrollWidth - html.clientWidth),
+        },
+      );
+      if (!adjustment) continue;
+      // One assignment per axis: instant, so a held D-pad never
+      // chases a smooth scroll that has not settled yet.
+      html.scrollTop = adjustment.scrollTop;
+      html.scrollLeft = adjustment.scrollLeft;
+    }
   } catch {
-    // Very old webviews: focus still lands, scroll just doesn't follow.
+    try {
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    } catch {
+      // Very old webviews: focus still lands, scroll just doesn't follow.
+    }
   }
+}
+
+// ── §24 focus preservation across async refreshes ──────────────────
+// W5's AI homes (and any view that re-renders a shelf in place) wrap
+// the mutation in withPreservedFocus: focus stays exactly where it
+// was when the focused control survives, moves to the nearest
+// surviving sibling in the same rail when it does not, and is never
+// stolen when it already sits on a live element. Scroll follows the
+// restored target through scrollFocusedIntoView. Views that render
+// grids should use the couch-list-focus capture/restore pair (or
+// withPreservedListFocus there) — same contract, key-based.
+
+interface CapturedFocus {
+  key?: string;
+  rail?: string;
+  index: number;
+}
+
+function captureFocusWithin(root: ParentNode): CapturedFocus | null {
+  const doc =
+    (root as Document).activeElement !== undefined
+      ? (root as Document)
+      : (root as Element).ownerDocument ?? document;
+  const active = doc.activeElement as HTMLElement | null;
+  if (!active || active === doc.body) return null;
+  if (root instanceof Element ? !root.contains(active) : false) return null;
+  if (root === doc && !doc.contains(active)) return null;
+  const rail = active.closest?.("[data-nylah-rail]") as HTMLElement | null;
+  let index = -1;
+  if (rail) index = couchRailItems(rail).indexOf(active);
+  return {
+    key: active.getAttribute("data-couch-key") ?? undefined,
+    rail: rail?.getAttribute("data-nylah-rail") ?? undefined,
+    index,
+  };
+}
+
+function restoreCapturedFocus(
+  root: ParentNode,
+  captured: CapturedFocus,
+): HTMLElement | null {
+  const doc =
+    (root as Document).activeElement !== undefined
+      ? (root as Document)
+      : (root as Element).ownerDocument ?? document;
+  const active = doc.activeElement as HTMLElement | null;
+  // Never steal focus from a live element — only repair a loss.
+  if (active && active !== doc.body) return null;
+  if (findOpenModal(doc)) return null;
+  const scope: ParentNode = root instanceof Element || root instanceof Document ? root : doc;
+  let target: HTMLElement | null = null;
+  if (captured.key) {
+    target = scope.querySelector<HTMLElement>(
+      `[data-couch-key="${cssEscape(captured.key)}"]`,
+    );
+    if (target && !isVisible(target)) target = null;
+  }
+  if (!target && captured.rail) {
+    const rail = scope.querySelector(
+      `[data-nylah-rail="${cssEscape(captured.rail)}"]`,
+    );
+    if (rail) {
+      const items = couchRailItems(rail);
+      if (items.length > 0) {
+        target =
+          items[Math.max(0, Math.min(captured.index, items.length - 1))] ??
+          items[0];
+      }
+    }
+  }
+  if (!target) return null;
+  target.focus({ preventScroll: true });
+  scrollFocusedIntoView(target);
+  return target;
+}
+
+/**
+ * Run `mutate` (a shelf/list re-render) without stealing or losing
+ * focus: capture the focused control first, restore it after —
+ * exact key, else same rail + index (clamped), else nothing. The
+ * mutation's return value passes through; a throwing mutation still
+ * restores focus before the error propagates. Never moves focus
+ * when the mutation leaves it on a live element.
+ */
+export function withPreservedFocus<T>(
+  root: ParentNode,
+  mutate: () => T,
+): T {
+  const captured = captureFocusWithin(root);
+  try {
+    return mutate();
+  } finally {
+    if (captured) restoreCapturedFocus(root, captured);
+  }
+}
+
+/** Whether `el` sits inside an open drawer (re-exported seam for views that scroll drawer content). */
+export function focusIsInsideDrawer(el: Element | null | undefined): boolean {
+  return drawerContaining(el) !== null;
 }
 
 /**
