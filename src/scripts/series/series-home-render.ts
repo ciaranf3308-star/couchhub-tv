@@ -37,12 +37,23 @@ import {
   type FollowedShelfItem,
   type NewEpisodeItem,
   type SeriesGenreTile,
+  type SeriesHomeAiAction,
   type SeriesHomeSection,
+  type SeriesShelfItem,
 } from "@/scripts/series/series-home-model.ts";
+import type { DiscoverEntryPrompt } from "@/scripts/lib/home-discover-entries.ts";
 import { seriesMetaLine, type SeriesRow } from "@/scripts/series/couch-series.ts";
 
 export interface SeriesHomeRenderContext {
   playlistId: string;
+  /** Called when the Generate / Request-fresh AI action is pressed (explicit user action). */
+  onAiAction?: () => void;
+  /** True while an AI request is in flight — the action button disables without moving focus. */
+  aiBusy?: boolean;
+  /** Called when a Discover entry-point chip is tapped (explicit user action). */
+  onDiscoverPrompt?: (prompt: DiscoverEntryPrompt) => void;
+  /** Id of the prompt whose results are showing (chip stays marked active). */
+  activeDiscoverPromptId?: string | null;
 }
 
 /** Mode-switch params the controller reads from data attributes (genre family id / sort id). */
@@ -99,13 +110,14 @@ function shelfSection(
 function seriesCard(
   row: SeriesRow,
   playlistId: string,
-  opts: { href?: string; itemKey?: string; meta?: string } = {},
+  opts: { href?: string; itemKey?: string; meta?: string; detail?: string | null } = {},
 ): HTMLElement {
   const cachedCount = playlistId ? getCachedSeasonCount(playlistId, row.id) : null;
   const card = buildCouchCard(
     {
       title: row.name,
       meta: opts.meta ?? seriesHomeCardMeta(row, cachedCount),
+      detail: opts.detail || undefined,
       image: row.logo,
       kind: "poster",
       href: opts.href ?? seriesDetailHref(row.id),
@@ -114,6 +126,93 @@ function seriesCard(
     false,
   );
   return card;
+}
+
+/** Recommendation card: always links to the SERIES detail page, never an episode. */
+function seriesShelfCard(item: SeriesShelfItem, playlistId: string): HTMLElement {
+  return seriesCard(item.row, playlistId, { detail: item.reason });
+}
+
+/** Shelf-head AI action button (Generate / Request fresh). Rendered only when the action is real. */
+function aiActionButton(
+  action: SeriesHomeAiAction,
+  ctx: SeriesHomeRenderContext,
+  key: string,
+): HTMLElement | null {
+  if (action.kind === "none") return null;
+  const button = el("button", "rs-hero__action rs-hero__action--secondary rs-series-home-ai-action");
+  button.type = "button";
+  button.setAttribute("data-nylah-item", "");
+  button.setAttribute("data-couch-key", key);
+  button.setAttribute("aria-label", `${action.label}. ${action.hint}`);
+  button.textContent = ctx.aiBusy ? "Asking AI…" : action.label;
+  button.disabled = ctx.aiBusy === true;
+  button.addEventListener("click", () => ctx.onAiAction?.());
+  return button;
+}
+
+/** AI prompt banner: Generate action + honest hint + unavailable note. No shelf, no fake picks. */
+function aiPromptSection(
+  section: Extract<SeriesHomeSection, { kind: "ai-prompt" }>,
+  ctx: SeriesHomeRenderContext,
+): HTMLElement {
+  const sectionEl = el("section", "rs-rail rs-series-home-shelf rs-series-home-ai-prompt");
+  sectionEl.setAttribute("data-nylah-rail", section.id);
+  sectionEl.setAttribute("data-series-home-section", section.kind);
+  sectionEl.setAttribute("aria-label", section.title);
+  const head = el("div", "rs-rail__head");
+  const h2 = el("h2", "rs-section-title");
+  h2.textContent = section.title;
+  head.appendChild(h2);
+  sectionEl.appendChild(head);
+  const sub = el("p", "rs-meta rs-series-home-subtitle");
+  sub.textContent = section.subtitle;
+  sectionEl.appendChild(sub);
+  const button = aiActionButton(section.action, ctx, "series-ai-generate");
+  if (button) sectionEl.appendChild(button);
+  const hint = el("p", "rs-meta rs-series-home-ai-hint");
+  hint.textContent = section.action.hint;
+  sectionEl.appendChild(hint);
+  if (section.note) {
+    const note = el("p", "rs-meta rs-series-home-ai-note");
+    note.textContent = section.note;
+    sectionEl.appendChild(note);
+  }
+  return sectionEl;
+}
+
+/** Discover entry-point chips: pre-scoped prompts, one explicit request per tap. */
+function discoverEntriesSection(
+  section: Extract<SeriesHomeSection, { kind: "discover-entries" }>,
+  ctx: SeriesHomeRenderContext,
+): HTMLElement {
+  const sectionEl = el("section", "rs-rail rs-series-home-shelf rs-series-home-discover");
+  sectionEl.setAttribute("data-nylah-rail", section.id);
+  sectionEl.setAttribute("data-series-home-section", section.kind);
+  sectionEl.setAttribute("aria-label", section.title);
+  const head = el("div", "rs-rail__head");
+  const h2 = el("h2", "rs-section-title");
+  h2.textContent = section.title;
+  head.appendChild(h2);
+  sectionEl.appendChild(head);
+  const sub = el("p", "rs-meta rs-series-home-subtitle");
+  sub.textContent = section.subtitle;
+  sectionEl.appendChild(sub);
+  const rowEl = el("div", "rs-series-home-chips");
+  for (const prompt of section.prompts) {
+    const chip = el("button", "rs-series-home-chip");
+    chip.type = "button";
+    chip.setAttribute("data-nylah-item", "");
+    chip.setAttribute("data-couch-key", `series-discover-${prompt.id}`);
+    chip.setAttribute("data-discover-prompt-id", prompt.id);
+    chip.setAttribute("aria-label", `Ask AI: ${prompt.label}`);
+    if (ctx.activeDiscoverPromptId === prompt.id) chip.setAttribute("aria-pressed", "true");
+    chip.textContent = prompt.label;
+    chip.addEventListener("click", () => ctx.onDiscoverPrompt?.(prompt));
+    rowEl.appendChild(chip);
+  }
+  sectionEl.appendChild(rowEl);
+  return sectionEl;
 }
 
 function continueCard(item: ContinueWatchingItem): HTMLElement {
@@ -330,9 +429,68 @@ export function renderSeriesHome(
       frag.appendChild(sectionEl);
       continue;
     }
+    if (section.kind === "ai-prompt") {
+      frag.appendChild(aiPromptSection(section, ctx));
+      continue;
+    }
+    if (section.kind === "discover-entries") {
+      frag.appendChild(discoverEntriesSection(section, ctx));
+      continue;
+    }
+    if (section.kind === "ai-picks") {
+      const { sectionEl, rowEl } = shelfSection(section, section.subtitle);
+      const action = aiActionButton(section.action, ctx, "series-ai-refresh");
+      if (action) sectionEl.querySelector(".rs-rail__head")?.appendChild(action);
+      for (const item of section.items) rowEl.appendChild(seriesShelfCard(item, ctx.playlistId));
+      rowEl.appendChild(
+        viewAllTile("Browse more", seriesBrowseUrl({ sort: "recommended" }), "viewall-ai-picks", {
+          sort: "recommended",
+        }),
+      );
+      frag.appendChild(sectionEl);
+      continue;
+    }
+    if (section.kind === "discover-results") {
+      const { sectionEl, rowEl } = shelfSection(section, section.subtitle);
+      for (const item of section.items) rowEl.appendChild(seriesShelfCard(item, ctx.playlistId));
+      rowEl.appendChild(viewAllTile("Open in Discover", section.discoverHref, "viewall-discover"));
+      frag.appendChild(sectionEl);
+      continue;
+    }
     if (section.kind === "worth-starting") {
       const { sectionEl, rowEl } = shelfSection(section, section.subtitle);
-      for (const row of section.items) rowEl.appendChild(seriesCard(row, ctx.playlistId));
+      for (const row of section.items) {
+        rowEl.appendChild(
+          seriesCard(row, ctx.playlistId, { detail: section.reasons?.[String(row.id)] ?? null }),
+        );
+      }
+      rowEl.appendChild(
+        viewAllTile("Browse more", seriesBrowseUrl({ sort: "rating" }), "viewall-worth-starting", {
+          sort: "rating",
+        }),
+      );
+      frag.appendChild(sectionEl);
+      continue;
+    }
+    if (section.kind === "something-different") {
+      const { sectionEl, rowEl } = shelfSection(section, section.subtitle);
+      for (const item of section.items) rowEl.appendChild(seriesShelfCard(item, ctx.playlistId));
+      rowEl.appendChild(
+        viewAllTile("Browse more", seriesBrowseUrl({ sort: "recommended" }), "viewall-different", {
+          sort: "recommended",
+        }),
+      );
+      frag.appendChild(sectionEl);
+      continue;
+    }
+    if (section.kind === "undiscovered") {
+      const { sectionEl, rowEl } = shelfSection(section, section.subtitle);
+      for (const item of section.items) rowEl.appendChild(seriesShelfCard(item, ctx.playlistId));
+      rowEl.appendChild(
+        viewAllTile("Browse more", seriesBrowseUrl({ sort: "rating" }), "viewall-undiscovered", {
+          sort: "rating",
+        }),
+      );
       frag.appendChild(sectionEl);
       continue;
     }

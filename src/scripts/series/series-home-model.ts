@@ -36,6 +36,8 @@ import type {
 } from "@/scripts/lib/followed.ts";
 import {
   CANONICAL_SERIES_GENRES,
+  genreLabelForId,
+  genresForEntry,
   type CanonicalSeriesFamily,
 } from "@/scripts/lib/genres.ts";
 import type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
@@ -45,9 +47,29 @@ import {
   normaliseRating,
 } from "@/scripts/lib/rating-evidence.ts";
 import {
+  selectAiRankedPicks,
+  selectHiddenGems,
   selectRecentlyAdded,
   selectSeriesWorthStarting,
+  selectSomethingDifferent,
+  type SelectorResult,
 } from "@/scripts/lib/collection-selectors.ts";
+import {
+  allocateShelves,
+  HOME_SHELF_LIMITS,
+  SHELF_POOL_OVERFETCH,
+} from "@/scripts/lib/home-shelf-variety.ts";
+import {
+  groundedReasonForAiCard,
+  homeAiShelfNote,
+  toSelectorPicks,
+  type HomeAiPick,
+  type HomeAiSource,
+} from "@/scripts/lib/home-ai-picks.ts";
+import {
+  discoverPromptsFor,
+  type DiscoverEntryPrompt,
+} from "@/scripts/lib/home-discover-entries.ts";
 import type { TasteModel } from "@/scripts/lib/taste.ts";
 import {
   episodeDisplayTitle,
@@ -60,6 +82,15 @@ import {
 } from "@/scripts/series/couch-series.ts";
 
 export const SERIES_HOME_SHELF_LIMIT = 12;
+/** AI Series Picks shelf size (0.11.14 §12–§13). */
+export const SERIES_AI_PICKS_LIMIT = HOME_SHELF_LIMITS.aiPicks;
+/** Worth Starting shelf size (0.11.14 §15: richer rows). */
+export const SERIES_WORTH_STARTING_LIMIT = HOME_SHELF_LIMITS.worthWatching;
+/** Something Different / Undiscovered shelf sizes (0.11.14 §14). */
+export const SERIES_SOMETHING_DIFFERENT_LIMIT = HOME_SHELF_LIMITS.somethingDifferent;
+export const SERIES_UNDISCOVERED_LIMIT = HOME_SHELF_LIMITS.hiddenGems;
+/** Recently Added shelf size (0.11.14 §15). */
+export const SERIES_RECENTLY_ADDED_LIMIT = HOME_SHELF_LIMITS.recentlyAdded;
 
 // ---------------------------------------------------------------------------
 // Detail URLs
@@ -553,6 +584,59 @@ export function buildSeriesGenreTiles(index: CatalogIndex): SeriesGenreTile[] {
 // Section assembly (§1.1, §2, §4) — order + omission rules in one place
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Recommendation shelf items (0.11.14 §14, §20, §22)
+// ---------------------------------------------------------------------------
+
+/**
+ * One recommendation-shelf card: a SERIES row plus its grounded
+ * reason. Series recommendations ALWAYS link to the series
+ * (seriesDetailHref) — never to a season or episode. The render
+ * layer builds hrefs from `row.id` only; no episode identity ever
+ * reaches this type.
+ */
+export interface SeriesShelfItem {
+  row: SeriesRow;
+  /** Grounded reason for the focus overlay, or null when nothing honest can be said. */
+  reason: string | null;
+}
+
+/** The AI action for the Series Home AI sections (same honesty rule as Movies Home). */
+export interface SeriesHomeAiAction {
+  kind: "generate" | "request-fresh" | "none";
+  label: string;
+  hint: string;
+}
+
+export function chooseSeriesHomeAiAction(input: {
+  aiConfigured: boolean;
+  hasVerifiedPicks: boolean;
+}): SeriesHomeAiAction {
+  if (!input.aiConfigured) return { kind: "none", label: "", hint: "" };
+  if (input.hasVerifiedPicks) {
+    return {
+      kind: "request-fresh",
+      label: "Request fresh AI picks",
+      hint: "Requests fresh picks from your AI provider — one request.",
+    };
+  }
+  return {
+    kind: "generate",
+    label: "Generate AI Picks",
+    hint: "Uses your configured AI provider — one request. Results are cached for a day.",
+  };
+}
+
+/** On-page Discover entry-point results (brief §21), resolved to series rows by the mount. */
+export interface SeriesDiscoverResults {
+  prompt: DiscoverEntryPrompt;
+  items: SeriesShelfItem[];
+  source: HomeAiSource;
+  note: string;
+  /** Forward-contract Discover URL (W3 consumes ?q=&kind= when it lands). */
+  discoverHref: string;
+}
+
 export type SeriesHomeSection =
   | {
       kind: "continue";
@@ -574,11 +658,61 @@ export type SeriesHomeSection =
       items: FollowedShelfItem[];
     }
   | {
+      kind: "ai-picks";
+      id: "series-home-ai-picks";
+      title: "AI Series Picks for You";
+      subtitle: string;
+      items: SeriesShelfItem[];
+      source: HomeAiSource;
+      action: SeriesHomeAiAction;
+    }
+  | {
+      kind: "ai-prompt";
+      id: "series-home-ai-prompt";
+      title: "AI Series Picks for You";
+      subtitle: string;
+      action: SeriesHomeAiAction;
+      /** Honest note when AI was attempted but unavailable (local shelves stay). */
+      note: string | null;
+    }
+  | {
+      kind: "discover-entries";
+      id: "series-home-discover-entries";
+      title: "Find something with AI";
+      subtitle: string;
+      prompts: DiscoverEntryPrompt[];
+    }
+  | {
+      kind: "discover-results";
+      id: "series-home-discover-results";
+      title: string;
+      subtitle: string;
+      items: SeriesShelfItem[];
+      source: HomeAiSource;
+      discoverHref: string;
+    }
+  | {
       kind: "worth-starting";
       id: "series-home-worth-starting";
       title: "Series Worth Starting";
       subtitle: string;
       items: SeriesRow[];
+      /** Grounded focus reasons by series id (local evidence, never AI-labelled). */
+      reasons?: Record<string, string>;
+    }
+  | {
+      kind: "something-different";
+      id: "series-home-something-different";
+      title: "Something Different";
+      subtitle: string;
+      items: SeriesShelfItem[];
+    }
+  | {
+      kind: "undiscovered";
+      id: "series-home-undiscovered";
+      title: "Undiscovered Series";
+      subtitle: string;
+      items: SeriesShelfItem[];
     }
   | {
       kind: "recently-added";
@@ -601,6 +735,9 @@ export type SeriesHomeSection =
 
 export const NEW_EPISODES_SUBTITLE = "New episodes detected from the series you follow";
 export const WORTH_STARTING_SUBTITLE = "Recommended series you haven't started yet";
+export const SOMETHING_DIFFERENT_SUBTITLE = "Good series outside your usual genres";
+export const UNDISCOVERED_SUBTITLE = "Well-rated series that rarely get surfaced";
+export const DISCOVER_ENTRIES_SUBTITLE = "Ask AI for in-library picks, right here — one request per tap";
 
 export interface SeriesHomeAssemblyInput {
   /** W1 catalog index (series kind) — the single source for shelves, tiles, and counts. */
@@ -616,6 +753,20 @@ export interface SeriesHomeAssemblyInput {
   /** String ids of series with any recorded progress (excluded from Worth Starting). */
   startedIds: Iterable<string | number>;
   isEpisodeWatched?: NewEpisodesOptions["isWatched"];
+  /** Verified AI picks in model order. Ignored unless `aiAllowed` is true. */
+  aiPicks?: HomeAiPick[] | null;
+  /** True only when verified AI input may be shown (privacy conditions met). */
+  aiAllowed?: boolean;
+  /** What actually produced `aiPicks` — the shelf label source. */
+  aiSource?: HomeAiSource;
+  /** Model id behind `aiPicks`, when known. */
+  aiModel?: string;
+  /** Honest note when AI was attempted but unavailable (shown with local shelves). */
+  aiNote?: string | null;
+  /** True when an AI request could run (enabled + endpoint + model set). */
+  aiConfigured?: boolean;
+  /** On-page Discover entry-point results to show, when the viewer tapped a prompt. */
+  discoverResults?: SeriesDiscoverResults | null;
 }
 
 /**
@@ -674,17 +825,179 @@ export function assembleSeriesHomeSections(
     input.index.revision,
     `started:${startedList.join(",")}`,
   ].join("|");
-  const worthStarting = selectSeriesWorthStarting(
+
+  const resolvePool = (
+    results: SelectorResult[],
+  ): Array<{ id: string; row: SeriesRow; reason: string | null }> => {
+    const items: Array<{ id: string; row: SeriesRow; reason: string | null }> = [];
+    for (const result of results) {
+      const row = input.index.byId.get(result.id) as SeriesRow | undefined;
+      if (row) items.push({ id: result.id, row, reason: result.reasons[0] ?? null });
+    }
+    return items;
+  };
+
+  // Verified AI picks (0.11.14 §20): series primaries only, model
+  // order preserved. A pick naming anything that is not a series in
+  // THIS index is dropped by the selector — it can never link to an
+  // episode, because episode identity never reaches a shelf item.
+  const aiAllowed = input.aiAllowed === true && Array.isArray(input.aiPicks);
+  const aiResults = aiAllowed
+    ? selectAiRankedPicks(input.index, toSelectorPicks(input.aiPicks!), input.taste, SERIES_AI_PICKS_LIMIT, {
+        excludeWatched: true,
+        watchedIds: startedList,
+      })
+    : [];
+  const aiPool = resolvePool(aiResults).map((item) => {
+    const result = aiResults.find((candidate) => candidate.id === item.id)!;
+    const rating = normaliseRating(item.row);
+    const year = item.row.year ? String(item.row.year) : "";
+    const genres = genresForEntry(item.row, "series")
+      .slice(0, 2)
+      .map((id) => genreLabelForId(id, "series"));
+    return {
+      ...item,
+      reason: groundedReasonForAiCard({
+        modelReason: result.reasons[0] ?? null,
+        selectorReasons: result.reasons.slice(1),
+        genres,
+        ratingLabel: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : "",
+        year,
+      }),
+    };
+  });
+  const aiSource: HomeAiSource = aiResults.length > 0 ? (input.aiSource ?? "fresh-ai") : "local-only";
+
+  // Worth Starting stays LOCAL (§14): no AI input is passed, and
+  // series with ANY recorded progress are excluded (already
+  // started, not "worth starting").
+  const worthResults = selectSeriesWorthStarting(
     input.index,
     input.taste,
-    SERIES_HOME_SHELF_LIMIT,
+    SERIES_WORTH_STARTING_LIMIT * SHELF_POOL_OVERFETCH,
     {
       watchedIds: startedList,
       cacheKey: `${cacheKeyBase}|worth`,
     },
-  )
-    .map((result) => input.index.byId.get(result.id) as SeriesRow | undefined)
-    .filter((row): row is SeriesRow => row != null);
+  );
+  const worthPool = resolvePool(worthResults);
+  const worthReasons: Record<string, string> = {};
+  for (const result of worthResults) {
+    if (result.reasons[0]) worthReasons[result.id] = result.reasons[0];
+  }
+
+  const differentResults = selectSomethingDifferent(
+    input.index,
+    input.taste,
+    SERIES_SOMETHING_DIFFERENT_LIMIT * SHELF_POOL_OVERFETCH,
+    {
+      watchedIds: startedList,
+      excludeWatched: true,
+      cacheKey: `${cacheKeyBase}|different`,
+    },
+  );
+  const differentPool = resolvePool(differentResults);
+
+  const undiscoveredResults = selectHiddenGems(
+    input.index,
+    input.taste,
+    SERIES_UNDISCOVERED_LIMIT * SHELF_POOL_OVERFETCH,
+    {
+      watchedIds: startedList,
+      excludeWatched: true,
+      cacheKey: `${cacheKeyBase}|undiscovered`,
+    },
+  );
+  const undiscoveredPool = resolvePool(undiscoveredResults);
+
+  // Recently Added is factual: no quality gate, no taste filter.
+  const recentPool = resolvePool(
+    selectRecentlyAdded(
+      input.index,
+      SERIES_RECENTLY_ADDED_LIMIT * SHELF_POOL_OVERFETCH,
+      null,
+      { cacheKey: `${cacheKeyBase}|recent` },
+    ),
+  );
+
+  // Cross-shelf allocation with backfill (§14/§15): the first shelf
+  // keeps a contested title; later shelves refill from their own
+  // pools. Continue/New/Followed are factual shelves and are not
+  // part of this allocation.
+  const allocated = allocateShelves([
+    { id: "ai", items: aiPool, limit: SERIES_AI_PICKS_LIMIT },
+    { id: "worth", items: worthPool, limit: SERIES_WORTH_STARTING_LIMIT },
+    { id: "recent", items: recentPool, limit: SERIES_RECENTLY_ADDED_LIMIT, minFill: 4 },
+    { id: "different", items: differentPool, limit: SERIES_SOMETHING_DIFFERENT_LIMIT },
+    { id: "undiscovered", items: undiscoveredPool, limit: SERIES_UNDISCOVERED_LIMIT },
+  ]);
+  const byId = new Map(allocated.map((shelf) => [shelf.id, shelf.items]));
+  const aiItems: SeriesShelfItem[] = (byId.get("ai") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const worthStarting = (byId.get("worth") ?? []).map((item) => item.row);
+  const differentItems: SeriesShelfItem[] = (byId.get("different") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const undiscoveredItems: SeriesShelfItem[] = (byId.get("undiscovered") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const recent = (byId.get("recent") ?? []).map((item) => item.row);
+
+  const hasVerifiedPicks = aiItems.length > 0;
+  const aiAction = chooseSeriesHomeAiAction({
+    aiConfigured: input.aiConfigured === true,
+    hasVerifiedPicks,
+  });
+  if (hasVerifiedPicks) {
+    sections.push({
+      kind: "ai-picks",
+      id: "series-home-ai-picks",
+      title: "AI Series Picks for You",
+      subtitle: homeAiShelfNote(aiSource, input.aiModel),
+      items: aiItems,
+      source: aiSource,
+      action: aiAction,
+    });
+  } else if (input.aiConfigured === true) {
+    // AI is configured but no verified picks exist yet: the Generate
+    // action is prominent, and an honest note explains a failed
+    // attempt — local shelves below carry the page either way.
+    sections.push({
+      kind: "ai-prompt",
+      id: "series-home-ai-prompt",
+      title: "AI Series Picks for You",
+      subtitle: "AI-ranked series from your own library",
+      action: aiAction,
+      note: input.aiNote ?? null,
+    });
+  }
+
+  // Discover entry points (§21): lightweight chips, always present
+  // (local fallback when AI is off). Results render directly below
+  // when the viewer tapped a prompt.
+  sections.push({
+    kind: "discover-entries",
+    id: "series-home-discover-entries",
+    title: "Find something with AI",
+    subtitle: DISCOVER_ENTRIES_SUBTITLE,
+    prompts: discoverPromptsFor("series"),
+  });
+  if (input.discoverResults && input.discoverResults.items.length > 0) {
+    sections.push({
+      kind: "discover-results",
+      id: "series-home-discover-results",
+      title: `Results for “${input.discoverResults.prompt.label}”`,
+      subtitle: input.discoverResults.note,
+      items: input.discoverResults.items,
+      source: input.discoverResults.source,
+      discoverHref: input.discoverResults.discoverHref,
+    });
+  }
+
   if (worthStarting.length > 0) {
     sections.push({
       kind: "worth-starting",
@@ -692,17 +1005,30 @@ export function assembleSeriesHomeSections(
       title: "Series Worth Starting",
       subtitle: WORTH_STARTING_SUBTITLE,
       items: worthStarting,
+      reasons: worthReasons,
     });
   }
 
-  const recent = selectRecentlyAdded(
-    input.index,
-    SERIES_HOME_SHELF_LIMIT,
-    null,
-    { cacheKey: `${cacheKeyBase}|recent` },
-  )
-    .map((result) => input.index.byId.get(result.id) as SeriesRow | undefined)
-    .filter((row): row is SeriesRow => row != null);
+  if (differentItems.length > 0) {
+    sections.push({
+      kind: "something-different",
+      id: "series-home-something-different",
+      title: "Something Different",
+      subtitle: SOMETHING_DIFFERENT_SUBTITLE,
+      items: differentItems,
+    });
+  }
+
+  if (undiscoveredItems.length > 0) {
+    sections.push({
+      kind: "undiscovered",
+      id: "series-home-undiscovered",
+      title: "Undiscovered Series",
+      subtitle: UNDISCOVERED_SUBTITLE,
+      items: undiscoveredItems,
+    });
+  }
+
   if (recent.length > 0) {
     sections.push({
       kind: "recently-added",

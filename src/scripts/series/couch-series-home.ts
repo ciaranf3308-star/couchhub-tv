@@ -30,6 +30,7 @@
 // which routes LB/RB to PageUp/PageDown on Home.
 
 import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts";
+import { repaintHomePreserving } from "@/scripts/lib/home-repaint.ts";
 import {
   BACK_PRIORITY,
   registerBackLayer,
@@ -65,6 +66,37 @@ import { getActiveProfileId, SHARED_PROFILE_ID } from "@/scripts/lib/profiles.ts
 import { emptyTasteModel, loadTaste, type TasteModel } from "@/scripts/lib/taste.ts";
 import { getCachedSeasonCount, getCachedSeriesInfoPayload } from "@/scripts/lib/series-seasons.ts";
 import { getCatalogIndex, type CatalogIndex } from "@/scripts/lib/catalog-index.ts";
+import { getAiEnabled, getAiEndpoint, getAiModel } from "@/scripts/lib/app-settings.js";
+import { getAiShareTaste } from "@/scripts/lib/ai/status.ts";
+import {
+  homeAiAllowsSelectorBoost,
+  maybeAutoRefreshHomeAiPicks,
+  readCachedHomeAiPicks,
+  requestHomeAiDiscovery,
+  requestHomeAiPicks,
+  type HomeAiPicksRequest,
+  type HomeAiResult,
+} from "@/scripts/lib/ai/home-picks.ts";
+import {
+  buildHomeAiDiscoveryRequest,
+  buildHomeAiPicksRequest,
+  groundedReasonForAiCard,
+  homeAiShelfNote,
+  type HomeAiPick,
+  type HomeAiSource,
+} from "@/scripts/lib/home-ai-picks.ts";
+import {
+  discoverPromptForcesFresh,
+  discoverUrlForPrompt,
+  type DiscoverEntryPrompt,
+} from "@/scripts/lib/home-discover-entries.ts";
+import {
+  localPromptRankedIds,
+  picksToEntries,
+  resolvePromptItems,
+} from "@/scripts/lib/home-prompt-results.ts";
+import { hasCredibleRating, normaliseRating } from "@/scripts/lib/rating-evidence.ts";
+import { genreLabelForId, genresForEntry } from "@/scripts/lib/genres.ts";
 import {
   mountBrowseEverything,
   type BrowseController,
@@ -88,8 +120,10 @@ import {
   assembleSeriesHomeSections,
   cachedSeasonGroup,
   type ContinueWatchingInput,
+  type SeriesDiscoverResults,
   type SeriesHomeProgressEntry,
   type SeriesHomeSection,
+  type SeriesShelfItem,
 } from "@/scripts/series/series-home-model.ts";
 import {
   renderSeriesHome,
@@ -153,6 +187,53 @@ let refreshQueued = false;
 let booted = false;
 /** data-couch-key of the Home tile that entered Browse (return focus). */
 let lastHomeEntryKey: string | null = null;
+
+// --- Home AI state (0.11.14, W5) --------------------------------------
+// Picks are cached AI answers or fresh verified results; local
+// shelves render regardless. No request leaves on load, focus or
+// scroll — only from the explicit Generate action, a prompt tap, or
+// the optional auto-refresh preference (default off).
+let homeAiResult: HomeAiResult | null = null;
+let homeAiPicks: HomeAiPick[] | null = null;
+let homeAiSource: HomeAiSource = "local-only";
+let homeAiModel: string | undefined;
+let homeAiNote: string | null = null;
+
+/** Adopt a core result as the Home AI state (single place). */
+function applyHomeAiResult(result: HomeAiResult | null): void {
+  homeAiResult = result;
+  homeAiPicks = result?.picks ?? null;
+  homeAiSource = result?.source ?? "local-only";
+  homeAiModel = result?.model;
+}
+
+/**
+ * Core picks request for the current catalogue. The exclusions
+ * (started series) are part of the cache key, so the read, the
+ * explicit request and the auto-refresh MUST all build through
+ * this helper — otherwise a cached answer is never found.
+ */
+function seriesPicksRequest(
+  trigger: "explicit" | "auto-refresh",
+  forceFresh: boolean,
+): HomeAiPicksRequest | null {
+  if (!catalog) return null;
+  const taste = loadTasteFor(catalog.playlistId);
+  const { hasProgressIds } = buildContinueInputs(catalog.rows, catalog.playlistId);
+  return buildHomeAiPicksRequest(catalog.index, taste, "series", {
+    trigger,
+    profileId: profileIdFor(),
+    playlistId: catalog.playlistId,
+    excludeIds: [...hasProgressIds].map(String),
+    forceFresh,
+  });
+}
+let homeAiBusy = false;
+let homeAiCacheLoaded = false;
+let discoverResults: SeriesDiscoverResults | null = null;
+let activeDiscoverPromptId: string | null = null;
+/** Focus the first prompt-result card after the next Home paint (user-initiated only). */
+let focusDiscoverResults = false;
 
 export const SERIES_HOME_HINTS: HintConfig = {
   id: "series-home",
@@ -307,19 +388,180 @@ function loadTasteFor(playlistId: string): TasteModel {
   }
 }
 
+/** Sync "an AI request could run" check: enabled + endpoint + model. Key presence is the ranker's problem — a failure surfaces honestly. */
+function aiConfiguredSync(): boolean {
+  try {
+    return getAiEnabled() && !!getAiEndpoint().trim() && !!getAiModel().trim();
+  } catch {
+    return false;
+  }
+}
+
+function profileIdFor(): string {
+  try {
+    return getActiveProfileId() ?? SHARED_PROFILE_ID;
+  } catch {
+    return SHARED_PROFILE_ID;
+  }
+}
+
+/** Load the durable AI cache once per catalogue (sync, zero requests) so cached picks paint immediately. */
+function loadCachedAiPicks(): void {
+  if (homeAiCacheLoaded || !catalog) return;
+  homeAiCacheLoaded = true;
+  try {
+    const request = seriesPicksRequest("explicit", false);
+    const cached = request ? readCachedHomeAiPicks(request) : null;
+    if (cached) {
+      applyHomeAiResult(cached);
+      homeAiNote = null;
+    }
+  } catch {
+    // Cache unreadable: local shelves carry the page.
+  }
+}
+
+function seriesAiReason(row: SeriesRow, modelReason: string | null): string | null {
+  const rating = normaliseRating(row);
+  const genres = genresForEntry(row, "series")
+    .slice(0, 2)
+    .map((id) => genreLabelForId(id, "series"));
+  return groundedReasonForAiCard({
+    modelReason,
+    genres,
+    ratingLabel: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : "",
+    year: row.year ? String(row.year) : "",
+  });
+}
+
+/** Explicit Generate / Request-fresh action. One request at most; failure keeps local shelves + an honest note. */
+async function onSeriesAiAction(): Promise<void> {
+  if (homeAiBusy || !catalog) return;
+  homeAiBusy = true;
+  scheduleHomeRefresh();
+  try {
+    const request = seriesPicksRequest("explicit", true);
+    if (!request) return;
+    // Explicit Generate: forceFresh is what makes the button
+    // promise fresh picks (core contract). At most one request.
+    const result = await requestHomeAiPicks(request);
+    if (result.picks.length > 0) {
+      applyHomeAiResult(result);
+      homeAiNote = null;
+    } else {
+      // Keep any previously cached picks; the core's honest
+      // fallback reason explains the failure.
+      homeAiNote = result.fallbackReason ?? "AI couldn't answer just now — showing local picks";
+    }
+  } catch {
+    homeAiNote = "AI couldn't answer just now — showing local picks";
+  } finally {
+    homeAiBusy = false;
+    scheduleHomeRefresh();
+  }
+}
+
+/** Discover entry-point tap: one explicit request, results browsable on this page. Local fallback when AI is off. */
+async function onSeriesDiscoverPrompt(prompt: DiscoverEntryPrompt): Promise<void> {
+  if (!catalog) return;
+  activeDiscoverPromptId = prompt.id;
+  const taste = loadTasteFor(catalog.playlistId);
+  const discoverHref = discoverUrlForPrompt(prompt, "series");
+  const localItems = (): SeriesShelfItem[] =>
+    resolvePromptItems<SeriesRow>(
+      catalog!.index,
+      localPromptRankedIds(catalog!.index, taste, "series", prompt, catalog!.playlistId).map((id) => ({ id })),
+      (row) => seriesAiReason(row, null),
+    );
+  if (!aiConfiguredSync()) {
+    discoverResults = {
+      prompt,
+      items: localItems(),
+      source: "local-only",
+      note: "Local results — AI isn't set up, so no request was sent",
+      discoverHref,
+    };
+    focusDiscoverResults = true;
+    scheduleHomeRefresh();
+    return;
+  }
+  homeAiBusy = true;
+  scheduleHomeRefresh();
+  try {
+    // Mood/brief entry points use the generation + TMDb
+    // verification path. Only "Surprise me" forces fresh; repeat
+    // briefs serve the cache. Verified-but-unmatched titles in
+    // result.verifiedUnmatched are NEVER rendered as playable —
+    // only result.picks (verified + matched) reach the shelf.
+    let shareTaste = false;
+    try {
+      shareTaste = getAiShareTaste();
+    } catch {
+      shareTaste = false;
+    }
+    const result = await requestHomeAiDiscovery(
+      buildHomeAiDiscoveryRequest(catalog.index, taste, "series", {
+        brief: prompt.label,
+        profileId: profileIdFor(),
+        playlistId: catalog.playlistId,
+        shareTaste,
+        forceFresh: discoverPromptForcesFresh(prompt),
+      }),
+    );
+    if (result.picks.length > 0) {
+      discoverResults = {
+        prompt,
+        items: resolvePromptItems<SeriesRow>(catalog.index, picksToEntries(result.picks), seriesAiReason),
+        source: result.source,
+        note: homeAiShelfNote(result.source, result.model),
+        discoverHref,
+      };
+    } else {
+      discoverResults = {
+        prompt,
+        items: localItems(),
+        source: "local-only",
+        note: `${result.fallbackReason ?? "AI couldn't answer just now"} — local results shown instead`,
+        discoverHref,
+      };
+    }
+  } catch {
+    discoverResults = {
+      prompt,
+      items: localItems(),
+      source: "local-only",
+      note: "AI couldn't answer just now — local results shown instead",
+      discoverHref,
+    };
+  } finally {
+    homeAiBusy = false;
+    focusDiscoverResults = true;
+    scheduleHomeRefresh();
+  }
+}
+
+/** Quiet auto-refresh after first paint (optional preference, default off; core enforces the 24h bound). */
+async function autoRefreshSeriesAi(): Promise<void> {
+  if (!catalog || homeAiPicks) return;
+  try {
+    const request = seriesPicksRequest("auto-refresh", false);
+    if (!request) return;
+    const result = await maybeAutoRefreshHomeAiPicks(request);
+    if (result && result.picks.length > 0) {
+      applyHomeAiResult(result);
+      scheduleHomeRefresh();
+    }
+  } catch {
+    // Quiet refresh failure: local shelves stay, no note, no retry.
+  }
+}
+
 async function renderHome(gen: number): Promise<void> {
   if (!homeRoot || !catalog) return;
-  // Focus preservation (§20): a follow/progress refresh re-renders
-  // the shelves with fresh nodes. Remember the focused card so it
-  // can be re-focused after paint instead of stranding the viewer.
-  const activeBefore = document.activeElement as HTMLElement | null;
-  const prevKey =
-    activeBefore && homeRoot.contains(activeBefore)
-      ? activeBefore.getAttribute("data-couch-key")
-      : null;
   const { groups, subs } = await loadFollowedData(catalog.playlistId);
   if (gen !== generation) return;
   const { inputs, hasProgressIds } = buildContinueInputs(catalog.rows, catalog.playlistId);
+  loadCachedAiPicks();
   const sections: SeriesHomeSection[] = assembleSeriesHomeSections({
     index: catalog.index,
     rowsById: catalog.byId,
@@ -329,20 +571,44 @@ async function renderHome(gen: number): Promise<void> {
     taste: loadTasteFor(catalog.playlistId),
     startedIds: [...hasProgressIds].map(String),
     isEpisodeWatched: isEpisodeWatched(catalog.playlistId),
+    aiPicks: homeAiPicks,
+    aiAllowed: homeAiAllowsSelectorBoost(homeAiResult),
+    aiSource: homeAiSource,
+    aiModel: homeAiModel,
+    aiNote: homeAiNote,
+    aiConfigured: aiConfiguredSync(),
+    discoverResults,
   });
   if (gen !== generation) return;
   if (sections.length === 0) {
     renderSeriesHomeState(homeRoot, "empty");
     return;
   }
-  renderSeriesHome(homeRoot, sections, { playlistId: catalog.playlistId });
-  if (prevKey) {
-    const activeAfter = document.activeElement as HTMLElement | null;
-    if (!activeAfter || activeAfter === document.body || !activeAfter.isConnected) {
-      const target = homeRoot.querySelector<HTMLElement>(
-        `[data-couch-key="${escapeAttr(prevKey)}"]`,
-      );
-      if (target) target.focus({ preventScroll: true });
+  // Focus/scroll preservation (§24): the wholesale re-render runs
+  // inside W1's withPreservedFocus (via repaintHomePreserving,
+  // which adds rail scrollLeft) — focus stays on the same card, or
+  // the same rail/index, and is never stolen. The capture happens
+  // here, at mutation time, after the awaits above.
+  repaintHomePreserving(homeRoot, () =>
+    renderSeriesHome(homeRoot!, sections, {
+      playlistId: catalog!.playlistId,
+      onAiAction: () => void onSeriesAiAction(),
+      aiBusy: homeAiBusy,
+      onDiscoverPrompt: (prompt) => void onSeriesDiscoverPrompt(prompt),
+      activeDiscoverPromptId,
+    }),
+  );
+  if (focusDiscoverResults) {
+    // User-initiated prompt tap: intentionally move focus to the
+    // first result AFTER preservation restored the old position.
+    focusDiscoverResults = false;
+    const firstResult = homeRoot.querySelector<HTMLElement>(
+      '[data-nylah-rail="series-home-discover-results"] [data-nylah-item]',
+    );
+    if (firstResult) {
+      firstResult.focus({ preventScroll: false });
+      restoreCouchFocus();
+      return;
     }
   }
   restoreCouchFocus();
@@ -491,6 +757,16 @@ function applyModeFromUrl(): void {
 async function boot(): Promise<void> {
   const gen = ++generation;
   if (!homeRoot) return;
+  // A new catalogue invalidates Home AI state: cached picks are
+  // re-read against the new index on first render (core
+  // re-validates them against the current pool before serving).
+  applyHomeAiResult(null);
+  homeAiNote = null;
+  homeAiBusy = false;
+  homeAiCacheLoaded = false;
+  discoverResults = null;
+  activeDiscoverPromptId = null;
+  focusDiscoverResults = false;
   const focusSearch = consumeFocusSearchParam();
   const mode = parseModeFromUrl("series", resolveLabel);
   showMode(mode.view);
@@ -542,6 +818,7 @@ async function boot(): Promise<void> {
       return;
     }
     await renderHome(gen);
+    if (gen === generation) void autoRefreshSeriesAi();
   } catch {
     if (gen !== generation) return;
     catalog = null;

@@ -16,6 +16,11 @@ export interface CouchCardView {
   title: string;
   subtitle?: string;
   meta?: string;
+  /** Extra info revealed ONLY on focus/hover (TvCard `detail` mirror):
+   * the grounded recommendation reason on Home AI cards. Rendered as
+   * the .rs-card__detail overlay — opacity/transform only, never a
+   * layout change, so neighbours never jump when focus moves. */
+  detail?: string;
   image?: string | null;
   imageAlt?: string;
   kind?: "poster" | "landscape" | "channel";
@@ -99,6 +104,11 @@ export function buildCouchCard(view: CouchCardView, armFallbacks = true): HTMLEl
     bar.appendChild(fill);
     media.appendChild(bar);
   }
+  if (view.detail) {
+    const detail = el("span", "rs-card__detail");
+    detail.textContent = view.detail;
+    media.appendChild(detail);
+  }
   card.appendChild(media);
 
   const body = el("span", "rs-card__body");
@@ -164,6 +174,7 @@ export function couchCardSignature(view: CouchCardView): string {
     view.title,
     view.subtitle ?? "",
     view.meta ?? "",
+    view.detail ?? "",
     view.image ?? "",
     view.kind ?? "poster",
     typeof view.progress === "number" ? String(Math.round(view.progress * 100)) : "",
@@ -260,6 +271,18 @@ export function updateCouchCard(card: HTMLElement, view: CouchCardView): boolean
     if (fill) fill.style.width = `${Math.round(pct * 100)}%`;
   } else {
     barEl?.remove();
+  }
+
+  let detailEl = card.querySelector(".rs-card__detail");
+  if (view.detail) {
+    if (!detailEl) {
+      detailEl = document.createElement("span");
+      detailEl.className = "rs-card__detail";
+      mediaEl.appendChild(detailEl);
+    }
+    detailEl.textContent = view.detail;
+  } else {
+    detailEl?.remove();
   }
 
   // Poster: only touch the <img> when the src actually changed —
