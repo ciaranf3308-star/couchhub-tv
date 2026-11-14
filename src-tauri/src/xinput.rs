@@ -34,13 +34,17 @@
 //   here: buttons, triggers-as-digital (threshold 30, the XInput
 //   dead-zone constant) and one direction at a time (D-pad beats the
 //   left stick; stick dead zone 7849, the XInput constant) are emitted
-//   as `xinput-button` / `xinput-direction` events. Connect /
-//   disconnect emits `xinput-status`. Right-stick axes are forwarded
-//   separately as rate-bounded `xinput-stick` events for Cursor Mode
-//   (0.11.10, W6): at most one per 16 ms while deflected beyond the
-//   same 7849 dead zone, plus one zero event on return to centre — a
-//   resting stick emits nothing. Deadzone rescaling + pointer speed
-//   live in the frontend (cursor-mode.ts).
+//   as `xinput-button` / `xinput-direction` events; each direction
+//   event carries `source` ("dpad" | "stick", 0.11.14 W2) so the
+//   frontend can drop stick directions while Cursor Mode scrolls.
+//   Connect / disconnect emits `xinput-status`. Right-stick axes are
+//   forwarded separately as rate-bounded `xinput-stick` events for
+//   Cursor Mode (0.11.10, W6), and left-stick axes as rate-bounded
+//   `xinput-scroll` events for Cursor Mode scrolling (0.11.14, W2):
+//   at most one per 16 ms while deflected beyond the same 7849 dead
+//   zone, plus one zero event on return to centre — a resting stick
+//   emits nothing. Deadzone rescaling + pointer/scroll speed live in
+//   the frontend (cursor-mode.ts).
 // - `xinput_status` is the synchronous snapshot the diagnostics UI
 //   (`ControllerStatus.svelte`, /controller-status) polls. It is the
 //   only Tauri command: the poll thread needs no command to run.
@@ -90,12 +94,32 @@ struct XInputDirectionEvent {
     /// direction that just ended.
     direction: &'static str,
     phase: &'static str, // "start" | "end"
+    /// Which physical control produced the direction: "dpad" or
+    /// "stick" (0.11.14, W2, §6). The frontend drops "stick"
+    /// directions while Cursor Mode is active — the left stick
+    /// scrolls then (see `xinput-scroll`) — and lets "dpad"
+    /// directions through, so D-pad focus navigation is retained.
+    source: &'static str,
 }
 
 /// Right-stick axes for Cursor Mode (0.11.10, W6). Raw i16 axes —
 /// XInput Y is up-positive; the frontend inverts to screen space.
 #[derive(Debug, Clone, Serialize)]
 struct XInputStickEvent {
+    slot: u32,
+    x: i16,
+    y: i16,
+}
+
+/// Left-stick axes for Cursor Mode scrolling (0.11.14, W2, §6). Same
+/// shape and rate bound as XInputStickEvent, emitted as
+/// `xinput-scroll` by the same poll loop whenever the left stick is
+/// deflected; the frontend consumes it only while Cursor Mode is
+/// active and drops stick-sourced `xinput-direction` events then, so
+/// one deflection is never both a scroll and a focus move. Raw i16
+/// axes, XInput Y up-positive; the frontend inverts to screen space.
+#[derive(Debug, Clone, Serialize)]
+struct XInputScrollEvent {
     slot: u32,
     x: i16,
     y: i16,
@@ -122,7 +146,8 @@ pub fn start_xinput_poll(app: &tauri::AppHandle) {
 #[cfg(target_os = "windows")]
 mod imp {
     use super::{
-        XInputButtonEvent, XInputDirectionEvent, XInputSlotStatus, XInputStatus, XInputStickEvent,
+        XInputButtonEvent, XInputDirectionEvent, XInputScrollEvent, XInputSlotStatus, XInputStatus,
+        XInputStickEvent,
     };
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -361,28 +386,33 @@ mod imp {
 
     /// One direction at a time, D-pad first (it is the precise
     /// control; the stick is the analogue fallback), dominant axis on
-    /// the stick — the same priority the browser path uses.
-    fn direction_of(pad: &XInputGamepad) -> Option<&'static str> {
+    /// the stick — the same priority the browser path uses. Returns
+    /// the direction plus its source ("dpad" | "stick") so the
+    /// frontend can drop stick directions while Cursor Mode scrolls
+    /// (0.11.14, W2, §6). Axes are widened to i32 before abs() so
+    /// i16::MIN can never panic in a debug build.
+    fn direction_of(pad: &XInputGamepad) -> Option<(&'static str, &'static str)> {
         if pad.w_buttons & BTN_DPAD_UP != 0 {
-            return Some("up");
+            return Some(("up", "dpad"));
         }
         if pad.w_buttons & BTN_DPAD_DOWN != 0 {
-            return Some("down");
+            return Some(("down", "dpad"));
         }
         if pad.w_buttons & BTN_DPAD_LEFT != 0 {
-            return Some("left");
+            return Some(("left", "dpad"));
         }
         if pad.w_buttons & BTN_DPAD_RIGHT != 0 {
-            return Some("right");
+            return Some(("right", "dpad"));
         }
-        let x = pad.s_thumb_lx;
-        let y = pad.s_thumb_ly;
-        if x.abs() > STICK_DEADZONE && x.abs() >= y.abs() {
-            return Some(if x > 0 { "right" } else { "left" });
+        let x = pad.s_thumb_lx as i32;
+        let y = pad.s_thumb_ly as i32;
+        let deadzone = STICK_DEADZONE as i32;
+        if x.abs() > deadzone && x.abs() >= y.abs() {
+            return Some((if x > 0 { "right" } else { "left" }, "stick"));
         }
-        if y.abs() > STICK_DEADZONE {
+        if y.abs() > deadzone {
             // Y is up-positive in XInput; screen up is negative.
-            return Some(if y > 0 { "up" } else { "down" });
+            return Some((if y > 0 { "up" } else { "down" }, "stick"));
         }
         None
     }
@@ -394,13 +424,19 @@ mod imp {
         buttons: u16,
         lt: bool,
         rt: bool,
-        direction: Option<&'static str>,
+        direction: Option<(&'static str, &'static str)>,
         /// True once a deflected right-stick event has been emitted
         /// and the stick has not yet returned to centre — the zero
         /// event on centre-return is emitted exactly once.
         stick_active: bool,
         /// Last `xinput-stick` emission, for the 16 ms rate bound.
         last_stick_emit: Option<std::time::Instant>,
+        /// Left-stick scroll equivalents of the two fields above
+        /// (0.11.14, W2, §6): `xinput-scroll` zero-on-centre + rate
+        /// bound, tracked independently of the right stick.
+        scroll_active: bool,
+        /// Last `xinput-scroll` emission, for the 16 ms rate bound.
+        last_scroll_emit: Option<std::time::Instant>,
     }
 
     static POLL_STARTED: AtomicBool = AtomicBool::new(false);
@@ -427,13 +463,19 @@ mod imp {
                         match poll_slot(api, slot) {
                             None => {
                                 if slots[index].connected {
-                                    // A stick held deflected at disconnect
-                                    // still gets its zero event, so the
-                                    // frontend pointer stops dead.
+                                    // Sticks held deflected at disconnect
+                                    // still get their zero events, so the
+                                    // frontend pointer / scroll stop dead.
                                     if slots[index].stick_active {
                                         let _ = app.emit(
                                             "xinput-stick",
                                             XInputStickEvent { slot, x: 0, y: 0 },
+                                        );
+                                    }
+                                    if slots[index].scroll_active {
+                                        let _ = app.emit(
+                                            "xinput-scroll",
+                                            XInputScrollEvent { slot, x: 0, y: 0 },
                                         );
                                     }
                                     slots[index] = SlotPollState::default();
@@ -460,13 +502,14 @@ mod imp {
                                     // A pad connected at startup reports
                                     // its direction immediately — no
                                     // first press needed.
-                                    if let Some(dir) = slots[index].direction {
+                                    if let Some((dir, source)) = slots[index].direction {
                                         let _ = app.emit(
                                             "xinput-direction",
                                             XInputDirectionEvent {
                                                 slot,
                                                 direction: dir,
                                                 phase: "start",
+                                                source,
                                             },
                                         );
                                     }
@@ -516,26 +559,32 @@ mod imp {
                                         },
                                     );
                                 }
-                                // Direction edges.
+                                // Direction edges. The stored tuple is
+                                // (direction, source): a D-pad press
+                                // while the stick is held ends the
+                                // stick direction and starts the D-pad
+                                // one, and vice versa on release.
                                 let dir = direction_of(pad);
                                 if dir != slots[index].direction {
-                                    if let Some(old) = slots[index].direction {
+                                    if let Some((old, old_source)) = slots[index].direction {
                                         let _ = app.emit(
                                             "xinput-direction",
                                             XInputDirectionEvent {
                                                 slot,
                                                 direction: old,
                                                 phase: "end",
+                                                source: old_source,
                                             },
                                         );
                                     }
-                                    if let Some(new) = dir {
+                                    if let Some((new, new_source)) = dir {
                                         let _ = app.emit(
                                             "xinput-direction",
                                             XInputDirectionEvent {
                                                 slot,
                                                 direction: new,
                                                 phase: "start",
+                                                source: new_source,
                                             },
                                         );
                                     }
@@ -578,6 +627,46 @@ mod imp {
                                     let _ = app.emit(
                                         "xinput-stick",
                                         XInputStickEvent { slot, x: 0, y: 0 },
+                                    );
+                                }
+                                // Left-stick axes for Cursor Mode
+                                // scrolling (0.11.14, W2, §6): the
+                                // exact mirror of the right-stick
+                                // block above — raw axes, rate-bounded
+                                // to one event per 16 ms while
+                                // deflected beyond the dead zone, plus
+                                // one zero event on return to centre.
+                                // Emitted regardless of Cursor Mode
+                                // state (the frontend gates
+                                // consumption); the same loop, the
+                                // same thread, no second poller.
+                                let lx = pad.s_thumb_lx;
+                                let ly = pad.s_thumb_ly;
+                                let scroll_deflected = (lx as i32).abs() > deadzone
+                                    || (ly as i32).abs() > deadzone;
+                                if scroll_deflected {
+                                    let now = std::time::Instant::now();
+                                    let due = match slots[index].last_scroll_emit {
+                                        None => true,
+                                        Some(last) => {
+                                            now.saturating_duration_since(last).as_millis()
+                                                >= STICK_EVENT_INTERVAL_MS as u128
+                                        }
+                                    };
+                                    if due {
+                                        slots[index].last_scroll_emit = Some(now);
+                                        slots[index].scroll_active = true;
+                                        let _ = app.emit(
+                                            "xinput-scroll",
+                                            XInputScrollEvent { slot, x: lx, y: ly },
+                                        );
+                                    }
+                                } else if slots[index].scroll_active {
+                                    slots[index].scroll_active = false;
+                                    slots[index].last_scroll_emit = None;
+                                    let _ = app.emit(
+                                        "xinput-scroll",
+                                        XInputScrollEvent { slot, x: 0, y: 0 },
                                     );
                                 }
                             }
