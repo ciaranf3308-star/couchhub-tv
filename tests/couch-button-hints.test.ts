@@ -4,7 +4,9 @@
 //
 // The audit (2026-11-10, gamepad.ts + per-screen handlers) found:
 // X = Details works ONLY where the focused card link carries
-// ?autoplay (Home rails); B/Escape has no back navigation on the
+// ?autoplay AND no page handler consumes "x" (0.11.14: HomeView's
+// onCardKey consumes it for the card menu, so Home hints Actions);
+// B/Escape has no back navigation on the
 // browse screens; Live TV Home Y = Search and Menu = Settings at
 // runtime (livetv-keys.ts's "home" rows claim Guide/Options but no
 // production handler consumes them); X is deliberately swallowed in
@@ -48,18 +50,24 @@ describe("return home is global", () => {
   });
 });
 
-describe("Home — X Details works here (rails carry ?autoplay)", () => {
-  it("Move / Play-Select / Details / Search / Settings / Home", () => {
+describe("Home — X opens the card context menu (HomeView onCardKey consumes it)", () => {
+  it("Move / Play-Select / Actions / Search / Settings / Home", () => {
     const config = HINT_CONFIGS.home;
     expect(glyphsOf(config)).toEqual(["dpad", "a", "x", "y", "menu", "view-menu"]);
     expect(labelsOf(config)).toEqual([
       "Move",
       "Play / Select",
-      "Details",
+      "Actions",
       "Search",
       "Settings",
       "Return home",
     ]);
+  });
+
+  it("the static config matches HomeView's live override label", () => {
+    // HomeView claims the legend on mount; a static config that said
+    // "Details" would flash a dead action before the claim lands.
+    expect(read("src/components/HomeView.svelte")).toContain('{ glyph: "x", label: "Actions" }');
   });
 
   it("no B hint — Escape has no back handler on Home", () => {

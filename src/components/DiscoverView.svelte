@@ -131,6 +131,8 @@
   // commit moves focus to results).
   /** @type {HTMLInputElement | null} */
   let inputEl = null
+  /** @type {HTMLDivElement | null} */
+  let rootEl = null
   const keyboard = new CouchKeyboardLifecycle()
   let keyboardOpen = $state(false)
   function syncKeyboard() {
@@ -778,7 +780,7 @@
     aiPhase = null
     searching = false
     searchingAi = false
-    diagnosticsOpen = false
+    closeDiagnostics()
     window.scrollTo(0, 0)
     inputEl?.focus()
   }
@@ -913,6 +915,7 @@
       receipt = null
       aiUnavailable = null
       localSimilar = null
+      closeDiagnostics()
       return
     }
     // Discover holds no genre state of its own (no genre control on
@@ -965,6 +968,7 @@
     aiPhase = null
     searching = false
     searchingAi = false
+    closeDiagnostics()
     inputEl?.focus()
   }
 
@@ -1011,7 +1015,7 @@
     aiPhase = null
     searching = false
     searchingAi = false
-    diagnosticsOpen = false
+    closeDiagnostics()
     window.scrollTo(0, 0)
     inputEl?.focus()
   }
@@ -1043,7 +1047,7 @@
         localSimilar !== null,
     })
     if (step === "close-diagnostics") {
-      diagnosticsOpen = false
+      closeDiagnostics(true)
       return true
     }
     if (step === "close-keyboard") {
@@ -1081,19 +1085,23 @@
     discoverBackStep()
   }
 
-  /** Diagnostics toggle, with controller hints for the open state. */
+  /** Diagnostics toggle, with controller hints for the open state.
+      Closing releases the override (§8) — the toggle button itself
+      keeps focus, so no refocus is needed on this path. */
   function toggleDiagnostics() {
-    diagnosticsOpen = !diagnosticsOpen
     if (diagnosticsOpen) {
-      setControllerHints({
-        id: "discover-diagnostics",
-        items: [
-          { glyph: "b", label: "Close diagnostics" },
-          { glyph: "menu", label: "Settings" },
-          { glyph: "view-menu", label: "Return home" },
-        ],
-      })
+      closeDiagnostics()
+      return
     }
+    diagnosticsOpen = true
+    setControllerHints({
+      id: "discover-diagnostics",
+      items: [
+        { glyph: "b", label: "Close diagnostics" },
+        { glyph: "menu", label: "Settings" },
+        { glyph: "view-menu", label: "Return home" },
+      ],
+    })
   }
 
   function dismissOnboarding() {
@@ -1120,6 +1128,13 @@
 
   onMount(async () => {
     aiAuto = getAiAutoRequests()
+    setLogicalView("discover")
+    // SHIM-0114: region ownership for §7.3 (see nav-regions-shim.ts).
+    // Until W1's gamepad-layer ownership lands, the keydown half
+    // below is the live behaviour for keyboard arrows and for
+    // gamepad arrows the rail model does not consume.
+    const releaseNavOwner = rootEl ? declareNavOwner(rootEl, "discover") : () => {}
+    const uninstallRegionNav = rootEl ? installRegionNavigation(rootEl) : () => {}
     // Origin for Back (Contract B): the screen that launched Discover.
     recordOriginFromReferrer(window.location.pathname)
     // Back layer (Contract A): Android BACK runs the SAME single step
@@ -1219,6 +1234,10 @@
     }
     return () => {
       clearInterval(clock)
+      uninstallRegionNav()
+      releaseNavOwner()
+      // Leaving with diagnostics open must not strand its legend.
+      setControllerHints(null)
       unregisterBack()
       window.removeEventListener("keydown", onWindowKeyDown, true)
       window.removeEventListener(COUCH_KEYBOARD_CLOSED_EVENT, onKeyboardClosed)
@@ -1241,7 +1260,7 @@
   })
 </script>
 
-<div class="rs-discover" data-discover-root onkeydown={onDiscoverKeyDown}>
+<div class="rs-discover" data-discover-root bind:this={rootEl} onkeydown={onDiscoverKeyDown}>
   <!-- Hero: Discover is a destination, with its purpose and its AI
        mode stated up front. -->
   <header class="rs-discover__hero">
@@ -1301,8 +1320,11 @@
     </section>
   {/if}
 
+  <!-- SHIM-0114 regions (§7.3): search -> examples -> quick picks ->
+       results/rows. The shim routes arrows between them; the OSK keys
+       inside the search scope are excluded (keyboard owns them). -->
   <div class="rs-discover__search">
-    <div class="rs-discover__keyboard-scope" onfocusout={onKeyboardScopeFocusOut}>
+    <div class="rs-discover__keyboard-scope" data-nav-region="search" onfocusout={onKeyboardScopeFocusOut}>
       <form
         class="rs-discover__input-row"
         onsubmit={(e) => {
@@ -1358,7 +1380,7 @@
     </div>
 
     <!-- Example prompts: tap one and it asks, exactly as typed. -->
-    <div class="rs-discover__examples">
+    <div class="rs-discover__examples" data-nav-region="examples">
       <p class="rs-discover__examples-title">Try asking</p>
       <div class="rs-discover__example-grid" role="group" aria-label="Example prompts">
         {#each EXAMPLE_PROMPTS.slice(0, 4) as prompt}
@@ -1375,7 +1397,7 @@
 
     <!-- Quick picks (B04): six large cards, one icon + label +
          honest subtitle each, consistent focus, no nested panels. -->
-    <div class="rs-discover__moods">
+    <div class="rs-discover__moods" data-nav-region="quick-picks">
       <p class="rs-discover__moods-title">Quick picks</p>
       <div class="rs-discover__mood-grid" role="group" aria-label="Quick picks">
         {#each MOOD_PRESETS as preset (preset.id)}
@@ -1415,7 +1437,7 @@
       <button type="button" class="rs-empty__action" onclick={() => location.reload()}>Try again</button>
     </div>
   {:else if showingSearch}
-    <section class="rs-rail" data-discover-results data-nylah-rail="discover-results" aria-label="Discover results">
+    <section class="rs-rail" data-discover-results data-nav-region="results" data-nylah-rail="discover-results" aria-label="Discover results">
       <div class="rs-rail__head">
         <!-- Rail title comes from the per-search receipt only: "AI
              picks" for a validated live answer, "Cached AI picks" for
@@ -1635,7 +1657,7 @@
     <div data-discover-rows class="rs-discover__rows">
       {#each rows as row (row.id)}
         {#if row.items.length}
-          <section class="rs-rail" data-nylah-rail={row.id} aria-label={row.title}>
+          <section class="rs-rail" data-nav-region={row.id} data-nylah-rail={row.id} aria-label={row.title}>
             <div class="rs-rail__head">
               <h2 class="rs-section-title">{row.title}</h2>
             </div>

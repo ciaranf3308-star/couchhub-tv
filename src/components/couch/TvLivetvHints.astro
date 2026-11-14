@@ -18,10 +18,13 @@
 //     html[data-livetv-guide-mode].
 //
 // Update sources, in priority order:
-//   1. `livetv:nav-change` {top} from livetvNav (the nav
+//   1. Cursor Mode (html[data-cursor-mode="active"], 0.11.14 W3):
+//      the cursor legend wins over every layer config while the
+//      pointer is the input.
+//   2. `livetv:nav-change` {top} from livetvNav (the nav
 //      stack is the source of truth once adopted).
-//   2. html[data-livetv-nav-layer] (the nav mirror, observed).
-//   3. `livetv:mode` {mode} fallback (pre-integration: the
+//   3. html[data-livetv-nav-layer] (the nav mirror, observed).
+//   4. `livetv:mode` {mode} fallback (pre-integration: the
 //      mode shell is the only signal; maps landing / browser /
 //      playback / guide directly).
 //
@@ -74,6 +77,12 @@ const initial = hintsForLivetvLayer(context, { guideMode });
   import { hintsForLivetvLayer, livetvHintsListHtml } from "@/scripts/lib/livetv-hints.ts";
   import { LIVETV_NAV_CHANGE_EVENT } from "@/scripts/lib/livetv-nav.ts";
   import type { LivetvNavLayerId } from "@/scripts/lib/livetv-nav.ts";
+  // 0.11.14 (W3, §8): while Cursor Mode is active (cursor-mode.ts
+  // sets html[data-cursor-mode="active"]) the legend shows the
+  // cursor hint set instead of the layer's — mirroring TvButtonHints.
+  // Without this the Live TV bar kept naming layer actions that
+  // Cursor Mode swallows (A click / RB right-click / B exit).
+  import { CURSOR_MODE_HINTS } from "@/scripts/lib/cursor-mode.ts";
 
   const nav = document.querySelector<HTMLElement>("[data-livetv-hints]");
   const list = nav?.querySelector<HTMLElement>("[data-livetv-hints-list]");
@@ -118,16 +127,27 @@ const initial = hintsForLivetvLayer(context, { guideMode });
       if (typeof layer === "string" && layer) {
         currentLayer = layer as LivetvNavLayerId;
       }
-      const config = hintsForLivetvLayer(currentLayer, {
-        guideMode: guideModeNow(),
-      });
+      // Cursor Mode wins over the layer config while active — the
+      // pointer's legend, not the screen's (same rule TvButtonHints
+      // applies). The layer is still tracked, so exiting Cursor Mode
+      // restores the layer's legend without a nav event.
+      const cursorActive =
+        document.documentElement.dataset.cursorMode === "active";
+      const config = cursorActive
+        ? CURSOR_MODE_HINTS
+        : hintsForLivetvLayer(currentLayer, {
+            guideMode: guideModeNow(),
+          });
       nav.dataset.context = currentLayer ?? "";
       nav.dataset.config = config.id;
       // Hide while a dialog owns input, and in playback while
       // the OSD / a playback overlay is up (it names its own
       // keys). Never hidden for search / sort / drawer layers.
+      // Cursor Mode bypasses the hide: the pointer legend must
+      // stay visible while the pointer is the input.
       const hidden =
-        dialogOpen() || (currentLayer === "playback" && overlayVisible());
+        !cursorActive &&
+        (dialogOpen() || (currentLayer === "playback" && overlayVisible()));
       nav.toggleAttribute("hidden", hidden);
       if (list.dataset.config !== config.id) {
         list.innerHTML = livetvHintsListHtml(config);
@@ -151,7 +171,9 @@ const initial = hintsForLivetvLayer(context, { guideMode });
     });
     attrObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-livetv-nav-layer", "data-livetv-guide-mode"],
+      // 0.11.14 (W3): data-cursor-mode joins the filter so Cursor
+      // Mode activation/exit re-renders the legend immediately.
+      attributeFilter: ["data-livetv-nav-layer", "data-livetv-guide-mode", "data-cursor-mode"],
     });
 
     // 3. Mode-shell fallback (pre-integration): when no nav

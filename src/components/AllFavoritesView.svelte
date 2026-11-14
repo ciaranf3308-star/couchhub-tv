@@ -46,8 +46,17 @@
   } from "@/scripts/lib/title-context-actions.ts"
   import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
   import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
+  // SHIM-0114 (W3): region ownership until W1's API lands — see
+  // nav-regions-shim.ts. Integration deletes the shim and re-points
+  // the onMount calls; the data-nav-region markup stays.
+  import {
+    declareNavOwner,
+    installRegionNavigation,
+  } from "@/scripts/lib/nav-regions-shim.ts"
 
   const ROUTE = "/favorites"
+  /** @type {HTMLDivElement | null} */
+  let rootEl = null
   const FILTERS = ["all", "live", "vod", "series"]
   /** Filter restored from the last visit (detail return keeps the filter). */
   function initialFilter() {
@@ -380,6 +389,10 @@
 
   onMount(() => {
     setLogicalView("favorites")
+    // SHIM-0114: filters <-> grid region routing (§7.16 — a grid,
+    // not a rail: column-preserving Up/Down, filters reachable).
+    const releaseNavOwner = rootEl ? declareNavOwner(rootEl, "favorites") : () => {}
+    const uninstallRegionNav = rootEl ? installRegionNavigation(rootEl) : () => {}
     setControllerHints({
       id: "favorites",
       items: [
@@ -426,6 +439,8 @@
       document.addEventListener(eventName, handler)
     }
     return () => {
+      uninstallRegionNav()
+      releaseNavOwner()
       stopFocusMemory()
       unregisterBack()
       document.removeEventListener("keydown", onCardKey)
@@ -437,7 +452,10 @@
   })
 </script>
 
-<div class="couch-library__filters">
+<!-- SHIM-0114: display:contents wrapper — the region root without
+     a layout box, so the filters/grid layout is byte-identical. -->
+<div class="couch-library-root" bind:this={rootEl}>
+<div class="couch-library__filters" data-nav-region="filters">
   <div class="couch-library__chips" role="tablist" aria-label={tr("favorites.heading")}>
     {#each [
       { id: "all", key: "favorites.filter.all" },
@@ -480,6 +498,7 @@
   <section
     class="rs-grid"
     data-couch-grid
+    data-nav-region="grid"
     role="group"
     aria-label={tr("favorites.heading")}>
     {#each visible as entry, idx (entry.playlistId + ":" + entry.kind + ":" + entry.id)}
@@ -559,9 +578,15 @@
     {/each}
   </section>
 {/if}
+</div>
 
 <style>
   /* Couch library — RedSilk tokens only (couch.css owns .rs-*). */
+  /* SHIM-0114: the region root renders no box (display:contents),
+     so wrapping the view changes no layout. */
+  .couch-library-root {
+    display: contents;
+  }
   .couch-library__filters {
     display: flex;
     flex-direction: column;

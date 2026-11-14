@@ -16,7 +16,7 @@
 //
 //   Screen            A               B                    X
 //   ───────────────── ─────────────── ─────────────────── ─────────────────
-//   Home              Play / Select   —                    Details (*1)
+//   Home              Play / Select   —                    Actions (*1)
 //   Live TV Home      Watch (tune)    —                    — (*2)
 //   Live TV playback  Show controls   Close → Live Home    Guide
 //   Guide             Select programme Leave Guide         — (swallowed, *3)
@@ -59,9 +59,13 @@
 //   detail pages); View + Menu held 2 s returns home (gamepad.ts owns
 //   the hold — no screen may intercept it, return-home.ts minimises).
 //
-//   (*1) X = Details works ONLY where the focused card link carries
-//        ?autoplay (Home rails append it, home-rails.ts). It strips
-//        the param and opens the detail page without autoplay.
+//   (*1) X = Actions on Home (0.11.10): HomeView's onCardKey consumes
+//        the "x" key on hero/rail cards and opens the card context
+//        menu, and HomeView claims the legend with the same label —
+//        so the static config below matches it. The legacy ?autoplay
+//        details fallback in gamepad.ts (openDetailsOfFocused) only
+//        runs where NO handler consumes "x"; no Home card reaches it.
+//        The 0.8.0 audit's "Details" label is superseded (0.11.14 W3).
 //   (*2) livetv-keys.ts claims Live TV Home X = contextual, Y = Guide,
 //        Menu = Options — but no production handler consumes the
 //        "home" context (only the Guide context is read, by
@@ -185,7 +189,7 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
     items: [
       { glyph: "dpad", label: "Move" },
       { glyph: "a", label: "Play / Select" },
-      { glyph: "x", label: "Details" },
+      { glyph: "x", label: "Actions" },
       { glyph: "y", label: "Search" },
       { glyph: "menu", label: "Settings" },
       RETURN_HOME_HINT,
