@@ -48,6 +48,22 @@ function updatePosition(target: HTMLElement, opts: { skipAnimation?: boolean } =
     hideIndicator()
     return
   }
+  // 0.11.14 (§4): while scrolling, a focused target can leave the
+  // viewport entirely (long list, fast repeat) — the ring must hide
+  // instead of sitting at a stale position over other content. It
+  // reappears on the next focus move / scroll that brings the target
+  // back, via onScrollOrResize → updatePosition.
+  if (
+    rect.bottom <= 0 ||
+    rect.top >= window.innerHeight ||
+    rect.right <= 0 ||
+    rect.left >= window.innerWidth
+  ) {
+    // Keep lastTarget: the next scroll that brings the target back
+    // into view re-shows the ring via onScrollOrResize.
+    hideIndicator(true)
+    return
+  }
   if (rect.width > SIZE_LIMIT.w || rect.height > SIZE_LIMIT.h) {
     hideIndicator()
     return
@@ -114,7 +130,7 @@ function startFollow(target: HTMLElement) {
   followRafId = requestAnimationFrame(step)
 }
 
-function hideIndicator() {
+function hideIndicator(keepTarget = false) {
   document.documentElement.classList.remove("xt-glide-tracking")
   cancelAnimationFrame(followRafId)
   if (!indicatorEl) return
@@ -122,7 +138,9 @@ function hideIndicator() {
   activeAnimation = null
   indicatorEl.dataset.visible = "false"
   indicatorEl.style.opacity = "0"
-  lastTarget = null
+  // Offscreen hides keep lastTarget so a scroll back into view
+  // re-shows the ring; every other hide clears it.
+  if (!keepTarget) lastTarget = null
 }
 
 function onFocus(ev: FocusEvent) {
