@@ -59,8 +59,10 @@
 //     repeat after a 350 ms initial delay, then every 140 ms.
 //   - Dead zone 0.30 on the left stick, so drift never moves focus.
 //   - While a text field is focused, navigation keys are left to the
-//     field (only B / View+Menu keep working, so the user can always
-//     blur out and return home).
+//     field: only B (blur + Back, dismissing editing first), A
+//     (enter editing / open the on-screen keyboard, §7.3/§7.15) and
+//     View+Menu keep working, so the user can always blur out and
+//     return home. Every other button stays swallowed in a field.
 //   - While a modal dialog is open, directions / A / B belong to the
 //     dialog only (see modalFocusTarget below); X / Y / Menu do
 //     nothing, so the page behind the dialog receives no navigation
@@ -82,6 +84,15 @@ import {
   markSyntheticBackEvent,
   resolveBack,
 } from "@/scripts/lib/back-handler.ts";
+// 0.11.14 (W1b, §7.3/§7.15): A on a focused text field enters editing
+// through the shared keyboard lifecycle — see activateTextEditing.
+// gamepad.ts only consumes the lifecycle's public API; the lifecycle
+// itself (and its Back layer) stays owned by couch-keyboard.ts.
+import {
+  getCouchKeyboardInput,
+  isCouchKeyboardOpen,
+  openCouchKeyboard,
+} from "@/scripts/lib/couch-keyboard.ts";
 // 0.11.10 (W6): Cursor Mode guard — see the guard at the top of
 // handleGamepadButtonPress. This module owns the guard region only;
 // cursor-mode.ts owns the pointer state machine.
@@ -376,8 +387,9 @@ export function cancelHeldDirection(): void {
  * One pressed button, from either input path. `index` is a
  * standard-mapping button index (see BTN_* above). Edge-triggered by
  * the caller: call only on the press edge, never while held. The
- * text-field gate lives here so both paths honour it: in a field only
- * B works (blur + back), every other button is swallowed.
+ * text-field gate lives here so both paths honour it: in a field B
+ * works (blur + back) and A enters editing through the shared
+ * keyboard lifecycle; every other button is swallowed.
  */
 export function handleGamepadButtonPress(index: number, _now: number): void {
   // 0.11.10 (W6) CURSOR MODE GUARD — runs before ALL button routing.
@@ -417,6 +429,15 @@ export function handleGamepadButtonPress(index: number, _now: number): void {
       markGamepadActive();
       (document.activeElement as HTMLElement | null)?.blur?.();
       resolveBack();
+    }
+    // 0.11.14 (W1b, §7.3/§7.15): A on a focused input must not be
+    // silently swallowed — it enters editing (activateFocused routes
+    // it through the shared keyboard lifecycle, with the modal/drawer
+    // pull taking priority as for every other A press). B above is
+    // unchanged; every other button stays swallowed in a field.
+    if (index === BTN_A) {
+      markGamepadActive();
+      activateFocused();
     }
     return;
   }
@@ -763,6 +784,151 @@ function currentVideo(): HTMLVideoElement | null {
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────
+// 0.11.14 (W1b) — A on a focused text field (§7.3/§7.15).
+//
+// "A on an input must not be silently swallowed" (§7.3) and "the
+// viewer must not be trapped in the search input" (§7.15). Both the
+// editing gate in handleGamepadButtonPress and activateFocused used
+// to return early for inputs, so the controller could never reach
+// the on-screen keyboard from the input itself — even though the
+// Discover/Search views already expect that entry ("the key grid is
+// reached via ArrowDown or A on the input") and the shared lifecycle
+// documents it (couch-keyboard.ts: focusGrid defaults to true as
+// "the explicit controller entry: A on a focused input").
+//
+// A enters editing through the EXISTING lifecycle only — no new
+// keyboard system, no B change, no new Back layer. Dispatching a
+// synthetic Enter is deliberately NOT the seam: Search navigates to
+// a result on Enter, Discover's form never submits from an
+// untrusted key, and neither opens the key grid. Dispatching
+// ArrowDown is not it either: surfaces without an ArrowDown handler
+// would move focus instead of entering editing. The seam is the
+// lifecycle's own public API, applied per state:
+//
+//   - Session already live for this input (the normal Discover /
+//     Search state — the view opens the session on focus with
+//     focusGrid:false, so focus stays in the input for typing):
+//     move focus into the already-mounted key grid. openCouchKeyboard
+//     is NOT re-called here: re-entry would overwrite the view's
+//     commit callback with undefined.
+//   - No session for this input but a keyboard surface is mounted
+//     (an Astro dialog surface, or a session that ended while the
+//     grid stayed rendered): openCouchKeyboard(input) with its
+//     default focusGrid:true — the designed explicit entry — which
+//     registers the session + keyboard Back layer and schedules the
+//     grid focus itself.
+//   - No session and no mounted keyboard (a plain form field with no
+//     OSK surface): A is a no-op, exactly as before. gamepad.ts never
+//     invents a keyboard session where no keyboard surface exists, so
+//     Settings form fields keep their current B behaviour and hints.
+//
+// B is untouched: the keyboard Back layer (priority 80) dismisses
+// editing first, without clearing the query or the conversation.
+// ──────────────────────────────────────────────────────────────────────
+
+/** Input types that take free text — the tv-input-guard set. */
+const TEXT_INPUT_TYPES = new Set([
+  "",
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "number",
+]);
+
+/** First-key selector, matching couch-keyboard's grid-focus query. */
+const OSK_KEY_SELECTOR =
+  "[data-couch-keyboard] [data-osk-key], [data-osk] [data-osk-key]";
+
+function isTextEditingTarget(
+  el: HTMLInputElement | HTMLTextAreaElement,
+): boolean {
+  if (el.tagName.toLowerCase() === "textarea") return true;
+  const type = (el.getAttribute("type") || "").toLowerCase();
+  return TEXT_INPUT_TYPES.has(type);
+}
+
+function focusFirstOskKey(
+  input: HTMLInputElement | HTMLTextAreaElement,
+): boolean {
+  const key = document.querySelector<HTMLElement>(OSK_KEY_SELECTOR);
+  if (!key) return false;
+  // Never steal focus the user has already moved elsewhere.
+  const active = document.activeElement;
+  if (active !== input && active !== document.body) return false;
+  key.focus();
+  return true;
+}
+
+/**
+ * Move focus into the key grid, retrying across frames like
+ * couch-keyboard's own scheduler (the grid may mount on the next
+ * Svelte flush). Each attempt re-checks that the live session still
+ * belongs to this input, so a stale retry never steals focus after
+ * the user moved on or B dismissed editing.
+ */
+function scheduleOskGridFocus(
+  input: HTMLInputElement | HTMLTextAreaElement,
+): void {
+  const attempt = (): void => {
+    if (!isCouchKeyboardOpen() || getCouchKeyboardInput() !== input) return;
+    focusFirstOskKey(input);
+  };
+  attempt();
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      attempt();
+      setTimeout(attempt, 80);
+    });
+  } else {
+    setTimeout(attempt, 80);
+  }
+}
+
+function activateTextEditing(
+  el: HTMLInputElement | HTMLTextAreaElement,
+): void {
+  if (!isTextEditingTarget(el)) {
+    // Checkbox / radio / button / range: controls, not text fields.
+    // A activates them natively instead of opening a keyboard.
+    el.click();
+    return;
+  }
+  if (isCouchKeyboardOpen() && getCouchKeyboardInput() === el) {
+    scheduleOskGridFocus(el);
+    return;
+  }
+  if (!document.querySelector("[data-couch-keyboard], [data-osk]")) return;
+  openCouchKeyboard(el);
+}
+
+function activateSelect(el: HTMLSelectElement): void {
+  // A opens the native option picker — the select equivalent of
+  // entering editing. showPicker is the programmatic equivalent of
+  // the trusted Enter/click that opens it; a synthetic Enter cannot.
+  // Best-effort throughout: where showPicker is unavailable or
+  // refused, click() is the fallback and a failure is a no-op.
+  const picker = (
+    el as HTMLSelectElement & { showPicker?: () => void }
+  ).showPicker;
+  if (typeof picker === "function") {
+    try {
+      picker.call(el);
+      return;
+    } catch {
+      // Fall through to click().
+    }
+  }
+  try {
+    el.click();
+  } catch {
+    // Best-effort: a failed activation is a no-op, never a throw.
+  }
+}
+
 function activateFocused(): void {
   // While a modal is open, A must never activate something behind
   // it: pull stray focus into the dialog instead. Same for an open
@@ -780,7 +946,19 @@ function activateFocused(): void {
     return;
   }
   const tag = el.tagName.toLowerCase();
-  if (tag === "input" || tag === "textarea" || tag === "select") return;
+  if (tag === "input" || tag === "textarea") {
+    activateTextEditing(el as HTMLInputElement | HTMLTextAreaElement);
+    return;
+  }
+  if (tag === "select") {
+    activateSelect(el as HTMLSelectElement);
+    return;
+  }
+  if (el.isContentEditable) {
+    // No keyboard lifecycle exists for contentEditable surfaces
+    // (none exist in the Couch views); A stays swallowed there.
+    return;
+  }
   if (
     tag === "button" ||
     tag === "a" ||
@@ -1294,11 +1472,16 @@ export function mountGamepad(): void {
     noteViewMenuHeld(snapshot[BTN_VIEW], snapshot[BTN_MENU], now);
 
     if (editing) {
-      // In a text field the controller only gets B (blur/back) and the
-      // View+Menu return-home hold — arrows and A belong to the field.
-      // The gate lives in handleGamepadButtonPress; calling it for B
-      // is enough here. R3 is routed too, so Cursor Mode can always
-      // be exited from a field on the fallback path (0.11.10 W6).
+      // In a text field the controller only gets A (enter editing,
+      // §7.3/§7.15 — routed through the shared pipeline so the
+      // fallback behaves exactly like the native path), B
+      // (blur/back) and the View+Menu return-home hold — arrows and
+      // every other button belong to the field. Directions stay
+      // swallowed here (the documented editing asymmetry: the native
+      // path dispatches Up/Down while editing, the fallback does
+      // not). R3 is routed too, so Cursor Mode can always be exited
+      // from a field on the fallback path (0.11.10 W6).
+      if (justPressed(BTN_A)) handleGamepadButtonPress(BTN_A, now);
       if (justPressed(BTN_B)) handleGamepadButtonPress(BTN_B, now);
       if (justPressed(BTN_RIGHT_THUMB))
         handleGamepadButtonPress(BTN_RIGHT_THUMB, now);

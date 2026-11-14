@@ -449,9 +449,14 @@ describe("configs grounded in the gamepad layer (source)", () => {
     expect(gamepad).toContain("Number.isFinite(video.duration)");
   });
 
-  it("editing branch leaves only B + View+Menu to the controller", () => {
+  // 0.11.14 (W1b, §7.3/§7.15): A joins B in a text field — it enters
+  // editing through the shared keyboard lifecycle instead of being
+  // silently swallowed. Directions and every other button stay with
+  // the field.
+  it("editing branch leaves only A (enter editing) + B + View+Menu to the controller", () => {
     const gamepad = read("src/scripts/lib/gamepad.ts");
-    expect(gamepad).toContain("In a text field the controller only gets B");
+    expect(gamepad).toContain("In a text field the controller only gets A (enter editing,");
+    expect(gamepad).toContain("every other button belong to the field");
   });
 });
 
