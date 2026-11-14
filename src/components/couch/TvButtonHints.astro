@@ -25,11 +25,13 @@
 // While Controller Cursor Mode is active (0.11.10 W6,
 // html[data-cursor-mode="active"]) the legend shows the cursor hint
 // set (CURSOR_MODE_HINTS) instead of the view's config.
+// html[data-cursor-scroll] (0.11.14 W2, change-only) is observed
+// too, so scroll-availability flips re-render the legend.
 // View+Menu held 2 s = return home is global and is never hidden
 // with the legend: the hold is owned by gamepad.ts, not by this bar.
 import {
   hintsForView,
-  hintItemHtml,
+  hintListHtml,
   type HintConfig,
 } from "@/scripts/lib/couch-button-hints.ts";
 
@@ -52,7 +54,7 @@ const initial: HintConfig = hintsForView(view);
     class="rs-button-hints__list"
     data-button-hints-list
     data-config={initial.id}
-    set:html={initial.items.map((item) => hintItemHtml(item)).join("")}
+    set:html={hintListHtml(initial)}
   >
   </ul>
 </nav>
@@ -62,7 +64,7 @@ const initial: HintConfig = hintsForView(view);
     CONTROLLER_HINTS_CHANGE_EVENT,
     getControllerHints,
     hintsForView,
-    hintItemHtml,
+    hintListHtml,
   } from "@/scripts/lib/couch-button-hints.ts";
   // 0.11.10 (W6): while Cursor Mode is active (cursor-mode.ts sets
   // html[data-cursor-mode="active"]) the legend shows the cursor
@@ -77,6 +79,12 @@ const initial: HintConfig = hintsForView(view);
   const list = nav?.querySelector<HTMLElement>("[data-button-hints-list]");
   if (nav && list) {
     const view = nav.dataset.view ?? "home";
+    // Last painted item HTML. The repaint guard compares rendered
+    // content, NOT the config id: view overrides often reuse their
+    // view config's id with different items (Favourites, Followed,
+    // Settings, detail pages), and the old id-only guard left those
+    // overrides unpainted forever (0.11.14 W3, §8).
+    let lastHtml = "";
 
     // Selectors whose visibility means "an overlay owns the buttons":
     // OSD + options + Quick Surf + channel browser + error, all
@@ -147,8 +155,10 @@ const initial: HintConfig = hintsForView(view);
           (view === "livetv" && mode === "playback" && overlayVisible()));
       nav.toggleAttribute("hidden", hidden);
       nav.dataset.config = config.id;
-      if (list.dataset.config !== config.id) {
-        list.innerHTML = config.items.map((item) => hintItemHtml(item)).join("");
+      const html = hintListHtml(config);
+      if (html !== lastHtml) {
+        list.innerHTML = html;
+        lastHtml = html;
         list.dataset.config = config.id;
       }
     }
@@ -158,7 +168,12 @@ const initial: HintConfig = hintsForView(view);
       attributes: true,
       // 0.11.10 (W6): data-cursor-mode joins the filter so Cursor
       // Mode activation/exit re-renders the legend immediately.
-      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode", "data-cursor-mode"],
+      // 0.11.14 (W2/W3 seam): data-cursor-scroll joins it too —
+      // cursor-mode.ts writes it change-only when scroll
+      // availability under the pointer flips, so the legend
+      // re-renders on the flip (the cursor config itself is
+      // static; the stick rows live in the on-screen pill).
+      attributeFilter: ["data-livetv-mode", "data-livetv-guide-mode", "data-cursor-mode", "data-cursor-scroll"],
     });
     const domObserver = new MutationObserver(render);
     domObserver.observe(document.body, {

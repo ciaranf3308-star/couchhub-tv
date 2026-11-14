@@ -1,6 +1,10 @@
 // TV receiver screen: pairing idle view + remote-controlled playback.
+import "@/scripts/spatial-navigation"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { BACK_PRIORITY, mountBackCoordinator, registerBackLayer } from "@/scripts/lib/back-handler"
+import { mountGamepad } from "@/scripts/lib/gamepad"
+import { mountNativeGamepad } from "@/scripts/lib/native-gamepad"
 import { getEffectiveReceiverDeviceName, getReceiverEngine, getReceiverId } from "@/scripts/lib/app-settings.js"
 import { applyStreamHeaders } from "@/scripts/lib/stream-headers"
 import { validateCastDescriptor, type CastDescriptorV1 } from "@/scripts/lib/tv-cast-descriptor"
@@ -509,6 +513,29 @@ if (isKioskBuild) {
   exitBtn?.classList.add("hidden")
 } else {
   exitBtn?.addEventListener("click", () => exitReceiver())
+}
+
+// 0.11.14 (W3, §7.19): the receiver layout mounts no input shell, so
+// the controller was dead on this page — B could not exit and the
+// D-pad could not reach Exit / Try again. Mount the same input stack
+// the other layouts mount (spatial nav + gamepad + Back coordinator)
+// and route one Back press to the same exit the button runs. The
+// receiver is remote-controlled while casting, so there is no local
+// playback layer for B to close first. Kiosk builds keep no exit:
+// the button is hidden there, and B stays hidden too.
+if (!isKioskBuild) {
+  mountBackCoordinator()
+  mountGamepad()
+  mountNativeGamepad()
+  registerBackLayer({
+    id: "receiver-exit",
+    priority: BACK_PRIORITY.ROUTE,
+    isActive: () => true,
+    handle: () => {
+      exitReceiver()
+      return true
+    },
+  })
 }
 
 function prefersReducedMotion(): boolean {

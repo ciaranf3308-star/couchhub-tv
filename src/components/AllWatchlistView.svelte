@@ -45,8 +45,18 @@
   } from "@/scripts/lib/title-context-actions.ts"
   import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
   import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
+  // Region ownership (§7.16, W1 contract): the grid-kind owner
+  // routes D-pad presses between the filters and grid regions;
+  // see region-direction.ts.
+  import { registerNavigationOwner } from "@/scripts/lib/navigation-ownership.ts"
+  import {
+    createRegionDirectionHandler,
+    regionSectionEntry,
+  } from "@/scripts/lib/region-direction.ts"
 
   const ROUTE = "/watchlist"
+  /** @type {HTMLDivElement | null} */
+  let rootEl = null
   const FILTERS = ["all", "vod", "series"]
   /** Filter restored from the last visit (detail return keeps the filter). */
   function initialFilter() {
@@ -313,6 +323,18 @@
 
   onMount(() => {
     setLogicalView("watchlist")
+    // Region owner (§7.16 — a grid, not a rail: column-preserving
+    // Up/Down, filters reachable). Unregistered on unmount.
+    const unregisterNavOwner = rootEl
+      ? registerNavigationOwner({
+          id: "watchlist",
+          kind: "grid",
+          root: () => rootEl,
+          isActive: () => rootEl?.isConnected ?? false,
+          handleDirection: createRegionDirectionHandler(rootEl),
+          sectionEntry: regionSectionEntry(rootEl),
+        })
+      : () => {}
     setControllerHints({
       id: "watchlist",
       items: [
@@ -358,6 +380,7 @@
       document.addEventListener(eventName, handler)
     }
     return () => {
+      unregisterNavOwner()
       stopFocusMemory()
       unregisterBack()
       document.removeEventListener("keydown", onCardKey)
@@ -369,7 +392,10 @@
   })
 </script>
 
-<div class="couch-library__filters">
+<!-- Region root (display:contents wrapper) — the owner root without
+     a layout box, so the filters/grid layout is byte-identical. -->
+<div class="couch-library-root" bind:this={rootEl}>
+<div class="couch-library__filters" data-nav-region="filters">
   <div class="couch-library__chips" role="tablist" aria-label={tr("watchlist.heading")}>
     {#each [
       { id: "all", key: "favorites.filter.all" },
@@ -411,6 +437,7 @@
   <section
     class="rs-grid"
     data-couch-grid
+    data-nav-region="grid"
     role="group"
     aria-label={tr("watchlist.heading")}>
     {#each visible as entry, idx (entry.playlistId + ":" + entry.kind + ":" + entry.id)}
@@ -460,9 +487,15 @@
     {/each}
   </section>
 {/if}
+</div>
 
 <style>
   /* Couch library — RedSilk tokens only (couch.css owns .rs-*). */
+  /* The region root renders no box (display:contents),
+     so wrapping the view changes no layout. */
+  .couch-library-root {
+    display: contents;
+  }
   .couch-library__filters {
     display: flex;
     flex-direction: column;
