@@ -183,8 +183,9 @@ export function browseResultKey(ranked: RankedCandidate): string {
  * after it; picks naming ids outside the ranked set are dropped
  * (never fabricated into results). Kind is enforced: a pick only
  * matches a result of the same kind. The caller must label the
- * result with the picks' real source (ai / cached-ai) — this
- * function only orders, it never claims AI produced the list.
+ * result with the picks' real source (fresh-ai / cached-ai via
+ * homeAiSourceLabel) — this function only orders, it never claims
+ * AI produced the list.
  */
 export function applyVerifiedAiOrder(
   ranked: RankedCandidate[],

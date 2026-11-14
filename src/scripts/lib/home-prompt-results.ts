@@ -1,18 +1,20 @@
 // Discover entry-point results (0.11.14, W5 Homes — brief §21).
 // Shared by the Movies and Series mounts: local fallback results
-// for one pre-scoped prompt through the existing LOCAL engine
-// (searchBrowse — no model call), and resolution of verified core
-// picks back to shelf items. The AI request itself goes through
-// the W4 core's discovery path (requestHomeAiDiscovery) from the
-// mounts; this module only prepares candidates and resolves ids,
-// so both mounts run the identical prompt flow and neither can
-// leak a title across kinds.
+// for one pre-scoped prompt through the existing LOCAL Recommended
+// engine (recommendForBrowse over the genre-filtered pool — no
+// model call, and no text search: a natural-language brief like
+// "A genuinely funny film" matches no title), and resolution of
+// verified core picks back to shelf items. The AI request itself
+// goes through the W4 core's discovery path
+// (requestHomeAiDiscovery) from the mounts; this module only
+// prepares candidates and resolves ids, so both mounts run the
+// identical prompt flow and neither can leak a title across kinds.
 
 import {
   catalogRowToCandidate,
   type DiscoverCandidate,
 } from "@/scripts/lib/discover.ts";
-import { searchBrowse } from "@/scripts/lib/browse-recommendations.ts";
+import { recommendForBrowse } from "@/scripts/lib/browse-recommendations.ts";
 import type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import type { TasteModel } from "@/scripts/lib/taste.ts";
 import type { DiscoverEntryPrompt } from "@/scripts/lib/home-discover-entries.ts";
@@ -83,11 +85,11 @@ export function localPromptRankedIds(
   playlistId = "",
 ): string[] {
   const pool = filterCandidatesForPrompt(promptCandidates(index, kind), prompt);
-  const ranked = searchBrowse(prompt.label, pool, taste ?? undefined, {
+  const { items } = recommendForBrowse(pool, taste ?? undefined, {
     kind,
     limit: PROMPT_RESULTS_LIMIT * 2,
   }, playlistId);
-  return ranked.map((entry) => entry.candidate.id);
+  return items.map((entry) => entry.candidate.id);
 }
 
 /**

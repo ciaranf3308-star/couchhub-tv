@@ -96,8 +96,15 @@ export function allocateShelves<T extends ShelfPoolItem>(
   });
 }
 
-/** Over-fetch factor for selector pools feeding allocation (2x the shelf limit). */
-export const SHELF_POOL_OVERFETCH = 2;
+/**
+ * Over-fetch factor for selector pools feeding allocation (3x the
+ * shelf limit, landing at the selectors' 50-result cap). Pools must
+ * be deep enough to survive strict dedup against every
+ * higher-priority shelf: with near-identical selector orderings
+ * (thin evidence), a 2x pool is fully consumed upstream and the
+ * last shelf starves despite legitimate titles remaining.
+ */
+export const SHELF_POOL_OVERFETCH = 3;
 
 /** Shelf limits (brief §15): richer rows, sensible visible counts — rails scroll horizontally. */
 export const HOME_SHELF_LIMITS = {

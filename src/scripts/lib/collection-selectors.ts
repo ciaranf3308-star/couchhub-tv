@@ -885,6 +885,18 @@ export function selectHiddenGems(
       if (groupHits(ctx.view.hardDislikedIds, group)) continue
       const isWatched = groupHits(ctx.watched, group)
       if (ctx.excludeWatched && isWatched) continue
+      // §14: never call a title a hidden gem merely because it
+      // carries a near-max provider rating with no backing — a
+      // "10" with no votes and no TMDb identity is not evidence.
+      // Applies in both strict and relaxed builds: the relaxed
+      // fallback must not resurrect what strict rejected.
+      if (
+        aggregate.rating &&
+        aggregate.rating.score10 >= 9.5 &&
+        !hasCredibleRating(aggregate.rating)
+      ) {
+        continue
+      }
       const { value: obscurity, signal } = obscurityOf(group, aggregate)
       if (strict && (aggregate.bayesian < 6.8 || obscurity <= 0)) continue
       if (!strict && aggregate.bayesian < 6.5) continue
@@ -1208,6 +1220,10 @@ export function selectSomethingDifferent(
       if (ctx.excludeCompleted && groupHits(ctx.completed, group)) continue
       const qualityFloor = strict ? 6.5 : 6.0
       if (aggregate.bayesian < qualityFloor) continue
+      // A low provider rating is evidence against the title even
+      // when the Bayesian prior pulls its score up: "different"
+      // must never mean poor-quality (§14).
+      if (aggregate.rating && aggregate.rating.score10 < 6.0) continue
       const credible = hasCredibleRating(aggregate.rating)
       const identified = group.tmdbId != null
       if (strict && !credible && !identified) continue
