@@ -15,6 +15,12 @@
 // Storage-injected pure helpers (record/read) mirror the
 // couch-keyboard.ts pattern so tests run without a DOM; the DOM
 // helpers degrade silently when storage or elements are missing.
+//
+// 0.11.14 (§4): restored targets are revealed through couch-focus's
+// container-aware scrollFocusedIntoView — the same reveal every
+// other focus move uses — instead of a blind scrollIntoView.
+
+import { scrollFocusedIntoView } from "@/scripts/lib/couch-focus.ts"
 
 const FOCUS_PREFIX = "rs_list_focus_v1:"
 const FILTER_PREFIX = "rs_list_filter_v1:"
@@ -181,7 +187,7 @@ export function restoreListFocus(
   if (!target || !target.isConnected || !isVisible(target)) return null
   try {
     target.focus({ preventScroll: true })
-    target.scrollIntoView({ block: "nearest", inline: "nearest" })
+    scrollFocusedIntoView(target)
   } catch {
     try {
       target.focus()
@@ -287,6 +293,7 @@ export function restoreFocusKeyWithin(
   const exact = findByFocusKey(root, key)
   if (exact) {
     exact.focus({ preventScroll: true })
+    scrollFocusedIntoView(exact)
     return true
   }
   const cardPrefix = key.slice(0, key.lastIndexOf(":") + 1)
@@ -296,9 +303,34 @@ export function restoreFocusKeyWithin(
       const candidateKey = candidate.getAttribute("data-couch-key") ?? ""
       if (candidateKey.startsWith(cardPrefix)) {
         candidate.focus({ preventScroll: true })
+        scrollFocusedIntoView(candidate)
         return true
       }
     }
   }
   return false
+}
+
+/**
+ * §24 grid counterpart of couch-focus's withPreservedFocus: run a
+ * list/grid re-render without stealing or losing focus. Captures
+ * the focused control's key (when focus sits inside one of
+ * `containers`), runs `mutate`, then restores the exact control —
+ * else the first surviving control in the same card — only when
+ * focus was lost to the body. The mutation's return value passes
+ * through; a throwing mutation still restores focus before the
+ * error propagates. W5's Series/Movies grid homes wrap shelf
+ * refreshes in this (rail shelves use withPreservedFocus).
+ */
+export function withPreservedListFocus<T>(
+  doc: Document,
+  containers: ReadonlyArray<ParentNode | null | undefined>,
+  mutate: () => T,
+): T {
+  const key = captureFocusKeyWithin(doc, containers)
+  try {
+    return mutate()
+  } finally {
+    if (key) restoreFocusKeyWithin(doc, key)
+  }
 }
