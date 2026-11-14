@@ -30,6 +30,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { mountGamepad, firstConnectedPad } from "@/scripts/lib/gamepad";
+import { setCurrentNavigationView } from "@/scripts/lib/navigation-ownership";
+// 0.11.14 (§2): this fixture IS the Home page, so it names the view
+// "home" exactly as HomeView does via setLogicalView — the rail
+// model only runs on rail/shelf views now.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -135,6 +139,8 @@ beforeAll(() => {
   };
   proto.getBoundingClientRect = () => fullRect();
   proto.scrollIntoView = () => {};
+
+  setCurrentNavigationView("home");
 
   document.body.innerHTML = `
     <header data-couch-nav><nav><div data-nylah-rail="couch-nav">

@@ -152,7 +152,30 @@ export function getCurrentNavigationView(): string {
 
 /** The navigation kind for a view (default: the current view). Unknown views → "spatial". */
 export function navigationKindForView(view: string = currentView): NavigationKind {
-  return NAVIGATION_KIND_BY_VIEW[view] ?? "spatial";
+  const mapped = NAVIGATION_KIND_BY_VIEW[view];
+  if (mapped) return mapped;
+  // Unset view (no owner has named one yet — e.g. a D-pad press in
+  // the first frames before the view's onMount runs): infer from
+  // unambiguous page structure. Only the Home rails wrapper and the
+  // Movies/Series Home roots infer a rail/shelf kind — Discover,
+  // Search and grids carry neither, so they can never infer into
+  // the rail model. Everything else → "spatial".
+  if (view === "") return inferNavigationKindFromDom();
+  return "spatial";
+}
+
+/** DOM fallback for an unnamed view: Home wrapper → "rail", Movies/Series Home root → "shelf", else "spatial". */
+export function inferNavigationKindFromDom(
+  doc: Document | null = typeof document !== "undefined" ? document : null,
+): NavigationKind {
+  if (!doc) return "spatial";
+  try {
+    if (doc.querySelector("[data-nylah-rails]")) return "rail";
+    if (doc.querySelector("#movies-home-root, #series-home-root")) return "shelf";
+  } catch {
+    // No DOM access: spatial fallback.
+  }
+  return "spatial";
 }
 
 // ── §5 input-ownership priority ladder ─────────────────────────────

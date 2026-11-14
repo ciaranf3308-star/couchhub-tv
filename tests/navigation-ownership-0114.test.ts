@@ -42,6 +42,16 @@ describe("navigationKindForView", () => {
 
   it("falls back to spatial for unknown views", () => {
     expect(navigationKindForView("no-such-view")).toBe("spatial");
+  });
+
+  it("infers rail/shelf from page structure when no view is named yet", () => {
+    expect(navigationKindForView("")).toBe("spatial");
+    document.body.innerHTML = `<div data-nylah-rails></div>`;
+    expect(navigationKindForView("")).toBe("rail");
+    document.body.innerHTML = `<div id="series-home-root"></div>`;
+    expect(navigationKindForView("")).toBe("shelf");
+    // Discover-style rail markers alone never infer the rail model.
+    document.body.innerHTML = `<section data-nylah-rail="discover-results"></section>`;
     expect(navigationKindForView("")).toBe("spatial");
   });
 });
