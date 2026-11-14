@@ -45,13 +45,14 @@
   } from "@/scripts/lib/title-context-actions.ts"
   import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.ts"
   import { RETURN_HOME_HINT } from "@/scripts/lib/couch-button-hints.ts"
-  // SHIM-0114 (W3): region ownership until W1's API lands — see
-  // nav-regions-shim.ts. Integration deletes the shim and re-points
-  // the onMount calls; the data-nav-region markup stays.
+  // Region ownership (§7.16, W1 contract): the grid-kind owner
+  // routes D-pad presses between the filters and grid regions;
+  // see region-direction.ts.
+  import { registerNavigationOwner } from "@/scripts/lib/navigation-ownership.ts"
   import {
-    declareNavOwner,
-    installRegionNavigation,
-  } from "@/scripts/lib/nav-regions-shim.ts"
+    createRegionDirectionHandler,
+    regionSectionEntry,
+  } from "@/scripts/lib/region-direction.ts"
 
   const ROUTE = "/watchlist"
   /** @type {HTMLDivElement | null} */
@@ -322,10 +323,18 @@
 
   onMount(() => {
     setLogicalView("watchlist")
-    // SHIM-0114: filters <-> grid region routing (§7.16 — a grid,
-    // not a rail: column-preserving Up/Down, filters reachable).
-    const releaseNavOwner = rootEl ? declareNavOwner(rootEl, "watchlist") : () => {}
-    const uninstallRegionNav = rootEl ? installRegionNavigation(rootEl) : () => {}
+    // Region owner (§7.16 — a grid, not a rail: column-preserving
+    // Up/Down, filters reachable). Unregistered on unmount.
+    const unregisterNavOwner = rootEl
+      ? registerNavigationOwner({
+          id: "watchlist",
+          kind: "grid",
+          root: () => rootEl,
+          isActive: () => rootEl?.isConnected ?? false,
+          handleDirection: createRegionDirectionHandler(rootEl),
+          sectionEntry: regionSectionEntry(rootEl),
+        })
+      : () => {}
     setControllerHints({
       id: "watchlist",
       items: [
@@ -371,8 +380,7 @@
       document.addEventListener(eventName, handler)
     }
     return () => {
-      uninstallRegionNav()
-      releaseNavOwner()
+      unregisterNavOwner()
       stopFocusMemory()
       unregisterBack()
       document.removeEventListener("keydown", onCardKey)
@@ -384,7 +392,7 @@
   })
 </script>
 
-<!-- SHIM-0114: display:contents wrapper — the region root without
+<!-- Region root (display:contents wrapper) — the owner root without
      a layout box, so the filters/grid layout is byte-identical. -->
 <div class="couch-library-root" bind:this={rootEl}>
 <div class="couch-library__filters" data-nav-region="filters">
@@ -483,7 +491,7 @@
 
 <style>
   /* Couch library — RedSilk tokens only (couch.css owns .rs-*). */
-  /* SHIM-0114: the region root renders no box (display:contents),
+  /* The region root renders no box (display:contents),
      so wrapping the view changes no layout. */
   .couch-library-root {
     display: contents;

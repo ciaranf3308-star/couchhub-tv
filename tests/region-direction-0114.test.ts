@@ -1,23 +1,24 @@
 /**
  * @vitest-environment jsdom
  */
-// SHIM-0114 (W3) — region navigation: Discover's region order holds
-// (search -> examples -> quick picks -> results, Up reverses it),
-// grids preserve columns, Left/Right never crosses regions, and the
-// installer yields to modals, the on-screen keyboard, text fields
-// and Cursor Mode. Geometry is stubbed per element (jsdom has no
-// layout); the picker only reads getBoundingClientRect.
+// 0.11.14 (W3) — region direction handling on the W1 ownership
+// contract: Discover's region order holds (search -> examples ->
+// quick picks -> results, Up reverses it), grids preserve columns,
+// Left/Right never crosses regions, the handler yields to text
+// fields / the OSK / modals, and D-pad focus nav is retained while
+// Cursor Mode is active (§6). Geometry is stubbed per element
+// (jsdom has no layout); the picker only reads getBoundingClientRect.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
-  declareNavOwner,
-  installRegionNavigation,
+  createRegionDirectionHandler,
   pickHorizontalTarget,
   pickVerticalTarget,
   regionItems,
   regionOf,
+  regionSectionEntry,
   regionsIn,
-} from "@/scripts/lib/nav-regions-shim";
+} from "@/scripts/lib/region-direction";
 
 function setRect(
   el: Element,
@@ -166,104 +167,91 @@ describe("pickHorizontalTarget", () => {
   });
 });
 
-describe("declareNavOwner", () => {
-  it("sets and clears data-nav-owner", () => {
-    const root = buildDiscoverDom();
-    const cleanup = declareNavOwner(root, "discover");
-    expect(root.getAttribute("data-nav-owner")).toBe("discover");
-    cleanup();
-    expect(root.hasAttribute("data-nav-owner")).toBe(false);
-  });
-});
-
-describe("installRegionNavigation", () => {
-  let uninstall: (() => void) | null = null;
-
-  beforeEach(() => {
-    document.documentElement.removeAttribute("data-cursor-mode");
-  });
-
+describe("createRegionDirectionHandler (owner handleDirection)", () => {
   afterEach(() => {
-    uninstall?.();
-    uninstall = null;
+    document.documentElement.removeAttribute("data-cursor-mode");
     document.body.innerHTML = "";
   });
 
-  function press(key: string): boolean {
-    const event = new KeyboardEvent("keydown", {
-      key,
-      bubbles: true,
-      cancelable: true,
-    });
-    (document.activeElement ?? document.body).dispatchEvent(event);
-    return event.defaultPrevented;
-  }
-
-  it("routes arrows between regions and consumes the press", () => {
+  it("consumes region moves and focuses the target", () => {
     const root = buildDiscoverDom();
-    uninstall = installRegionNavigation(root);
+    const handle = createRegionDirectionHandler(root);
     byId("qp1").focus();
-    expect(press("ArrowDown")).toBe(true);
+    expect(handle("down", byId("qp1"))).toBe(true);
     expect(document.activeElement?.id).toBe("toggle");
-    expect(press("ArrowDown")).toBe(true);
+    expect(handle("down", byId("toggle"))).toBe(true);
     expect(document.activeElement?.id).toBe("card-a1");
-    expect(press("ArrowRight")).toBe(true);
+    expect(handle("right", byId("card-a1"))).toBe(true);
     expect(document.activeElement?.id).toBe("card-a2");
-    expect(press("ArrowUp")).toBe(true);
+    expect(handle("up", byId("card-a2"))).toBe(true);
     expect(document.activeElement?.id).toBe("toggle");
-    expect(press("ArrowUp")).toBe(true);
+    expect(handle("up", byId("toggle"))).toBe(true);
     expect(document.activeElement?.id).toBe("qp1");
   });
 
-  it("leaves edge moves unconsumed for spatial navigation", () => {
+  it("returns false at edges so the kind's built-in behaviour runs", () => {
     const root = buildDiscoverDom();
-    uninstall = installRegionNavigation(root);
-    byId("qp1").focus();
-    expect(press("ArrowLeft")).toBe(false);
-    expect(document.activeElement?.id).toBe("qp1");
+    const handle = createRegionDirectionHandler(root);
+    expect(handle("left", byId("qp1"))).toBe(false);
+    expect(handle("down", byId("diag"))).toBe(false);
   });
 
-  it("yields to text fields, the OSK, modals and Cursor Mode", () => {
+  it("yields to text fields, the OSK and modals (§5)", () => {
     const root = buildDiscoverDom();
-    uninstall = installRegionNavigation(root);
-    byId("query").focus();
-    expect(press("ArrowDown")).toBe(false);
-    expect(document.activeElement?.id).toBe("query");
+    const handle = createRegionDirectionHandler(root);
+    // Editing target: the keyboard layer owns the arrows.
+    expect(handle("down", byId("query"))).toBe(false);
 
-    document.documentElement.dataset.cursorMode = "active";
-    byId("qp1").focus();
-    expect(press("ArrowDown")).toBe(false);
-    expect(document.activeElement?.id).toBe("qp1");
-    document.documentElement.removeAttribute("data-cursor-mode");
+    // OSK key inside the root: never a region move.
+    const osk = document.createElement("div");
+    osk.setAttribute("data-osk", "");
+    const oskKey = document.createElement("button");
+    oskKey.id = "osk-key";
+    oskKey.type = "button";
+    osk.appendChild(oskKey);
+    root.appendChild(osk);
+    setRect(oskKey, { top: 100, left: 0, width: 48, height: 48 });
+    expect(handle("down", oskKey)).toBe(false);
 
+    // Open modal: defense-in-depth (move() guards first).
     const dialog = document.createElement("dialog");
     dialog.setAttribute("open", "");
     document.body.appendChild(dialog);
-    byId("qp1").focus();
-    expect(press("ArrowDown")).toBe(false);
+    expect(handle("down", byId("qp1"))).toBe(false);
     dialog.remove();
   });
 
   it("does not move focus that sits outside the root", () => {
     const root = buildDiscoverDom();
-    uninstall = installRegionNavigation(root);
+    const handle = createRegionDirectionHandler(root);
     const outside = document.createElement("button");
     outside.id = "outside";
     outside.type = "button";
-    outside.textContent = "Outside";
     document.body.appendChild(outside);
-    outside.focus();
-    expect(press("ArrowDown")).toBe(false);
-    expect(document.activeElement?.id).toBe("outside");
+    expect(handle("down", outside)).toBe(false);
   });
 
-  it("uninstall removes the routing", () => {
+  it("keeps D-pad focus nav while Cursor Mode is active (§6)", () => {
     const root = buildDiscoverDom();
-    uninstall = installRegionNavigation(root);
-    uninstall();
-    uninstall = null;
-    byId("qp1").focus();
-    expect(press("ArrowDown")).toBe(false);
-    expect(document.activeElement?.id).toBe("qp1");
+    const handle = createRegionDirectionHandler(root);
+    document.documentElement.dataset.cursorMode = "active";
+    expect(handle("down", byId("qp1"))).toBe(true);
+    expect(document.activeElement?.id).toBe("toggle");
+  });
+});
+
+describe("regionSectionEntry", () => {
+  it("enters at the first region going down, the last region going up", () => {
+    const root = buildDiscoverDom();
+    const entry = regionSectionEntry(root);
+    expect(entry("down", null)?.id).toBe("query");
+    expect(entry("right", null)?.id).toBe("query");
+    expect(entry("up", null)?.id).toBe("toggle");
+  });
+
+  it("returns null when the root has no region items", () => {
+    document.body.innerHTML = `<div id="empty-root"></div>`;
+    const root = document.getElementById("empty-root") as HTMLElement;
+    expect(regionSectionEntry(root)("down", null)).toBeNull();
   });
 });

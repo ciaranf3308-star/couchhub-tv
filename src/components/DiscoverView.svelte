@@ -112,13 +112,14 @@
     COUCH_KEYBOARD_CLOSED_EVENT,
   } from "@/scripts/lib/couch-keyboard.ts"
   import { restoreCouchFocus, setLogicalView } from "@/scripts/lib/couch-focus.ts"
-  // SHIM-0114 (W3): region ownership until W1's API lands — see
-  // nav-regions-shim.ts. Integration deletes the shim and re-points
-  // these two calls; the data-nav-region markup stays.
+  // Region ownership (§7.3, W1 contract): the mixed-kind owner
+  // routes D-pad presses between the view's [data-nav-region]
+  // sections; see region-direction.ts.
+  import { registerNavigationOwner } from "@/scripts/lib/navigation-ownership.ts"
   import {
-    declareNavOwner,
-    installRegionNavigation,
-  } from "@/scripts/lib/nav-regions-shim.ts"
+    createRegionDirectionHandler,
+    regionSectionEntry,
+  } from "@/scripts/lib/region-direction.ts"
   import {
     armTvImageFallbacks,
     fallbackMarkFor,
@@ -1129,12 +1130,19 @@
   onMount(async () => {
     aiAuto = getAiAutoRequests()
     setLogicalView("discover")
-    // SHIM-0114: region ownership for §7.3 (see nav-regions-shim.ts).
-    // Until W1's gamepad-layer ownership lands, the keydown half
-    // below is the live behaviour for keyboard arrows and for
-    // gamepad arrows the rail model does not consume.
-    const releaseNavOwner = rootEl ? declareNavOwner(rootEl, "discover") : () => {}
-    const uninstallRegionNav = rootEl ? installRegionNavigation(rootEl) : () => {}
+    // Region owner (§7.3): search -> examples -> quick picks ->
+    // results, column-preserving, no rail hijack (kind "mixed"
+    // via setLogicalView above). Unregistered on unmount.
+    const unregisterNavOwner = rootEl
+      ? registerNavigationOwner({
+          id: "discover",
+          kind: "mixed",
+          root: () => rootEl,
+          isActive: () => rootEl?.isConnected ?? false,
+          handleDirection: createRegionDirectionHandler(rootEl),
+          sectionEntry: regionSectionEntry(rootEl),
+        })
+      : () => {}
     // Origin for Back (Contract B): the screen that launched Discover.
     recordOriginFromReferrer(window.location.pathname)
     // Back layer (Contract A): Android BACK runs the SAME single step
@@ -1234,8 +1242,7 @@
     }
     return () => {
       clearInterval(clock)
-      uninstallRegionNav()
-      releaseNavOwner()
+      unregisterNavOwner()
       // Leaving with diagnostics open must not strand its legend.
       setControllerHints(null)
       unregisterBack()
@@ -1320,9 +1327,10 @@
     </section>
   {/if}
 
-  <!-- SHIM-0114 regions (§7.3): search -> examples -> quick picks ->
-       results/rows. The shim routes arrows between them; the OSK keys
-       inside the search scope are excluded (keyboard owns them). -->
+  <!-- Navigation regions (§7.3): search -> examples -> quick picks ->
+       results/rows. The registered region owner routes D-pad presses
+       between them; the OSK keys inside the search scope are
+       excluded (keyboard owns them). -->
   <div class="rs-discover__search">
     <div class="rs-discover__keyboard-scope" data-nav-region="search" onfocusout={onKeyboardScopeFocusOut}>
       <form
