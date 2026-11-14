@@ -233,7 +233,7 @@ describe("precedence: Live TV, modal, detail pages", () => {
     expect(keys).toEqual(["y"]);
   });
 
-  it("in a text field, only B works — browse keys are swallowed", () => {
+  it("in a text field, browse keys are swallowed and only B backs out", () => {
     mountBrowseRoot();
     const input = document.createElement("input");
     document.body.appendChild(input);
