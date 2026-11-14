@@ -1144,9 +1144,11 @@
     syncPerfModeButtons()
 
     // ---------------------------------------------------------------------
-    // Controller Cursor Mode (0.11.10, W6): persisted to
-    // xt_cursor_mode, default off (absent key). cursor-mode.ts listens
-    // for `xt:cursor-mode-changed` and exits immediately on disable.
+    // Controller Cursor Mode (0.11.10, W6; 0.11.14, W2): persisted
+    // to xt_cursor_mode — "1" enabled, "0" deliberately disabled,
+    // absent key enabled (new-install default). cursor-mode.ts
+    // listens for `xt:cursor-mode-changed` and exits immediately on
+    // disable.
     // ---------------------------------------------------------------------
     const cursorModeGroup = document.getElementById("settings-cursor-mode")
     function syncCursorModeButtons() {

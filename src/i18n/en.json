@@ -71,7 +71,7 @@
   "settings.perfMode.off": "Off",
   "settings.cursorMode.title": "Controller Cursor Mode",
   "settings.cursorMode.label": "Controller Cursor Mode",
-  "settings.cursorMode.helperLong": "Press the right stick (R3) to show an on-screen pointer you move with the right stick. A clicks, RB right-clicks, and B or R3 exits. Off by default; when off, R3 does nothing.",
+  "settings.cursorMode.helperLong": "Press the right stick (R3) to show an on-screen pointer: right stick moves it, left stick scrolls the page under it, A clicks, RB right-clicks, D-pad still moves focus, and B or R3 exits. Normal navigation stays primary; turn this off and R3 does nothing.",
   "settings.cursorMode.enabled": "Enabled",
   "settings.cursorMode.disabled": "Disabled",
   "settings.rendering.title": "Rendering",

@@ -144,16 +144,20 @@ afterEach(() => {
 // ── Setting ───────────────────────────────────────────────────────────
 
 describe("cursor mode setting", () => {
-  it("defaults to disabled when no key is stored", () => {
-    expect(getCursorMode()).toBe(false);
-    expect(isCursorModeEnabled()).toBe(false);
+  // 0.11.14 (W2, §6): the default flipped to ENABLED for new installs
+  // (absent key reads as on); a deliberate disable persists as "0".
+  it("defaults to enabled when no key is stored", () => {
+    expect(getCursorMode()).toBe(true);
+    expect(isCursorModeEnabled()).toBe(true);
   });
 
   it("reads the stored value", () => {
     localStorage.setItem("xt_cursor_mode", "1");
     expect(isCursorModeEnabled()).toBe(true);
-    localStorage.setItem("xt_cursor_mode", "");
+    localStorage.setItem("xt_cursor_mode", "0");
     expect(isCursorModeEnabled()).toBe(false);
+    localStorage.setItem("xt_cursor_mode", "");
+    expect(isCursorModeEnabled()).toBe(true);
   });
 
   it("setCursorMode persists and dispatches the change event", () => {
@@ -165,7 +169,7 @@ describe("cursor mode setting", () => {
     setCursorMode(true);
     setCursorMode(false);
     document.removeEventListener(CURSOR_MODE_EVENT, listener);
-    expect(localStorage.getItem("xt_cursor_mode")).toBeNull();
+    expect(localStorage.getItem("xt_cursor_mode")).toBe("0");
     expect(seen).toEqual([true, false]);
   });
 
@@ -183,6 +187,8 @@ describe("cursor mode setting", () => {
 
 describe("R3 toggle and exit", () => {
   it("R3 does nothing when the setting is disabled", () => {
+    // 0.11.14: the default is enabled, so disable explicitly.
+    setCursorMode(false);
     handleGamepadButtonPress(BTN_R3, 0);
     expect(isCursorModeActive()).toBe(false);
     expect(document.querySelector("[data-cursor-pointer]")).toBeNull();
@@ -220,6 +226,8 @@ describe("R3 toggle and exit", () => {
   });
 
   it("toggleCursorMode respects the setting", () => {
+    // 0.11.14: the default is enabled, so disable explicitly first.
+    setCursorMode(false);
     toggleCursorMode();
     expect(isCursorModeActive()).toBe(false);
     enableCursorMode();
@@ -262,15 +270,18 @@ describe("R3 toggle and exit", () => {
     // static pin below. This test pins the config content + the
     // signal; the headless render proves the legend actually swaps.
     expect(CURSOR_MODE_HINTS.id).toBe("cursor-mode");
+    // 0.11.14 (W2): D-pad keeps focus nav while the cursor is up.
     expect(CURSOR_MODE_HINTS.items.map((item) => item.glyph)).toEqual([
       "a",
       "rb",
+      "dpad",
       "b",
       "view-menu",
     ]);
     expect(CURSOR_MODE_HINTS.items.map((item) => item.label)).toEqual([
       "Click",
       "Right-click",
+      "Move focus",
       "Exit cursor",
       "Return home",
     ]);

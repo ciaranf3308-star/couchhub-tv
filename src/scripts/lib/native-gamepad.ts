@@ -14,12 +14,30 @@
 //                                                lb | rb | lt | rt | view |
 //                                                menu | left_stick |
 //                                                right_stick
-//   xinput-direction { slot, direction, phase }  direction: up | down |
+//   xinput-direction { slot, direction, phase, source }
+//                                                direction: up | down |
 //                                                left | right;
-//                                                phase: start | end
+//                                                phase: start | end;
+//                                                source: "dpad" |
+//                                                "stick" (0.11.14 W2).
+//                                                While Cursor Mode is
+//                                                active, "stick"
+//                                                directions are
+//                                                dropped here — the
+//                                                left stick scrolls
+//                                                then — and "dpad"
+//                                                directions pass, so
+//                                                D-pad focus nav is
+//                                                retained (no-dual-
+//                                                route rule, §6).
 //   xinput-stick     { slot, x, y }              right-stick axes, raw
 //                                                i16 (0.11.10 W6,
 //                                                Cursor Mode only)
+//   xinput-scroll    { slot, x, y }              left-stick axes, raw
+//                                                i16 (0.11.14 W2,
+//                                                Cursor Mode scroll
+//                                                only; same rate
+//                                                bound as xinput-stick)
 //   xinput-status    { available, slots[] }      connect / disconnect
 //
 // Slot discipline: only the first slot that produces input drives
@@ -37,7 +55,12 @@
 // Gamepad API owns input there.
 
 import { listen } from "@tauri-apps/api/event";
-import { noteNativeStick, setCursorModeActive } from "./cursor-mode";
+import {
+  isCursorModeActive,
+  noteNativeScrollStick,
+  noteNativeStick,
+  setCursorModeActive,
+} from "./cursor-mode";
 import {
   clearViewMenuHoldTimer,
   dispatchNativeButton,
@@ -62,6 +85,8 @@ interface XInputDirectionPayload {
   slot: number;
   direction: string;
   phase: string;
+  /** "dpad" | "stick" (0.11.14 W2). Optional: older Rust builds omit it. */
+  source?: string;
 }
 
 interface XInputStickPayload {
@@ -152,9 +177,17 @@ export function mountNativeGamepad(): void {
   });
 
   void listen<XInputDirectionPayload>("xinput-direction", (event) => {
-    const { slot, direction, phase } = event.payload;
+    const { slot, direction, phase, source } = event.payload;
     if (!slotOwnsEvent(slot) || !isDirection(direction)) return;
     noteNativeInputActive();
+    // 0.11.14 (W2, §6) NO-DUAL-ROUTE: while Cursor Mode is active the
+    // left stick scrolls (xinput-scroll, below) and must never also
+    // move focus. Stick-sourced directions are dropped entirely — no
+    // dispatch, no held-direction state — while D-pad directions pass
+    // through untouched, so D-pad focus nav is retained. A missing
+    // source (older Rust) is treated as D-pad: dropping an
+    // unattributed direction would strand focus navigation.
+    if (source === "stick" && isCursorModeActive()) return;
     if (phase === "start") {
       setNativeDirectionActive(true);
       dispatchNativeDirection(direction);
@@ -175,6 +208,33 @@ export function mountNativeGamepad(): void {
     if (!slotOwnsEvent(slot)) return;
     noteNativeInputActive();
     noteNativeStick(x, y);
+  });
+
+  // 0.11.14 (W2, §6): left-stick axes for Cursor Mode scrolling.
+  // Same slot discipline and native-liveness note as xinput-stick;
+  // deadzone + scroll speed live in cursor-mode.ts, and when Cursor
+  // Mode is off this only stores a vector and scrolls nothing.
+  void listen<XInputStickPayload>("xinput-scroll", (event) => {
+    const { slot, x, y } = event.payload;
+    if (!slotOwnsEvent(slot)) return;
+    noteNativeInputActive();
+    noteNativeScrollStick(x, y);
+  });
+
+  // 0.11.14 (W2, §6): a left stick held deflected across R3 already
+  // started a native direction (with its repeat ticker in gamepad.ts)
+  // before Cursor Mode existed — Rust sends no new edge until the
+  // stick re-centres, so without this the ticker would keep moving
+  // focus under the cursor. Activation cancels the held direction;
+  // the stick must re-deflect to move focus again after exit, which
+  // matches the edge semantics everywhere else. D-pad directions
+  // after activation still flow (see the suppression above).
+  window.addEventListener("couch:cursor-mode", (event) => {
+    const detail = (event as CustomEvent<{ active?: boolean }>).detail;
+    if (detail?.active === true) {
+      setNativeDirectionActive(false);
+      dispatchNativeDirection(null);
+    }
   });
 
   void listen<XInputStatusPayload>("xinput-status", (event) => {
