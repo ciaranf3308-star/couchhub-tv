@@ -44,10 +44,25 @@ import {
   normaliseRating,
 } from "@/scripts/lib/rating-evidence.ts";
 import {
+  selectAiRankedPicks,
   selectFeaturedFilm,
+  selectHiddenGems,
   selectRecentlyAdded,
+  selectSomethingDifferent,
   selectWorthWatching,
+  type SelectorResult,
 } from "@/scripts/lib/collection-selectors.ts";
+import {
+  allocateShelves,
+  HOME_SHELF_LIMITS,
+  SHELF_POOL_OVERFETCH,
+} from "@/scripts/lib/home-shelf-variety.ts";
+import {
+  groundedReasonForAiCard,
+  homeAiSourceNote,
+  type HomeAiPick,
+  type HomeAiSource,
+} from "@/scripts/lib/home-ai-picks.ts";
 import { parseYear } from "@/scripts/lib/browse-filters.ts";
 import type { BrowseSortId } from "@/scripts/lib/browse-state.ts";
 import type { TasteModel } from "@/scripts/lib/taste.ts";
@@ -62,10 +77,16 @@ export type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
 
 /** Continue Watching shows at most this many posters (§3.3). */
 export const CONTINUE_WATCHING_VISIBLE = 8;
-/** Worth Watching shelf size (§3.4: ~8–12). */
-export const WORTH_WATCHING_LIMIT = 12;
-/** Recently Added shelf size (§3.5). */
-export const RECENTLY_ADDED_LIMIT = 12;
+/** Worth Watching shelf size (0.11.14 §15: richer rows; rails scroll horizontally). */
+export const WORTH_WATCHING_LIMIT = HOME_SHELF_LIMITS.worthWatching;
+/** Recently Added shelf size (0.11.14 §15). */
+export const RECENTLY_ADDED_LIMIT = HOME_SHELF_LIMITS.recentlyAdded;
+/** AI Picks shelf size (0.11.14 §12–§13; the ranker caps at 20). */
+export const AI_PICKS_LIMIT = HOME_SHELF_LIMITS.aiPicks;
+/** Something Different shelf size (0.11.14 §14). */
+export const SOMETHING_DIFFERENT_LIMIT = HOME_SHELF_LIMITS.somethingDifferent;
+/** Hidden Gems shelf size (0.11.14 §14). */
+export const HIDDEN_GEMS_LIMIT = HOME_SHELF_LIMITS.hiddenGems;
 /** Prominent genre tiles (§3.6) — the first six canonical genres. */
 export const PROMINENT_GENRE_COUNT = 6;
 /** The prominent six, in brief §3.6 order (not taxonomy order). */
@@ -87,8 +108,12 @@ export const MOVIES_HOME_RAILS = {
   actions: "movies-home-actions",
   featured: "movies-featured",
   continue: "movies-continue",
+  ai: "movies-ai-picks",
   worth: "movies-worth",
+  different: "movies-different",
+  gems: "movies-gems",
   recent: "movies-recent",
+  discover: "movies-discover-entries",
   genresA: "movies-genres-a",
   genresB: "movies-genres-b",
   browseEntry: "movies-browse-entry",
@@ -419,7 +444,7 @@ export function genreTiles(index: CatalogIndex): GenreTile[] {
 export function movieHomeCardView(
   row: MovieRow,
   progress: MoviesHomeProgress | null | undefined,
-  opts: { metaSuffix?: string } = {},
+  opts: { metaSuffix?: string; detail?: string | null } = {},
 ): CouchCardView {
   const rating = normaliseRating(row);
   const fraction = movieProgressFraction(progress);
@@ -427,12 +452,63 @@ export function movieHomeCardView(
   return {
     title: row.name,
     meta,
+    detail: opts.detail || undefined,
     image: row.logo,
     kind: "poster",
     progress: fraction > 0 && fraction < 1 ? fraction : 0,
     badge: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : undefined,
     href: movieDetailHref(row),
     itemKey: `vod-${row.id}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation shelf items (0.11.14 §14, §22)
+// ---------------------------------------------------------------------------
+
+/** One recommendation-shelf card: the row plus its grounded reason (focus detail). */
+export interface HomeShelfItem {
+  row: MovieRow;
+  /** Grounded reason for the focus overlay, or null when nothing honest can be said. */
+  reason: string | null;
+}
+
+/**
+ * The AI action the mount offers, chosen by what is true — never a
+ * misleading button. "generate" = no verified picks yet, AI is
+ * configured: one explicit request. "request-fresh" = verified picks
+ * are showing: asking again costs one more request. "none" = AI is
+ * not configured: no AI button at all, local shelves only. The hint
+ * always says whether an API call happens; the local Refresh Picks
+ * action (seed rotation, no call) is separate and labelled local.
+ */
+export interface MoviesHomeAiAction {
+  kind: "generate" | "request-fresh" | "none";
+  /** Button label. */
+  label: string;
+  /** Honest hint under/near the button (API call or not). */
+  hint: string;
+}
+
+export function chooseMoviesHomeAiAction(input: {
+  aiConfigured: boolean;
+  hasVerifiedPicks: boolean;
+  aiRequestInFlight?: boolean;
+}): MoviesHomeAiAction {
+  if (!input.aiConfigured) {
+    return { kind: "none", label: "", hint: "" };
+  }
+  if (input.hasVerifiedPicks) {
+    return {
+      kind: "request-fresh",
+      label: "Request fresh AI picks",
+      hint: "Requests fresh picks from your AI provider — one request.",
+    };
+  }
+  return {
+    kind: "generate",
+    label: "Generate AI Picks",
+    hint: "Uses your configured AI provider — one request. Results are cached for a day.",
   };
 }
 
@@ -445,9 +521,19 @@ export interface MoviesHomeModel {
   totalCount: number;
   featured: FeaturedFilm | null;
   continueWatching: { items: ContinueWatchingItem[]; total: number };
-  worthWatching: { items: MovieRow[]; label: string };
+  /** Verified AI picks only — empty unless real verified AI input was supplied and allowed. */
+  aiPicks: { items: HomeShelfItem[]; source: HomeAiSource; label: string; note: string };
+  worthWatching: { items: MovieRow[]; label: string; reasons: Record<string, string> };
+  /** Controlled exploration outside the strongest taste genres (local, never AI-labelled). */
+  somethingDifferent: { items: HomeShelfItem[] };
+  /** Quality + underexposure (local, never AI-labelled). */
+  hiddenGems: { items: HomeShelfItem[] };
   recentlyAdded: { items: MovieRow[]; evidence: RecentlyAddedEvidence };
   genres: GenreTile[];
+  /** The AI action for the mount (generate / request-fresh / none). */
+  aiAction: MoviesHomeAiAction;
+  /** Honest note when AI was attempted/unavailable (mount shows it; local shelves stay). */
+  aiNote: string | null;
   /** False when the catalogue is empty (the empty state renders). */
   hasContent: boolean;
 }
@@ -460,6 +546,22 @@ export interface BuildMoviesHomeInput {
   /** Rotation seed — persisted by the mount, changed only by Refresh Picks. */
   rotationSeed?: number;
   nowMs?: number;
+  /**
+   * Verified AI picks (home-ai-picks.ts) in model order. Ignored
+   * unless `aiAllowed` is true — supplying picks without permission
+   * must never produce an "AI" shelf.
+   */
+  aiPicks?: HomeAiPick[] | null;
+  /** True only when verified AI input may be shown (privacy conditions met). */
+  aiAllowed?: boolean;
+  /** What actually produced `aiPicks` — the shelf label source. */
+  aiSource?: HomeAiSource;
+  /** Model id behind `aiPicks`, when known. */
+  aiModel?: string;
+  /** Honest note when AI was attempted but unavailable (shown with local shelves). */
+  aiNote?: string | null;
+  /** True when an AI request could run (enabled + endpoint + model set). */
+  aiConfigured?: boolean;
 }
 
 /**
@@ -523,11 +625,45 @@ function resolveGroupRows(index: CatalogIndex, ids: string[]): MovieRow[] {
   return rows;
 }
 
+/** Resolve selector results to pool items carrying their first evidence reason. */
+function poolItemsFor(
+  index: CatalogIndex,
+  results: SelectorResult[],
+): Array<{ id: string; row: MovieRow; reason: string | null }> {
+  const items: Array<{ id: string; row: MovieRow; reason: string | null }> = [];
+  for (const result of results) {
+    const row = index.byId.get(result.id) as MovieRow | undefined;
+    if (row) {
+      items.push({ id: result.id, row, reason: result.reasons[0] ?? null });
+    }
+  }
+  return items;
+}
+
+/** Grounded focus reason for one AI pick: model reason wins, evidence follows, neutral last. */
+function aiPickReason(row: MovieRow, result: SelectorResult): string {
+  const rating = normaliseRating(row);
+  const genres = genresForEntry(row, "vod")
+    .slice(0, 2)
+    .map((id) => genreLabelForId(id, "vod"));
+  const year = parseYear(row.year);
+  return groundedReasonForAiCard({
+    modelReason: result.reasons[0] ?? null,
+    selectorReasons: result.reasons.slice(1),
+    genres,
+    ratingLabel: hasCredibleRating(rating) ? `★ ${rating!.score10.toFixed(1)}` : "",
+    year: year != null ? String(year) : "",
+  });
+}
+
 /**
  * Assemble the full Movies Home model. Selection via the W1
- * selectors; composition (continue eligibility, diversity, honest
- * labels, genre counts) here. Completed titles never headline and
- * never fill Worth Watching. Pure.
+ * selectors; composition (continue eligibility, cross-shelf
+ * allocation with backfill, honest labels, genre counts) here.
+ * Completed titles never headline and never fill Worth Watching.
+ * AI picks appear ONLY when the caller supplied verified picks AND
+ * aiAllowed is true — otherwise the AI shelf is empty and local
+ * shelves carry the page. Pure.
  */
 export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeModel {
   const nowMs = input.nowMs ?? Date.now();
@@ -572,65 +708,144 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
     ? featuredViewModel(featuredRow, continueByPrimary.get(featuredRow.id) ?? null)
     : null;
 
-  // Over-fetch by one: the diversity net removes the featured film
-  // from Worth Watching, and the shelf must still fill to 12.
-  const worthRaw = resolveGroupRows(
+  // Verified AI picks (0.11.14 §19): model order preserved, hard
+  // exclusions + completed exclusion applied inside the selector.
+  // No verified input (or not allowed) = no AI shelf, no AI label.
+  const aiAllowed = input.aiAllowed === true && Array.isArray(input.aiPicks);
+  const aiResults = aiAllowed
+    ? selectAiRankedPicks(index, input.aiPicks, input.taste, AI_PICKS_LIMIT, {
+        excludeCompleted: true,
+        completedIds,
+      })
+    : [];
+  const aiPool = poolItemsFor(index, aiResults).map((item) => ({
+    ...item,
+    reason: aiPickReason(
+      item.row,
+      aiResults.find((result) => result.id === item.id)!,
+    ),
+  }));
+  const aiSource: HomeAiSource =
+    aiResults.length > 0 ? (input.aiSource ?? "ai") : "local";
+
+  const worthResults = selectWorthWatching(
     index,
-    selectWorthWatching(index, input.taste, WORTH_WATCHING_LIMIT + 1, {
+    input.taste,
+    WORTH_WATCHING_LIMIT * SHELF_POOL_OVERFETCH,
+    {
       rotationSeed: seed,
       excludeCompleted: true,
       completedIds,
       cacheKey: `${cacheKeyBase}|worth`,
-      // NO verified-AI input: no verified cache is plumbed and the
-      // privacy conditions are unverified — the shelf stays local.
+      // Worth Watching stays LOCAL (§14): AI input is never passed
+      // here, so the shelf can never be mislabelled as AI-generated.
       nowMs,
-    }).map((result) => result.id),
+    },
   );
+  const worthPool = poolItemsFor(index, worthResults);
+
+  const differentResults = selectSomethingDifferent(
+    index,
+    input.taste,
+    SOMETHING_DIFFERENT_LIMIT * SHELF_POOL_OVERFETCH,
+    {
+      rotationSeed: seed,
+      excludeCompleted: true,
+      completedIds,
+      cacheKey: `${cacheKeyBase}|different`,
+      nowMs,
+    },
+  );
+  const differentPool = poolItemsFor(index, differentResults);
+
+  const gemsResults = selectHiddenGems(
+    index,
+    input.taste,
+    HIDDEN_GEMS_LIMIT * SHELF_POOL_OVERFETCH,
+    {
+      excludeCompleted: true,
+      completedIds,
+      cacheKey: `${cacheKeyBase}|gems`,
+      nowMs,
+    },
+  );
+  const gemsPool = poolItemsFor(index, gemsResults);
 
   // Recently Added: a 90-day cutoff first (brief §3.5's meaningful
-  // cutoff); when fewer than 4 titles survive, extend to the newest
-  // dated titles WITHOUT implying just-uploaded — the evidence note
-  // stays honest either way. Over-fetch so the diversity net (which
-  // removes featured + Worth titles) still leaves a full shelf.
-  const recentLimit =
-    RECENTLY_ADDED_LIMIT + 1 + worthRaw.length;
+  // cutoff); when fewer than 4 titles survive allocation, extend to
+  // the newest dated titles WITHOUT implying just-uploaded — the
+  // evidence note stays honest either way. No quality gate, ever:
+  // this shelf is factual.
   const cutoff90 = nowMs - 90 * 24 * 60 * 60 * 1000;
-  let recentRaw = resolveGroupRows(
-    index,
-    selectRecentlyAdded(index, recentLimit, cutoff90, {
-      cacheKey: `${cacheKeyBase}|recent`,
-      nowMs,
-    }).map((result) => result.id),
-  );
-  let { worthWatching, recentlyAdded } = applyHomeDiversity(
-    featuredRow,
-    worthRaw,
-    recentRaw,
-  );
-  recentlyAdded = recentlyAdded.slice(0, RECENTLY_ADDED_LIMIT);
-  if (recentlyAdded.length < 4) {
-    recentRaw = resolveGroupRows(
+  const recentPoolFor = (cutoff: number | null) =>
+    poolItemsFor(
       index,
-      selectRecentlyAdded(index, recentLimit, null, {
+      selectRecentlyAdded(index, RECENTLY_ADDED_LIMIT * SHELF_POOL_OVERFETCH, cutoff, {
         cacheKey: `${cacheKeyBase}|recent`,
         nowMs,
-      }).map((result) => result.id),
+      }),
     );
-    ({ recentlyAdded } = applyHomeDiversity(featuredRow, worthRaw, recentRaw));
-    recentlyAdded = recentlyAdded.slice(0, RECENTLY_ADDED_LIMIT);
+
+  const featuredPool =
+    featuredRow != null
+      ? [{ id: String(featuredRow.id), row: featuredRow, reason: null as string | null }]
+      : [];
+
+  const allocate = (recentPool: Array<{ id: string; row: MovieRow; reason: string | null }>) =>
+    allocateShelves([
+      { id: "featured", items: featuredPool, limit: 1 },
+      { id: "ai", items: aiPool, limit: AI_PICKS_LIMIT },
+      { id: "worth", items: worthPool, limit: WORTH_WATCHING_LIMIT },
+      { id: "different", items: differentPool, limit: SOMETHING_DIFFERENT_LIMIT },
+      { id: "gems", items: gemsPool, limit: HIDDEN_GEMS_LIMIT },
+      { id: "recent", items: recentPool, limit: RECENTLY_ADDED_LIMIT },
+    ]);
+
+  let allocated = allocate(recentPoolFor(cutoff90));
+  let recentAllocated = allocated.find((shelf) => shelf.id === "recent")!;
+  if (recentAllocated.items.length < 4) {
+    allocated = allocate(recentPoolFor(null));
+    recentAllocated = allocated.find((shelf) => shelf.id === "recent")!;
   }
-  worthWatching = worthWatching.slice(0, WORTH_WATCHING_LIMIT);
+  const byId = new Map(allocated.map((shelf) => [shelf.id, shelf.items]));
+  const aiItems: HomeShelfItem[] = (byId.get("ai") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const worthWatching = (byId.get("worth") ?? []).map((item) => item.row);
+  const differentItems: HomeShelfItem[] = (byId.get("different") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const gemsItems: HomeShelfItem[] = (byId.get("gems") ?? []).map((item) => ({
+    row: item.row,
+    reason: item.reason,
+  }));
+  const recentlyAdded = recentAllocated.items.map((item) => item.row);
 
   const credibleCount = worthWatching.filter((row) =>
     hasCredibleRating(normaliseRating(row)),
   ).length;
+  const worthReasons: Record<string, string> = {};
+  for (const result of worthResults) {
+    if (result.reasons[0]) worthReasons[result.id] = result.reasons[0];
+  }
 
+  const hasVerifiedPicks = aiItems.length > 0;
   return {
     totalCount: index.totalGroups,
     featured,
     continueWatching: {
       items: continueItems.slice(0, CONTINUE_WATCHING_VISIBLE),
       total: continueItems.length,
+    },
+    aiPicks: {
+      items: aiItems,
+      source: hasVerifiedPicks ? aiSource : "local",
+      label: "AI Picks for You",
+      note: hasVerifiedPicks
+        ? homeAiSourceNote(aiSource, input.aiModel)
+        : "",
     },
     worthWatching: {
       items: worthWatching,
@@ -639,20 +854,32 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
         credibleCount,
         total: worthWatching.length,
       }),
+      reasons: worthReasons,
     },
+    somethingDifferent: { items: differentItems },
+    hiddenGems: { items: gemsItems },
     recentlyAdded: {
       items: recentlyAdded,
       evidence: recentlyAddedEvidence(recentlyAdded, nowMs),
     },
     genres: genreTiles(index),
+    aiAction: chooseMoviesHomeAiAction({
+      aiConfigured: input.aiConfigured === true,
+      hasVerifiedPicks,
+    }),
+    aiNote: hasVerifiedPicks ? null : (input.aiNote ?? null),
     hasContent: index.totalGroups > 0,
   };
 }
 
-/** Browse Everything URLs used by Home entry points (§3.5, §3.7). */
+/** Browse Everything URLs used by Home entry points (§3.5, §3.7, 0.11.14 §15 View All). */
 export const MOVIES_HOME_BROWSE_URLS = {
   everything: browseUrl({}),
   continueWatching: browseUrl({ category: "collection:continue" }),
+  aiPicks: browseUrl({ sort: "recommended" }),
+  worthWatching: browseUrl({ sort: "rating" }),
+  somethingDifferent: browseUrl({ sort: "recommended" }),
+  hiddenGems: browseUrl({ sort: "rating" }),
   recentlyAdded: browseUrl({ sort: "added" }),
   search: `${browseUrl({})}&focus=search`,
 } as const;

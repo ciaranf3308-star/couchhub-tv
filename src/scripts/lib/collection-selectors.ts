@@ -45,6 +45,7 @@ import {
   CANONICAL_MOVIE_GENRES,
   CANONICAL_SERIES_GENRES,
 } from "@/scripts/lib/genres.ts"
+import { hasCredibleRating } from "@/scripts/lib/rating-evidence.ts"
 import type {
   CatalogIndex,
   GroupAggregate,
@@ -1090,6 +1091,167 @@ export function selectSeriesWorthStarting(
   }
   const pool = topK(scored, Math.min(300, Math.max(24, capped * 6)))
   return cachePut(cacheKey, toResults(diversify(pool, capped)))
+}
+
+// ── AI-ranked picks (0.11.14, W5) ────────────────────────────────────
+
+/**
+ * Verified AI picks in MODEL order (brief §13, §18): the model must
+ * influence the actual order — this selector never re-sorts by local
+ * score and never diversifies the model's ranking. It only
+ * VALIDATES: each pick must resolve to a displayed group primary in
+ * THIS index (variant ids resolve to their group primary), must pass
+ * the same hard exclusions as every other shelf (not-interested,
+ * explicit dislikes, excludeWatched/excludeCompleted), and must not
+ * repeat. Picks that fail validation are dropped, never replaced —
+ * an empty result means "no verified AI picks", and the caller falls
+ * back to local shelves with an honest label. The model reason is
+ * carried as the first reason (the ranker already sanitised it
+ * against real metadata); evidence reasons follow. This is the
+ * Home wiring for `aiRecommendations` — the boost path in
+ * scoreCandidate stays for callers that want AI as a nudge inside a
+ * local ranking, and must never be used to label a local shelf "AI".
+ */
+export function selectAiRankedPicks(
+  index: CatalogIndex | null | undefined,
+  picks: Array<{ id: string | number; rank?: number; reason?: string | null }> | null | undefined,
+  taste: TasteInput,
+  limit = 16,
+  opts: SelectorOptions = {},
+): SelectorResult[] {
+  if (!index || !index.groups.length || !Array.isArray(picks) || picks.length === 0) return []
+  const capped = clampLimit(limit, 16)
+  const ctx = scoringContext(index, taste, opts)
+  const ordered = [...picks].sort((a, b) => {
+    const ra = Number(a?.rank ?? 0)
+    const rb = Number(b?.rank ?? 0)
+    if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb
+    return 0
+  })
+  const results: SelectorResult[] = []
+  const seen = new Set<string>()
+  for (const pick of ordered) {
+    if (results.length >= capped) break
+    if (!pick) continue
+    const rawId = String(pick.id ?? "").trim()
+    if (!rawId) continue
+    const groupId = index.groupIdByEntryId.get(rawId)
+    const group = groupId ? index.groupById.get(groupId) : undefined
+    if (!group) continue
+    const primaryId = group.primaryId
+    if (seen.has(primaryId)) continue
+    const aggregate = index.groupAggregates.get(group.id)
+    if (!aggregate) continue
+    // Hard exclusions — identical to scoreCandidate's.
+    if (groupHits(ctx.view.notInterested, group)) continue
+    if (groupHits(ctx.view.hardDislikedIds, group)) continue
+    if (ctx.excludeWatched && groupHits(ctx.watched, group)) continue
+    if (ctx.excludeCompleted && groupHits(ctx.completed, group)) continue
+    seen.add(primaryId)
+    const reasons: string[] = []
+    const modelReason = typeof pick.reason === "string" ? pick.reason.trim() : ""
+    if (modelReason) reasons.push(modelReason)
+    const evidence = aggregate.rating
+    if (evidence && aggregate.bayesian >= 7 && evidence.score10 >= 7) {
+      reasons.push(`Rated ${evidence.score10.toFixed(1)}`)
+    }
+    results.push({
+      id: primaryId,
+      score: results.length === 0 ? 1 : Math.round(((capped - results.length) / capped) * 100) / 100,
+      reasons: reasons.slice(0, 3),
+      groupId: group.id,
+    })
+  }
+  return results
+}
+
+// ── Something Different (0.11.14, W5) ────────────────────────────────
+
+/**
+ * Controlled exploration (brief §14): variety OUTSIDE the viewer's
+ * strongest genre preferences, without random poor-quality titles.
+ * Scoring rewards quality + high-confidence metadata + distance from
+ * taste affinity; titles matching the strongest taste genres are
+ * penalised, never boosted. A strict pass requires a quality floor
+ * (Bayesian >= 6.5), credible rating evidence or a TMDb identity,
+ * and artwork; a relaxed pass (Bayesian >= 6.0, artwork or TMDb
+ * identity) fills the shelf only when the strict pass is empty, so
+ * thin catalogues still get exploration without rubbish. With no
+ * taste signal at all, exploration is undefined — the shelf falls
+ * back to quality + diversity and says so in its reasons (the model
+ * layer labels it honestly; nothing here claims personalisation).
+ * AI recommendations do not apply: exploration is defined by
+ * distance from taste, and an AI boost would corrupt that.
+ */
+export function selectSomethingDifferent(
+  index: CatalogIndex | null | undefined,
+  taste: TasteInput,
+  limit = 16,
+  opts: SelectorOptions = {},
+): SelectorResult[] {
+  if (!index || !index.groups.length) return []
+  const capped = clampLimit(limit, 16)
+  const ctx = scoringContext(index, taste, opts)
+  const hasTaste = ctx.view.genreWeights.size > 0 || ctx.view.likedIds.size > 0
+  const cacheKey = cacheable(index, ctx.view, opts, "different", capped, hasTaste ? "taste" : "notaste")
+  const cached = cacheGet(cacheKey)
+  if (cached) return cached
+
+  const build = (strict: boolean): SelectorResult[] => {
+    const scored: ScoredCandidate[] = []
+    for (const group of index.groups) {
+      const aggregate = index.groupAggregates.get(group.id)
+      if (!aggregate) continue
+      if (groupHits(ctx.view.notInterested, group)) continue
+      if (groupHits(ctx.view.hardDislikedIds, group)) continue
+      if (ctx.excludeWatched && groupHits(ctx.watched, group)) continue
+      if (ctx.excludeCompleted && groupHits(ctx.completed, group)) continue
+      const qualityFloor = strict ? 6.5 : 6.0
+      if (aggregate.bayesian < qualityFloor) continue
+      const credible = hasCredibleRating(aggregate.rating)
+      const identified = group.tmdbId != null
+      if (strict && !credible && !identified) continue
+      if (strict && !aggregate.hasPoster) continue
+      if (!strict && !aggregate.hasPoster && !identified) continue
+      const { score: tasteScore, topGenreId } = tasteAffinity(aggregate.genreIds, index.kind, ctx.view)
+      const exploration = hasTaste ? 1 - tasteScore : 0.5
+      let score =
+        0.55 * quality01(aggregate.bayesian) +
+        0.3 * exploration +
+        0.1 * (aggregate.hasPoster ? 1 : 0) +
+        0.05 * (identified ? 1 : 0)
+      if (groupHits(ctx.watched, group)) score -= WATCHED_PENALTY
+      if (groupHits(ctx.favourites, group)) score -= FAVOURITE_PENALTY
+      score = Math.max(0, score)
+      const reasons: string[] = []
+      if (hasTaste && tasteScore < 0.15 && aggregate.genreIds.length > 0) {
+        reasons.push("Outside your usual genres")
+      } else if (!hasTaste) {
+        reasons.push("Worth a look beyond the top picks")
+      }
+      if (aggregate.rating && aggregate.bayesian >= 7) {
+        reasons.push(`Rated ${aggregate.rating.score10.toFixed(1)}`)
+      }
+      if (topGenreId && tasteScore >= 0.15 && hasTaste) {
+        reasons.push(genreLabel(index.kind, topGenreId))
+      }
+      scored.push({
+        id: group.primaryId,
+        groupId: group.id,
+        aggregate,
+        score,
+        reasons: reasons.slice(0, 3),
+        tasteScore,
+        topGenreId,
+      })
+    }
+    const pool = topK(scored, Math.min(300, Math.max(24, capped * 6)))
+    return toResults(diversify(pool, capped))
+  }
+
+  const strictResults = build(true)
+  if (strictResults.length) return cachePut(cacheKey, strictResults)
+  return cachePut(cacheKey, build(false))
 }
 
 // ── Cross-shelf diversity ────────────────────────────────────────────
