@@ -155,8 +155,17 @@ describe("gamepad.ts — Live TV back dispatch + global return-home untouched", 
   });
 
   it("plumbs LT/RT (6/7) to page nav in the browser, volume elsewhere", () => {
-    expect(gamepad).toContain('if (livetvBrowserActive()) dispatchKey("PageUp");');
-    expect(gamepad).toContain('if (livetvBrowserActive()) dispatchKey("PageDown");');
+    // 0.11.14 (W1, §5): the page-turn branch is modal-gated — the
+    // topmost layer owns the press, so LT/RT never page-turn behind
+    // an open modal. The browser/volume split itself is unchanged.
+    expect(gamepad).toContain(
+      'if (livetvBrowserActive() && findOpenModal() === null) dispatchKey("PageUp");',
+    );
+    expect(gamepad).toContain(
+      'if (livetvBrowserActive() && findOpenModal() === null) dispatchKey("PageDown");',
+    );
+    expect(gamepad).toContain("else adjustVolume(-0.1);");
+    expect(gamepad).toContain("else adjustVolume(0.1);");
   });
 
   it("View+Menu 2s return-home stays global and is never intercepted", () => {
