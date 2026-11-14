@@ -1,11 +1,12 @@
 // Discover entry-point results (0.11.14, W5 Homes — brief §21).
-// Shared by the Movies and Series mounts: build the relevance-ranked
-// shortlist for one pre-scoped prompt through the existing LOCAL
-// engine (searchBrowse — no model call), and resolve verified picks
-// back to shelf items. The AI request itself lives in
-// home-ai-picks.ts; this module only prepares candidates and
-// resolves ids, so both mounts run the identical prompt flow and
-// neither can leak a title across kinds.
+// Shared by the Movies and Series mounts: local fallback results
+// for one pre-scoped prompt through the existing LOCAL engine
+// (searchBrowse — no model call), and resolution of verified core
+// picks back to shelf items. The AI request itself goes through
+// the W4 core's discovery path (requestHomeAiDiscovery) from the
+// mounts; this module only prepares candidates and resolves ids,
+// so both mounts run the identical prompt flow and neither can
+// leak a title across kinds.
 
 import {
   catalogRowToCandidate,
@@ -14,33 +15,11 @@ import {
 import { searchBrowse } from "@/scripts/lib/browse-recommendations.ts";
 import type { CatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import type { TasteModel } from "@/scripts/lib/taste.ts";
-import type { DiscoverCandidate as RankerCandidate } from "@/scripts/lib/ai/ranking.ts";
 import type { DiscoverEntryPrompt } from "@/scripts/lib/home-discover-entries.ts";
 import { promptGenreFilter } from "@/scripts/lib/home-discover-entries.ts";
 import type { HomeAiKind, HomeAiPick } from "@/scripts/lib/home-ai-picks.ts";
 
-export const PROMPT_SHORTLIST_LIMIT = 20;
 export const PROMPT_RESULTS_LIMIT = 16;
-
-function toRankerCandidate(candidate: DiscoverCandidate): RankerCandidate {
-  return {
-    id: candidate.id,
-    kind: candidate.kind,
-    title: candidate.title,
-    year: candidate.year,
-    rating: candidate.rating,
-    voteCount: candidate.voteCount,
-    tmdbId: candidate.tmdbId,
-    genres: [...candidate.genres],
-    cast: [...candidate.cast],
-    director: candidate.director,
-    runtimeMinutes: candidate.runtimeMinutes,
-    overview: candidate.overview,
-    posterUrl: candidate.posterUrl,
-    backdropUrl: candidate.backdropUrl,
-    source: candidate.source,
-  };
-}
 
 function normaliseGenre(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -89,27 +68,6 @@ export function filterCandidatesForPrompt(
     candidate.genres.some((genre) => wantedSet.has(normaliseGenre(genre))),
   );
   return filtered.length >= 5 ? filtered : [...candidates];
-}
-
-/**
- * The ranker's shortlist for one prompt: genre pre-filter, then the
- * local relevance engine (kind-scoped, hard exclusions honoured),
- * capped at the ranker ceiling. Never raw catalogue order. Pure —
- * no model call.
- */
-export function buildPromptShortlist(
-  index: CatalogIndex,
-  taste: TasteModel | null | undefined,
-  kind: HomeAiKind,
-  prompt: DiscoverEntryPrompt,
-  playlistId = "",
-): RankerCandidate[] {
-  const pool = filterCandidatesForPrompt(promptCandidates(index, kind), prompt);
-  const ranked = searchBrowse(prompt.label, pool, taste ?? undefined, {
-    kind,
-    limit: PROMPT_SHORTLIST_LIMIT,
-  }, playlistId);
-  return ranked.map((entry) => toRankerCandidate(entry.candidate));
 }
 
 /**

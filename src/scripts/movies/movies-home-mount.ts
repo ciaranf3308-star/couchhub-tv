@@ -84,24 +84,28 @@ import { getCatalogIndex } from "@/scripts/lib/catalog-index.ts";
 import { getAiEnabled, getAiEndpoint, getAiModel } from "@/scripts/lib/app-settings.js";
 import { getAiShareTaste } from "@/scripts/lib/ai/status.ts";
 import {
-  catalogueFingerprintFor,
-  groundedReasonForAiCard,
-  homeAiSourceNote,
+  homeAiAllowsSelectorBoost,
   maybeAutoRefreshHomeAiPicks,
   readCachedHomeAiPicks,
+  requestHomeAiDiscovery,
   requestHomeAiPicks,
-  tasteRevisionFor,
+  type HomeAiResult,
+} from "@/scripts/lib/ai/home-picks.ts";
+import {
+  buildHomeAiDiscoveryRequest,
+  buildHomeAiPicksRequest,
+  groundedReasonForAiCard,
+  homeAiShelfNote,
   type HomeAiPick,
   type HomeAiSource,
 } from "@/scripts/lib/home-ai-picks.ts";
 import {
-  discoverPromptRequestType,
+  discoverPromptForcesFresh,
   discoverPromptsFor,
   discoverUrlForPrompt,
   type DiscoverEntryPrompt,
 } from "@/scripts/lib/home-discover-entries.ts";
 import {
-  buildPromptShortlist,
   localPromptRankedIds,
   picksToEntries,
   resolvePromptItems,
@@ -1230,11 +1234,20 @@ let currentPlaylistId = "";
 // shelves render regardless. No request leaves on load, focus or
 // scroll — only from the explicit Generate action, a prompt tap, or
 // the optional auto-refresh preference (default off).
+let homeAiResult: HomeAiResult | null = null;
 let homeAiPicks: HomeAiPick[] | null = null;
-let homeAiSource: HomeAiSource = "local";
+let homeAiSource: HomeAiSource = "local-only";
 let homeAiModel: string | undefined;
 let homeAiNote: string | null = null;
 let homeAiBusy = false;
+
+/** Adopt a core result as the Home AI state (single place). */
+function applyHomeAiResult(result: HomeAiResult | null): void {
+  homeAiResult = result;
+  homeAiPicks = result?.picks ?? null;
+  homeAiSource = result?.source ?? "local-only";
+  homeAiModel = result?.model;
+}
 let discoverResults: MoviesDiscoverResults | null = null;
 let activeDiscoverPromptId: string | null = null;
 
@@ -1322,10 +1335,9 @@ async function boot(root: HTMLElement): Promise<void> {
   const playlistId = result.playlistId;
   currentPlaylistId = playlistId;
   // A new catalogue invalidates Home AI state: cached picks are
-  // re-read against the new index fingerprint below.
-  homeAiPicks = null;
-  homeAiSource = "local";
-  homeAiModel = undefined;
+  // re-read against the new index below (core re-validates them
+  // against the current pool before serving).
+  applyHomeAiResult(null);
   homeAiNote = null;
   homeAiBusy = false;
   discoverResults = null;
@@ -1355,34 +1367,28 @@ async function boot(root: HTMLElement): Promise<void> {
     }
   })();
 
-  // Cached AI picks paint immediately (sync, zero requests).
-  try {
-    let shareTaste = false;
-    try {
-      shareTaste = getAiShareTaste();
-    } catch {
-      shareTaste = false;
-    }
-    const cached = readCachedHomeAiPicks({
-      profileId,
-      playlistId,
-      kind: "movie",
-      catalogueFingerprint: catalogueFingerprintFor(index),
-      tasteRevision: tasteRevisionFor(taste, shareTaste),
-      requestType: "home-picks",
-    });
-    if (cached) {
-      homeAiPicks = cached.picks;
-      homeAiSource = "cached-ai";
-      homeAiModel = cached.model || undefined;
-    }
-  } catch {
-    // Cache unreadable: local shelves carry the page.
-  }
-
   const completedIds = new Set<string>();
   for (const [id, progress] of progressById as Map<number, MoviesHomeProgress>) {
     if (progress.completed) completedIds.add(String(id));
+  }
+
+  const picksRequest = (trigger: "explicit" | "auto-refresh", forceFresh: boolean) =>
+    buildHomeAiPicksRequest(index, taste, "movie", {
+      trigger,
+      profileId,
+      playlistId,
+      excludeIds: [...completedIds],
+      rotationSeed: readPicksSeed(playlistId),
+      forceFresh,
+    });
+
+  // Cached AI picks paint immediately (sync, zero requests). The
+  // core re-validates them against the current pool.
+  try {
+    const cached = readCachedHomeAiPicks(picksRequest("explicit", false));
+    if (cached) applyHomeAiResult(cached);
+  } catch {
+    // Cache unreadable: local shelves carry the page.
   }
 
   const paintOpts = (): PaintMoviesHomeOptions => ({
@@ -1403,7 +1409,7 @@ async function boot(root: HTMLElement): Promise<void> {
       rotationSeed: readPicksSeed(playlistId),
       nowMs: Date.now(),
       aiPicks: homeAiPicks,
-      aiAllowed: homeAiPicks != null && homeAiPicks.length > 0,
+      aiAllowed: homeAiAllowsSelectorBoost(homeAiResult),
       aiSource: homeAiSource,
       aiModel: homeAiModel,
       aiNote: homeAiNote,
@@ -1419,31 +1425,19 @@ async function boot(root: HTMLElement): Promise<void> {
 
   const onAiAction = async (): Promise<void> => {
     if (homeAiBusy) return;
-    const hadPicks = homeAiPicks != null && homeAiPicks.length > 0;
     homeAiBusy = true;
     repaintAiShelf(root, rebuild(), paintOpts());
     try {
-      const result = await requestHomeAiPicks(
-        {
-          index,
-          taste,
-          kind: "movie",
-          profileId,
-          playlistId,
-          excludeIds: [...completedIds],
-          rotationSeed: readPicksSeed(playlistId),
-          force: hadPicks,
-        },
-        {},
-      );
+      // Explicit Generate: forceFresh is what makes the button
+      // promise fresh picks (core contract). At most one request.
+      const result = await requestHomeAiPicks(picksRequest("explicit", true));
       if (result.picks.length > 0) {
-        homeAiPicks = result.picks;
-        homeAiSource = result.source;
-        homeAiModel = result.model;
+        applyHomeAiResult(result);
         homeAiNote = null;
       } else {
-        homeAiNote = result.note;
-        if (result.source === "not-configured") homeAiPicks = null;
+        // Keep any previously cached picks; the core's honest
+        // fallback reason explains the failure.
+        homeAiNote = result.fallbackReason ?? "AI couldn't answer just now — showing local picks";
       }
     } catch {
       homeAiNote = "AI couldn't answer just now — showing local picks";
@@ -1466,7 +1460,7 @@ async function boot(root: HTMLElement): Promise<void> {
       discoverResults = {
         prompt,
         items: localItems(),
-        source: "local",
+        source: "local-only",
         note: "Local results — AI isn't set up, so no request was sent",
         discoverHref,
       };
@@ -1478,39 +1472,40 @@ async function boot(root: HTMLElement): Promise<void> {
     homeAiBusy = true;
     repaintAiShelf(root, rebuild(), paintOpts());
     try {
-      const shortlist = buildPromptShortlist(index, taste, "movie", prompt, playlistId);
-      const result = await requestHomeAiPicks(
-        {
-          index,
-          taste,
-          kind: "movie",
+      // Mood/brief entry points use the generation + TMDb
+      // verification path. Only "Surprise me" forces fresh; repeat
+      // briefs serve the cache. Verified-but-unmatched titles in
+      // result.verifiedUnmatched are NEVER rendered as playable —
+      // only result.picks (verified + matched) reach the shelf.
+      let shareTaste = false;
+      try {
+        shareTaste = getAiShareTaste();
+      } catch {
+        shareTaste = false;
+      }
+      const result = await requestHomeAiDiscovery(
+        buildHomeAiDiscoveryRequest(index, taste, "movie", {
+          brief: prompt.label,
           profileId,
           playlistId,
-          shortlist,
-          query: prompt.label,
-          constraints: {
-            genres: prompt.genres,
-            maxRuntimeMinutes: prompt.maxRuntimeMinutes,
-            mood: prompt.mood,
-          },
-          requestType: discoverPromptRequestType(prompt, "movie"),
-        },
-        {},
+          shareTaste,
+          forceFresh: discoverPromptForcesFresh(prompt),
+        }),
       );
       if (result.picks.length > 0) {
         discoverResults = {
           prompt,
           items: resolvePromptItems<MovieRow>(index, picksToEntries(result.picks), movieAiReason),
           source: result.source,
-          note: homeAiSourceNote(result.source, result.model),
+          note: homeAiShelfNote(result.source, result.model),
           discoverHref,
         };
       } else {
         discoverResults = {
           prompt,
           items: localItems(),
-          source: "local",
-          note: `${result.note} — local results shown instead`,
+          source: "local-only",
+          note: `${result.fallbackReason ?? "AI couldn't answer just now"} — local results shown instead`,
           discoverHref,
         };
       }
@@ -1518,7 +1513,7 @@ async function boot(root: HTMLElement): Promise<void> {
       discoverResults = {
         prompt,
         items: localItems(),
-        source: "local",
+        source: "local-only",
         note: "AI couldn't answer just now — local results shown instead",
         discoverHref,
       };
@@ -1536,20 +1531,10 @@ async function boot(root: HTMLElement): Promise<void> {
   // Quiet auto-refresh (optional preference, default off): only when
   // no cached picks painted, at most one refresh per 24h via cache.
   if (!homeAiPicks) {
-    void maybeAutoRefreshHomeAiPicks({
-      index,
-      taste,
-      kind: "movie",
-      profileId,
-      playlistId,
-      excludeIds: [...completedIds],
-      rotationSeed: readPicksSeed(playlistId),
-    })
+    void maybeAutoRefreshHomeAiPicks(picksRequest("auto-refresh", false))
       .then((result) => {
         if (result && result.picks.length > 0 && runId === bootRunId) {
-          homeAiPicks = result.picks;
-          homeAiSource = result.source;
-          homeAiModel = result.model;
+          applyHomeAiResult(result);
           repaintAiShelf(root, rebuild(), paintOpts());
         }
       })

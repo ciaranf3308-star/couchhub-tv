@@ -1,10 +1,11 @@
 // Discover entry points (0.11.14, W5 Homes — brief §21). Pure.
 // Lightweight pre-scoped prompts into the existing Discover AI
 // experience. Homes does NOT build a second AI chat app: tapping a
-// prompt runs ONE explicit AI-ranked in-library request and shows
-// the results browsable directly on the originating Movies/Series
-// page (via home-ai-picks + the existing ranker). The "Open in
-// Discover" link is the escape hatch to the full Discover flow.
+// prompt runs ONE explicit request through the W4 core's discovery
+// path (generation + TMDb verification, verified-and-matched
+// titles only) and shows the results browsable directly on the
+// originating Movies/Series page. The "Open in Discover" link is
+// the escape hatch to the full Discover flow.
 //
 // URL CONTRACT (for W3, DiscoverView navigation owner): entry
 // points link to `/discover?q=<prompt>&kind=<movie|series>`.
@@ -21,7 +22,7 @@ import type { HomeAiKind } from "@/scripts/lib/home-ai-picks.ts";
 export interface DiscoverEntryPrompt {
   /** Stable id for focus keys / tests. */
   id: string;
-  /** The prompt text shown on the chip and sent as the ranker query. */
+  /** The prompt text shown on the chip and sent as the discovery brief. */
   label: string;
   /** Hard intent for the ranker (kind is always enforced separately). */
   genres?: string[];
@@ -63,16 +64,21 @@ export function discoverUrlForPrompt(prompt: DiscoverEntryPrompt, kind: HomeAiKi
   return `/discover?${params.toString()}`;
 }
 
-/** Cache request-type dimension for a prompt run (one cached answer per prompt+kind). */
-export function discoverPromptRequestType(prompt: DiscoverEntryPrompt, kind: HomeAiKind): string {
-  return `prompt:${kind}:${prompt.id}`;
+/**
+ * Only "Surprise me" forces a fresh discovery request (core
+ * contract): repeat taps of any other brief serve the fresh cache.
+ * No series prompt forces fresh.
+ */
+export function discoverPromptForcesFresh(prompt: DiscoverEntryPrompt): boolean {
+  return prompt.id === "surprise";
 }
 
 /**
- * Shortlist intent for a prompt run: genre filters the local
- * relevance pool uses BEFORE the ranker sees it. "Surprise me" and
- * prompts without genres intentionally return no genre filter —
- * surprise means the whole diverse pool, not one genre.
+ * Genre intent for a prompt run: the filter the LOCAL fallback
+ * pool uses before local ranking. "Surprise me" and prompts
+ * without genres intentionally return no genre filter — surprise
+ * means the whole diverse pool, not one genre. The AI discovery
+ * path carries the brief text instead (cache key includes it).
  */
 export function promptGenreFilter(prompt: DiscoverEntryPrompt): string[] {
   return [...(prompt.genres ?? [])];

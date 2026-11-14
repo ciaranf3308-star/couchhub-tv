@@ -59,7 +59,8 @@ import {
 } from "@/scripts/lib/home-shelf-variety.ts";
 import {
   groundedReasonForAiCard,
-  homeAiSourceNote,
+  homeAiShelfNote,
+  toSelectorPicks,
   type HomeAiPick,
   type HomeAiSource,
 } from "@/scripts/lib/home-ai-picks.ts";
@@ -713,7 +714,7 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
   // No verified input (or not allowed) = no AI shelf, no AI label.
   const aiAllowed = input.aiAllowed === true && Array.isArray(input.aiPicks);
   const aiResults = aiAllowed
-    ? selectAiRankedPicks(index, input.aiPicks, input.taste, AI_PICKS_LIMIT, {
+    ? selectAiRankedPicks(index, toSelectorPicks(input.aiPicks!), input.taste, AI_PICKS_LIMIT, {
         excludeCompleted: true,
         completedIds,
       })
@@ -726,7 +727,7 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
     ),
   }));
   const aiSource: HomeAiSource =
-    aiResults.length > 0 ? (input.aiSource ?? "ai") : "local";
+    aiResults.length > 0 ? (input.aiSource ?? "fresh-ai") : "local-only";
 
   const worthResults = selectWorthWatching(
     index,
@@ -841,10 +842,10 @@ export function buildMoviesHomeModel(input: BuildMoviesHomeInput): MoviesHomeMod
     },
     aiPicks: {
       items: aiItems,
-      source: hasVerifiedPicks ? aiSource : "local",
+      source: hasVerifiedPicks ? aiSource : "local-only",
       label: "AI Picks for You",
       note: hasVerifiedPicks
-        ? homeAiSourceNote(aiSource, input.aiModel)
+        ? homeAiShelfNote(aiSource, input.aiModel)
         : "",
     },
     worthWatching: {

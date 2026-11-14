@@ -61,7 +61,8 @@ import {
 } from "@/scripts/lib/home-shelf-variety.ts";
 import {
   groundedReasonForAiCard,
-  homeAiSourceNote,
+  homeAiShelfNote,
+  toSelectorPicks,
   type HomeAiPick,
   type HomeAiSource,
 } from "@/scripts/lib/home-ai-picks.ts";
@@ -842,7 +843,7 @@ export function assembleSeriesHomeSections(
   // episode, because episode identity never reaches a shelf item.
   const aiAllowed = input.aiAllowed === true && Array.isArray(input.aiPicks);
   const aiResults = aiAllowed
-    ? selectAiRankedPicks(input.index, input.aiPicks, input.taste, SERIES_AI_PICKS_LIMIT, {
+    ? selectAiRankedPicks(input.index, toSelectorPicks(input.aiPicks!), input.taste, SERIES_AI_PICKS_LIMIT, {
         excludeWatched: true,
         watchedIds: startedList,
       })
@@ -865,7 +866,7 @@ export function assembleSeriesHomeSections(
       }),
     };
   });
-  const aiSource: HomeAiSource = aiResults.length > 0 ? (input.aiSource ?? "ai") : "local";
+  const aiSource: HomeAiSource = aiResults.length > 0 ? (input.aiSource ?? "fresh-ai") : "local-only";
 
   // Worth Starting stays LOCAL (§14): no AI input is passed, and
   // series with ANY recorded progress are excluded (already
@@ -956,7 +957,7 @@ export function assembleSeriesHomeSections(
       kind: "ai-picks",
       id: "series-home-ai-picks",
       title: "AI Series Picks for You",
-      subtitle: homeAiSourceNote(aiSource, input.aiModel),
+      subtitle: homeAiShelfNote(aiSource, input.aiModel),
       items: aiItems,
       source: aiSource,
       action: aiAction,
