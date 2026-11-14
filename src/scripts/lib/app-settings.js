@@ -305,18 +305,27 @@ export function setPerfMode(on) {
   }
 }
 
-// Controller Cursor Mode (0.11.10, W6): R3 toggles an on-screen
-// pointer driven by the right stick. DEFAULT DISABLED — the key is
-// absent until the user enables it in Settings → Display → Behavior,
-// and an absent key reads as off. cursor-mode.ts listens for
-// CURSOR_MODE_EVENT and exits immediately when the setting is turned
-// off mid-session.
+// Controller Cursor Mode (0.11.10, W6; default changed 0.11.14, W2,
+// §6 discoverability): R3 toggles an on-screen pointer driven by the
+// right stick, with left-stick scrolling. DEFAULT ENABLED for new
+// installs — an absent key reads as on, so R3 is discoverable instead
+// of silently dead. A deliberate disable persists as "0" and is never
+// overwritten; only an explicit enable ("1") or disable ("0") writes
+// the key. Note the pre-0.11.14 caveat: setCursorMode(false) used to
+// remove the key (writeLS drops falsy values), so a disable from
+// 0.11.10–0.11.13 is indistinguishable from never-set and reads as
+// on after this change — the off switch in Settings → Display →
+// Behavior stays one tap away, and R3 needs a deliberate stick click.
+// cursor-mode.ts listens for CURSOR_MODE_EVENT and exits immediately
+// when the setting is turned off mid-session.
 export function getCursorMode() {
-  return readLS(KEY_CURSOR_MODE, "") === "1"
+  return readLS(KEY_CURSOR_MODE, "") !== "0"
 }
 
 export function setCursorMode(on) {
-  writeLS(KEY_CURSOR_MODE, on ? "1" : "")
+  // "0" is a truthy string, so writeLS stores it instead of removing
+  // the key — the deliberate disable survives restarts.
+  writeLS(KEY_CURSOR_MODE, on ? "1" : "0")
   if (typeof document !== "undefined") {
     document.dispatchEvent(
       new CustomEvent(CURSOR_MODE_EVENT, { detail: { value: !!on } })
