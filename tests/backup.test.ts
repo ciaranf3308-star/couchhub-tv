@@ -238,6 +238,10 @@ vi.mock("@/scripts/lib/tv-cast.js", () => ({
 }))
 
 import { exportAll, importAll } from "@/scripts/lib/backup.js"
+import {
+  getSportsReminder,
+  setSportsReminder,
+} from "@/scripts/lib/sports-reminders.ts"
 
 const customDoc = JSON.stringify({
   version: 1,
@@ -487,6 +491,35 @@ describe("exportAll", () => {
       expect(snapshot.profiles.keys["nylah_profiles_v1"]).toContain("shared")
       expect(snapshot.profiles.keys["nylah_profile_active_v1"]).toBe("shared")
       expect(snapshot.profiles.keys["xt_tmdb_enabled"]).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("includes the sports reminders map (v2 Phase 3, plan §5.2)", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      get length() { return [...this.store.keys()].length }
+      key(index: number) { return [...this.store.keys()][index] ?? null }
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      setSportsReminder({
+        id: "fd-535101",
+        title: "Liverpool v Man Utd",
+        startMs: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      })
+      const snapshot = (await exportAll()) as any
+      expect(snapshot.sportsReminders["fd-535101"]).toMatchObject({
+        fixtureId: "fd-535101",
+        title: "Liverpool v Man Utd",
+        leadMinutes: 30,
+        delivered: false,
+      })
     } finally {
       vi.unstubAllGlobals()
     }
@@ -871,5 +904,41 @@ describe("importAll", () => {
     })
 
     expect(tvDevices).toEqual([])
+  })
+
+  it("restores the sports reminders map (v2 Phase 3, plan §5.2)", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      const futureMs = Date.now() + 7 * 24 * 60 * 60 * 1000
+      const summary = await importAll({
+        format: "extreme-infinitv-backup",
+        version: 1,
+        creds: { entries: [], selectedId: "" },
+        prefs: {},
+        sportsReminders: {
+          "fd-535101": {
+            fixtureId: "fd-535101",
+            title: "Liverpool v Man Utd",
+            startMs: futureMs,
+            leadMinutes: 30,
+            createdAt: new Date().toISOString(),
+            delivered: false,
+          },
+          "fd-bad": { fixtureId: "fd-bad", title: "Bogus" },
+        },
+      })
+      expect(summary.appSettings).toBeGreaterThan(0)
+      expect(getSportsReminder("fd-535101")?.title).toBe("Liverpool v Man Utd")
+      expect(getSportsReminder("fd-bad")).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
