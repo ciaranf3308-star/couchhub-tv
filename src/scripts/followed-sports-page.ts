@@ -128,7 +128,9 @@ import {
 export const SPORTS_HUB_ROUTE = "/followed/sports"
 
 // Manchester United crest — the genuine club crest, bundled as a
-// repo asset (public/art/sports/man-utd-crest.svg). Source: the
+// repo brand asset (public/brand/man-utd-crest.svg — brand assets,
+// NOT the governed sports-photo library in public/art/sports/, whose
+// manifest only covers licence-verified Commons JPEGs). Source: the
 // club's own hospitality guide, via Wikipedia
 // File:Manchester_United_FC_crest.svg
 // (https://en.wikipedia.org/wiki/File:Manchester_United_FC_crest.svg,
@@ -136,7 +138,7 @@ export const SPORTS_HUB_ROUTE = "/followed/sports"
 // United; used here only to identify the club in its own hub. This
 // file never comes from the feed — football-data.org terms §9.2
 // forbids rendering feed-supplied logos.
-export const MAN_UTD_CREST_SRC = "/art/sports/man-utd-crest.svg"
+export const MAN_UTD_CREST_SRC = "/brand/man-utd-crest.svg"
 export const MAN_UTD_CREST_ALT = "Manchester United crest"
 
 // ── Controller hints (plan §6.3) ────────────────────────────────

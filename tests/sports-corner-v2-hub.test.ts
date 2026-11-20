@@ -9,6 +9,9 @@
 // (MOCK_FRIDAY_AFTERNOON_MS) — a Friday afternoon when the EPG's
 // ~36h window holds none of the next 5 fixtures.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { join, dirname } from "node:path"
 import {
   FOOTBALL_DATA_FIXTURES_CACHE_KEY,
   FOOTBALL_DATA_KEY_STORAGE_KEY,
@@ -310,7 +313,7 @@ describe("Sports Corner crest (0.11.16) — genuine crest in the hero and on the
     expect(crest).not.toBeNull()
     expect(crest?.tagName).toBe("IMG")
     // Bundled repo asset — never a feed URL (terms §9.2).
-    expect(crest?.getAttribute("src")).toBe("/art/sports/man-utd-crest.svg")
+    expect(crest?.getAttribute("src")).toBe("/brand/man-utd-crest.svg")
     expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
     // First thing in the hero body, above the "Next match" eyebrow.
     expect(
@@ -342,9 +345,18 @@ describe("Sports Corner crest (0.11.16) — genuine crest in the hero and on the
     const crest = container.querySelector(".rs-sports-card-crest")
     expect(crest).not.toBeNull()
     expect(crest?.tagName).toBe("IMG")
-    expect(crest?.getAttribute("src")).toBe("/art/sports/man-utd-crest.svg")
+    expect(crest?.getAttribute("src")).toBe("/brand/man-utd-crest.svg")
     expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
     expect(crest?.closest(".rs-sports-card-art")).not.toBeNull()
+  })
+
+  it("the crest file exists on disk as a real SVG brand asset", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..")
+    const diskPath = join(root, "public", "brand", "man-utd-crest.svg")
+    expect(existsSync(diskPath)).toBe(true)
+    const svg = readFileSync(diskPath, "utf8")
+    expect(svg).toContain("<svg")
+    expect(svg.length).toBeGreaterThan(10_000)
   })
 })
 
