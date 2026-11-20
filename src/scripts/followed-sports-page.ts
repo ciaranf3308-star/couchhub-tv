@@ -127,6 +127,18 @@ import {
 
 export const SPORTS_HUB_ROUTE = "/followed/sports"
 
+// Manchester United crest — the genuine club crest, bundled as a
+// repo asset (public/art/sports/man-utd-crest.svg). Source: the
+// club's own hospitality guide, via Wikipedia
+// File:Manchester_United_FC_crest.svg
+// (https://en.wikipedia.org/wiki/File:Manchester_United_FC_crest.svg,
+// verified visually 2026-11-20). Registered trademark of Manchester
+// United; used here only to identify the club in its own hub. This
+// file never comes from the feed — football-data.org terms §9.2
+// forbids rendering feed-supplied logos.
+export const MAN_UTD_CREST_SRC = "/art/sports/man-utd-crest.svg"
+export const MAN_UTD_CREST_ALT = "Manchester United crest"
+
 // ── Controller hints (plan §6.3) ────────────────────────────────
 // Mirrors the Followed page's hint shape. LB/RB are unmapped and
 // deliberately NOT hinted; Y is unconsumed here so the global
@@ -826,6 +838,11 @@ function buildHero(
   hero.setAttribute("data-sports-section", "hero")
   hero.setAttribute("data-fixture-id", fixture.id)
   const body = el("div", "rs-sports-hero-body")
+  const crest = el("img", "rs-sports-hero-crest")
+  crest.src = MAN_UTD_CREST_SRC
+  crest.alt = MAN_UTD_CREST_ALT
+  crest.decoding = "async"
+  body.appendChild(crest)
   body.appendChild(el("p", "rs-sports-hero-eyebrow", "Next match"))
   body.appendChild(el("h2", "rs-sports-hero-title", fixture.title))
   body.appendChild(
@@ -1373,6 +1390,11 @@ export function renderSportsEntryCard(
   container.hidden = false
   const card = el("article", "rs-sports-card")
   const art = el("div", "rs-sports-card-art")
+  const crest = el("img", "rs-sports-card-crest")
+  crest.src = MAN_UTD_CREST_SRC
+  crest.alt = MAN_UTD_CREST_ALT
+  crest.decoding = "async"
+  art.appendChild(crest)
   card.appendChild(art)
   const body = el("div", "rs-sports-card-body")
   body.appendChild(

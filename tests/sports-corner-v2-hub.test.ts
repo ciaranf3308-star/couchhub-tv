@@ -282,6 +282,72 @@ describe("T-v2-1 — mini-table renders United 18th, expand shows the full table
   })
 })
 
+describe("Sports Corner crest (0.11.16) — genuine crest in the hero and on the entry card", () => {
+  it("the hero carries the real crest first, before the Next match eyebrow", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "ready",
+      scanResult: scanResult([
+        fixture({
+          title: "Man Utd v Sunderland",
+          startMs: FRIDAY + 2 * HOUR,
+          stopMs: FRIDAY + 4 * HOUR,
+        }),
+      ]),
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      nextMatches: [],
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+
+    const hero = document.querySelector(".rs-sports-hero")
+    expect(hero).not.toBeNull()
+    const crest = hero?.querySelector(".rs-sports-hero-crest")
+    expect(crest).not.toBeNull()
+    expect(crest?.tagName).toBe("IMG")
+    // Bundled repo asset — never a feed URL (terms §9.2).
+    expect(crest?.getAttribute("src")).toBe("/art/sports/man-utd-crest.svg")
+    expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
+    // First thing in the hero body, above the "Next match" eyebrow.
+    expect(
+      hero?.querySelector(".rs-sports-hero-body")?.firstElementChild,
+    ).toBe(crest)
+  })
+
+  it("the entry card carries the crest in its art panel", async () => {
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    renderSportsEntryCard(
+      container,
+      buildSportsEntryCardModel(
+        true,
+        true,
+        "ready",
+        scanResult([
+          fixture({
+            title: "Man Utd v Sunderland",
+            startMs: FRIDAY + 2 * HOUR,
+            stopMs: FRIDAY + 4 * HOUR,
+          }),
+        ]),
+        FRIDAY,
+      ),
+      { onWatchLive: () => {}, onToggleFollow: () => {} },
+      FRIDAY,
+    )
+    const crest = container.querySelector(".rs-sports-card-crest")
+    expect(crest).not.toBeNull()
+    expect(crest?.tagName).toBe("IMG")
+    expect(crest?.getAttribute("src")).toBe("/art/sports/man-utd-crest.svg")
+    expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
+    expect(crest?.closest(".rs-sports-card-art")).not.toBeNull()
+  })
+})
+
 describe("T-v2-2 — Next Matches lists the next 5 on a Friday afternoon", () => {
   it("lists Liverpool → Sporting CP → Brentford → Newcastle → Coventry with competitions", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
