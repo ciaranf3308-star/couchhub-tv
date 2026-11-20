@@ -123,9 +123,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
     title: "Discover & AI",
     titleKey: "",
     desc: "Recommendations, metadata and AI",
-    keywords: "discover ai recommendations metadata tmdb tvdb enrichment api key endpoint model test connection",
+    keywords: "discover ai recommendations metadata tmdb tvdb enrichment api key endpoint model test connection sports corner football data manchester united table fixtures",
     items: [
       { label: "Metadata enrichment", keywords: "metadata enrichment tmdb tvdb api key", anchor: "card-tmdb" },
+      { label: "Sports Corner football data", keywords: "sports corner football data api key manchester united table fixtures", anchor: "card-football-data" },
       { label: "AI Discovery", keywords: "ai discovery endpoint model key test", anchor: "card-ai-discovery" },
       { label: "Test connection", keywords: "test connection ai", anchor: "card-ai-discovery" },
     ],
