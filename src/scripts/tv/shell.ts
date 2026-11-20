@@ -227,6 +227,16 @@ function scheduleBackgroundWarmup(): void {
   })
 }
 
+// Sports Corner v2 reminders (Phase 3 fix): the watcher fires due
+// match reminders on any /tv/* page, not just the hub. Dynamic
+// import so the shell bundle stays lean; the watcher chunk loads
+// once after boot, and its own start guard makes a re-run a no-op.
+function mountSportsReminderWatcher(): void {
+  import("@/scripts/lib/sports-reminder-watcher")
+    .then(({ startSportsReminderWatcher }) => startSportsReminderWatcher())
+    .catch(() => {})
+}
+
 function mountPrefetchOnFocus(): void {
   const prefetched = new Set<string>()
   document.addEventListener("focusin", (event) => {
@@ -411,6 +421,7 @@ export function bootTvShell(): void {
   mountAmbientHandoffRefresh()
   mountNavSync()
   mountNavPlaylistDialog()
+  mountSportsReminderWatcher()
   mountPrefetchOnFocus()
   mountCloseDialogsOnSwap()
   mountFocusMemory()

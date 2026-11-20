@@ -315,7 +315,8 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
     /* Phase 3 firing banner (v2 §4.3, D2-A): fixed top-center,
        same visual language as the toast — warm surface, United
        red accent bar, focusable Watch + Dismiss actions. Never
-       steals focus: it is appended, never focused. */
+       steals focus: it is appended, never focused. Same rules are
+       copied in tv.css for /tv/* pages — keep the two in step. */
     html[data-couch] .rs-sports-reminder-banner {
       position: fixed;
       top: calc(max(1rem, env(safe-area-inset-top, 0px)) + var(--xt-titlebar-h, 0px));

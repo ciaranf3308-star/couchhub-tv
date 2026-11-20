@@ -239,3 +239,70 @@ html[data-tv-ui][data-perf-mode="on"]::view-transition-group(*) {
 html[data-tv-ui][data-perf-mode="on"]::view-transition-new(tv-detail-backdrop) {
   animation: none;
 }
+
+/* Sports reminder firing banner (v2 Phase 3 fix): the banner can
+   fire on any /tv/* page, but its rules live in sports.astro under
+   html[data-couch] and the --rs-* tokens come from couch.css, which
+   /tv/* pages never load — without this copy the banner would render
+   unstyled on top of playback. Same rules as the sports.astro copy
+   (keep the two in step); every --rs-* token carries the literal
+   Couch value as fallback so the banner looks identical here.
+   United red #da291c and the warm dark surface are the same hues
+   as the hub banner, not the TV accent. */
+html[data-tv] .rs-sports-reminder-banner {
+  position: fixed;
+  top: calc(max(1rem, env(safe-area-inset-top, 0px)) + var(--xt-titlebar-h, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  width: max-content;
+  max-width: min(34rem, calc(100vw - 2rem));
+  padding: 1rem 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--rs-line-soft, rgba(248, 241, 242, 0.08));
+  border-left: 4px solid var(--rs-sports-united-red, #da291c);
+  background: var(--rs-surface-2, #2e1318);
+  color: var(--rs-text, #f8f1f2);
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+}
+html[data-tv] .rs-sports-reminder-title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+html[data-tv] .rs-sports-reminder-meta {
+  margin: 0.375rem 0 0;
+  font-size: 1.0625rem;
+  color: var(--rs-text-2, #c4abb1);
+}
+html[data-tv] .rs-sports-reminder-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.875rem;
+}
+html[data-tv] .rs-sports-reminder-watch,
+html[data-tv] .rs-sports-reminder-dismiss {
+  font-size: 1.0625rem;
+  font-weight: 700;
+  padding: 0.625rem 1.25rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+html[data-tv] .rs-sports-reminder-watch {
+  border: 1px solid var(--rs-sports-united-red, #da291c);
+  background: var(--rs-sports-united-red, #da291c);
+  color: #fff;
+}
+html[data-tv] .rs-sports-reminder-dismiss {
+  border: 1px solid var(--rs-line-soft, rgba(248, 241, 242, 0.08));
+  background: transparent;
+  color: var(--rs-text, #f8f1f2);
+}
+html[data-tv] .rs-sports-reminder-watch:hover,
+html[data-tv] .rs-sports-reminder-watch:focus-visible,
+html[data-tv] .rs-sports-reminder-dismiss:hover,
+html[data-tv] .rs-sports-reminder-dismiss:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--rs-focus, #eaa9b8);
+}

@@ -9,10 +9,10 @@
 // Honesty contract (plan §4.3, D2-A):
 // - A reminder fires ONLY while the app is open: the store itself has
 //   no timer, no scheduler, no DOM side effect — firing happens only
-//   when the hub's checker (followed-sports-page.ts) runs, which lives
-//   on the hub's existing 60-second timer. Nothing here can fire while
-//   the app is closed. D2-B (closed-app nudge) is a separate feature
-//   and is NOT built here.
+//   when the app-wide watcher (sports-reminder-watcher.ts, started
+//   from both layouts) runs its 60-second check. Nothing here can
+//   fire while the app is closed. D2-B (closed-app nudge) is a
+//   separate feature and is NOT built here.
 // - Past fixtures' reminders are pruned on load: a reminder for a
 //   fixture whose start is >2h past is deleted silently — it can never
 //   fire (plan §5.2).
@@ -323,8 +323,10 @@ export function markReminderDelivered(
  * kick-off not yet passed. The fire window closes at kick-off — a
  * reminder for a match already underway does not fire late; the row
  * itself still offers Watch. Pure query: calling this never fires
- * anything, shows nothing, and changes no state — the hub checker
- * owns firing (see followed-sports-page.ts checkSportsReminders).
+ * anything, shows nothing, and changes no state — the app-wide
+ * watcher owns firing (see sports-reminder-watcher.ts
+ * checkSportsRemindersAppWide, via the shared firing primitive in
+ * sports-reminder-fire.ts).
  * Sorted earliest kick-off first.
  */
 export function dueSportsReminders(

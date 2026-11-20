@@ -66,13 +66,10 @@ import {
   STATION_TBC,
   getLeagueTable,
   getNextFixtures,
-  matchFixtureStations,
   normaliseTeamName,
-  type EpgStationListing,
   type FeedFixture,
   type FeedFixturesResult,
   type LeagueTableResult,
-  type MatchedFixture,
 } from "@/scripts/lib/football-data.js"
 import {
   formatFeedFixtureDateTime,
@@ -89,16 +86,33 @@ import {
   SPORTS_FOLLOWED_TEAM_NAME,
 } from "@/scripts/lib/sports-follow.js"
 import {
-  SPORTS_REMINDER_BANNER_DISMISS_MS,
   SPORTS_REMINDERS_CHANGED_EVENT,
-  clearSportsReminder,
-  dueSportsReminders,
   getSportsReminder,
   hasSportsReminder,
-  markReminderDelivered,
   toggleSportsReminder,
-  type SportsReminder,
 } from "@/scripts/lib/sports-reminders.js"
+// Reminder firing (banner, checker, Next Matches rows, live tune URL)
+// lives in the shared fire module so the app-wide watcher can use it
+// without importing this hub page module. Re-exported here so the
+// hub's existing import sites (and tests) keep working.
+import {
+  buildLiveTuneUrl,
+  buildNextMatchRows,
+  el,
+  type NextMatchRow,
+  type TuneTarget,
+} from "@/scripts/lib/sports-reminder-fire.js"
+export {
+  buildLiveTuneUrl,
+  buildNextMatchRows,
+  checkSportsReminders,
+  resolveDueReminders,
+  showSportsReminderBanner,
+  type DueReminderTarget,
+  type NextMatchRow,
+  type SportsReminderBanner,
+  type TuneTarget,
+} from "@/scripts/lib/sports-reminder-fire.js"
 import {
   fixtureCatchupAction,
   getSportsScan,
@@ -188,59 +202,6 @@ export interface SportsHubModelInput {
   tableExpanded?: boolean
 }
 
-// ── Next Matches: feed fixtures × EPG listings (v2 §4.1) ────────
-
-export interface NextMatchRow {
-  matched: MatchedFixture
-  /**
-   * The EPG fixture carrying this match's listing, for Watch
-   * tune-in. Null when the EPG has no listing yet (Station TBC) —
-   * the row then has no Watch button, by design.
-   */
-  epgFixture: SportsFixture | null
-}
-
-/**
- * Match feed fixtures to EPG listings for stations, and keep the
- * EPG fixture alongside each match so Watch can tune the real
- * listing. The station match is matchFixtureStations() (normalised
- * teams, start within the same minute); the EPG fixture is found
- * with the same rule, so the two can never disagree about which
- * listing a match belongs to.
- */
-export function buildNextMatchRows(
-  feedFixtures: ReadonlyArray<FeedFixture>,
-  epgFixtures: ReadonlyArray<SportsFixture>,
-): NextMatchRow[] {
-  const listings: EpgStationListing[] = epgFixtures.map((fixture) => ({
-    home: fixture.teams[0],
-    away: fixture.teams[1],
-    startMs: fixture.startMs,
-    channelName: fixture.channelName,
-    alsoOn: fixture.alsoOn.map((channel) => channel.channelName),
-  }))
-  const matched = matchFixtureStations(feedFixtures, listings)
-  return matched.map((row, index) => {
-    if (!row.stationKnown) return { matched: row, epgFixture: null }
-    const fixture = feedFixtures[index]
-    const fixtureMinute = Math.floor(fixture.startMs / 60_000)
-    const home = normaliseTeamName(fixture.home)
-    const away = normaliseTeamName(fixture.away)
-    const epgFixture =
-      epgFixtures.find((candidate) => {
-        if (Math.floor(candidate.startMs / 60_000) !== fixtureMinute) {
-          return false
-        }
-        const candidateHome = normaliseTeamName(candidate.teams[0])
-        const candidateAway = normaliseTeamName(candidate.teams[1])
-        return (
-          (candidateHome === home && candidateAway === away) ||
-          (candidateHome === away && candidateAway === home)
-        )
-      }) ?? null
-    return { matched: row, epgFixture }
-  })
-}
 
 /**
  * Fixed state precedence, mirroring the Guide's guideDataState
@@ -322,22 +283,8 @@ export function formatKickoff(startMs: number, nowMs: number): string {
 }
 
 // ── Tune-in deep links (plan §7, pure + testable) ───────────────
-
-export interface TuneTarget {
-  url: string
-}
-
-/**
- * Live tune: /livetv?channel=<numeric id>. The Live TV autoplay
- * path parses the id with Number() and silently ignores a
- * non-finite value, so a non-numeric provider id must never reach
- * it — the caller navigates to the landing + toast instead (§7.1).
- */
-export function buildLiveTuneUrl(fixture: SportsFixture): TuneTarget | null {
-  const id = Number(fixture.channelId)
-  if (!Number.isFinite(id)) return null
-  return { url: `/livetv?channel=${encodeURIComponent(String(fixture.channelId))}` }
-}
+// Live tune (buildLiveTuneUrl + TuneTarget) lives in the shared
+// fire module; catch-up tune stays here (it needs the EPG offset).
 
 /**
  * Catch-up tune: the epg.ts navigateToCatchup shape exactly —
@@ -462,16 +409,6 @@ export function createSportsHubCallbacks(
 
 // ── DOM helpers ─────────────────────────────────────────────────
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  className?: string,
-  text?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag)
-  if (className) node.className = className
-  if (text !== undefined) node.textContent = text
-  return node
-}
 
 function fixtureMetaLine(
   fixture: SportsFixture,
@@ -877,184 +814,6 @@ function buildNextMatchesSection(
     )
   }
   return section
-}
-
-// ── Reminder firing (v2 §4.3, D2-A) ─────────────────────────────
-//
-// The store alone never fires anything: dueSportsReminders() is a
-// pure query, and firing happens ONLY here, when the hub checker
-// runs. The checker lives on the hub's existing 60-second timer
-// (mountSportsHubPage) plus once after the feed lands — no new
-// global scheduler, and no firing while the hub (hence the app)
-// is closed. That is the honest D2-A scope: "reminds you while
-// the app is open".
-
-export interface DueReminderTarget {
-  reminder: SportsReminder
-  /** "Sky Sports Main Event · Sky Sports Premier League", or
-   *  STATION_TBC when the EPG has no listing for this fixture yet. */
-  station: string
-  /** True only when the EPG actually lists this fixture. */
-  stationKnown: boolean
-  /** The EPG fixture carrying this match's listing, for Watch
-   *  tune-in. Null when the station is TBC — no Watch action. */
-  epgFixture: SportsFixture | null
-}
-
-/**
- * Resolve due reminders to their station + tune-in target. Pure:
- * takes the reminders as input, reads nothing, changes nothing.
- * A reminder whose fixture has left the feed still resolves — with
- * station TBC and no Watch — so a feed change never silently
- * swallows a reminder the user asked for.
- */
-export function resolveDueReminders(
-  reminders: ReadonlyArray<SportsReminder>,
-  nextMatches: ReadonlyArray<NextMatchRow>,
-  nowMs: number,
-): DueReminderTarget[] {
-  return reminders
-    .filter(
-      (reminder) =>
-        !reminder.delivered &&
-        nowMs >= reminder.startMs - reminder.leadMinutes * 60_000 &&
-        nowMs <= reminder.startMs,
-    )
-    .sort((a, b) => a.startMs - b.startMs)
-    .map((reminder) => {
-      const row = nextMatches.find(
-        (candidate) => candidate.matched.fixture.id === reminder.fixtureId,
-      )
-      return {
-        reminder,
-        station: row?.matched.station ?? STATION_TBC,
-        stationKnown: row?.matched.stationKnown ?? false,
-        epgFixture: row?.epgFixture ?? null,
-      }
-    })
-}
-
-/**
- * The hub's firing pass. Reads due reminders from the store
- * (pruning past fixtures on the way), resolves each to its
- * station/Watch target, marks it delivered, clears it (plan §4.3,
- * default clear), then shows it. Returns the fired targets.
- * A throwing `show` never blocks the remaining reminders — the
- * record is already consumed, so a banner failure cannot re-fire
- * it on the next tick.
- */
-export function checkSportsReminders(
-  nextMatches: ReadonlyArray<NextMatchRow>,
-  show: (target: DueReminderTarget) => void,
-  nowMs: number = Date.now(),
-): DueReminderTarget[] {
-  const due = dueSportsReminders(nowMs)
-  if (due.length === 0) return []
-  const targets = resolveDueReminders(due, nextMatches, nowMs)
-  for (const target of targets) {
-    markReminderDelivered(target.reminder.fixtureId)
-    clearSportsReminder(target.reminder.fixtureId)
-    try {
-      show(target)
-    } catch (error) {
-      log.warn("[xt:sports] reminder banner failed:", error)
-    }
-  }
-  return targets
-}
-
-export interface SportsReminderBanner {
-  dismiss: () => void
-}
-
-/**
- * The firing banner for one due reminder: fixture, station (when
- * known), and a focusable Watch action when tunable. B dismisses
- * (a Back layer owns the press while the banner is up, above the
- * route layer); auto-dismiss after 60s. Never steals focus — the
- * banner is appended without focusing anything, so playback (or
- * whatever the user is doing) is not interrupted.
- */
-export function showSportsReminderBanner(
-  target: DueReminderTarget,
-  callbacks: SportsHubCallbacks,
-  options: { host?: ParentNode; durationMs?: number } = {},
-): SportsReminderBanner | null {
-  if (typeof document === "undefined") return null
-  const host = options.host ?? document.body
-  const durationMs =
-    options.durationMs ?? SPORTS_REMINDER_BANNER_DISMISS_MS
-
-  const banner = document.createElement("div")
-  banner.className = "rs-sports-reminder-banner"
-  banner.setAttribute("role", "status")
-  banner.setAttribute(
-    "data-sports-reminder-banner",
-    target.reminder.fixtureId,
-  )
-  banner.appendChild(
-    el(
-      "p",
-      "rs-sports-reminder-title",
-      `Kick-off in ${target.reminder.leadMinutes} minutes — ${target.reminder.title}`,
-    ),
-  )
-  banner.appendChild(
-    el(
-      "p",
-      "rs-sports-reminder-meta",
-      target.stationKnown
-        ? target.station
-        : `${STATION_TBC} — check the guide closer to kick-off`,
-    ),
-  )
-  const actions = el("div", "rs-sports-reminder-actions")
-  if (target.epgFixture !== null) {
-    const epgFixture = target.epgFixture
-    const watch = el("button", "rs-sports-reminder-watch", "Watch")
-    watch.type = "button"
-    watch.setAttribute("data-couch-key", "sports:reminder:watch")
-    watch.addEventListener("click", () => {
-      callbacks.onWatch(epgFixture)
-      dismiss()
-    })
-    actions.appendChild(watch)
-  }
-  const dismissButton = el(
-    "button",
-    "rs-sports-reminder-dismiss",
-    "Dismiss",
-  )
-  dismissButton.type = "button"
-  dismissButton.setAttribute("data-couch-key", "sports:reminder:dismiss")
-  dismissButton.addEventListener("click", () => dismiss())
-  actions.appendChild(dismissButton)
-  banner.appendChild(actions)
-  host.appendChild(banner)
-
-  let closed = false
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let unregister: (() => void) | null = null
-  function dismiss(): void {
-    if (closed) return
-    closed = true
-    if (timer !== null) clearTimeout(timer)
-    unregister?.()
-    banner.remove()
-  }
-  unregister = registerBackLayer({
-    id: "sports-reminder-banner",
-    priority: BACK_PRIORITY.PAGE_STATE,
-    isActive: () => !closed,
-    handle: () => {
-      dismiss()
-      return true
-    },
-  })
-  if (durationMs > 0) {
-    timer = setTimeout(dismiss, durationMs)
-  }
-  return { dismiss }
 }
 
 // ── Hero ────────────────────────────────────────────────────────
@@ -1881,20 +1640,13 @@ export function mountSportsHubPage(): void {
     }
   }
 
-  /**
-   * The reminder firing pass (D2-A): due reminders → banner, on
-   * the hub's existing 60-second timer and once after the feed
-   * lands. No new scheduler; nothing fires while the hub is closed.
-   */
-  function checkReminders(): void {
-    if (!mounted) return
-    const active =
-      callbacks ?? createSportsHubCallbacks(runtime.playlistId, SPORTS_HUB_ROUTE)
-    checkSportsReminders(runtime.nextMatches, (target) => {
-      showSportsReminderBanner(target, active)
-    })
-  }
-
+  // Reminder firing is NOT owned here any more (Phase 3 fix): the
+  // app-wide watcher (sports-reminder-watcher.ts, started from both
+  // layouts) fires on any page, including this hub — the hub's own
+  // 60s checker is removed so exactly one checker exists per
+  // document. The watcher also checks on start, on reminder change,
+  // and when the guide lands, which covers the feed-landing moment
+  // this function used to handle.
   function scan(): void {
     if (!mounted || runtime.playlistId === "") return
     // Unfollowed: no scan runs (§2.5). The memoised result from a
@@ -1943,10 +1695,6 @@ export function mountSportsHubPage(): void {
         currentFixtures(),
       )
       render()
-      // The feed landing is the first moment the rows (and their
-      // stations) are known: a reminder already due fires now
-      // rather than waiting for the next 60-second tick.
-      checkReminders()
     } finally {
       runtime.feedInFlight = false
     }
@@ -2087,14 +1835,12 @@ export function mountSportsHubPage(): void {
 
   // 60-second timer: re-derive row states from the clock without
   // re-scanning (§2.4). Re-render only when a boundary crossed —
-  // cheap check on the memoised fixture list.
+  // cheap check on the memoised fixture list. Reminder firing used
+  // to ride this heartbeat; it now lives in the app-wide watcher
+  // (sports-reminder-watcher.ts), so this timer only re-renders.
   let lastStateSignature = ""
   runtime.timer = setInterval(() => {
     if (!mounted) return
-    // Reminder firing rides this existing heartbeat (D2-A): it runs
-    // on EVERY tick, independent of the re-render signature below —
-    // a due reminder must fire even when no row state changed.
-    checkReminders()
     const nowMs = Date.now()
     const signature = (runtime.scanResult?.fixtures ?? [])
       .map(

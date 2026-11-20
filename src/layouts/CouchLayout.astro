@@ -188,6 +188,14 @@ const documentTitle = pageTitle
       // nor released the stream on hide.
       initTrayHandler();
       mountExitShortcuts();
+      // Sports Corner v2 reminders (Phase 3 fix): fire due match
+      // reminders on any Couch page, not just the hub — the same
+      // watcher the TV shell starts. Dynamic import keeps this
+      // layout lean; the watcher's own start guard makes a re-run
+      // a no-op.
+      import("@/scripts/lib/sports-reminder-watcher").then(
+        ({ startSportsReminderWatcher }) => startSportsReminderWatcher(),
+      ).catch(() => {});
       // Top-nav Exit button: two-step arm (couch-nav.ts) — A arms, A
       // again confirms, B while armed disarms via the Back
       // coordinator, arm lapses after 4 s. Same as the Settings card.
