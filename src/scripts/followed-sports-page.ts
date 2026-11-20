@@ -61,6 +61,26 @@ import {
 import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
 import { toast } from "@/scripts/lib/toast.js"
 import {
+  FOOTBALL_DATA_ATTRIBUTION,
+  STATION_TBC,
+  getLeagueTable,
+  getNextFixtures,
+  matchFixtureStations,
+  normaliseTeamName,
+  type EpgStationListing,
+  type FeedFixture,
+  type FeedFixturesResult,
+  type LeagueTableResult,
+  type MatchedFixture,
+} from "@/scripts/lib/football-data.js"
+import {
+  formatFeedFixtureDateTime,
+  formatFeedFixtureTitle,
+  formatTableAsOf,
+  selectTableRows,
+  type SportsEntryCardFeed,
+} from "@/scripts/lib/sports-corner-v2-hub.js"
+import {
   isSportsTeamFollowed,
   followSportsTeam,
   unfollowSportsTeam,
@@ -121,6 +141,15 @@ export interface SportsHubModel {
   lastUpdatedLabel: string | null
   mappedChannelCount: number
   channelCount: number
+  /** Feed table result (v2 Phase 2). Null = not fetched yet — the
+   *  table section is omitted, never faked. */
+  tableResult: LeagueTableResult | null
+  /** Feed fixtures result (v2 Phase 2). Null = not fetched yet. */
+  feedResult: FeedFixturesResult | null
+  /** Feed fixtures matched to EPG listings, feed order (v2 §4.1). */
+  nextMatches: NextMatchRow[]
+  /** Mini-table vs full 20 (v2 §4.1). */
+  tableExpanded: boolean
 }
 
 const EMPTY_SPLIT: SplitSportsFixtures = {
@@ -140,6 +169,65 @@ export interface SportsHubModelInput {
   epgStatus: "loading" | "failed" | "ready"
   scanResult: SportsScanResult | null
   nowMs: number
+  /** Feed results (v2 Phase 2). Omitted = not fetched yet. */
+  tableResult?: LeagueTableResult | null
+  feedResult?: FeedFixturesResult | null
+  nextMatches?: NextMatchRow[]
+  tableExpanded?: boolean
+}
+
+// ── Next Matches: feed fixtures × EPG listings (v2 §4.1) ────────
+
+export interface NextMatchRow {
+  matched: MatchedFixture
+  /**
+   * The EPG fixture carrying this match's listing, for Watch
+   * tune-in. Null when the EPG has no listing yet (Station TBC) —
+   * the row then has no Watch button, by design.
+   */
+  epgFixture: SportsFixture | null
+}
+
+/**
+ * Match feed fixtures to EPG listings for stations, and keep the
+ * EPG fixture alongside each match so Watch can tune the real
+ * listing. The station match is matchFixtureStations() (normalised
+ * teams, start within the same minute); the EPG fixture is found
+ * with the same rule, so the two can never disagree about which
+ * listing a match belongs to.
+ */
+export function buildNextMatchRows(
+  feedFixtures: ReadonlyArray<FeedFixture>,
+  epgFixtures: ReadonlyArray<SportsFixture>,
+): NextMatchRow[] {
+  const listings: EpgStationListing[] = epgFixtures.map((fixture) => ({
+    home: fixture.teams[0],
+    away: fixture.teams[1],
+    startMs: fixture.startMs,
+    channelName: fixture.channelName,
+    alsoOn: fixture.alsoOn.map((channel) => channel.channelName),
+  }))
+  const matched = matchFixtureStations(feedFixtures, listings)
+  return matched.map((row, index) => {
+    if (!row.stationKnown) return { matched: row, epgFixture: null }
+    const fixture = feedFixtures[index]
+    const fixtureMinute = Math.floor(fixture.startMs / 60_000)
+    const home = normaliseTeamName(fixture.home)
+    const away = normaliseTeamName(fixture.away)
+    const epgFixture =
+      epgFixtures.find((candidate) => {
+        if (Math.floor(candidate.startMs / 60_000) !== fixtureMinute) {
+          return false
+        }
+        const candidateHome = normaliseTeamName(candidate.teams[0])
+        const candidateAway = normaliseTeamName(candidate.teams[1])
+        return (
+          (candidateHome === home && candidateAway === away) ||
+          (candidateHome === away && candidateAway === home)
+        )
+      }) ?? null
+    return { matched: row, epgFixture }
+  })
 }
 
 /**
@@ -159,6 +247,10 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
     lastUpdatedLabel: null,
     mappedChannelCount: scanResult?.mappedChannelCount ?? 0,
     channelCount: scanResult?.channelCount ?? 0,
+    tableResult: input.tableResult ?? null,
+    feedResult: input.feedResult ?? null,
+    nextMatches: input.nextMatches ?? [],
+    tableExpanded: input.tableExpanded ?? false,
   }
   if (!followed) return { ...base, state: "unfollowed" }
   if (!hasPlaylist) return { ...base, state: "no-playlist" }
@@ -309,6 +401,9 @@ export interface SportsHubCallbacks {
   onOpenGuide: () => void
   /** Toggle the follow record (§5.4). */
   onToggleFollow: () => void
+  /** Toggle the league-table mini/full expansion (v2 §4.1).
+   *  Optional: test stubs omit it; the expand button no-ops then. */
+  onToggleTableExpanded?: () => void
 }
 
 /** Production navigation: record the return origin, then go. The
@@ -448,9 +543,11 @@ function buildSection(
   rows: SportsFixture[],
   ctx: RowContext,
   emptyLine: string | null,
+  sectionKey?: string,
 ): HTMLElement | null {
   if (rows.length === 0 && emptyLine === null) return null
   const section = el("section", "rs-sports-section")
+  if (sectionKey) section.setAttribute("data-sports-section", sectionKey)
   section.appendChild(el("h2", "rs-sports-section-title", heading))
   if (explainer) {
     section.appendChild(el("p", "rs-sports-section-note", explainer))
@@ -472,6 +569,7 @@ function buildOtherSquadsSection(
 ): HTMLElement | null {
   if (upcoming.length === 0 && recent.length === 0) return null
   const section = el("section", "rs-sports-section")
+  section.setAttribute("data-sports-section", "other-squads")
   section.appendChild(el("h2", "rs-sports-section-title", "Other Squads"))
   section.appendChild(
     el(
@@ -496,6 +594,251 @@ function buildOtherSquadsSection(
   return section
 }
 
+// ── League table (v2 §4.1) ─────────────────────────────────────
+
+function formatGoalDifference(gd: number): string {
+  if (gd > 0) return `+${gd}`
+  if (gd < 0) return `−${-gd}`
+  return "0"
+}
+
+/**
+ * League Table section. Mini-table (United + 3 above + 3 below)
+ * by default, full 20 behind one focusable expand action. The
+ * United row is highlighted in United red (hub-scoped token, see
+ * sports.astro) — hard-coded United visuals, no team picker, no
+ * feed-supplied crests (terms §9.2: the parser drops them).
+ * Dated + sourced on screen; stale >24h says "may be out of date";
+ * feed down / no key shows honest failure copy, never invented data.
+ */
+function buildTableSection(
+  tableResult: LeagueTableResult,
+  expanded: boolean,
+  callbacks: SportsHubCallbacks,
+): HTMLElement {
+  const section = el("section", "rs-sports-section rs-sports-table-section")
+  section.setAttribute("data-sports-section", "table")
+  section.appendChild(el("h2", "rs-sports-section-title", "League Table"))
+
+  const table = tableResult.table
+  if (
+    (tableResult.status === "ok" || tableResult.status === "stale") &&
+    table !== null
+  ) {
+    section.appendChild(
+      el("p", "rs-sports-section-note", table.competition),
+    )
+    const rows = selectTableRows(table, expanded)
+    const tableEl = document.createElement("table")
+    tableEl.className = "rs-sports-table"
+    const head = document.createElement("tr")
+    for (const label of ["Pos", "Team", "P", "W", "D", "L", "GF–GA", "GD", "Pts"]) {
+      head.appendChild(el("th", undefined, label))
+    }
+    tableEl.appendChild(head)
+    for (const entry of rows) {
+      const rowEl = document.createElement("tr")
+      if (normaliseTeamName(entry.team) === "manchester united") {
+        rowEl.className = "rs-sports-table-row-united"
+      }
+      const cells = [
+        String(entry.position),
+        entry.team,
+        String(entry.played),
+        String(entry.won),
+        String(entry.drawn),
+        String(entry.lost),
+        `${entry.gf}–${entry.ga}`,
+        formatGoalDifference(entry.gd),
+        String(entry.points),
+      ]
+      for (const [index, value] of cells.entries()) {
+        const cell = el("td", undefined, value)
+        if (index !== 1) cell.className = "rs-sports-table-num"
+        rowEl.appendChild(cell)
+      }
+      tableEl.appendChild(rowEl)
+    }
+    section.appendChild(tableEl)
+    const asOf = formatTableAsOf(table)
+    const meta = [asOf, FOOTBALL_DATA_ATTRIBUTION]
+      .filter((part): part is string => part !== null)
+      .join(" · ")
+    section.appendChild(el("p", "rs-sports-table-meta", meta))
+    if (tableResult.stale) {
+      section.appendChild(
+        el(
+          "p",
+          "rs-sports-table-stale",
+          tableResult.mayBeOutOfDate
+            ? "This table may be out of date — the feed couldn't be reached."
+            : "Showing the last table we have — the feed couldn't be reached.",
+        ),
+      )
+    }
+    const miniRows = selectTableRows(table, false)
+    if (table.entries.length > miniRows.length) {
+      const expand = el(
+        "button",
+        "rs-sports-table-expand",
+        expanded ? "Show fewer teams" : "Show full table",
+      )
+      expand.type = "button"
+      expand.setAttribute("data-couch-key", "sports:table:expand")
+      expand.addEventListener("click", () => {
+        callbacks.onToggleTableExpanded?.()
+      })
+      section.appendChild(expand)
+    }
+    return section
+  }
+
+  if (tableResult.status === "no-key") {
+    section.appendChild(
+      el(
+        "p",
+        "rs-sports-empty-line",
+        "League table unavailable — add your football-data.org API key in Settings to see it.",
+      ),
+    )
+  } else {
+    section.appendChild(
+      el(
+        "p",
+        "rs-sports-empty-line",
+        "League table unavailable — the feed couldn't be reached. Fixtures below still come from your programme guide.",
+      ),
+    )
+  }
+  return section
+}
+
+// ── Next Matches (v2 §4.1) ──────────────────────────────────────
+
+/**
+ * One feed-driven Next Matches row: fixture, date/time,
+ * competition, station from the EPG where known else "Station
+ * TBC", Watch only when the EPG listing exists and is tunable.
+ *
+ * ── PHASE 3 REMINDER HOOK ─────────────────────────────────────
+ * The `<div class="rs-sports-next-actions"
+ * data-reminder-slot="<feed fixture id>">` on every row is the
+ * insertion point for the Phase 3 "Remind me" toggle (v2 plan
+ * §4.3, D2-A). Phase 3 renders one focusable bell toggle button
+ * INSIDE this actions area, before the Watch button when one
+ * exists, with data-couch-key="sports:remind:<feed fixture id>",
+ * reading/writing the `xt_sports_reminders` store (plan §5.2)
+ * keyed by the feed fixture id (`fixture.id`, e.g. "fd-535101").
+ * The toggle must NOT replace or wrap the Watch button, and the
+ * row must keep working with no reminder set — this empty actions
+ * area is the valid no-reminder state, and Phase 2 ships it empty
+ * on purpose. No reminder functionality is built here.
+ */
+function buildNextMatchRow(
+  row: NextMatchRow,
+  callbacks: SportsHubCallbacks,
+): HTMLElement {
+  const fixture = row.matched.fixture
+  const container = el("div", "rs-sports-next-row")
+  container.setAttribute("data-feed-fixture-id", fixture.id)
+  const main = el("div", "rs-sports-row-main")
+  main.appendChild(
+    el("span", "rs-sports-row-title", formatFeedFixtureTitle(fixture)),
+  )
+  const metaParts = [
+    formatFeedFixtureDateTime(fixture.startMs),
+    fixture.competition,
+    row.matched.station,
+  ]
+  if (fixture.venue) metaParts.push(fixture.venue)
+  main.appendChild(el("div", "rs-sports-row-meta", metaParts.join(" · ")))
+  container.appendChild(main)
+
+  const actions = el("div", "rs-sports-next-actions")
+  actions.setAttribute("data-reminder-slot", fixture.id)
+  if (row.matched.watchable && row.epgFixture !== null) {
+    const epgFixture = row.epgFixture
+    const watch = el("button", "rs-sports-next-watch", "Watch")
+    watch.type = "button"
+    watch.setAttribute("data-couch-key", `sports:next-watch:${fixture.id}`)
+    watch.setAttribute("data-fixture-id", epgFixture.id)
+    watch.addEventListener("click", () => {
+      callbacks.onWatch(epgFixture)
+    })
+    actions.appendChild(watch)
+  }
+  container.appendChild(actions)
+  return container
+}
+
+function buildNextMatchesSection(
+  feedResult: FeedFixturesResult,
+  nextMatches: NextMatchRow[],
+  callbacks: SportsHubCallbacks,
+  /** True when the table section did NOT already show the
+   *  attribution line — the attribution must be visible in the hub
+   *  wherever feed data is shown. */
+  showAttribution: boolean,
+): HTMLElement {
+  const section = el("section", "rs-sports-section rs-sports-next-section")
+  section.setAttribute("data-sports-section", "next-matches")
+  section.appendChild(el("h2", "rs-sports-section-title", "Next Matches"))
+  if (
+    (feedResult.status === "ok" || feedResult.status === "stale") &&
+    nextMatches.length > 0
+  ) {
+    const list = el("div", "rs-sports-list")
+    for (const row of nextMatches) {
+      list.appendChild(buildNextMatchRow(row, callbacks))
+    }
+    section.appendChild(list)
+    if (feedResult.stale) {
+      section.appendChild(
+        el(
+          "p",
+          "rs-sports-table-stale",
+          feedResult.mayBeOutOfDate
+            ? "These fixtures may be out of date — the feed couldn't be reached."
+            : "Showing the last fixtures we have — the feed couldn't be reached.",
+        ),
+      )
+    }
+  } else if (feedResult.status === "ok" || feedResult.status === "stale") {
+    section.appendChild(
+      el(
+        "p",
+        "rs-sports-empty-line",
+        "No upcoming Manchester United fixtures from the feed right now.",
+      ),
+    )
+  } else if (feedResult.status === "no-key") {
+    section.appendChild(
+      el(
+        "p",
+        "rs-sports-empty-line",
+        "Next matches need your football-data.org API key — add it in Settings.",
+      ),
+    )
+  } else {
+    section.appendChild(
+      el(
+        "p",
+        "rs-sports-empty-line",
+        "Next matches unavailable — the feed couldn't be reached. Fixtures below still come from your programme guide.",
+      ),
+    )
+  }
+  if (
+    showAttribution &&
+    (feedResult.status === "ok" || feedResult.status === "stale")
+  ) {
+    section.appendChild(
+      el("p", "rs-sports-attribution", FOOTBALL_DATA_ATTRIBUTION),
+    )
+  }
+  return section
+}
+
 // ── Hero ────────────────────────────────────────────────────────
 
 function buildHero(
@@ -503,6 +846,7 @@ function buildHero(
   ctx: RowContext,
 ): HTMLElement {
   const hero = el("section", "rs-sports-hero")
+  hero.setAttribute("data-sports-section", "hero")
   hero.setAttribute("data-fixture-id", fixture.id)
   const body = el("div", "rs-sports-hero-body")
   body.appendChild(el("p", "rs-sports-hero-eyebrow", "Next match"))
@@ -707,8 +1051,37 @@ export function renderSportsHub(
 
   const ctx: RowContext = { nowMs, callbacks, showPossibleBadge: false }
   const fragment = document.createDocumentFragment()
+  // Section order (v2 §4.1, D1-C): Table → Hero → Next Matches →
+  // Upcoming (EPG) → Possible → Other Squads → Recent. Recent
+  // NEVER leads; when Upcoming is empty the honest empty line
+  // names the ~36h guide window and Next Matches carries "what's
+  // coming". The hero stays EPG-driven (v2 §4.1) — on a Friday
+  // afternoon it is absent and Next Matches leads the fixtures.
+  const tableShowsFeedData =
+    model.tableResult !== null &&
+    (model.tableResult.status === "ok" ||
+      model.tableResult.status === "stale")
+  if (model.tableResult) {
+    fragment.appendChild(
+      buildTableSection(
+        model.tableResult,
+        model.tableExpanded,
+        callbacks,
+      ),
+    )
+  }
   if (model.hero) {
     fragment.appendChild(buildHero(model.hero, ctx))
+  }
+  if (model.feedResult) {
+    fragment.appendChild(
+      buildNextMatchesSection(
+        model.feedResult,
+        model.nextMatches,
+        callbacks,
+        !tableShowsFeedData,
+      ),
+    )
   }
   const { upcoming, possible, otherSquadsUpcoming, otherSquadsRecent, recent } =
     model.split
@@ -741,7 +1114,8 @@ export function renderSportsHub(
       null,
       upcoming,
       ctx,
-      "No upcoming matches in the guide right now.",
+      "No upcoming matches in the guide right now — the guide covers about the next day and a half.",
+      "upcoming",
     )
     if (upcomingSection) fragment.appendChild(upcomingSection)
     const possibleSection = buildSection(
@@ -750,6 +1124,7 @@ export function renderSportsHub(
       possible,
       { ...ctx, showPossibleBadge: true },
       null,
+      "possible",
     )
     if (possibleSection) fragment.appendChild(possibleSection)
     const squadsSection = buildOtherSquadsSection(
@@ -758,7 +1133,14 @@ export function renderSportsHub(
       ctx,
     )
     if (squadsSection) fragment.appendChild(squadsSection)
-    const recentSection = buildSection("Recent Matches", null, recent, ctx, null)
+    const recentSection = buildSection(
+      "Recent Matches",
+      null,
+      recent,
+      ctx,
+      null,
+      "recent",
+    )
     if (recentSection) fragment.appendChild(recentSection)
   }
   root.content.replaceChildren(fragment)
@@ -891,6 +1273,23 @@ export function focusSportsHubInitial(root: ParentNode): void {
     firstRow.focus({ preventScroll: true })
     return
   }
+  // No EPG rows (e.g. Friday afternoon): the feed sections lead,
+  // so focus the table expand action, else the first Next Matches
+  // Watch button, before falling back to the follow control.
+  const tableExpand = root.querySelector<HTMLElement>(
+    '[data-couch-key="sports:table:expand"]',
+  )
+  if (tableExpand) {
+    tableExpand.focus({ preventScroll: true })
+    return
+  }
+  const firstNextWatch = root.querySelector<HTMLElement>(
+    '[data-couch-key^="sports:next-watch:"]',
+  )
+  if (firstNextWatch) {
+    firstNextWatch.focus({ preventScroll: true })
+    return
+  }
   const followControl = root.querySelector<HTMLElement>(
     '[data-couch-key="sports:follow"], [data-couch-key="sports:unfollow"]',
   )
@@ -906,6 +1305,15 @@ export interface SportsEntryCardModel {
   epgStatus: "loading" | "failed" | "ready"
   nextFixture: SportsFixture | null
   hasFixtures: boolean
+  /** "18th · 8 pts" (v2 §4.2), or null when the table is unknown. */
+  tableLine: string | null
+  /**
+   * Next feed fixture (v2 §4.2), shown only when the EPG has no
+   * next fixture — the card must never show "no matches" while the
+   * feed knows a fixture is coming. Station is always TBC here:
+   * beyond the ~36h EPG window there is no listing to tune.
+   */
+  nextFeedFixture: FeedFixture | null
 }
 
 export function buildSportsEntryCardModel(
@@ -914,6 +1322,7 @@ export function buildSportsEntryCardModel(
   epgStatus: "loading" | "failed" | "ready",
   scanResult: SportsScanResult | null,
   nowMs: number,
+  feed?: SportsEntryCardFeed | null,
 ): SportsEntryCardModel {
   return {
     followed,
@@ -924,6 +1333,8 @@ export function buildSportsEntryCardModel(
         ? selectNextFixture(scanResult.fixtures, nowMs)
         : null,
     hasFixtures: (scanResult?.fixtures.length ?? 0) > 0,
+    tableLine: feed?.tableLine ?? null,
+    nextFeedFixture: feed?.nextFeedFixture ?? null,
   }
 }
 
@@ -951,6 +1362,11 @@ export function renderSportsEntryCard(
   body.appendChild(
     el("p", "rs-sports-card-team", SPORTS_FOLLOWED_TEAM_NAME.toUpperCase()),
   )
+  if (model.tableLine) {
+    body.appendChild(
+      el("p", "rs-sports-card-meta", model.tableLine),
+    )
+  }
 
   if (!model.followed) {
     body.appendChild(
@@ -991,6 +1407,30 @@ export function renderSportsEntryCard(
       actions.appendChild(watch)
     }
     body.appendChild(actions)
+  } else if (model.nextFeedFixture) {
+    // Feed knows a fixture is coming but the EPG window doesn't
+    // reach it yet: show it with Station TBC (v2 §4.2). No Watch
+    // button — there is no listing to tune.
+    const feedFixture = model.nextFeedFixture
+    body.appendChild(
+      el(
+        "p",
+        "rs-sports-card-line",
+        `Next match: ${formatFeedFixtureTitle(feedFixture)}`,
+      ),
+    )
+    body.appendChild(
+      el(
+        "p",
+        "rs-sports-card-meta",
+        [
+          formatFeedFixtureDateTime(feedFixture.startMs),
+          feedFixture.competition,
+          STATION_TBC,
+        ].join(" · "),
+      ),
+    )
+    body.appendChild(sportsCardOpenLink())
   } else if (model.epgStatus === "failed") {
     body.appendChild(
       el(
@@ -1069,6 +1509,13 @@ interface HubRuntime {
   resolved: boolean
   /** Playlist resolution attempted while followed (re-follow path). */
   playlistAttempted: boolean
+  /** Feed state (v2 Phase 2). Null until the first fetch lands;
+   *  the table / Next Matches sections are omitted until then. */
+  tableResult: LeagueTableResult | null
+  feedResult: FeedFixturesResult | null
+  nextMatches: NextMatchRow[]
+  tableExpanded: boolean
+  feedInFlight: boolean
 }
 
 export function mountSportsHubPage(): void {
@@ -1088,6 +1535,11 @@ export function mountSportsHubPage(): void {
     timer: null,
     resolved: false,
     playlistAttempted: false,
+    tableResult: null,
+    feedResult: null,
+    nextMatches: [],
+    tableExpanded: false,
+    feedInFlight: false,
   }
 
   let callbacks: SportsHubCallbacks | null = null
@@ -1119,10 +1571,18 @@ export function mountSportsHubPage(): void {
           : runtime.epgStatus,
       scanResult: followed ? runtime.scanResult : null,
       nowMs: Date.now(),
+      tableResult: runtime.tableResult,
+      feedResult: runtime.feedResult,
+      nextMatches: runtime.nextMatches,
+      tableExpanded: runtime.tableExpanded,
     })
     const activeCallbacks =
       callbacks ??
       createSportsHubCallbacks(runtime.playlistId, SPORTS_HUB_ROUTE)
+    activeCallbacks.onToggleTableExpanded = () => {
+      runtime.tableExpanded = !runtime.tableExpanded
+      render()
+    }
     renderSportsHub(root!, model, activeCallbacks)
     if (model.hero && model.hero.id !== runtime.heroArtworkFor) {
       runtime.heroArtworkFor = model.hero.id
@@ -1161,6 +1621,34 @@ export function mountSportsHubPage(): void {
       // A corrupt channel entry must not blank the hub: keep the
       // last-good scan and surface the failure signal instead.
       runtime.pipelineFailed = true
+    }
+  }
+
+  /**
+   * Feed refresh (v2 Phase 2): table + next 5 fixtures through the
+   * Phase 1 client (1h cache, so repeat calls are cheap). A
+   * no-key/error result still lands in the runtime — the table and
+   * Next Matches sections render their honest failure copy from
+   * it. Never throws: the client returns typed results.
+   */
+  async function refreshFeed(): Promise<void> {
+    if (!mounted || runtime.feedInFlight) return
+    runtime.feedInFlight = true
+    try {
+      const [tableResult, feedResult] = await Promise.all([
+        getLeagueTable(),
+        getNextFixtures(5),
+      ])
+      if (!mounted) return
+      runtime.tableResult = tableResult
+      runtime.feedResult = feedResult
+      runtime.nextMatches = buildNextMatchRows(
+        feedResult.fixtures ?? [],
+        currentFixtures(),
+      )
+      render()
+    } finally {
+      runtime.feedInFlight = false
     }
   }
 
@@ -1248,6 +1736,15 @@ export function mountSportsHubPage(): void {
     if (!mounted) return
     runtime.epgStatus = "ready"
     scan()
+    // A fresh EPG revision can bring the station for a feed
+    // fixture that was Station TBC — re-match from the cached feed
+    // result (no refetch inside the 1h TTL).
+    if (runtime.feedResult?.fixtures) {
+      runtime.nextMatches = buildNextMatchRows(
+        runtime.feedResult.fixtures,
+        currentFixtures(),
+      )
+    }
     render()
   })
   document.addEventListener(EPG_SOURCE_STATUS_EVENT, (event) => {
@@ -1308,4 +1805,5 @@ export function mountSportsHubPage(): void {
   })
 
   void resolvePlaylist()
+  void refreshFeed()
 }

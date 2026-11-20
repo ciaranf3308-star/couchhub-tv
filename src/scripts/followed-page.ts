@@ -63,6 +63,15 @@ import {
 import { readCachedLiveChannels } from "@/scripts/lib/live-catalog.js"
 import { getChannelEpgOverride } from "@/scripts/lib/preferences.js"
 import {
+  getLeagueTable,
+  getNextFixtures,
+  type FeedFixturesResult,
+  type LeagueTableResult,
+} from "@/scripts/lib/football-data.js"
+import {
+  buildSportsEntryCardFeed,
+} from "@/scripts/lib/sports-corner-v2-hub.js"
+import {
   isSportsTeamFollowed,
   SPORTS_FOLLOW_CHANGED_EVENT,
 } from "@/scripts/lib/sports-follow.js"
@@ -576,6 +585,13 @@ async function mountSportsEntryCard(): Promise<void> {
   let overrides: Record<string, string> = {}
   let scanResult: SportsScanResult | null = null
   let epgFailed = false
+  // Feed state (v2 Phase 2): table line + next feed fixture for
+  // the card (§4.2). Null until the first fetch lands; the card
+  // renders its EPG-only copy until then. No key → the client
+  // returns no-key immediately and no fetch is made.
+  let tableResult: LeagueTableResult | null = null
+  let feedResult: FeedFixturesResult | null = null
+  let feedInFlight = false
 
   const renderCard = (): void => {
     const state = playlistId ? getProgrammesSync(playlistId) : null
@@ -585,6 +601,7 @@ async function mountSportsEntryCard(): Promise<void> {
       state ? "ready" : epgFailed ? "failed" : "loading",
       scanResult,
       Date.now(),
+      buildSportsEntryCardFeed(tableResult, feedResult, Date.now()),
     )
     section.hidden = !model.hasPlaylist
     const callbacks = createSportsHubCallbacks(playlistId, "/followed")
@@ -604,6 +621,26 @@ async function mountSportsEntryCard(): Promise<void> {
     } catch (err) {
       log.warn("[xt:sports] entry-card scan failed:", err)
       scanResult = null
+    }
+  }
+
+  const refreshFeed = async (): Promise<void> => {
+    if (feedInFlight) return
+    feedInFlight = true
+    try {
+      const [table, fixtures] = await Promise.all([
+        getLeagueTable(),
+        getNextFixtures(5),
+      ])
+      tableResult = table
+      feedResult = fixtures
+      renderCard()
+    } catch (err) {
+      // The client returns typed results, never throws; this is
+      // defensive — the EPG-only card stays up either way.
+      log.warn("[xt:sports] entry-card feed refresh failed:", err)
+    } finally {
+      feedInFlight = false
     }
   }
 
@@ -664,6 +701,7 @@ async function mountSportsEntryCard(): Promise<void> {
     }
     scan()
     renderCard()
+    void refreshFeed()
   } catch (err) {
     log.warn("[xt:sports] entry-card mount failed:", err)
   }

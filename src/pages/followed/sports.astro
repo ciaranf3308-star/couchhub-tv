@@ -182,6 +182,110 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       margin: 0.5rem 0 0;
       color: var(--rs-text-2);
     }
+    /* United visuals (v2, hard-coded): Manchester United red.
+       The RedSilk accent is burgundy; the corner's own red is the
+       club red, used for the United table row, the table expand
+       action and the Next Matches Watch buttons. Old Trafford art
+       stays on the hero + entry card (enrichment L3); no
+       feed-supplied crests are ever rendered (terms §9.2) and no
+       crest asset ships in the repo. */
+    html[data-couch] .rs-sports-shell {
+      --rs-sports-united-red: #da291c;
+    }
+    html[data-couch] .rs-sports-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 1.125rem;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-table th,
+    html[data-couch] .rs-sports-table td {
+      padding: 0.5rem 0.625rem;
+      border-bottom: 1px solid var(--rs-line-soft);
+      text-align: left;
+    }
+    html[data-couch] .rs-sports-table th {
+      font-size: 0.9375rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-table-num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    html[data-couch] .rs-sports-table-row-united {
+      background: rgba(218, 41, 28, 0.16);
+      box-shadow: inset 3px 0 0 var(--rs-sports-united-red);
+    }
+    html[data-couch] .rs-sports-table-row-united td {
+      font-weight: 700;
+    }
+    html[data-couch] .rs-sports-table-meta,
+    html[data-couch] .rs-sports-attribution {
+      margin: 0.5rem 0 0;
+      font-size: 1rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-table-stale {
+      margin: 0.5rem 0 0;
+      font-size: 1.0625rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-table-expand {
+      margin-top: 0.75rem;
+      font-size: 1.125rem;
+      font-weight: 700;
+      padding: 0.625rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-sports-united-red);
+      background: transparent;
+      color: var(--rs-text);
+      cursor: pointer;
+    }
+    html[data-couch] .rs-sports-table-expand:hover,
+    html[data-couch] .rs-sports-table-expand:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--rs-focus);
+      background: rgba(218, 41, 28, 0.14);
+    }
+    /* Next Matches rows are divs, not whole-row buttons: the row
+       carries the fixture facts, the actions area carries the
+       Watch button (when tunable) and the Phase 3 reminder slot. */
+    html[data-couch] .rs-sports-next-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+      width: 100%;
+      padding: 1.125rem 0.75rem;
+      border-bottom: 1px solid var(--rs-line-soft);
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-next-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-shrink: 0;
+    }
+    html[data-couch] .rs-sports-next-watch {
+      font-size: 1.125rem;
+      font-weight: 700;
+      padding: 0.625rem 1.5rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-sports-united-red);
+      background: var(--rs-sports-united-red);
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-next-watch:hover,
+    html[data-couch] .rs-sports-next-watch:focus-visible {
+      outline: none;
+      box-shadow:
+        0 0 0 2px var(--rs-focus),
+        0 0 20px 2px var(--rs-focus-glow);
+    }
     html[data-couch] .rs-sports-list {
       display: flex;
       flex-direction: column;
