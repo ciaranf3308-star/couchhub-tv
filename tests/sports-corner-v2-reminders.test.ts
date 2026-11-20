@@ -56,6 +56,11 @@ import {
   type SportsHubCallbacks,
   type SportsHubRoot,
 } from "@/scripts/followed-sports-page.ts"
+import {
+  checkSportsRemindersAppWide,
+  startSportsReminderWatcher,
+  stopSportsReminderWatcher,
+} from "@/scripts/lib/sports-reminder-watcher.ts"
 import type {
   SportsFixture,
   SportsScanResult,
@@ -708,5 +713,226 @@ describe("feed station matching for firing (mock sanity)", () => {
     expect(matched.slice(1).every((row) => row.station === "Station TBC")).toBe(
       true,
     )
+  })
+})
+
+describe("app-wide watcher — fires from a non-hub page (Phase 3 fix)", () => {
+  /** A bare non-hub page (e.g. Live TV / Home): no [data-sports-hub-shell]. */
+  function barePageHtml(): string {
+    return `<main id="tv-main"><section data-tv-view-root></section></main>`
+  }
+
+  async function flush(): Promise<void> {
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+  }
+
+  function setLiverpoolReminder(now: number): void {
+    setSportsReminder(
+      { id: LIVERPOOL.id, title: "Liverpool v Man Utd", startMs: LIVERPOOL_KICKOFF },
+      { nowMs: now },
+    )
+  }
+
+  function banner(): HTMLElement | null {
+    return document.querySelector<HTMLElement>("[data-sports-reminder-banner]")
+  }
+
+  it("T-v2-4 end to end via the watcher: set Friday, app open Sunday 16:00 → banner fires with Watch", async () => {
+    document.body.innerHTML = barePageHtml()
+    document.body.focus()
+    setLiverpoolReminder(FRIDAY)
+    let nowMs = SUN_15_59
+    const watched: SportsFixture[] = []
+    const handle = startSportsReminderWatcher({
+      nowMs: () => nowMs,
+      resolveRows: () => nextRows([liverpoolEpgFixture()]),
+      onWatch: (fixture) => watched.push(fixture),
+    })
+    try {
+      if (!handle) throw new Error("watcher did not start")
+      await flush()
+      expect(banner()).toBeNull()
+
+      nowMs = SUN_16_00
+      await handle.checkNow()
+      const node = banner()
+      expect(node).not.toBeNull()
+      expect(node?.textContent).toContain(
+        "Kick-off in 30 minutes — Liverpool v Man Utd",
+      )
+      expect(node?.textContent).toContain("Sky Sports Main Event")
+      // The banner never steals focus from whatever the user is
+      // doing (e.g. playback).
+      expect(document.activeElement).toBe(document.body)
+
+      const watch = document.querySelector<HTMLButtonElement>(
+        '[data-couch-key="sports:reminder:watch"]',
+      )
+      expect(watch).not.toBeNull()
+      watch?.click()
+      expect(watched).toHaveLength(1)
+      expect(watched[0]?.channelName).toBe("Sky Sports Main Event")
+      // Watch tunes and dismisses; firing consumed the record.
+      expect(banner()).toBeNull()
+      expect(getSportsReminder("fd-535101", SUN_16_00)).toBeNull()
+    } finally {
+      stopSportsReminderWatcher()
+    }
+  })
+
+  it("fires via its 60s interval, not only via checkNow", async () => {
+    vi.useFakeTimers()
+    try {
+      document.body.innerHTML = barePageHtml()
+      setLiverpoolReminder(FRIDAY)
+      let nowMs = SUN_15_59
+      const shown: unknown[] = []
+      const handle = startSportsReminderWatcher({
+        nowMs: () => nowMs,
+        resolveRows: () => nextRows([liverpoolEpgFixture()]),
+        show: (target) => shown.push(target.reminder.fixtureId),
+      })
+      try {
+        if (!handle) throw new Error("watcher did not start")
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(shown).toEqual([])
+
+        nowMs = SUN_16_00
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(shown).toEqual(["fd-535101"])
+      } finally {
+        stopSportsReminderWatcher()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("ticks are cheap when nothing is due: no feed/EPG resolution runs", async () => {
+    vi.useFakeTimers()
+    try {
+      document.body.innerHTML = barePageHtml()
+      const resolveRows = vi.fn(() => nextRows([liverpoolEpgFixture()]))
+      const handle = startSportsReminderWatcher({
+        nowMs: () => FRIDAY,
+        resolveRows,
+      })
+      try {
+        if (!handle) throw new Error("watcher did not start")
+        await vi.advanceTimersByTimeAsync(2 * 60_000)
+        expect(resolveRows).not.toHaveBeenCalled()
+      } finally {
+        stopSportsReminderWatcher()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("no double-fire: starting twice starts one interval, and a hub-style pass after the watcher fires nothing", async () => {
+    vi.useFakeTimers()
+    try {
+      document.body.innerHTML = barePageHtml()
+      setLiverpoolReminder(FRIDAY)
+      let nowMs = SUN_16_00
+      const shown: string[] = []
+      const deps = {
+        nowMs: () => nowMs,
+        resolveRows: () => nextRows([liverpoolEpgFixture()]),
+        show: (target: ReturnType<typeof resolveDueReminders>[number]) =>
+          shown.push(target.reminder.fixtureId),
+      }
+      const first = startSportsReminderWatcher(deps)
+      const second = startSportsReminderWatcher(deps)
+      try {
+        if (!first || !second) throw new Error("watcher did not start")
+        // A second start in the same document is a no-op.
+        expect(second).toBe(first)
+        await vi.advanceTimersByTimeAsync(3 * 60_000)
+        // Three ticks, one firing: the delivered-clear guard makes
+        // every later pass find nothing due.
+        expect(shown).toEqual(["fd-535101"])
+        // The old hub path, run after the watcher, also fires nothing.
+        expect(
+          checkSportsReminders(nextRows([liverpoolEpgFixture()]), () => {
+            shown.push("hub")
+          }, SUN_16_00),
+        ).toEqual([])
+        expect(shown).toEqual(["fd-535101"])
+      } finally {
+        stopSportsReminderWatcher()
+      }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a reminder set while already inside its lead window fires immediately, not on the next tick", async () => {
+    document.body.innerHTML = barePageHtml()
+    const nowMs = SUN_16_00
+    const handle = startSportsReminderWatcher({
+      nowMs: () => nowMs,
+      resolveRows: () => nextRows([liverpoolEpgFixture()]),
+    })
+    try {
+      if (!handle) throw new Error("watcher did not start")
+      await flush()
+      expect(banner()).toBeNull()
+
+      // Set at 16:00, already inside the 30-min lead window: the
+      // reminders-changed event triggers an immediate check.
+      setLiverpoolReminder(nowMs)
+      await flush()
+      expect(banner()).not.toBeNull()
+      expect(banner()?.textContent).toContain("Liverpool v Man Utd")
+    } finally {
+      stopSportsReminderWatcher()
+    }
+  })
+
+  it("stop() silences the watcher: later ticks fire nothing", async () => {
+    vi.useFakeTimers()
+    try {
+      document.body.innerHTML = barePageHtml()
+      setLiverpoolReminder(FRIDAY)
+      let nowMs = SUN_15_59
+      const shown: string[] = []
+      const handle = startSportsReminderWatcher({
+        nowMs: () => nowMs,
+        resolveRows: () => nextRows([liverpoolEpgFixture()]),
+        show: (target) => shown.push(target.reminder.fixtureId),
+      })
+      if (!handle) throw new Error("watcher did not start")
+      stopSportsReminderWatcher()
+      nowMs = SUN_16_00
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(shown).toEqual([])
+      expect(banner()).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("default resolution with no feed key and no EPG fires Station TBC with no Watch — never an invented station", async () => {
+    document.body.innerHTML = barePageHtml()
+    setLiverpoolReminder(FRIDAY)
+    // No football-data key in localStorage, no EPG loaded in this
+    // page session: the production resolution path, unmocked — no
+    // injected rows, no injected show.
+    const fired = await checkSportsRemindersAppWide({}, SUN_16_00)
+    expect(fired).toHaveLength(1)
+    expect(fired[0]?.station).toBe("Station TBC")
+    expect(fired[0]?.stationKnown).toBe(false)
+    expect(fired[0]?.epgFixture).toBeNull()
+    const node = banner()
+    expect(node).not.toBeNull()
+    expect(node?.textContent).toContain("Station TBC")
+    expect(
+      document.querySelector('[data-couch-key="sports:reminder:watch"]'),
+    ).toBeNull()
+    expect(
+      document.querySelector('[data-couch-key="sports:reminder:dismiss"]'),
+    ).not.toBeNull()
+    expect(getSportsReminder("fd-535101", SUN_16_00)).toBeNull()
   })
 })
