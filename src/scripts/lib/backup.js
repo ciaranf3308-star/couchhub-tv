@@ -149,6 +149,10 @@ import {
   readSportsFollowRecord,
   restoreSportsFollowState,
 } from "@/scripts/lib/sports-follow.js"
+import {
+  readSportsRemindersRaw,
+  restoreSportsReminders,
+} from "@/scripts/lib/sports-reminders.js"
 
 const FORMAT_VERSION = 1
 const FORMAT_NAME = "extreme-infinitv-backup"
@@ -370,6 +374,10 @@ export async function exportAll() {
     // to back up. Null when no record exists (fresh default on
     // restore). Old backups without this field simply skip.
     sportsFollow: readSportsFollowRecord(),
+    // Sports Corner v2 Phase 3: the reminders map (plan §5.2).
+    // Empty object when none are set; old backups without this
+    // field simply skip. Past fixtures are pruned on restore.
+    sportsReminders: readSportsRemindersRaw(),
     profiles: { keys: snapshotProfileKeys() },
     ai: {
       endpoint: getAiEndpoint(),
@@ -562,6 +570,14 @@ export async function importAll(blob) {
     if (restoreSportsFollowState(b.sportsFollow)) {
       summary.appSettings++
     }
+  }
+
+  // Sports Corner v2 Phase 3: restore the reminders map.
+  // Validation + past-fixture pruning live in
+  // restoreSportsReminders — a bad entry is dropped, never fatal,
+  // and old backups without the field skip.
+  if (b.sportsReminders && typeof b.sportsReminders === "object") {
+    summary.appSettings += restoreSportsReminders(b.sportsReminders)
   }
 
   // Profiles: verbatim `nylah_*` localStorage keys (registry, active
