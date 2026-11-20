@@ -1,6 +1,7 @@
 ---
 import SettingsShell from "@/components/settings/SettingsShell.astro"
 import {
+  IconBallFootball,
   IconMovie,
   IconSparkles,
 } from "@tabler/icons-svelte"
@@ -134,6 +135,75 @@ import {
           </div>
           <p class="text-2xs text-fg-3 px-5 sm:px-6 pb-5 sm:pb-6 -mt-1">
             This product uses the TMDB API but is not endorsed or certified by TMDB.
+          </p>
+        </div>
+
+        <!-- Sports Corner v2 — football-data.org key (free tier, €0).
+             Same card pattern as the TMDB key above. The key powers the
+             Manchester United table + next matches in the Sports Corner;
+             without it the hub shows an honest no-key state, never
+             invented fixtures. Attribution line is a licence
+             requirement (football-data.org terms §7.1). -->
+        <div id="card-football-data" data-settings-item class="settings-surface icon-mark-host scroll-mt-6 lg:scroll-mt-20">
+          <div class="settings-surface__header">
+            <span class="icon-mark">
+              <IconBallFootball aria-hidden="true" stroke={2} />
+            </span>
+            <h3 class="text-base font-semibold">Sports Corner — football data</h3>
+          </div>
+          <p class="settings-surface__helper text-xs text-fg-3">
+            Powers the Manchester United league table and next matches in the Sports Corner. Add a free football-data.org key — it stays on this device and is never shared. Without a key the hub says so instead of showing made-up fixtures.
+          </p>
+          <div class="settings-rows">
+
+            <!-- Feed state -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">Feed status</h3>
+                <p id="settings-football-data-state" aria-live="polite" class="text-xs text-fg-3"></p>
+              </div>
+            </div>
+
+            <!-- API key -->
+            <div data-settings-item class="settings-row scroll-mt-6 lg:scroll-mt-20">
+              <div class="settings-row__text">
+                <h3 class="text-sm font-medium leading-snug">API key</h3>
+                <p class="text-xs text-fg-3">
+                  <span>Paste a free football-data.org API key.</span>
+                  <a
+                    href="https://www.football-data.org/client/register"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-external
+                    class="text-accent underline ms-1">Get a key at football-data.org</a>
+                </p>
+                <p class="text-xs text-fg-3">
+                  Free registration, no card. One key per application — this key is only for CouchHub TV, and it must stay confidential.
+                </p>
+              </div>
+              <div class="settings-row__control w-full @2xl:w-[36rem] flex-col items-stretch gap-1">
+                <div class="flex gap-2">
+                  <input
+                    id="settings-football-data-key"
+                    type="password"
+                    autocomplete="off"
+                    spellcheck="false"
+                    class="field-input font-mono flex-1 min-w-0"
+                  />
+                  <button id="settings-football-data-test" type="button" class="btn flex-none w-auto justify-center">
+                    <span>Test key</span>
+                  </button>
+                </div>
+                <span
+                  id="settings-football-data-msg"
+                  aria-live="polite"
+                  class="text-xs text-fg-3 transition-opacity duration-300 empty:hidden"></span>
+              </div>
+            </div>
+
+          </div>
+          <p class="text-2xs text-fg-3 px-5 sm:px-6 pb-5 sm:pb-6 -mt-1">
+            Football data provided by the Football-Data.org API.
           </p>
         </div>
 

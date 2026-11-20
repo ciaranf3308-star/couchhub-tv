@@ -120,6 +120,9 @@
       getTmdbEnrichmentState,
       getTvdbEnabled,
       setTvdbEnabled,
+      getFootballDataApiKey,
+      setFootballDataApiKey,
+      getFootballDataEnrichmentState,
       getAiEndpoint,
       setAiEndpoint,
       getAiModel,
@@ -128,6 +131,7 @@
       setAiEnabled,
     } from "@/scripts/lib/app-settings.js"
     import { validateTmdbKey } from "@/scripts/lib/tmdb.ts"
+    import { validateFootballDataKey } from "@/scripts/lib/football-data.ts"
     import { saveAiKey, deleteAiKey, hasAiKey } from "@/scripts/lib/ai/keystore.ts"
     import {
       getAiStatus,
@@ -2687,6 +2691,95 @@
         }
       } finally {
         setLoading(tmdbTestBtn, false)
+      }
+    })
+
+    // -------------------------------------------------------------------
+    // Sports Corner v2 — football-data.org key (free tier, €0).
+    // Same wiring pattern as the TMDB key above: debounced save on
+    // input, save on blur, test button that saves first, honest state
+    // line. Without a key the hub shows a no-key state, never invented
+    // fixtures — so the state line must say so plainly.
+    // -------------------------------------------------------------------
+    const footballDataKeyInput = /** @type {HTMLInputElement|null} */ (
+      document.getElementById("settings-football-data-key")
+    )
+    const footballDataTestBtn = /** @type {HTMLButtonElement|null} */ (
+      document.getElementById("settings-football-data-test")
+    )
+    const footballDataMsgEl = document.getElementById("settings-football-data-msg")
+    const footballDataStateEl = document.getElementById("settings-football-data-state")
+
+    function syncFootballDataState() {
+      if (!footballDataStateEl) return
+      footballDataStateEl.textContent =
+        getFootballDataEnrichmentState() === "active"
+          ? "Feed active — table and fixtures available."
+          : "No key — Sports Corner shows no table or fixtures until you add one."
+    }
+    syncFootballDataState()
+
+    function syncFootballDataTestDisabled() {
+      if (footballDataTestBtn) {
+        footballDataTestBtn.disabled = !(footballDataKeyInput?.value || "").trim()
+      }
+    }
+
+    if (footballDataKeyInput) {
+      footballDataKeyInput.value = getFootballDataApiKey()
+      let footballDataSaveTimer = null
+      function saveFootballDataKey() {
+        if (!setFootballDataApiKey(footballDataKeyInput.value)) {
+          flashMsg(footballDataMsgEl, "Could not save the football-data.org key.")
+          return false
+        }
+        return true
+      }
+      footballDataKeyInput.addEventListener("input", () => {
+        syncFootballDataTestDisabled()
+        syncFootballDataState()
+        if (footballDataSaveTimer) window.clearTimeout(footballDataSaveTimer)
+        footballDataSaveTimer = window.setTimeout(() => {
+          saveFootballDataKey()
+          syncFootballDataState()
+        }, 350)
+      })
+      footballDataKeyInput.addEventListener("blur", () => {
+        if (footballDataSaveTimer) {
+          window.clearTimeout(footballDataSaveTimer)
+          footballDataSaveTimer = null
+        }
+        if (footballDataKeyInput.value !== getFootballDataApiKey()) saveFootballDataKey()
+        syncFootballDataState()
+      })
+      syncFootballDataTestDisabled()
+    }
+
+    footballDataTestBtn?.addEventListener("click", async () => {
+      // Save the typed key first (mirrors the TMDB Test button): a key
+      // typed moments ago may still be waiting on the 350ms debounce,
+      // and a test must never run against a key that failed to save.
+      if (footballDataKeyInput && footballDataKeyInput.value !== getFootballDataApiKey()) {
+        if (!setFootballDataApiKey(footballDataKeyInput.value)) {
+          flashMsg(footballDataMsgEl, "Could not save the football-data.org key.")
+          return
+        }
+      }
+      const key = (footballDataKeyInput?.value || getFootballDataApiKey() || "").trim()
+      setLoading(footballDataTestBtn, true)
+      try {
+        const result = await validateFootballDataKey(key)
+        if (result.ok) {
+          flashMsg(footballDataMsgEl, "Key works")
+          flashSuccess(footballDataTestBtn)
+        } else if (result.status === 401 || result.status === 403) {
+          flashMsg(footballDataMsgEl, "football-data.org rejected this key")
+        } else {
+          flashMsg(footballDataMsgEl, "Couldn't reach football-data.org")
+        }
+        syncFootballDataState()
+      } finally {
+        setLoading(footballDataTestBtn, false)
       }
     })
 

@@ -3,6 +3,7 @@ import { normalizeVideoScale } from "@/scripts/lib/video-scale.ts"
 import { sandboxRuntimeSync } from "@/scripts/lib/sandbox.ts"
 import { LANGUAGE_TOKENS } from "@/scripts/lib/language-tags.ts"
 import { compareVersions } from "@/scripts/lib/version-compare.ts"
+import { FOOTBALL_DATA_KEY_STORAGE_KEY } from "@/scripts/lib/football-data.ts"
 
 const KEY_USER_AGENT = "xt_user_agent"
 const KEY_DOWNLOAD_DIR = "xt_download_dir"
@@ -1289,6 +1290,43 @@ export function getTmdbEnrichmentState() {
 
 export function isEnrichmentActive() {
   return getTvdbEnabled() || isTmdbActive()
+}
+
+// Sports Corner v2 — football-data.org API key (free tier, €0).
+// Same pattern as the TMDB key above: the user's own key, entered in
+// Settings on their PC, stored in localStorage under the key imported
+// from football-data.ts. Never committed to the public repo (provider
+// terms §6.1: credentials must stay confidential and must not be
+// stored in code repositories of open-source projects). The key is
+// read at call time by football-data.ts; these functions are the
+// Settings UI's read/write pair.
+export const FOOTBALL_DATA_SETTINGS_EVENT = "xt:football-data-settings-changed"
+
+export function getFootballDataApiKey() {
+  return readLS(FOOTBALL_DATA_KEY_STORAGE_KEY, "").trim()
+}
+
+/**
+ * Store the football-data.org key. Returns true only when the write
+ * landed (verified by reading it back), mirroring setTmdbApiKey: a
+ * silent failed write used to look like a key lost on restart.
+ */
+export function setFootballDataApiKey(key) {
+  const trimmed = (key || "").trim()
+  const written = writeLSResult(FOOTBALL_DATA_KEY_STORAGE_KEY, trimmed)
+  const verified = written && readLS(FOOTBALL_DATA_KEY_STORAGE_KEY, "") === trimmed
+  if (!verified) {
+    log.error("[xt:settings] football-data.org key write did not persist")
+  }
+  document.dispatchEvent(
+    new CustomEvent(FOOTBALL_DATA_SETTINGS_EVENT, { detail: { key: "apiKey" } }),
+  )
+  return verified
+}
+
+/** Honest Sports Corner feed state for Settings: active only with a key. */
+export function getFootballDataEnrichmentState() {
+  return getFootballDataApiKey() ? "active" : "no-key"
 }
 
 export const AI_SETTINGS_EVENT = "xt:ai-settings-changed"
