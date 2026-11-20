@@ -83,13 +83,20 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       font-size: 1.125rem;
       color: var(--rs-text-2);
     }
+    /* Brutal red-to-black fades over the Old Trafford art (user:
+       "brutal fade gradients" — heavy, not subtle). The crest and
+       the hero text sit in the bottom-up black fade; a United-red
+       wash comes in from the left; the top edge is darkened too so
+       the photo never glares. */
     html[data-couch] .rs-sports-hero {
       position: relative;
       overflow: hidden;
       border-radius: var(--rs-radius);
       background:
-        linear-gradient(100deg, rgba(23, 10, 12, 0.92) 30%, rgba(23, 10, 12, 0.55) 60%, rgba(23, 10, 12, 0.15)),
-        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+        linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 24%),
+        linear-gradient(100deg, rgba(218, 41, 28, 0.5) 0%, rgba(120, 8, 8, 0.35) 45%, rgba(0, 0, 0, 0) 78%),
+        linear-gradient(0deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.82) 34%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 82%),
+        linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
       box-shadow: var(--rs-shadow);
       min-height: 16rem;
       display: flex;
@@ -97,9 +104,17 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
     }
     html[data-couch] .rs-sports-hero-has-art {
       background:
-        linear-gradient(100deg, rgba(23, 10, 12, 0.94) 28%, rgba(23, 10, 12, 0.6) 58%, rgba(23, 10, 12, 0.1)),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 24%),
+        linear-gradient(100deg, rgba(218, 41, 28, 0.5) 0%, rgba(120, 8, 8, 0.35) 45%, rgba(0, 0, 0, 0) 78%),
+        linear-gradient(0deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.82) 34%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 82%),
         var(--rs-sports-hero-art) center 30% / cover no-repeat,
-        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+        linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+    }
+    html[data-couch] .rs-sports-hero-crest {
+      height: 6.5rem;
+      width: auto;
+      margin-bottom: 0.5rem;
+      filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.75));
     }
     html[data-couch] .rs-sports-hero-body {
       display: flex;
@@ -186,9 +201,11 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
        The RedSilk accent is burgundy; the corner's own red is the
        club red, used for the United table row, the table expand
        action and the Next Matches Watch buttons. Old Trafford art
-       stays on the hero + entry card (enrichment L3); no
-       feed-supplied crests are ever rendered (terms §9.2) and no
-       crest asset ships in the repo. */
+       stays on the hero + entry card (enrichment L3). The genuine
+       crest ships as a repo brand asset
+       (public/brand/man-utd-crest.svg) and is rendered in the
+       hero and on the entry card; no feed-supplied crests are ever
+       rendered (terms §9.2). */
     html[data-couch] .rs-sports-shell {
       --rs-sports-united-red: #da291c;
     }

@@ -9,6 +9,9 @@
 // (MOCK_FRIDAY_AFTERNOON_MS) — a Friday afternoon when the EPG's
 // ~36h window holds none of the next 5 fixtures.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { existsSync, readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { join, dirname } from "node:path"
 import {
   FOOTBALL_DATA_FIXTURES_CACHE_KEY,
   FOOTBALL_DATA_KEY_STORAGE_KEY,
@@ -279,6 +282,81 @@ describe("T-v2-1 — mini-table renders United 18th, expand shows the full table
     expect(sectionOrder().indexOf("table")).toBeLessThan(
       sectionOrder().indexOf("hero"),
     )
+  })
+})
+
+describe("Sports Corner crest (0.11.16) — genuine crest in the hero and on the entry card", () => {
+  it("the hero carries the real crest first, before the Next match eyebrow", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "ready",
+      scanResult: scanResult([
+        fixture({
+          title: "Man Utd v Sunderland",
+          startMs: FRIDAY + 2 * HOUR,
+          stopMs: FRIDAY + 4 * HOUR,
+        }),
+      ]),
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      nextMatches: [],
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+
+    const hero = document.querySelector(".rs-sports-hero")
+    expect(hero).not.toBeNull()
+    const crest = hero?.querySelector(".rs-sports-hero-crest")
+    expect(crest).not.toBeNull()
+    expect(crest?.tagName).toBe("IMG")
+    // Bundled repo asset — never a feed URL (terms §9.2).
+    expect(crest?.getAttribute("src")).toBe("/brand/man-utd-crest.svg")
+    expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
+    // First thing in the hero body, above the "Next match" eyebrow.
+    expect(
+      hero?.querySelector(".rs-sports-hero-body")?.firstElementChild,
+    ).toBe(crest)
+  })
+
+  it("the entry card carries the crest in its art panel", async () => {
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    renderSportsEntryCard(
+      container,
+      buildSportsEntryCardModel(
+        true,
+        true,
+        "ready",
+        scanResult([
+          fixture({
+            title: "Man Utd v Sunderland",
+            startMs: FRIDAY + 2 * HOUR,
+            stopMs: FRIDAY + 4 * HOUR,
+          }),
+        ]),
+        FRIDAY,
+      ),
+      { onWatchLive: () => {}, onToggleFollow: () => {} },
+      FRIDAY,
+    )
+    const crest = container.querySelector(".rs-sports-card-crest")
+    expect(crest).not.toBeNull()
+    expect(crest?.tagName).toBe("IMG")
+    expect(crest?.getAttribute("src")).toBe("/brand/man-utd-crest.svg")
+    expect(crest?.getAttribute("alt")).toBe("Manchester United crest")
+    expect(crest?.closest(".rs-sports-card-art")).not.toBeNull()
+  })
+
+  it("the crest file exists on disk as a real SVG brand asset", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..")
+    const diskPath = join(root, "public", "brand", "man-utd-crest.svg")
+    expect(existsSync(diskPath)).toBe(true)
+    const svg = readFileSync(diskPath, "utf8")
+    expect(svg).toContain("<svg")
+    expect(svg.length).toBeGreaterThan(10_000)
   })
 })
 

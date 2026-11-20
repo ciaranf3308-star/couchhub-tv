@@ -202,13 +202,27 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       width: 12rem;
       flex-shrink: 0;
       border-radius: 0.75rem;
-      background: linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+      background: linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
       min-height: 7rem;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
     }
     html[data-couch] .rs-sports-card-art-has-art {
       background:
+        linear-gradient(0deg, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.45) 55%, rgba(0, 0, 0, 0.1) 100%),
+        linear-gradient(100deg, rgba(218, 41, 28, 0.45) 0%, rgba(0, 0, 0, 0) 70%),
         var(--rs-sports-card-art) center 30% / cover no-repeat,
-        linear-gradient(135deg, var(--rs-accent), var(--rs-bg-2));
+        linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+    }
+    html[data-couch] .rs-sports-card-crest {
+      position: relative;
+      z-index: 1;
+      height: 5rem;
+      width: auto;
+      filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.7));
     }
     html[data-couch] .rs-sports-card-body {
       display: flex;
