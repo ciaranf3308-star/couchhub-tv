@@ -320,7 +320,7 @@ describe("T-v2-2 — Next Matches lists the next 5 on a Friday afternoon", () =>
     expect(document.querySelectorAll(".rs-sports-next-watch")).toHaveLength(0)
   })
 
-  it("every Next Matches row carries the Phase 3 reminder slot (empty for now)", async () => {
+  it("every Next Matches row carries the Phase 3 reminder bell (no Watch on TBC rows)", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
     const model = buildSportsHubModel({
       followed: true,
@@ -339,8 +339,16 @@ describe("T-v2-2 — Next Matches lists the next 5 on a Friday afternoon", () =>
     expect(slots.map((slot) => slot.getAttribute("data-reminder-slot"))).toEqual(
       MOCK_NEXT_FIXTURES.map((fixture) => fixture.id),
     )
-    // The slot is the actions area: empty until Phase 3 fills it.
-    for (const slot of slots) expect(slot.childElementCount).toBe(0)
+    // Phase 3 fills the slot: exactly one bell toggle per row, and
+    // no Watch button — every row is Station TBC on a Friday.
+    for (const slot of slots) {
+      expect(slot.childElementCount).toBe(1)
+      const bell = slot.querySelector(
+        `[data-couch-key="sports:remind:${slot.getAttribute("data-reminder-slot")}"]`,
+      )
+      expect(bell).not.toBeNull()
+      expect(bell?.textContent).toBe("🔔 Remind me")
+    }
   })
 })
 
