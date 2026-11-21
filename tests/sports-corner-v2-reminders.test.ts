@@ -834,7 +834,7 @@ describe("app-wide watcher — fires from a non-hub page (Phase 3 fix)", () => {
     try {
       document.body.innerHTML = barePageHtml()
       setLiverpoolReminder(FRIDAY)
-      let nowMs = SUN_16_00
+      const nowMs = SUN_16_00
       const shown: string[] = []
       const deps = {
         nowMs: () => nowMs,
