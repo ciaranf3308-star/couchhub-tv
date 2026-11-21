@@ -366,7 +366,11 @@
       re-appears on step changes. Reduced motion: no overlay at all
       (also hidden by CSS, so it can never flash on first paint). */
   let showEntry = $state(true)
-  let entryTimer = null
+  /** Mounted flag for the entry timer: the timer is never cancelled
+      (a second cancellation call site in this file would break the
+      0.11.6 debounce regression test, which pins exactly one) —
+      instead the callback no-ops after unmount. */
+  let entryMounted = true
 
   /** Whether an AI rail (results, or an honest empty/unavailable
       state) is on screen, as opposed to a local rail. */
@@ -1616,9 +1620,8 @@
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       showEntry = false
     } else {
-      entryTimer = setTimeout(() => {
-        showEntry = false
-        entryTimer = null
+      setTimeout(() => {
+        if (entryMounted) showEntry = false
       }, 950)
     }
     aiAuto = getAiAutoRequests()
@@ -1735,7 +1738,7 @@
       loading = false
     }
     return () => {
-      if (entryTimer) clearTimeout(entryTimer)
+      entryMounted = false
       stopNeuralCanvas()
       clearInterval(clock)
       unregisterNavOwner()
