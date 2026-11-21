@@ -320,7 +320,16 @@
       scaled by the live root font-size so 1920x1080 scales
       automatically. Alpha is the reveal ember's dimming (0.45). */
   const ORB_GEOMETRY = {
-    kind: { cx: 0.5, cy: 0.24, r: 150, alpha: 1 },
+    // kind: the core sits in a clear band between the sub and the
+    // kind cards (Orbology 9.5) — never behind the headline. The
+    // grid carries the band as top margin (see .rs-kind-grid):
+    // core centre viewport y ≈ 395 at 1672x941, core radius
+    // 0.55R = 88px, so the core spans y 307–483, clearing the sub
+    // (bottom 295) and the cards (top 495) by ~12px each. cy is a
+    // fraction of canvas height (848.6px at 1672x941, top 92.4):
+    // (395 − 92.4) / 848.6 = 0.357. r 160 (was 150) so the core
+    // reads as a substantial bright disc, not a sliver.
+    kind: { cx: 0.5, cy: 0.357, r: 160, alpha: 1 },
     categories: { cx: 0.84, cy: 0.16, r: 120, alpha: 1 },
     brief: { cx: 0.82, cy: 0.28, r: 165, alpha: 1 },
     loading: { cx: 0.5, cy: 0.36, r: 165, alpha: 1 },
@@ -1307,18 +1316,34 @@
       mid.addColorStop(1, "rgba(13, 140, 253, 0)")
       ctx.fillStyle = mid
       ctx.fillRect(orbCx - rEff, orbCy - rEff, 2 * rEff, 2 * rEff)
-      // 3. Core (radius 0.55R) + soft ring (0.72R).
+      // 3. Core (radius 0.55R) + feathered ring. The core's bright
+      // centre is wide (near-white out to 0.35 of the core
+      // radius, Orbology 9.5) so the orb reads as a bright disc,
+      // not a faint blue smudge — the bright centre is what the
+      // eye lands on.
       const core = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.55 * rEff)
       core.addColorStop(0, `rgba(205, 255, 255, ${coreAlpha(0.95)})`)
-      core.addColorStop(0.55, `rgba(80, 180, 255, ${coreAlpha(0.55)})`)
+      core.addColorStop(0.35, `rgba(185, 238, 255, ${coreAlpha(0.85)})`)
+      core.addColorStop(0.7, `rgba(80, 180, 255, ${coreAlpha(0.5)})`)
       core.addColorStop(1, "rgba(80, 180, 255, 0)")
       ctx.fillStyle = core
       ctx.fillRect(orbCx - 0.55 * rEff, orbCy - 0.55 * rEff, 1.1 * rEff, 1.1 * rEff)
-      ctx.strokeStyle = `rgba(205, 255, 255, ${0.5 * alpha})`
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.arc(orbCx, orbCy, 0.72 * rEff, 0, Math.PI * 2)
-      ctx.stroke()
+      const ringBreath = 1 + 0.12 * Math.sin((2 * Math.PI * now) / breathingPeriod)
+      // Feathered ring (Orbology 9.5): a soft annulus of light,
+      // never a drawn stroke — a radial gradient band peaking at
+      // 0.72R and fading to transparent on both sides
+      // (0.66R–0.80R), so its edge can never read as a
+      // diagram-circle line. The peak alpha breathes ±12% with
+      // the orb, so the band feels organic, and it rides the same
+      // flash/swell multipliers as the core.
+      const ringPeak = Math.min(1, 0.42 * alpha * ringBreath * coreBoost * swell)
+      const ring = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.8 * rEff)
+      ring.addColorStop(0, "rgba(205, 255, 255, 0)")
+      ring.addColorStop(0.82, "rgba(205, 255, 255, 0)")
+      ring.addColorStop(0.9, `rgba(205, 255, 255, ${ringPeak})`)
+      ring.addColorStop(1, "rgba(205, 255, 255, 0)")
+      ctx.fillStyle = ring
+      ctx.fillRect(orbCx - 0.8 * rEff, orbCy - 0.8 * rEff, 1.6 * rEff, 1.6 * rEff)
       // 4. Orbiting particles: 14 dots on 2 tilted elliptical orbits.
       // Angles advance by wall-clock time, not frame count.
       const tilt = (-18 * Math.PI) / 180
@@ -1816,6 +1841,11 @@
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       orbCurrent = { ...target }
       orbTweenStart = 0
+      // Reduced motion draws one static frame (no rAF loop), so
+      // re-draw here — otherwise the orb would stay frozen at the
+      // previous step's geometry for the whole session (the
+      // 0.11.20 static frame never moved off step 1).
+      drawNeural()
       return
     }
     orbFrom = { ...orbCurrent }
@@ -2522,7 +2552,15 @@
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 1.58rem;
-    margin: 1.795rem auto 0;
+    /* Orb band (Orbology 9.5): the step-1 orb core (r 160px,
+       centre cy 0.357) lives in the clear band between the sub and
+       these cards — the core spans viewport y 307–483 at 1672x941,
+       so the grid sits 14.33rem below the sub (was 1.795rem) to
+       leave ~12px of clear space on each side of the core. The
+       cards themselves are untouched (same size, same art); the
+       band is the price of the orb being the heart of the step
+       instead of a backdrop hidden behind the headline. */
+    margin: 14.33rem auto 0;
     width: min(102.459rem, 100%);
   }
   .rs-kind-card {
@@ -2697,25 +2735,31 @@
   /* Step 3 — brief. */
   .rs-flow-step--brief .rs-flow-title--left {
     max-width: 57.44rem;
+    /* Orbology 9.5 slack: 4.1rem (was the 4.3rem base) — two
+       lines, saves ~6px toward the no-key headroom budget. */
+    font-size: 4.1rem;
   }
   /* Bottom clearance (fix #6, Orbology): the shell's fixed hints
      pill overlays the bottom ~45px of the viewport. The brief step
      is the tall one (no-key panel + mode row below the actions),
-     so it carries extra bottom padding — 2rem leaves the foot
-     ~15px above the pill, and the step now fits without scrolling
-     in both key states at both viewports (the spec's 2.6rem assumed
-     a 13px mode-row saving that does not materialise: the row is
-     single-line with or without the detail <p> — see rows="2"
-     note on the textarea). Steps 1-2 fit without scrolling, so
-     they keep the tight padding above. */
+     so it carries extra bottom padding — 1.8rem (was 2rem in
+     0.11.20) leaves the foot ~12px above the pill, and the step
+     now fits without scrolling in both key states at both
+     viewports with ≥60px of slack (Orbology 9.5 headroom budget:
+     the 0.11.20 fit had only 27px — 2px over the bar — so every
+     cut below buys room against future copy growth). Steps 1-2
+     fit without scrolling, so they keep the tight padding above. */
   .rs-flow-step--brief {
-    padding-bottom: 2rem;
+    padding-bottom: 1.8rem;
   }
   .rs-flow-step--brief .rs-flow-sub--left {
     max-width: 57.44rem;
+    /* Orbology 9.5 slack: tighter sub gap, saves ~2px. */
+    margin-top: 0.431rem;
   }
   .rs-flow-brief-form {
-    margin-top: 0.862rem;
+    /* Orbology 9.5 slack: 0.574rem (was 0.862rem), saves ~4px. */
+    margin-top: 0.574rem;
     max-width: 61.461rem;
   }
   .rs-discover__keyboard-scope {
@@ -2725,7 +2769,8 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin: 0 1.005rem 0.574rem;
+    /* Orbology 9.5 slack: 0.431rem (was 0.574rem), saves ~2px. */
+    margin: 0 1.005rem 0.431rem;
     font-size: 2.01rem;
     font-weight: 700;
     line-height: 1.3;
@@ -2740,9 +2785,15 @@
   .rs-flow-brief-input {
     display: block;
     width: 100%;
-    min-height: 10.6rem;
+    /* Orbology 9.5 slack: min-height 9.6rem (was 10.6rem) with
+       1.15rem vertical padding (was 1.544rem) — saves ~14px.
+       The 2-line placeholder still fits: 2 lines at 2.441rem /
+       1.35 = 91.8px + 2 × 1.15rem (32.1px) padding + border
+       ≈ 128px < 133.8px box. Verified live (placeholder does
+       not clip); do not cut below 9.6rem without re-checking. */
+    min-height: 9.6rem;
     resize: vertical;
-    padding: 1.544rem 3.231rem;
+    padding: 1.15rem 3.231rem;
     border-radius: 1.292rem;
     border: 0.144rem solid #dbffff;
     background: #031930;
@@ -2766,7 +2817,8 @@
     display: flex;
     align-items: center;
     gap: 3.303rem;
-    margin-top: 1.149rem;
+    /* Orbology 9.5 slack: 0.862rem (was 1.149rem), saves ~4px. */
+    margin-top: 0.862rem;
   }
   .rs-flow-link {
     background: none;
@@ -3025,7 +3077,8 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 1.436rem;
-    margin-top: 0.574rem;
+    /* Orbology 9.5 slack: 0.431rem (was 0.574rem), saves ~2px. */
+    margin-top: 0.431rem;
     max-width: 61.461rem;
   }
   .rs-discover-mode {
@@ -3073,7 +3126,9 @@
   /* AI panels (unavailable / empty / not-configured). */
   .rs-ai-panel {
     margin: 0 auto 0;
-    padding: 0.5rem 2.01rem;
+    /* Orbology 9.5 slack: 0.42rem vertical padding (was 0.5rem),
+       saves ~2px; the panel stays one line + one button row. */
+    padding: 0.42rem 2.01rem;
     max-width: 64.62rem;
     border-radius: 1.149rem;
     border: 0.072rem solid #43576f;
@@ -3094,7 +3149,8 @@
     display: flex;
     flex-wrap: wrap;
     gap: 1.149rem;
-    margin-top: 0.718rem;
+    /* Orbology 9.5 slack: 0.574rem (was 0.718rem), saves ~2px. */
+    margin-top: 0.574rem;
   }
   .rs-ai-panel__primary,
   .rs-ai-panel__secondary {

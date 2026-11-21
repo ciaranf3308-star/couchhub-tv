@@ -53,7 +53,10 @@ describe("Orbology: brain art is gone, the orb owns the glow", () => {
 
 describe("Orbology: the orb", () => {
   it("defines per-step geometry (kind centre-top, categories top-right, brief right, loading centre, reveal dim ember)", () => {
-    expect(view).toContain("kind: { cx: 0.5, cy: 0.24, r: 150, alpha: 1 }")
+    // Orbology 9.5: the kind orb moved out from behind the
+    // headline into the clear band between the sub and the cards
+    // (cy 0.357, r 160) — its core is visible, not a backdrop.
+    expect(view).toContain("kind: { cx: 0.5, cy: 0.357, r: 160, alpha: 1 }")
     expect(view).toContain("categories: { cx: 0.84, cy: 0.16, r: 120, alpha: 1 }")
     expect(view).toContain("brief: { cx: 0.82, cy: 0.28, r: 165, alpha: 1 }")
     expect(view).toContain("loading: { cx: 0.5, cy: 0.36, r: 165, alpha: 1 }")
@@ -140,14 +143,16 @@ describe("Orbology: blemish fixes", () => {
   })
 
   it("fits step 3: the itemised budget values are in the CSS", () => {
-    expect(view).toContain("padding-bottom: 2rem;")
-    expect(view).toContain("min-height: 10.6rem;")
+    // Orbology 9.5: the 0.11.20 fit left only 27px of slack (2px
+    // over the bar); the headroom budget below buys ≥60px.
+    expect(view).toContain("padding-bottom: 1.8rem;")
+    expect(view).toContain("min-height: 9.6rem;")
     // rows="2", not 3: rows set the intrinsic height and min-height
     // only raises it — rows="3" left the box at ~185px and the
     // min-height cut nothing (spec §7 item 3 as written is a no-op).
     expect(view).toContain('rows="2"')
     expect(view).toContain("font-size: 4.3rem;")
-    expect(view).toContain("padding: 0.5rem 2.01rem;")
+    expect(view).toContain("padding: 0.42rem 2.01rem;")
   })
 
   it("keeps the honest no-key first line, drops the redundant second line", () => {
@@ -164,6 +169,52 @@ describe("Orbology: blemish fixes", () => {
   it("removes the duplicated mode detail row but keeps its title attribute", () => {
     expect(view).not.toContain("rs-discover-mode__detail")
     expect(view).toContain("title={aiDetail}")
+  })
+})
+
+describe("Orbology 9.5 gap-close", () => {
+  it("step 1: the orb core lives in the clear band between the sub and the kind cards", () => {
+    // Core centre cy 0.357 → viewport y ≈ 395 at 1672x941; core
+    // radius 0.55R = 88px spans y 307–483, clearing the sub
+    // (bottom 295) and the cards (top 495) by ~12px each. The
+    // grid carries the band as top margin — the cards themselves
+    // keep their size and art.
+    expect(view).toContain("kind: { cx: 0.5, cy: 0.357, r: 160, alpha: 1 }")
+    expect(view).toContain("margin: 14.33rem auto 0;")
+    expect(view).toContain("Orb band (Orbology 9.5)")
+  })
+
+  it("the ring is a feathered gradient annulus, never a drawn stroke", () => {
+    // No crisp stroked circle anywhere in the orb draw: the ring
+    // is a radial-gradient band peaking at 0.72R, transparent on
+    // both sides, with a breathing peak alpha.
+    expect(view).not.toContain("ctx.arc(orbCx, orbCy, 0.72 * rEff")
+    expect(view).not.toContain("lineWidth = 2")
+    expect(view).toContain(
+      "createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.8 * rEff)",
+    )
+    expect(view).toContain("ringPeak")
+    expect(view).toContain("ringBreath")
+  })
+
+  it("step 3 no-key buys real headroom: tighter rhythm everywhere, not one big cut", () => {
+    // Each cut is small; together they move the no-key slack
+    // from 27px (0.11.20) to ≥60px at both viewports (measured
+    // live in the Playwright pass — vitest pins the values here).
+    expect(view).toContain("font-size: 4.1rem;") // brief title only
+    expect(view).toContain("padding: 1.15rem 3.231rem;") // textarea
+    expect(view).toContain("margin-top: 0.862rem;") // actions row
+    expect(view).toContain("margin-top: 0.574rem;") // panel actions
+    expect(view).toContain("Orbology 9.5 slack")
+  })
+
+  it("reduced motion still jump-cuts the orb: the static frame is re-drawn on every step change", () => {
+    // 0.11.20 set orbCurrent in the reduced-motion branch but
+    // never re-drew, so the orb stayed frozen at step 1 for the
+    // whole session (no rAF loop exists to pick the change up).
+    const effect = view.slice(view.indexOf("// Orb glide:"), view.indexOf("</script>"))
+    expect(effect).toContain("orbCurrent = { ...target }")
+    expect(effect).toContain("drawNeural()")
   })
 })
 
