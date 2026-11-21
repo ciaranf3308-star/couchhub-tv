@@ -12,8 +12,10 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
   <div data-sports-hub-shell class="rs-sports-shell">
     <header class="rs-sports-head">
       <div class="rs-sports-head-text">
-        <p class="rs-sports-eyebrow">Sports Corner</p>
-        <h1 class="rs-page-title">Manchester United</h1>
+        <p class="rs-sports-breadcrumb">
+          <a href="/followed">Followed</a><span aria-hidden="true"> / </span>
+          Manchester United
+        </p>
         <p data-sports-hub-meta class="rs-meta">
           Fixtures from your programme guide
         </p>
@@ -70,6 +72,52 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       gap: 0.25rem;
       min-width: 0;
     }
+    /* Mockup breadcrumb (0.11.17): "Followed / Manchester United",
+       muted, above the hub — the old "Sports Corner" eyebrow + H1
+       are gone; the UNITED CORNER hero title carries the name now. */
+    html[data-couch] .rs-sports-breadcrumb {
+      margin: 0;
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+    }
+    html[data-couch] .rs-sports-breadcrumb a {
+      color: var(--rs-text);
+      text-decoration: none;
+    }
+    html[data-couch] .rs-sports-breadcrumb a:hover,
+    html[data-couch] .rs-sports-breadcrumb a:focus-visible {
+      text-decoration: underline;
+      outline: none;
+    }
+    /* Mockup top block (0.11.17): hero left, League position
+       panel right (~280px). DOM order stays table-first (the
+       section-order test pins it); grid placement puts the hero
+       in column 1 and the panel in column 2. */
+    html[data-couch] .rs-sports-top {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 17.5rem;
+      gap: 2.5rem;
+      align-items: stretch;
+    }
+    html[data-couch] .rs-sports-top > .rs-sports-hero {
+      grid-column: 1;
+      grid-row: 1;
+    }
+    html[data-couch] .rs-sports-top > .rs-sports-table-section {
+      grid-column: 2;
+      grid-row: 1;
+      margin-bottom: 0;
+    }
+    @media (max-width: 1100px) {
+      html[data-couch] .rs-sports-top {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      html[data-couch] .rs-sports-top > .rs-sports-hero,
+      html[data-couch] .rs-sports-top > .rs-sports-table-section {
+        grid-column: 1;
+        grid-row: auto;
+      }
+    }
     html[data-couch] .rs-sports-eyebrow {
       margin: 0;
       font-size: 1rem;
@@ -109,6 +157,71 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
         linear-gradient(0deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.82) 34%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 82%),
         var(--rs-sports-hero-art) center 30% / cover no-repeat,
         linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+    }
+    /* Feed hero (mockup, 0.11.17): the bundled Old Trafford dusk
+       photo is the hero background — same brutal fades, photo
+       positioned right so the statue + signage show beside the
+       text column. DOM order keeps the crest first in the body;
+       the grid puts crest + UNITED CORNER on one row. */
+    html[data-couch] .rs-sports-hero-feed {
+      min-height: 25rem;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0) 24%),
+        linear-gradient(100deg, rgba(218, 41, 28, 0.5) 0%, rgba(120, 8, 8, 0.35) 45%, rgba(0, 0, 0, 0) 78%),
+        linear-gradient(0deg, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.82) 34%, rgba(0, 0, 0, 0.35) 60%, rgba(0, 0, 0, 0) 82%),
+        url("/art/sports/football-man-utd-old-trafford.jpg") 72% 30% / cover no-repeat,
+        linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+    }
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-body {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      column-gap: 1.25rem;
+      align-items: center;
+      width: 100%;
+      max-width: none;
+    }
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-crest {
+      grid-row: 1;
+      grid-column: 1;
+      height: 4rem;
+      margin-bottom: 0;
+    }
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-title {
+      grid-row: 1;
+      grid-column: 2;
+      font-size: 2.5rem;
+    }
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-eyebrow,
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-match,
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-meta,
+    html[data-couch] .rs-sports-hero-feed .rs-sports-hero-actions {
+      grid-column: 1 / -1;
+    }
+    html[data-couch] .rs-sports-hero-match {
+      margin: 0;
+      font-size: 2.75rem;
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-hero-actions {
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      margin-top: 0.75rem;
+      flex-wrap: wrap;
+    }
+    html[data-couch] .rs-sports-hero-remind {
+      font-size: 1.25rem;
+      padding: 0.75rem 1.5rem;
+      border-color: rgba(240, 150, 160, 0.65);
+    }
+    html[data-couch] .rs-sports-hero-station {
+      font-size: 1.125rem;
+      font-style: italic;
+      color: var(--rs-text-2);
+      border-left: 1px solid var(--rs-line-soft);
+      padding-left: 1.25rem;
     }
     html[data-couch] .rs-sports-hero-crest {
       height: 6.5rem;
@@ -209,6 +322,38 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
     html[data-couch] .rs-sports-shell {
       --rs-sports-united-red: #da291c;
     }
+    /* League position panel (mockup, 0.11.17): heading + big
+       position/points + compact 4-column table, no card chrome. */
+    html[data-couch] .rs-sports-table-heading {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-table-position {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin: 0.5rem 0 0.75rem;
+    }
+    html[data-couch] .rs-sports-table-big {
+      font-size: 3rem;
+      font-weight: 800;
+      line-height: 1;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-table-points-rule {
+      width: 1px;
+      align-self: stretch;
+      background: var(--rs-line-soft);
+    }
+    html[data-couch] .rs-sports-table-points {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--rs-text);
+      white-space: nowrap;
+    }
     html[data-couch] .rs-sports-table {
       width: 100%;
       border-collapse: collapse;
@@ -249,41 +394,159 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       font-size: 1.0625rem;
       color: var(--rs-text-2);
     }
+    /* "View full table ›" is a text link in the mockup, not a
+       bordered button — same focus ring, same couch key. */
     html[data-couch] .rs-sports-table-expand {
       margin-top: 0.75rem;
+      padding: 0.5rem 0;
       font-size: 1.125rem;
       font-weight: 700;
-      padding: 0.625rem 1.25rem;
-      border-radius: 0.75rem;
-      border: 1px solid var(--rs-sports-united-red);
+      border: none;
       background: transparent;
-      color: var(--rs-text);
+      color: var(--rs-focus);
       cursor: pointer;
+      text-align: left;
     }
     html[data-couch] .rs-sports-table-expand:hover,
     html[data-couch] .rs-sports-table-expand:focus-visible {
       outline: none;
       box-shadow: 0 0 0 2px var(--rs-focus);
-      background: rgba(218, 41, 28, 0.14);
+      background: transparent;
+      text-decoration: underline;
     }
     /* Next Matches rows are divs, not whole-row buttons: the row
        carries the fixture facts, the actions area carries the
        Watch button (when tunable) and the Phase 3 reminder slot. */
+    /* Next fixtures row (mockup, 0.11.17): the section title sits
+       left, the fixture columns run right of it in one row,
+       separated by vertical dividers. Each column is day/time,
+       opponent, HOME/AWAY · competition, station, reminder slot. */
+    html[data-couch] .rs-sports-next-section {
+      display: grid;
+      grid-template-columns: 20rem minmax(0, 1fr);
+      column-gap: 2rem;
+      align-items: start;
+    }
+    html[data-couch] .rs-sports-next-section > .rs-sports-section-title {
+      margin: 0;
+    }
+    html[data-couch] .rs-sports-next-section > .rs-sports-next-grid {
+      grid-column: 2;
+      grid-row: 1;
+    }
+    html[data-couch] .rs-sports-next-section > .rs-sports-empty-line,
+    html[data-couch] .rs-sports-next-section > .rs-sports-table-stale,
+    html[data-couch] .rs-sports-next-section > .rs-sports-attribution {
+      grid-column: 1 / -1;
+    }
+    html[data-couch] .rs-sports-next-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
     html[data-couch] .rs-sports-next-row {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1.5rem;
-      width: 100%;
-      padding: 1.125rem 0.75rem;
-      border-bottom: 1px solid var(--rs-line-soft);
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.25rem;
+      min-width: 0;
+      padding: 0.25rem 1.25rem;
       color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-next-row:first-child {
+      padding-left: 0;
+    }
+    html[data-couch] .rs-sports-next-row + .rs-sports-next-row {
+      border-left: 1px solid var(--rs-line-soft);
+    }
+    html[data-couch] .rs-sports-next-when {
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-next-opponent {
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: var(--rs-text);
+      overflow-wrap: anywhere;
+    }
+    html[data-couch] .rs-sports-next-station {
+      font-size: 1rem;
+      color: var(--rs-text-2);
     }
     html[data-couch] .rs-sports-next-actions {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      flex-shrink: 0;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-top: 0.5rem;
+    }
+    html[data-couch] .rs-sports-next-actions .rs-sports-remind {
+      font-size: 1rem;
+      padding: 0.5rem 0.875rem;
+    }
+    html[data-couch] .rs-sports-next-actions .rs-sports-next-watch {
+      font-size: 1rem;
+      padding: 0.5rem 1.125rem;
+    }
+    /* United on TV now (mockup, 0.11.17): three cards, artwork
+       thumbs with the badge top-left and the Watch pill
+       bottom-right, title + "channel · type · N min left" below. */
+    html[data-couch] .rs-sports-onnow-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 2.75rem;
+    }
+    html[data-couch] .rs-sports-onnow-card {
+      min-width: 0;
+    }
+    html[data-couch] .rs-sports-onnow-thumb {
+      position: relative;
+      aspect-ratio: 5 / 2;
+      overflow: hidden;
+      border-radius: var(--rs-radius);
+      background: linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+      box-shadow: var(--rs-shadow);
+    }
+    html[data-couch] .rs-sports-onnow-thumb-has-art {
+      background:
+        var(--rs-sports-onnow-art) center / cover no-repeat,
+        linear-gradient(135deg, #da291c 0%, #5c0703 48%, #000000 100%);
+    }
+    html[data-couch] .rs-sports-onnow-thumb .rs-sports-badge {
+      position: absolute;
+      top: 0.75rem;
+      left: 0.75rem;
+    }
+    html[data-couch] .rs-sports-onnow-watch {
+      position: absolute;
+      right: 0.75rem;
+      bottom: 0.75rem;
+      font-size: 1.125rem;
+      font-weight: 700;
+      padding: 0.5rem 1rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      background: rgba(0, 0, 0, 0.65);
+      color: #fff;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    html[data-couch] .rs-sports-onnow-watch:hover,
+    html[data-couch] .rs-sports-onnow-watch:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-onnow-title {
+      margin-top: 0.75rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+      line-height: 1.25;
+      color: var(--rs-text);
+    }
+    html[data-couch] .rs-sports-onnow-meta {
+      font-size: 1.125rem;
+      color: var(--rs-text-2);
     }
     html[data-couch] .rs-sports-next-watch {
       font-size: 1.125rem;
@@ -443,9 +706,11 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       border-radius: 999px;
       white-space: nowrap;
     }
+    /* ON NOW / LIVE badge (mockup): light pink pill, dark text —
+       same badge the EPG rows carry, so the colour is hub-wide. */
     html[data-couch] .rs-sports-badge-live {
-      background: var(--rs-accent);
-      color: var(--rs-text);
+      background: #f6b8c4;
+      color: #3a0a12;
     }
     html[data-couch] .rs-sports-badge-possible {
       border: 1px solid var(--rs-focus);

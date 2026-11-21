@@ -171,7 +171,7 @@ afterEach(() => {
 })
 
 describe("T-v2-1 — mini-table renders United 18th, expand shows the full table", () => {
-  it("renders United 18th P10 W1 D5 L4 14–19 −5 8 pts, dated and sourced", async () => {
+  it("renders United 18th P10 8 pts in the compact panel, dated and sourced", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
     const model = buildSportsHubModel({
       followed: true,
@@ -194,13 +194,15 @@ describe("T-v2-1 — mini-table renders United 18th, expand shows the full table
       "18",
       "Manchester United FC",
       "10",
-      "1",
-      "5",
-      "4",
-      "14–19",
-      "−5",
       "8",
     ])
+    // Big position + points above the mini-table (mockup panel).
+    expect(
+      document.querySelector(".rs-sports-table-big")?.textContent,
+    ).toBe("18th")
+    expect(
+      document.querySelector(".rs-sports-table-points")?.textContent,
+    ).toBe("8 points")
     const text = document.body.textContent ?? ""
     // "As of" is the fetch time — the feed carries no table
     // timestamp of its own (football-data.ts), so the honest date
@@ -243,7 +245,7 @@ describe("T-v2-1 — mini-table renders United 18th, expand shows the full table
       '[data-couch-key="sports:table:expand"]',
     )
     expect(expand).not.toBeNull()
-    expect(expand?.textContent).toBe("Show full table")
+    expect(expand?.textContent).toBe("View full table ›")
     expand?.click()
     expect(expanded).toBe(true)
     render()
@@ -378,23 +380,38 @@ describe("T-v2-2 — Next Matches lists the next 5 on a Friday afternoon", () =>
 
     const rows = [...document.querySelectorAll(".rs-sports-next-row")]
     expect(rows).toHaveLength(5)
-    expect(rows.map((row) => row.querySelector(".rs-sports-row-title")?.textContent)).toEqual([
-      "Liverpool v Man Utd",
-      "Sporting CP v Man Utd",
-      "Man Utd v Brentford",
-      "Newcastle v Man Utd",
-      "Man Utd v Coventry",
+    // Mockup columns: opponent, day/time, HOME/AWAY · competition.
+    expect(rows.map((row) => row.querySelector(".rs-sports-next-opponent")?.textContent)).toEqual([
+      "Liverpool",
+      "Sporting CP",
+      "Brentford",
+      "Newcastle",
+      "Coventry",
     ])
+    const whens = rows.map((row) => row.querySelector(".rs-sports-next-when")?.textContent ?? "")
+    expect(whens[0]).toContain("Sun")
+    expect(whens[0]).toContain("16:30")
+    expect(whens[1]).toContain("Wed")
+    expect(whens[1]).toContain("20:00")
+    expect(whens[2]).toContain("Sat")
+    expect(whens[2]).toContain("15:00")
+    expect(whens[3]).toContain("Wed")
+    expect(whens[3]).toContain("20:15")
+    expect(whens[4]).toContain("Sat")
+    expect(whens[4]).toContain("15:00")
     const metas = rows.map((row) => row.querySelector(".rs-sports-row-meta")?.textContent ?? "")
-    expect(metas[0]).toContain("Sun 22 Nov 16:30")
+    expect(metas[0]).toContain("AWAY")
     expect(metas[0]).toContain("Premier League")
-    expect(metas[1]).toContain("Wed 25 Nov 20:00")
     expect(metas[1]).toContain("UEFA Champions League")
-    expect(metas[2]).toContain("Sat 28 Nov 15:00")
-    expect(metas[3]).toContain("Wed 2 Dec 20:15")
-    expect(metas[4]).toContain("Sat 5 Dec 15:00")
-    // None of the five is inside the EPG window — every row is TBC.
-    for (const meta of metas) expect(meta).toContain("Station TBC")
+    expect(metas[2]).toContain("Premier League")
+    expect(metas[3]).toContain("Premier League")
+    expect(metas[4]).toContain("Premier League")
+    // None of the five is inside the EPG window — every column is TBC.
+    for (const row of rows) {
+      expect(
+        row.querySelector(".rs-sports-next-station")?.textContent,
+      ).toBe("Station TBC")
+    }
     expect(document.querySelectorAll(".rs-sports-next-watch")).toHaveLength(0)
   })
 
@@ -465,10 +482,13 @@ describe("T-v2-3 — Liverpool shows its station + Watch once inside the EPG win
 
     const rows = [...document.querySelectorAll(".rs-sports-next-row")]
     expect(rows).toHaveLength(5)
+    const liverpoolStation =
+      rows[0].querySelector(".rs-sports-next-station")?.textContent ?? ""
+    expect(liverpoolStation).toContain("Sky Sports Main Event")
+    expect(liverpoolStation).toContain("Sky Sports Premier League")
+    expect(liverpoolStation).not.toContain("Station TBC")
     const liverpoolMeta =
       rows[0].querySelector(".rs-sports-row-meta")?.textContent ?? ""
-    expect(liverpoolMeta).toContain("Sky Sports Main Event")
-    expect(liverpoolMeta).toContain("Sky Sports Premier League")
     expect(liverpoolMeta).toContain("Premier League")
     expect(liverpoolMeta).not.toContain("Station TBC")
     const watches = [...document.querySelectorAll(".rs-sports-next-watch")]
@@ -476,8 +496,8 @@ describe("T-v2-3 — Liverpool shows its station + Watch once inside the EPG win
     expect(watches[0].textContent).toBe("Watch")
     for (const row of rows.slice(1)) {
       expect(
-        row.querySelector(".rs-sports-row-meta")?.textContent,
-      ).toContain("Station TBC")
+        row.querySelector(".rs-sports-next-station")?.textContent,
+      ).toBe("Station TBC")
     }
     // Watch tunes the EPG fixture's channel, not an invented one.
     watches[0].dispatchEvent(new MouseEvent("click", { bubbles: true }))
@@ -623,6 +643,8 @@ describe("T-v2-6 — Recent never leads", () => {
     renderSportsHub(hubRoot(), model, stubCallbacks(), NOW)
     expect(sectionOrder()).toEqual([
       "table",
+      "hero",
+      "on-tv-now",
       "next-matches",
       "upcoming",
       "recent",
@@ -633,7 +655,7 @@ describe("T-v2-6 — Recent never leads", () => {
     )
     // Recent is last, never the lead.
     expect(text.indexOf("Recent Matches")).toBeGreaterThan(
-      text.indexOf("Next Matches"),
+      text.indexOf("Next fixtures"),
     )
     expect(text.indexOf("Man Utd v Fulham")).toBeGreaterThan(
       text.indexOf("Recent Matches"),
@@ -671,18 +693,24 @@ describe("T-v2-7 — women's fixture stays in Other Squads", () => {
     expect(text.indexOf("Birmingham v United Women")).toBeGreaterThan(
       text.indexOf("Other Squads"),
     )
-    // Never the hero.
-    expect(document.querySelector(".rs-sports-hero")).toBeNull()
-    // Never in Next Matches: the feed list is the men's five only.
-    const nextTitles = [
-      ...document.querySelectorAll(".rs-sports-next-row .rs-sports-row-title"),
+    // Never the hero: the hero is the feed's next men's match.
+    const hero = document.querySelector(".rs-sports-hero")
+    expect(hero).not.toBeNull()
+    expect(hero?.textContent).toContain("UNITED CORNER")
+    expect(hero?.textContent).toContain("Liverpool v Man Utd")
+    expect(hero?.textContent).not.toContain("Women")
+    // Never in Next fixtures: the feed list is the men's five only.
+    const nextOpponents = [
+      ...document.querySelectorAll(".rs-sports-next-row .rs-sports-next-opponent"),
     ].map((node) => node.textContent)
-    expect(nextTitles).toHaveLength(5)
-    expect(nextTitles.join(" ")).not.toContain("Women")
+    expect(nextOpponents).toHaveLength(5)
+    expect(nextOpponents.join(" ")).not.toContain("Women")
     // Upcoming renders its honest empty line (no first-team EPG
     // fixture is upcoming); Other Squads follows it.
     expect(sectionOrder()).toEqual([
       "table",
+      "hero",
+      "on-tv-now",
       "next-matches",
       "upcoming",
       "other-squads",
