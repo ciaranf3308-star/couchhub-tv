@@ -1739,7 +1739,7 @@
             {/each}
           </div>
           <p class="rs-flow-hints" aria-hidden="true">
-            <span class="rs-hint-glyph">D-pad</span> Move
+            <span class="rs-hint-glyph rs-hint-glyph--wide">D-pad</span> Move
             <span class="rs-hint-glyph">A</span> Select
             <span class="rs-hint-glyph">B</span> Back
           </p>
@@ -1777,7 +1777,7 @@
             <button type="button" onclick={goToBrief} data-nylah-item class="rs-flow-primary rs-flow-primary--continue">Continue <span aria-hidden="true">→</span></button>
           </div>
           <p class="rs-flow-hints" aria-hidden="true">
-            <span class="rs-hint-glyph">D-pad</span> Move
+            <span class="rs-hint-glyph rs-hint-glyph--wide">D-pad</span> Move
             <span class="rs-hint-glyph">A</span> Select / deselect
             <span class="rs-hint-glyph">B</span> Back
           </p>
@@ -2134,7 +2134,19 @@
     display: flex;
     flex-direction: column;
     gap: 0.862rem;
-    min-height: 100%;
+    /* 100% is .rs-main's content box (viewport minus nav minus
+       its 3rem bottom padding); +3rem reaches the viewport
+       bottom so the navy is full-bleed there too, not just at
+       the sides (the -3rem bottom margin below cancels the
+       padding in the parent's height math). The percentage only
+       resolves where the parent height is definite, so flex
+       growth is the real mechanism: .rs-main is a column flex
+       container, and growing to its content box (plus the
+       negative bottom margin) puts the panel's bottom edge at
+       the viewport bottom. flex-shrink:0 so tall steps (brief)
+       are never squeezed. */
+    min-height: calc(100% + 3rem);
+    flex: 1 0 auto;
     /* Full-bleed below the top nav: cancel the shell .rs-main
        side padding (clamp(1.5rem, 3vw, 3rem)) and bottom padding
        (3rem) so the navy fills edge-to-edge; the mockup shows no
@@ -2592,7 +2604,7 @@
     display: flex;
     align-items: center;
     gap: 3.303rem;
-    margin-top: 1.436rem;
+    margin-top: 1.149rem;
   }
   .rs-flow-link {
     background: none;
@@ -2651,12 +2663,22 @@
   .rs-flow-primary--watch {
     min-width: 17.232rem;
   }
-  /* The (A) glyph inside a primary button is a 32px circle
-     (mockup), not the wide text pill the hints row uses. */
-  .rs-flow-primary .rs-hint-glyph {
-    min-width: 0;
+  /* Flow glyphs are 32px (mockup (A)/(B) O26-32, D-pad icon
+     33x33) — but the shell owns .rs-hint-glyph at 1.05rem
+     (html[data-couch] .rs-hint-glyph, specificity 0,2,1), which
+     beats the plain scoped rule, so the flow's glyphs rendered
+     as 15px slivers. These rules out-specify the shell rule;
+     the --wide variant is the "D-pad" text pill. */
+  .rs-discover .rs-hint-glyph {
+    min-width: 2.298rem;
     width: 2.298rem;
+    height: 2.298rem;
     padding: 0;
+    font-size: 1.292rem;
+  }
+  .rs-discover .rs-hint-glyph--wide {
+    width: auto;
+    padding: 0 0.574rem;
   }
   .rs-flow-secondary {
     min-height: 4.739rem;
@@ -2938,8 +2960,8 @@
 
   /* AI panels (unavailable / empty / not-configured). */
   .rs-ai-panel {
-    margin: 0.862rem auto 0;
-    padding: 0.862rem 2.01rem;
+    margin: 0 auto 0;
+    padding: 0.574rem 2.01rem;
     max-width: 64.62rem;
     border-radius: 1.149rem;
     border: 0.072rem solid #43576f;
