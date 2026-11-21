@@ -118,6 +118,7 @@ import {
   getSportsScan,
   selectNextFixture,
   splitSportsFixtures,
+  sportsFixtureLiveBadge,
   sportsFixtureState,
   type SportsFixture,
   type SportsScanChannel,
@@ -463,8 +464,11 @@ function buildFixtureRow(
   const main = el("div", "rs-sports-row-main")
   const titleRow = el("div", "rs-sports-row-title-row")
   titleRow.appendChild(el("span", "rs-sports-row-title", fixture.title))
-  if (state === "now") {
-    titleRow.appendChild(el("span", "rs-sports-badge rs-sports-badge-live", "LIVE"))
+  // ON NOW vs LIVE (bug 4a): "LIVE" only for live football — a
+  // classic/replay/highlights programme on now reads "ON NOW".
+  const nowLabel = sportsFixtureLiveBadge(fixture, ctx.nowMs)
+  if (nowLabel) {
+    titleRow.appendChild(el("span", "rs-sports-badge rs-sports-badge-live", nowLabel))
   }
   if (ctx.showPossibleBadge) {
     titleRow.appendChild(

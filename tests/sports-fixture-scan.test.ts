@@ -16,6 +16,8 @@ import {
   scanSportsFixtures,
   selectNextFixture,
   splitSportsFixtures,
+  sportsFixtureLiveBadge,
+  type SportsFixture,
   type SportsScanChannel,
 } from "@/scripts/lib/sports-fixture-scan.ts"
 
@@ -659,4 +661,255 @@ describe("synthetic 15,319-channel scan (T15)", () => {
     },
     120_000,
   )
+})
+
+describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () => {
+  it("generic title + fixture in the description → CONFIRMED, teams from the description", () => {
+    const match = matchUnitedFixture(
+      "Football Classics",
+      "Sky Sports Premier League",
+      "Sports",
+      "Manchester United v Arsenal, Premier League, 1999.",
+    )
+    expect(match).not.toBeNull()
+    expect(match!.tier).toBe("confirmed")
+    expect(match!.squad).toBe("first-team")
+    expect(match!.classification.teams).toEqual([
+      "Manchester United",
+      "Arsenal",
+    ])
+  })
+
+  it("generic title + United as the away side in the description → CONFIRMED", () => {
+    const match = matchUnitedFixture(
+      "Football Classics",
+      "Sky Sports Premier League",
+      "Sports",
+      "A classic from 1999: Arsenal v Manchester United at Highbury.",
+    )
+    expect(match?.tier).toBe("confirmed")
+    expect(match!.classification.teams).toEqual([
+      "Arsenal",
+      "Manchester United",
+    ])
+  })
+
+  it("generic title + description naming United without a fixture → POSSIBLE", () => {
+    const match = matchUnitedFixture(
+      "Football Classics",
+      "Sky Sports Premier League",
+      "Sports",
+      "A look back at Manchester United's treble-winning season.",
+    )
+    expect(match).not.toBeNull()
+    expect(match!.tier).toBe("possible")
+    expect(match!.classification.teams?.[0]).toBe("Manchester United")
+  })
+
+  it("description with no United → not found", () => {
+    expect(
+      matchUnitedFixture(
+        "Football Classics",
+        "Sky Sports Premier League",
+        "Sports",
+        "A look back at Arsenal's Invincibles season.",
+      ),
+    ).toBeNull()
+  })
+
+  it("description naming a different United → not found", () => {
+    expect(
+      matchUnitedFixture(
+        "Football Classics",
+        "Sky Sports Premier League",
+        "Sports",
+        "Leeds United's promotion season, game by game.",
+      ),
+    ).toBeNull()
+    expect(
+      matchUnitedFixture(
+        "Football Classics",
+        "Sky Sports Premier League",
+        "Sports",
+        "Kramer vs Kramer: a film about a custody battle.",
+      ),
+    ).toBeNull()
+  })
+
+  it("bare United fixture in the description + sports channel → POSSIBLE (corroboration)", () => {
+    const match = matchUnitedFixture(
+      "Football Classics",
+      "Sky Sports Main Event",
+      "Sports",
+      "United v Sunderland from 1999.",
+    )
+    expect(match?.tier).toBe("possible")
+    expect(match!.classification.teams).toEqual(["United", "Sunderland"])
+  })
+
+  it("a title that IS another fixture is never re-labelled by its description", () => {
+    expect(
+      matchUnitedFixture(
+        "Arsenal v Chelsea",
+        "Sky Sports Main Event",
+        "Sports",
+        "Followed by Manchester United v Liverpool later today.",
+      ),
+    ).toBeNull()
+  })
+
+  it("a title match wins — the description is never consulted then", () => {
+    const match = matchUnitedFixture(
+      "Man Utd v Liverpool",
+      "",
+      "",
+      "A documentary about something else entirely.",
+    )
+    expect(match?.tier).toBe("confirmed")
+    expect(match!.classification.teams).toEqual(["Man Utd", "Liverpool"])
+  })
+
+  it("women's fixture in the description → CONFIRMED, other-squad", () => {
+    const match = matchUnitedFixture(
+      "Football Classics",
+      "Sky Sports Premier League",
+      "Sports",
+      "Manchester United Women v Arsenal Women, 2023.",
+    )
+    expect(match?.tier).toBe("confirmed")
+    expect(match?.squad).toBe("other-squad")
+  })
+
+  it("scan: a description-matched programme reaches the result with its description kept", () => {
+    const start = NOW + 2 * HOUR
+    const state = epgState([
+      {
+        id: "sky-pl",
+        name: "Sky Sports Premier League",
+        programmes: [
+          programme(
+            start,
+            start + 2 * HOUR,
+            "Football Classics",
+            "Manchester United v Arsenal, Premier League, 1999.",
+          ),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [channel(1, "Sky Sports Premier League", "sky-pl")],
+      state,
+      {},
+      "pl1",
+      NOW,
+    )
+    expect(result.fixtures).toHaveLength(1)
+    const fixture = result.fixtures[0]!
+    expect(fixture.title).toBe("Football Classics")
+    expect(fixture.teams).toEqual(["Manchester United", "Arsenal"])
+    expect(fixture.tier).toBe("confirmed")
+    expect(fixture.desc).toBe(
+      "Manchester United v Arsenal, Premier League, 1999.",
+    )
+  })
+})
+
+describe("sportsFixtureLiveBadge — ON NOW vs LIVE (bug 4a, 2026-11-21)", () => {
+  function badgeFixture(
+    overrides: Partial<SportsFixture> & { title: string },
+  ): SportsFixture {
+    return {
+      id: `1:${overrides.startMs ?? NOW - HOUR}:${overrides.title}`,
+      teams: ["Man Utd", "Sunderland"],
+      startMs: NOW - HOUR,
+      stopMs: NOW + HOUR,
+      channelId: 101,
+      channelName: "Sky Sports Main Event",
+      channelLogo: null,
+      channelCategory: "Sports",
+      alsoOn: [],
+      tier: "confirmed",
+      squad: "first-team",
+      catchupAction: "none",
+      channelCatchup: {},
+      ...overrides,
+    }
+  }
+
+  it("live match on now → LIVE", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({ title: "Man Utd v Sunderland" }),
+        NOW,
+      ),
+    ).toBe("LIVE")
+  })
+
+  it("classic on now → ON NOW", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({ title: "Football Classics: Man Utd v Sunderland" }),
+        NOW,
+      ),
+    ).toBe("ON NOW")
+  })
+
+  it("replay on now → ON NOW", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({ title: "Man Utd v Sunderland: Full Match Replay" }),
+        NOW,
+      ),
+    ).toBe("ON NOW")
+  })
+
+  it("highlights on now → ON NOW, including a highlights marker in the description", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({ title: "Man Utd v Sunderland: Highlights" }),
+        NOW,
+      ),
+    ).toBe("ON NOW")
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({
+          title: "Man Utd v Sunderland",
+          desc: "Extended highlights of the match.",
+        }),
+        NOW,
+      ),
+    ).toBe("ON NOW")
+  })
+
+  it("pre-match build-up on now → ON NOW, not LIVE", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({ title: "Man Utd v Chelsea: Build-Up" }),
+        NOW,
+      ),
+    ).toBe("ON NOW")
+  })
+
+  it("upcoming and past fixtures carry no badge", () => {
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({
+          title: "Man Utd v Sunderland",
+          startMs: NOW + 2 * HOUR,
+          stopMs: NOW + 4 * HOUR,
+        }),
+        NOW,
+      ),
+    ).toBeNull()
+    expect(
+      sportsFixtureLiveBadge(
+        badgeFixture({
+          title: "Man Utd v Sunderland",
+          startMs: NOW - 3 * HOUR,
+          stopMs: NOW - HOUR,
+        }),
+        NOW,
+      ),
+    ).toBeNull()
+  })
 })
