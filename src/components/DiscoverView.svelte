@@ -314,6 +314,60 @@
   let neuralNodes = []
   let neuralPulses = []
 
+  // -- Orbology orb (0.11.20) ---------------------------------------
+  /** Orb geometry per flow step: fractions of the canvas size;
+      radius in px at the 1672x941 design size (root 13.9333px),
+      scaled by the live root font-size so 1920x1080 scales
+      automatically. Alpha is the reveal ember's dimming (0.45). */
+  const ORB_GEOMETRY = {
+    kind: { cx: 0.5, cy: 0.24, r: 150, alpha: 1 },
+    categories: { cx: 0.84, cy: 0.16, r: 120, alpha: 1 },
+    brief: { cx: 0.82, cy: 0.28, r: 165, alpha: 1 },
+    loading: { cx: 0.5, cy: 0.36, r: 165, alpha: 1 },
+    reveal: { cx: 0.5, cy: 0.12, r: 80, alpha: 0.45 },
+  }
+  /** Current (possibly tweened) orb geometry, same units as above. */
+  let orbCurrent = { ...ORB_GEOMETRY.kind }
+  /** Tween endpoints + start time (performance.now()), 0 when idle. */
+  let orbFrom = { ...ORB_GEOMETRY.kind }
+  let orbTo = { ...ORB_GEOMETRY.kind }
+  let orbTweenStart = 0
+  /** performance.now() until which the orb stays flash-bright after a pick. */
+  let orbFlashUntil = 0
+  /** Root-font scale for orb radii (1 at 1672x941, ~1.148 at 1920x1080). */
+  let orbScale = 1
+  /** 14 orbiting dots: orbit 0 inner (0.85R, +0.12 rad/s), orbit 1
+      outer (1.15R, -0.08 rad/s). Radius fixed per dot, 2-3.5px. */
+  let orbDots = Array.from({ length: 14 }, (_, i) => ({
+    orbit: i % 2,
+    angle: (i / 14) * Math.PI * 2,
+    r: 2 + (i % 3) * 0.75,
+    bright: i % 2 === 0,
+  }))
+
+  /** cubic-bezier(0.16, 1, 0.3, 1) — the --rs-motion curve — for the
+      500ms orb glide between steps. */
+  function orbEase(t) {
+    const bx = (u) =>
+      3 * (1 - u) * (1 - u) * u * 0.16 + 3 * (1 - u) * u * u * 0.3 + u * u * u
+    const by = (u) =>
+      3 * (1 - u) * (1 - u) * u * 1 + 3 * (1 - u) * u * u * 1 + u * u * u
+    let lo = 0
+    let hi = 1
+    for (let i = 0; i < 20; i++) {
+      const mid = (lo + hi) / 2
+      if (bx(mid) < t) lo = mid
+      else hi = mid
+    }
+    return by((lo + hi) / 2)
+  }
+
+  /** "Welcome to Discovery" entry beat: mount-only, 950ms, never
+      re-appears on step changes. Reduced motion: no overlay at all
+      (also hidden by CSS, so it can never flash on first paint). */
+  let showEntry = $state(true)
+  let entryTimer = null
+
   /** Whether an AI rail (results, or an honest empty/unavailable
       state) is on screen, as opposed to a local rail. */
   const hasAiResults = $derived(aiResults !== null)
@@ -1049,6 +1103,7 @@
   /** Step 2 "Surprise me": clear the draws and move to step 3. */
   function surpriseMe() {
     flow = surpriseDiscoverCategories(flow)
+    pulseNeural()
     query = flow.brief
     void tick().then(() => inputEl?.focus({ preventScroll: true }))
   }
@@ -1056,6 +1111,7 @@
   /** Step 2 Continue: move to step 3 with the draws intact. */
   function goToBrief() {
     flow = continueToBrief(flow)
+    pulseNeural()
     query = flow.brief
     void tick().then(() => inputEl?.focus({ preventScroll: true }))
   }
@@ -1164,22 +1220,42 @@
   }
 
   // -- Neural background (one continuous space) ----------------------
-  /** One drifting-neuron frame: filaments, core glow, travelling pulses. */
+  /** One drifting-neuron frame: sparse filaments, the orb, travelling
+      pulses converging on the orb centre, drifting nodes. */
   function drawNeural() {
     const canvas = neuralCanvas
     if (!canvas) return
     const ctx = canvas.getContext("2d")
     if (!ctx) return
     ctx.clearRect(0, 0, canvas.width, canvas.height)
-    const cx = canvas.width * 0.5
-    const cy = canvas.height * 0.32
+    const now = performance.now()
+    // Orb geometry: tween toward the current step's target over
+    // 500ms (the step effect sets the endpoints); reduced motion
+    // jump-cuts instead (the effect sets orbCurrent directly).
+    if (orbTweenStart > 0) {
+      const elapsed = now - orbTweenStart
+      const p = Math.min(1, elapsed / 500)
+      const e = orbEase(p)
+      orbCurrent = {
+        cx: orbFrom.cx + (orbTo.cx - orbFrom.cx) * e,
+        cy: orbFrom.cy + (orbTo.cy - orbFrom.cy) * e,
+        r: orbFrom.r + (orbTo.r - orbFrom.r) * e,
+        alpha: orbFrom.alpha + (orbTo.alpha - orbFrom.alpha) * e,
+      }
+      if (p >= 1) orbTweenStart = 0
+    }
+    const orbCx = orbCurrent.cx * canvas.width
+    const orbCy = orbCurrent.cy * canvas.height
+    // Below 1100px wide the orb would crowd the content: draw only
+    // the sparse neuron field (same rule the old brains followed).
+    const showOrb = canvas.getBoundingClientRect().width >= 1100
     for (let i = 0; i < neuralNodes.length; i++) {
       for (let j = i + 1; j < neuralNodes.length; j++) {
         const a = neuralNodes[i]
         const b = neuralNodes[j]
         const d = Math.hypot(a.x - b.x, a.y - b.y)
-        if (d < 150) {
-          ctx.strokeStyle = `rgba(80, 160, 255, ${0.16 * (1 - d / 150)})`
+        if (d < 130) {
+          ctx.strokeStyle = `rgba(80, 160, 255, ${0.1 * (1 - d / 130)})`
           ctx.lineWidth = 1
           ctx.beginPath()
           ctx.moveTo(a.x, a.y)
@@ -1188,9 +1264,83 @@
         }
       }
     }
+    if (showOrb) {
+      const step = flow.step
+      const breathingAmp = step === "loading" ? 0.06 : 0.03
+      const breathingPeriod = step === "loading" ? 2400 : 6000
+      let rEff =
+        orbCurrent.r *
+        orbScale *
+        (1 + breathingAmp * Math.sin((2 * Math.PI * now) / breathingPeriod))
+      // Selection intake: core brightens and the orb swells briefly,
+      // decaying with a (1-p)^2 ease-out over the 600ms flash.
+      let coreBoost = 1
+      if (now < orbFlashUntil) {
+        const p = 1 - (orbFlashUntil - now) / 600
+        const fall = (1 - p) * (1 - p)
+        coreBoost = 1 + 0.4 * fall
+        rEff *= 1 + 0.04 * fall
+      }
+      // Step glide: brightness swell, x1.25 at the tween midpoint,
+      // back to 1.0 at the end.
+      let swell = 1
+      if (orbTweenStart > 0) {
+        const p = Math.min(1, (now - orbTweenStart) / 500)
+        swell = 1 + 0.25 * Math.sin(Math.PI * p)
+      }
+      const alpha = orbCurrent.alpha
+      const coreAlpha = (v) => Math.min(1, v * alpha * coreBoost * swell)
+      // 1. Outer halo (radius 2.6R).
+      const halo = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 2.6 * rEff)
+      halo.addColorStop(0, `rgba(13, 140, 253, ${0.2 * alpha})`)
+      halo.addColorStop(1, "rgba(13, 140, 253, 0)")
+      ctx.fillStyle = halo
+      ctx.fillRect(orbCx - 2.6 * rEff, orbCy - 2.6 * rEff, 5.2 * rEff, 5.2 * rEff)
+      // 2. Mid glow (radius 1.0R).
+      const mid = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, rEff)
+      mid.addColorStop(0, `rgba(13, 140, 253, ${0.3 * alpha})`)
+      mid.addColorStop(0.7, `rgba(13, 140, 253, ${0.05 * alpha})`)
+      mid.addColorStop(1, "rgba(13, 140, 253, 0)")
+      ctx.fillStyle = mid
+      ctx.fillRect(orbCx - rEff, orbCy - rEff, 2 * rEff, 2 * rEff)
+      // 3. Core (radius 0.55R) + soft ring (0.72R).
+      const core = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.55 * rEff)
+      core.addColorStop(0, `rgba(205, 255, 255, ${coreAlpha(0.95)})`)
+      core.addColorStop(0.55, `rgba(80, 180, 255, ${coreAlpha(0.55)})`)
+      core.addColorStop(1, "rgba(80, 180, 255, 0)")
+      ctx.fillStyle = core
+      ctx.fillRect(orbCx - 0.55 * rEff, orbCy - 0.55 * rEff, 1.1 * rEff, 1.1 * rEff)
+      ctx.strokeStyle = `rgba(205, 255, 255, ${0.5 * alpha})`
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(orbCx, orbCy, 0.72 * rEff, 0, Math.PI * 2)
+      ctx.stroke()
+      // 4. Orbiting particles: 14 dots on 2 tilted elliptical orbits.
+      // Angles advance by wall-clock time, not frame count.
+      const tilt = (-18 * Math.PI) / 180
+      for (const dot of orbDots) {
+        const orbitR = (dot.orbit === 0 ? 0.85 : 1.15) * rEff
+        const speed = dot.orbit === 0 ? 0.12 : -0.08
+        const theta = dot.angle + speed * (now / 1000)
+        const px = orbitR * Math.cos(theta)
+        const py = 0.62 * orbitR * Math.sin(theta)
+        const x = orbCx + px * Math.cos(tilt) - py * Math.sin(tilt)
+        const y = orbCy + px * Math.sin(tilt) + py * Math.cos(tilt)
+        ctx.fillStyle = dot.bright
+          ? `rgba(205, 255, 255, ${0.9 * alpha})`
+          : `rgba(140, 200, 255, ${0.8 * alpha})`
+        ctx.beginPath()
+        ctx.arc(x, y, dot.r, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    // Travelling pulses converge on the orb centre (the old core
+    // point when the orb is hidden on narrow screens).
+    const tx = showOrb ? orbCx : canvas.width * 0.5
+    const ty = showOrb ? orbCy : canvas.height * 0.32
     for (const p of neuralPulses) {
-      const x = p.x + (cx - p.x) * p.t
-      const y = p.y + (cy - p.y) * p.t
+      const x = p.x + (tx - p.x) * p.t
+      const y = p.y + (ty - p.y) * p.t
       ctx.fillStyle = "rgba(205, 255, 255, 0.9)"
       ctx.beginPath()
       ctx.arc(x, y, 2.4, 0, Math.PI * 2)
@@ -1198,16 +1348,11 @@
     }
     neuralPulses = neuralPulses.filter((p) => p.t < 1)
     for (const n of neuralNodes) {
-      ctx.fillStyle = "rgba(140, 200, 255, 0.85)"
+      ctx.fillStyle = "rgba(140, 200, 255, 0.6)"
       ctx.beginPath()
       ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
       ctx.fill()
     }
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 130)
-    g.addColorStop(0, "rgba(13, 140, 253, 0.28)")
-    g.addColorStop(1, "rgba(13, 140, 253, 0)")
-    ctx.fillStyle = g
-    ctx.fillRect(cx - 130, cy - 130, 260, 260)
   }
 
   /** Start the neural drift (one static frame when reduced motion). */
@@ -1219,15 +1364,17 @@
       const rect = canvas.getBoundingClientRect()
       canvas.width = Math.max(1, Math.floor(rect.width))
       canvas.height = Math.max(1, Math.floor(rect.height))
-      const count = Math.floor((canvas.width * canvas.height) / 26000)
+      const rootFont = parseFloat(getComputedStyle(document.documentElement).fontSize || "13.9333")
+      orbScale = Number.isFinite(rootFont) && rootFont > 0 ? rootFont / 13.9333 : 1
+      const count = Math.floor((canvas.width * canvas.height) / 52000)
       neuralNodes = Array.from(
-        { length: Math.min(64, Math.max(24, count)) },
+        { length: Math.min(32, Math.max(14, count)) },
         () => ({
           x: Math.random() * canvas.width,
           y: Math.random() * canvas.height,
           vx: (Math.random() - 0.5) * 0.22,
           vy: (Math.random() - 0.5) * 0.22,
-          r: 1 + Math.random() * 2.2,
+          r: 0.8 + Math.random() * 1.4,
         }),
       )
     }
@@ -1242,7 +1389,7 @@
         if (n.x < 0 || n.x > canvas.width) n.vx *= -1
         if (n.y < 0 || n.y > canvas.height) n.vy *= -1
       }
-      if (Math.random() < 0.02 && neuralNodes.length) {
+      if (Math.random() < 0.012 && neuralNodes.length) {
         const n = neuralNodes[Math.floor(Math.random() * neuralNodes.length)]
         neuralPulses.push({ x: n.x, y: n.y, t: 0 })
       }
@@ -1261,8 +1408,10 @@
     neuralCanvasResize = null
   }
 
-  /** A selection sends one pulse from a random neuron toward the core. */
+  /** A selection sends one pulse from a random neuron toward the orb
+      centre, and the orb flashes brighter for 600ms as it arrives. */
   function pulseNeural() {
+    orbFlashUntil = performance.now() + 600
     if (!neuralNodes.length) return
     const n = neuralNodes[Math.floor(Math.random() * neuralNodes.length)]
     neuralPulses.push({ x: n.x, y: n.y, t: 0 })
@@ -1463,6 +1612,15 @@
   }
 
   onMount(async () => {
+    // Entry beat: "Welcome to Discovery" for 950ms, then gone.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      showEntry = false
+    } else {
+      entryTimer = setTimeout(() => {
+        showEntry = false
+        entryTimer = null
+      }, 950)
+    }
     aiAuto = getAiAutoRequests()
     setLogicalView("discover")
     startNeuralCanvas()
@@ -1577,6 +1735,7 @@
       loading = false
     }
     return () => {
+      if (entryTimer) clearTimeout(entryTimer)
       stopNeuralCanvas()
       clearInterval(clock)
       unregisterNavOwner()
@@ -1644,6 +1803,22 @@
       })
     }
   })
+
+  // Orb glide: on every step change, tween the orb to the new step's
+  // geometry over 500ms (drawNeural interpolates). Reduced motion:
+  // jump-cut to the new geometry, no tween.
+  $effect(() => {
+    const target = ORB_GEOMETRY[flow.step]
+    if (!target) return
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      orbCurrent = { ...target }
+      orbTweenStart = 0
+      return
+    }
+    orbFrom = { ...orbCurrent }
+    orbTo = { ...target }
+    orbTweenStart = performance.now()
+  })
 </script>
 
 <div class="rs-discover" data-discover-root bind:this={rootEl} onkeydown={onDiscoverKeyDown}>
@@ -1655,6 +1830,15 @@
        not a new page. The top navigation lives in CouchLayout and
        is untouched. -->
   <canvas class="rs-neural-canvas" bind:this={neuralCanvas} aria-hidden="true"></canvas>
+
+  {#if showEntry}
+    <!-- Entry beat (Orbology): one cinematic title card, 950ms,
+         pointer-events:none so it can never block input. -->
+    <div class="rs-discover-entry" aria-hidden="true">
+      <p class="rs-discover-entry__title">Welcome to Discovery</p>
+      <p class="rs-discover-entry__sub">Let&rsquo;s find what you&rsquo;re in the mood for.</p>
+    </div>
+  {/if}
 
   <div class="rs-discover__top">
     <p class="rs-discover__eyebrow">Discover</p>
@@ -1686,13 +1870,10 @@
       <button type="button" class="rs-empty__action" onclick={() => location.reload()}>Try again</button>
     </div>
   {:else}
-    <div data-discover-flow class="rs-flow">
+    <div data-discover-flow class="rs-flow" class:is-first-mount={showEntry}>
       {#if flow.step === "kind"}
         <!-- Step 1 — "What are we watching?" -->
         <section class="rs-flow-step rs-flow-step--kind" data-nav-region="flow-kind" aria-label="What are we watching?">
-          <div class="rs-brain rs-brain--step1" aria-hidden="true">
-            <img class="rs-brain__img" src="/art/discover/brain-step1.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
-          </div>
           <h1 class="rs-flow-title">What are we watching?</h1>
           <p class="rs-flow-sub">Let&rsquo;s find what you&rsquo;re in the mood for.</p>
           <div class="rs-kind-grid" role="group" aria-label="What are we watching?">
@@ -1713,19 +1894,11 @@
               </button>
             {/each}
           </div>
-          <p class="rs-flow-hints" aria-hidden="true">
-            <span class="rs-hint-glyph rs-hint-glyph--wide">D-pad</span> Move
-            <span class="rs-hint-glyph">A</span> Select
-            <span class="rs-hint-glyph">B</span> Back
-          </p>
           <p class="rs-flow-foot">Discover concept · Step 1 of 3</p>
         </section>
       {:else if flow.step === "categories"}
         <!-- Step 2 — "What are you drawn to?" -->
         <section class="rs-flow-step rs-flow-step--categories" data-nav-region="flow-categories" aria-label="What are you drawn to?">
-          <div class="rs-brain rs-brain--step2" aria-hidden="true">
-            <img class="rs-brain__img" src="/art/discover/brain-step2.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
-          </div>
           <h1 class="rs-flow-title rs-flow-title--left">What are you drawn to?</h1>
           <p class="rs-flow-sub rs-flow-sub--left">Choose one or more.</p>
           <div class="rs-discover__mood-grid" role="group" aria-label="Genres you are drawn to">
@@ -1751,19 +1924,11 @@
             <button type="button" onclick={surpriseMe} data-nylah-item class="rs-flow-link">Surprise me</button>
             <button type="button" onclick={goToBrief} data-nylah-item class="rs-flow-primary rs-flow-primary--continue">Continue <span aria-hidden="true">→</span></button>
           </div>
-          <p class="rs-flow-hints" aria-hidden="true">
-            <span class="rs-hint-glyph rs-hint-glyph--wide">D-pad</span> Move
-            <span class="rs-hint-glyph">A</span> Select / deselect
-            <span class="rs-hint-glyph">B</span> Back
-          </p>
           <p class="rs-flow-foot">Discover concept · Step 2 of 3</p>
         </section>
       {:else if flow.step === "brief"}
         <!-- Step 3 — "Tell me what you really want." -->
         <section class="rs-flow-step rs-flow-step--brief" data-nav-region="flow-brief" aria-label="Tell me what you really want">
-          <div class="rs-brain rs-brain--step3" aria-hidden="true">
-            <img class="rs-brain__img" src="/art/discover/brain-step3.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
-          </div>
           <h1 class="rs-flow-title rs-flow-title--left">Tell me what you<br />really want.</h1>
           <p class="rs-flow-sub rs-flow-sub--left">Anything to seek out, avoid, or already seen?</p>
           {#if choicesLine}
@@ -1816,14 +1981,13 @@
           {#if flowNotice}
             <p class="rs-flow-notice" role="status">{flowNotice}</p>
           {/if}
-          {#if !canAskAi}
+          {#if !canAskAi && !flowNotice}
             <!-- Honest no-key state: AI is not configured on this
                  device, so no model call is made and nothing pretends
                  it answered. Settings fixes it; the local catalogue
                  fallback is offered instead. -->
             <div class="rs-ai-panel" role="status" data-ai-not-configured>
               <p class="rs-ai-panel__text">{askAiWhy}</p>
-              <p class="rs-ai-panel__text">AI picks need a key — or browse your library locally instead.</p>
               <div class="rs-ai-panel__actions">
                 <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-ai-panel__primary">Open AI settings</a>
                 <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__secondary">
@@ -1844,22 +2008,12 @@
             <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
               Discovery preferences
             </a>
-            {#if aiDetail}
-              <p class="rs-discover-mode__detail">{aiDetail}</p>
-            {/if}
           </div>
-          <p class="rs-flow-hints" aria-hidden="true">
-            <span class="rs-hint-glyph">A</span> Continue
-            <span class="rs-hint-glyph">B</span> Back
-          </p>
           <p class="rs-flow-foot">Discover concept · Step 3 of 3</p>
         </section>
       {:else if flow.step === "loading"}
         <!-- Finding: one honest progress line from the orchestrator. -->
         <section class="rs-flow-step rs-flow-step--loading" data-nav-region="flow-loading" aria-label="Finding your next watch">
-          <div class="rs-brain rs-brain--step3" aria-hidden="true">
-            <img class="rs-brain__img" src="/art/discover/brain-step3.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
-          </div>
           <h1 class="rs-flow-title">Finding your next watch…</h1>
           <p class="rs-meta rs-flow-loading-note" aria-live="polite" data-ai-phase>{aiStatusText} One request for this question.</p>
           {#if choicesLine}
@@ -2212,7 +2366,7 @@
   }
   .rs-flow-title--left {
     text-align: left;
-    font-size: 4.667rem;
+    font-size: 4.3rem;
     line-height: 1.02;
   }
   .rs-flow-sub {
@@ -2248,15 +2402,6 @@
     border-radius: 0.862rem;
     padding: 1.005rem 1.292rem;
   }
-  .rs-flow-hints {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1.149rem;
-    margin: 0.431rem 0 0;
-    font-size: 1.436rem;
-    color: #d9e4f1;
-  }
   .rs-hint-glyph {
     display: inline-flex;
     align-items: center;
@@ -2277,49 +2422,86 @@
     text-align: center;
   }
 
-  /* Brain / neural hero art. The generated PNG sits over a CSS
-     neural glow, so a missing asset degrades to the glow, never to
-     a broken image. */
-  .rs-brain {
-    position: relative;
-    margin: 0 auto;
+  /* Orbology entry beat: "Welcome to Discovery" title card, 950ms
+     total (fade in 350ms, hold 300ms, fade out 300ms), then removed
+     from the DOM. pointer-events:none throughout — it never blocks
+     input. z-index 5 sits above content (1), below the shell hints
+     pill (60). */
+  @keyframes rs-entry {
+    0% { opacity: 0; }
+    36.8% { opacity: 1; }
+    68.4% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .rs-discover .rs-discover-entry {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
     pointer-events: none;
-    background:
-      radial-gradient(closest-side, rgba(13, 140, 253, 0.35) 0%, rgba(13, 140, 253, 0.12) 55%, transparent 75%);
+    z-index: 5;
+    animation: rs-entry 950ms ease-out both;
   }
-  .rs-brain--step1 {
-    width: min(51.696rem, 86%);
-    height: 22.976rem;
-    /* Mockup brain body starts at y60, behind the DISCOVER label
-       row — pull the in-flow brain up over the top-row zone the
-       same way (it is pointer-events:none and clears the label
-       and dots horizontally). */
-    margin-top: -5.026rem;
-  }
-  .rs-brain--step2 {
-    position: absolute;
-    top: 0;
-    right: 10.912rem;
-    width: 25.13rem;
-    height: 15.796rem;
+  .rs-discover-entry__title {
     margin: 0;
+    font-size: 3.5rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #e4eaf0;
+    text-shadow: 0 0 2rem rgba(13, 140, 253, 0.55);
   }
-  .rs-brain--step3 {
-    position: absolute;
-    top: -1.22rem;
-    right: 0;
-    /* Mockup body is 710x480 (x935-1645, y140-620). */
-    width: 50.976rem;
-    height: 34.456rem;
-    margin: 0;
+  .rs-discover-entry__sub {
+    margin: 0.862rem 0 0;
+    font-size: 1.8rem;
+    color: #aec9e8;
   }
-  .rs-brain__img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    border-radius: 1.149rem;
-    mask-image: radial-gradient(closest-side, #000 55%, transparent 98%);
-    -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 98%);
+
+  /* Step transitions: content fades and rises in 380ms. Svelte
+     recreates the <section> on every {#if} branch change, so the
+     animation replays per step with no JS. Opacity + translate
+     only — never scale, never blur. First mount only, a 150ms
+     delay so the step rises in underneath the entry card. */
+  @keyframes rs-step-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .rs-flow-step {
+    animation: rs-step-in 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .rs-flow.is-first-mount .rs-flow-step {
+    animation-delay: 150ms;
+  }
+
+  /* Discover's neural-blue active pill. Lives here, NOT in
+     couch.css: tests/couch-visual-identity.test.ts forbids blue
+     literals there. The [href="/discover"] qualifier means this
+     can only ever match the Discover link. */
+  :global(html[data-couch] .rs-nav__link.is-active[href="/discover"]) {
+    background: #0D8CFD;
+    box-shadow: 0 0 1.5rem rgba(13, 140, 253, 0.45);
+  }
+  :global(html[data-couch] .rs-nav__link[href="/discover"]:focus-visible) {
+    outline: none;
+    box-shadow:
+      0 0 0 3px #CDFFFF,
+      0 0 1.5rem rgba(13, 140, 253, 0.6);
+  }
+
+  /* Unmistakable controller focus (neural, not pink): the global
+     :focus-visible ring is pink; these Discover controls get the
+     #CDFFFF outline instead. Per-component glows on cards, tiles,
+     primaries and the textarea already use #CDFFFF — untouched. */
+  .rs-discover .rs-flow-link:focus-visible,
+  .rs-discover .rs-discover-prefs:focus-visible,
+  .rs-discover .rs-discover-mode:focus-visible,
+  .rs-discover .rs-ai-panel__primary:focus-visible,
+  .rs-discover .rs-ai-panel__secondary:focus-visible,
+  .rs-discover .rs-discover-ask-ai:focus-visible,
+  .rs-discover .rs-discover-diag__toggle:focus-visible {
+    outline: 3px solid #CDFFFF;
+    outline-offset: 2px;
   }
 
   /* Step 1 — three kind cards. */
@@ -2407,14 +2589,6 @@
   /* Step 2 — eight genre tiles (the mood grid, reused class names). */
   .rs-flow-step--categories {
     padding-right: 3.375rem;
-  }
-  .rs-flow-step--categories .rs-brain--step2 {
-    top: -4.094rem;
-  }
-  /* Step 2 hints sit at the mockup's y841 once the foot row is
-     placed — the shared 6px margin would pull them 20px high. */
-  .rs-flow-step--categories .rs-flow-hints {
-    margin-top: 1.436rem;
   }
   .rs-discover__mood-grid {
     display: grid;
@@ -2514,15 +2688,15 @@
   .rs-flow-step--brief .rs-flow-title--left {
     max-width: 57.44rem;
   }
-  /* Bottom clearance (fix #6): the shell's fixed hints pill
-     overlays the bottom ~45px of the viewport. The brief step is
-     the tall one (no-key panel + mode row below the actions), so
-     it carries extra bottom padding: scrolled to the bottom, the
-     last panel clears the pill instead of sliding under it.
-     Steps 1-2 fit without scrolling, so they keep the tight
-     padding above. */
+  /* Bottom clearance (fix #6, Orbology): the shell's fixed hints
+     pill overlays the bottom ~45px of the viewport. The brief step
+     is the tall one (no-key panel + mode row below the actions),
+     so it carries extra bottom padding — 2.6rem leaves the foot
+     ~55px above the pill, and the step now fits without scrolling
+     in both key states at both viewports. Steps 1-2 fit without
+     scrolling, so they keep the tight padding above. */
   .rs-flow-step--brief {
-    padding-bottom: 4.523rem;
+    padding-bottom: 2.6rem;
   }
   .rs-flow-step--brief .rs-flow-sub--left {
     max-width: 57.44rem;
@@ -2553,7 +2727,7 @@
   .rs-flow-brief-input {
     display: block;
     width: 100%;
-    min-height: 13.283rem;
+    min-height: 10.6rem;
     resize: vertical;
     padding: 1.544rem 3.231rem;
     border-radius: 1.292rem;
@@ -2625,6 +2799,22 @@
     box-shadow:
       0 0 0 0.144rem rgba(205, 255, 255, 0.9),
       0 0 2.154rem rgba(23, 118, 186, 0.9);
+  }
+  /* Gentle float, primaries only (Continue / Find my next watch /
+     Watch): 5s, ±3px, transform-only so no layout shifts. Paused
+     on hover/focus so the focus ring is stable. Kind cards, genre
+     tiles, secondaries and links never float — that would be the
+     "busy" Orbology rejects. */
+  @keyframes rs-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+  .rs-flow-primary {
+    animation: rs-float 5s ease-in-out infinite;
+  }
+  .rs-flow-primary:hover,
+  .rs-flow-primary:focus-visible {
+    animation-play-state: paused;
   }
   .rs-flow-primary--find {
     min-height: 5.385rem;
@@ -2857,11 +3047,6 @@
   .rs-discover-mode--local .rs-discover-mode__dot {
     background: #f0b429;
   }
-  .rs-discover-mode__detail {
-    margin: 0;
-    font-size: 1.436rem;
-    color: #9fb6ce;
-  }
   .rs-discover-prefs {
     font-size: 1.58rem;
     color: #c5d7f1;
@@ -2875,7 +3060,7 @@
   /* AI panels (unavailable / empty / not-configured). */
   .rs-ai-panel {
     margin: 0 auto 0;
-    padding: 0.574rem 2.01rem;
+    padding: 0.5rem 2.01rem;
     max-width: 64.62rem;
     border-radius: 1.149rem;
     border: 0.072rem solid #43576f;
@@ -3044,14 +3229,19 @@
     .rs-reveal-card {
       grid-template-columns: 1fr;
     }
-    .rs-brain--step2,
-    .rs-brain--step3 {
-      display: none;
-    }
   }
   @media (prefers-reduced-motion: reduce) {
     .rs-neural-canvas {
       opacity: 0.35;
+    }
+    .rs-discover-entry {
+      display: none;
+    }
+    .rs-flow-step {
+      animation: none;
+    }
+    .rs-flow-primary {
+      animation: none;
     }
   }
 </style>
