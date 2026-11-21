@@ -2133,7 +2133,7 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 1.077rem;
+    gap: 0.862rem;
     min-height: 100%;
     /* Full-bleed below the top nav: cancel the shell .rs-main
        side padding (clamp(1.5rem, 3vw, 3rem)) and bottom padding
@@ -2211,7 +2211,7 @@
     position: relative;
     display: flex;
     flex-direction: column;
-    padding: 0 3.375rem 0.718rem;
+    padding: 0 3.375rem 0.431rem;
     min-height: 44.516rem;
   }
   .rs-flow-title {
@@ -2226,12 +2226,12 @@
   .rs-flow-title--left {
     text-align: left;
     font-size: 4.667rem;
-    line-height: 1.08;
+    line-height: 1.02;
   }
   .rs-flow-sub {
-    margin: 1.005rem 0 0;
+    margin: 0.574rem 0 0;
     font-size: 2.585rem;
-    line-height: 1.3;
+    line-height: 1.2;
     color: #b7cee6;
     text-align: center;
   }
@@ -2240,14 +2240,16 @@
     font-size: 2.154rem;
   }
   .rs-flow-choices {
-    margin: 1.436rem 0 0;
+    margin: 0.431rem 0 0;
     font-size: 1.867rem;
+    line-height: 1.3;
     color: #d2dff0;
   }
   .rs-flow-hint {
-    margin: 0.862rem 0 0 0.718rem;
+    margin: 0.431rem 0 0 0.718rem;
     font-size: 1.723rem;
     font-style: italic;
+    line-height: 1.3;
     color: #bcd6ee;
   }
   .rs-flow-notice {
@@ -2264,7 +2266,7 @@
     align-items: center;
     justify-content: center;
     gap: 1.149rem;
-    margin: 1.723rem 0 0;
+    margin: 0.431rem 0 0;
     font-size: 1.436rem;
     color: #d9e4f1;
   }
@@ -2282,7 +2284,7 @@
     color: #ffffff;
   }
   .rs-flow-foot {
-    margin: 1.149rem 0 0;
+    margin: 0.431rem 0 0;
     font-size: 1.292rem;
     color: #9fb6ce;
     text-align: center;
@@ -2300,22 +2302,28 @@
   }
   .rs-brain--step1 {
     width: min(51.696rem, 86%);
-    height: 21.54rem;
+    height: 22.976rem;
+    /* Mockup brain body starts at y60, behind the DISCOVER label
+       row — pull the in-flow brain up over the top-row zone the
+       same way (it is pointer-events:none and clears the label
+       and dots horizontally). */
+    margin-top: -5.026rem;
   }
   .rs-brain--step2 {
     position: absolute;
     top: 0;
-    right: 3.375rem;
+    right: 10.912rem;
     width: 25.13rem;
     height: 15.796rem;
     margin: 0;
   }
   .rs-brain--step3 {
     position: absolute;
-    top: 1.436rem;
+    top: -1.22rem;
     right: 0;
-    width: 37.336rem;
-    height: 31.592rem;
+    /* Mockup body is 710x480 (x935-1645, y140-620). */
+    width: 50.976rem;
+    height: 34.456rem;
     margin: 0;
   }
   .rs-brain__img {
@@ -2329,13 +2337,13 @@
 
   /* Step 1 — three kind cards. */
   .rs-flow-step--kind .rs-flow-title {
-    margin-top: 0.718rem;
+    margin-top: 0.431rem;
   }
   .rs-kind-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 1.58rem;
-    margin: 3.231rem auto 0;
+    margin: 1.795rem auto 0;
     width: min(102.459rem, 100%);
   }
   .rs-kind-card {
@@ -2414,7 +2422,12 @@
     padding-right: 3.375rem;
   }
   .rs-flow-step--categories .rs-brain--step2 {
-    top: 0.718rem;
+    top: -4.094rem;
+  }
+  /* Step 2 hints sit at the mockup's y841 once the foot row is
+     placed — the shared 6px margin would pull them 20px high. */
+  .rs-flow-step--categories .rs-flow-hints {
+    margin-top: 1.436rem;
   }
   .rs-discover__mood-grid {
     display: grid;
@@ -2455,14 +2468,14 @@
     text-shadow: 0 0.144rem 0.718rem rgba(1, 14, 30, 0.9);
   }
   .rs-discover-mood__label {
-    margin-top: 9.621rem;
+    margin-top: 8.616rem;
     font-size: 2.728rem;
     font-weight: 700;
     line-height: 1;
   }
   .rs-discover-mood__sub {
     margin-top: 0.646rem;
-    font-size: 1.436rem;
+    font-size: 1.364rem;
     color: #cfe2f4;
   }
   .rs-discover-mood__check {
@@ -2514,11 +2527,21 @@
   .rs-flow-step--brief .rs-flow-title--left {
     max-width: 57.44rem;
   }
+  /* Bottom clearance (fix #6): the shell's fixed hints pill
+     overlays the bottom ~45px of the viewport. The brief step is
+     the tall one (no-key panel + mode row below the actions), so
+     it carries extra bottom padding: scrolled to the bottom, the
+     last panel clears the pill instead of sliding under it.
+     Steps 1-2 fit without scrolling, so they keep the tight
+     padding above. */
+  .rs-flow-step--brief {
+    padding-bottom: 4.523rem;
+  }
   .rs-flow-step--brief .rs-flow-sub--left {
     max-width: 57.44rem;
   }
   .rs-flow-brief-form {
-    margin-top: 2.441rem;
+    margin-top: 0.862rem;
     max-width: 61.461rem;
   }
   .rs-discover__keyboard-scope {
@@ -2528,9 +2551,10 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin: 0 1.005rem 0.862rem;
+    margin: 0 1.005rem 0.574rem;
     font-size: 2.01rem;
     font-weight: 700;
+    line-height: 1.3;
     color: #edf5ff;
   }
   .rs-flow-brief-optional {
@@ -2544,7 +2568,7 @@
     width: 100%;
     min-height: 13.283rem;
     resize: vertical;
-    padding: 1.867rem 3.231rem;
+    padding: 1.544rem 3.231rem;
     border-radius: 1.292rem;
     border: 0.144rem solid #dbffff;
     background: #031930;
@@ -2568,7 +2592,7 @@
     display: flex;
     align-items: center;
     gap: 3.303rem;
-    margin-top: 2.154rem;
+    margin-top: 1.436rem;
   }
   .rs-flow-link {
     background: none;
@@ -2578,6 +2602,10 @@
     font-size: 1.867rem;
     color: #e2ecfc;
     text-decoration: none;
+    /* One line each: "Skip this step" and "On-screen keyboard"
+       wrap without this (the actions row is inside the 856px
+       form, and the mockup shows both on one line). */
+    white-space: nowrap;
   }
   .rs-flow-link:hover,
   .rs-flow-link:focus-visible {
@@ -2622,6 +2650,13 @@
   }
   .rs-flow-primary--watch {
     min-width: 17.232rem;
+  }
+  /* The (A) glyph inside a primary button is a 32px circle
+     (mockup), not the wide text pill the hints row uses. */
+  .rs-flow-primary .rs-hint-glyph {
+    min-width: 0;
+    width: 2.298rem;
+    padding: 0;
   }
   .rs-flow-secondary {
     min-height: 4.739rem;
@@ -2790,14 +2825,14 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 1.436rem;
-    margin-top: 2.154rem;
+    margin-top: 0.862rem;
     max-width: 61.461rem;
   }
   .rs-discover-mode {
     display: inline-flex;
     align-items: center;
     gap: 0.718rem;
-    padding: 0.718rem 1.292rem;
+    padding: 0.431rem 1.292rem;
     border-radius: 717.282rem;
     border: 0.072rem solid #43576f;
     background: rgba(2, 24, 48, 0.85);
@@ -2903,8 +2938,8 @@
 
   /* AI panels (unavailable / empty / not-configured). */
   .rs-ai-panel {
-    margin: 1.436rem auto 0;
-    padding: 1.723rem 2.01rem;
+    margin: 0.862rem auto 0;
+    padding: 0.862rem 2.01rem;
     max-width: 64.62rem;
     border-radius: 1.149rem;
     border: 0.072rem solid #43576f;
@@ -2916,24 +2951,24 @@
     color: #eef2f9;
   }
   .rs-ai-panel__text {
-    margin: 0 0 0.862rem;
-    font-size: 1.723rem;
-    line-height: 1.5;
+    margin: 0 0 0.574rem;
+    font-size: 1.508rem;
+    line-height: 1.4;
     color: #d2dff0;
   }
   .rs-ai-panel__actions {
     display: flex;
     flex-wrap: wrap;
     gap: 1.149rem;
-    margin-top: 1.149rem;
+    margin-top: 0.718rem;
   }
   .rs-ai-panel__primary,
   .rs-ai-panel__secondary {
     display: inline-flex;
     align-items: center;
-    padding: 1.005rem 1.723rem;
+    padding: 0.718rem 1.436rem;
     border-radius: 1.005rem;
-    font-size: 1.723rem;
+    font-size: 1.508rem;
     font-weight: 700;
     text-decoration: none;
     cursor: pointer;
