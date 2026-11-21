@@ -91,6 +91,7 @@ import {
   SPORTS_FOLLOW_CHANGED_EVENT,
   SPORTS_FOLLOWED_TEAM_NAME,
 } from "@/scripts/lib/sports-follow.js"
+import { maybeOpenKeysOnboarding } from "@/scripts/lib/keys-feature-entry.ts"
 import {
   SPORTS_REMINDERS_CHANGED_EVENT,
   getSportsReminder,
@@ -477,6 +478,11 @@ export interface SportsHubCallbacks {
   /** Toggle the league-table mini/full expansion (v2 §4.1).
    *  Optional: test stubs omit it; the expand button no-ops then. */
   onToggleTableExpanded?: () => void
+  /** Open the unified keys onboarding at the football-data.org step
+   *  (0.11.19 keys onboarding). Optional: test stubs omit it; the
+   *  "Set up key" buttons then no-op. The production implementation
+   *  opens the dialog and refreshes the feed when a key is saved. */
+  onSetupFootballDataKey?: () => void
 }
 
 /** Production navigation: record the return origin, then go. The
@@ -512,6 +518,12 @@ export function createSportsHubCallbacks(
         followSportsTeam()
         toast({ title: `Following ${SPORTS_FOLLOWED_TEAM_NAME}` })
       }
+    },
+    // Keys onboarding (0.11.19): the no-key "Set up key" buttons
+    // open the dialog at the football-data.org step. No feed refresh
+    // here — the mount assigns the refresh-aware version below.
+    onSetupFootballDataKey: () => {
+      void maybeOpenKeysOnboarding("football-data")
     },
   }
 }
@@ -800,6 +812,16 @@ function buildTableSection(
         "League table unavailable — add your football-data.org API key in Settings to see it.",
       ),
     )
+    // Keys onboarding (0.11.19): the no-key line keeps its honest
+    // copy and gains an action — the dialog starts at the
+    // football-data.org step and refreshes the feed on save.
+    const setup = el("button", "rs-sports-setup-key", "Set up key")
+    setup.type = "button"
+    setup.setAttribute("data-couch-key", "sports:setup-key:table")
+    setup.addEventListener("click", () => {
+      callbacks.onSetupFootballDataKey?.()
+    })
+    section.appendChild(setup)
   } else {
     section.appendChild(
       el(
@@ -954,6 +976,15 @@ function buildNextMatchesSection(
         "Next matches need your football-data.org API key — add it in Settings.",
       ),
     )
+    // Keys onboarding (0.11.19): same "Set up key" action as the
+    // table's no-key line — dialog starts at football-data.org.
+    const setup = el("button", "rs-sports-setup-key", "Set up key")
+    setup.type = "button"
+    setup.setAttribute("data-couch-key", "sports:setup-key:next")
+    setup.addEventListener("click", () => {
+      callbacks.onSetupFootballDataKey?.()
+    })
+    section.appendChild(setup)
   } else {
     section.appendChild(
       el(
@@ -2040,6 +2071,14 @@ export function mountSportsHubPage(): void {
         toast({ title: `Reminder cleared — ${title}` })
       }
       render()
+    }
+    // Keys onboarding (0.11.19): the no-key "Set up key" buttons
+    // open the dialog at the football-data.org step; a completed
+    // save refetches the feed so the table + fixtures appear without
+    // a page reload. A skip leaves the honest no-key copy in place.
+    activeCallbacks.onSetupFootballDataKey = async () => {
+      const result = await maybeOpenKeysOnboarding("football-data")
+      if (result?.outcome === "completed") await refreshFeed()
     }
     renderSportsHub(root!, model, activeCallbacks)
     if (model.hero && model.hero.id !== runtime.heroArtworkFor) {

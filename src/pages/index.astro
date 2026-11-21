@@ -23,3 +23,12 @@ import HomeView from "@/components/HomeView.svelte";
 <CouchLayout pageTitle="Home" activeNav="home" view="home">
   <HomeView client:load />
 </CouchLayout>
+
+<script>
+  // Keys onboarding launch gate (0.11.19): first run with a key
+  // missing opens the unified setup dialog (reason "launch"). It
+  // never blocks the app — a failed check resolves to "do not show" —
+  // and a skip this session suppresses it until the next launch.
+  import { runKeysLaunchGate } from "@/scripts/lib/keys-feature-entry.ts";
+  void runKeysLaunchGate();
+</script>

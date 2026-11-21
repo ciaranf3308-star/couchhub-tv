@@ -133,6 +133,7 @@
     import { validateTmdbKey } from "@/scripts/lib/tmdb.ts"
     import { validateFootballDataKey } from "@/scripts/lib/football-data.ts"
     import { saveAiKey, deleteAiKey, hasAiKey } from "@/scripts/lib/ai/keystore.ts"
+    import { maybeOpenKeysOnboarding } from "@/scripts/lib/keys-feature-entry.ts"
     import {
       getAiStatus,
       testAiConnection,
@@ -2579,6 +2580,7 @@
     )
     const tmdbMsgEl = document.getElementById("settings-tmdb-msg")
     const tmdbStateEl = document.getElementById("settings-tmdb-state")
+    const tmdbSetupBtn = document.getElementById("settings-tmdb-setup-key")
 
     /** Honest toggle state (0.11.4): with no key, On and Off are
      * indistinguishable unless the line below says the key is missing. */
@@ -2591,6 +2593,11 @@
           : state === "on-no-key"
             ? "On, no key — enrichment inactive. Add a key below."
             : "Off — enrichment disabled."
+      // Keys onboarding (0.11.19): the no-key state gains a "Set up
+      // key" action that opens the unified dialog at the TMDB step.
+      // The field below keeps working as-is — this is an entry point,
+      // not a replacement.
+      if (tmdbSetupBtn) tmdbSetupBtn.hidden = state !== "on-no-key"
     }
 
     function syncTmdbEnabled() {
@@ -2603,6 +2610,20 @@
       syncTmdbState()
     }
     syncTmdbEnabled()
+
+    // Keys onboarding (0.11.19): "Set up key" opens the unified
+    // dialog at the TMDB step; a completed save refreshes this card's
+    // field + state from the same storage Settings already uses.
+    tmdbSetupBtn?.addEventListener("click", async () => {
+      const result = await maybeOpenKeysOnboarding("tmdb")
+      if (result?.outcome === "completed") {
+        if (tmdbKeyInput) {
+          tmdbKeyInput.value = getTmdbApiKey()
+          syncTmdbTestDisabled()
+        }
+        syncTmdbState()
+      }
+    })
 
     tmdbEnabledGroup?.addEventListener("click", (event) => {
       const btn = /** @type {HTMLElement} */ (event.target).closest(".tmdb-enabled-btn")
