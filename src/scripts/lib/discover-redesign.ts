@@ -80,13 +80,6 @@ export const GENRE_LABELS: Record<string, string> = Object.fromEntries(
   GENRE_CATEGORIES.map((g) => [g.id, g.label]),
 )
 
-/** Brain / neural hero art per step (gradient fallback when missing). */
-export const STEP_BRAIN_ART: Record<number, string> = {
-  1: "/art/discover/brain-step1.png",
-  2: "/art/discover/brain-step2.png",
-  3: "/art/discover/brain-step3.png",
-}
-
 /** True for a known genre id (case-insensitive). Unknown ids are ignored. */
 export function isGenreCategory(id: string): boolean {
   return GENRE_CATEGORIES.some((g) => g.id === (id ?? "").trim().toLowerCase())
