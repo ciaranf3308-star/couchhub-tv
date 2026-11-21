@@ -509,6 +509,42 @@ describe("mockup layout — feed hero, panel, on-TV-now, fixtures row", () => {
     )
   })
 
+  it("a fixture on now is featured once — in the card, not repeated in Upcoming", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    const live = fixture({
+      title: "Man Utd v Sunderland",
+      startMs: FRIDAY - 10 * MINUTE,
+      stopMs: FRIDAY + 80 * MINUTE,
+      id: "101:live",
+    })
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "ready",
+      scanResult: scanResult([live]),
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    // One badge in the whole hub for this fixture (the card's).
+    expect(
+      [...document.querySelectorAll(".rs-sports-badge")].map(
+        (badge) => badge.textContent,
+      ),
+    ).toEqual(["LIVE"])
+    // Upcoming lists only fixtures still to come.
+    expect(
+      document.querySelector('[data-sports-section="upcoming"]')
+        ?.textContent,
+    ).toContain("No upcoming matches in the guide right now")
+    expect(
+      document.querySelectorAll('[data-couch-key^="sports:fixture:"]'),
+    ).toHaveLength(0)
+  })
+
   it("formatters: hero day/time, column day/time, opponent, HOME/AWAY", () => {
     expect(formatFeedHeroDateTime(KICKOFF)).toBe("Sunday · 16:30")
     expect(formatFixtureDayTime(KICKOFF)).toBe("Sun · 16:30")

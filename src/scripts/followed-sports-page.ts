@@ -1409,10 +1409,19 @@ export function renderSportsHub(
       ),
     )
   }
-  const { upcoming, possible, otherSquadsUpcoming, otherSquadsRecent, recent } =
+  const { possible, otherSquadsUpcoming, otherSquadsRecent, recent } =
     model.split
+  // A fixture on air right now is featured once, in the on-TV-now
+  // cards above — it does NOT repeat in Upcoming (which is for
+  // fixtures still to come). This also keeps each fixture's badge
+  // painted exactly once in the hub: the on-now badge tests collect
+  // badges document-wide, and the card and the row would double it.
+  const upcoming = model.split.upcoming.filter(
+    (fixture) => sportsFixtureState(fixture, nowMs) !== "now",
+  )
   const hasAnyFixture =
     upcoming.length > 0 ||
+    model.onTvNow.length > 0 ||
     possible.length > 0 ||
     otherSquadsUpcoming.length > 0 ||
     otherSquadsRecent.length > 0 ||
