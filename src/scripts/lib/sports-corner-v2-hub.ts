@@ -131,6 +131,46 @@ export function formatFeedFixtureDateTime(startMs: number): string {
   return `${get("weekday")} ${get("day")} ${get("month")} ${get("hour")}:${get("minute")}`
 }
 
+// ── EPG ↔ feed kick-off matching: the pre-match window (bug 4b, 2026-11-21) ──
+
+/**
+ * How early an EPG listing may start and still be the broadcast of
+ * a feed fixture: 60 minutes before kick-off.
+ *
+ * Why 60: UK pre-match build-up slots run 30–60 minutes (Sky
+ * Sports' standard build-up is 30 minutes, Super Sunday / big
+ * matches run a full hour; TNT Sports is the same shape), so 60
+ * covers the longest standard build-up. A listing starting more
+ * than an hour before kick-off is a different programme — an
+ * earlier match, a magazine show, the news — and matching it would
+ * tune the user into the wrong programme. A listing starting after
+ * kick-off never matches here: the broadcast has already begun
+ * elsewhere, and the exact-minute rule never matched those either.
+ *
+ * This is the shared rule for the two call sites that still match
+ * on the exact kick-off minute — matchFixtureStation() in
+ * football-data.ts (station) and buildNextMatchRows() in
+ * sports-reminder-fire.ts (Watch target) — which must both use it
+ * so station and Watch can never disagree about which listing a
+ * match belongs to. (Neither file is owned by this change; the
+ * helper + tests land here so the swap is a one-line call each.)
+ */
+export const SPORTS_PREMATCH_WINDOW_MS = 60 * 60_000
+
+/** True when an EPG listing starting at `listingStartMs` is the
+ *  broadcast of a fixture kicking off at `kickoffMs`: it starts at
+ *  kick-off, or up to SPORTS_PREMATCH_WINDOW_MS before it. */
+export function epgListingMatchesKickoff(
+  listingStartMs: number,
+  kickoffMs: number,
+): boolean {
+  if (!Number.isFinite(listingStartMs) || !Number.isFinite(kickoffMs)) {
+    return false
+  }
+  const leadMs = kickoffMs - listingStartMs
+  return leadMs >= 0 && leadMs <= SPORTS_PREMATCH_WINDOW_MS
+}
+
 // ── Entry-card feed data (plan §4.2) ────────────────────────────
 
 export interface SportsEntryCardFeed {

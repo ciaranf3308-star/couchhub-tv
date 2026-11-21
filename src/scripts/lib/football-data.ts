@@ -1,8 +1,9 @@
 // Sports Corner v2 — football-data.org feed client (Phase 1, plan §5.1).
 //
-// Table + next fixtures come from football-data.org (free tier, €0 —
-// approved 2026-11-20, D1-A). Stations and tune-in still come from the
-// EPG; this module NEVER invents a station, a table row or a fixture.
+// Table + next fixtures + recent form come from football-data.org
+// (free tier, €0 — approved 2026-11-20, D1-A). Stations and tune-in
+// still come from the EPG; this module NEVER invents a station, a
+// table row, a fixture or a result.
 //
 // Honesty contract (plan §3 + §5.1):
 // - No API key in code, ever. The key lives in Settings localStorage
@@ -24,14 +25,15 @@
 // client (tmdb.ts). No Tauri allow-list entry is needed:
 // src-tauri/capabilities/default.json already allows `https://**/*`,
 // and safe_fetch.rs is only the manifest probe, not a fetch gate.
-// Rate limit (free tier): 10 requests/minute. A refresh needs 3 calls
-// (standings + PL matches + CL matches) and is cached for 1h, so
-// normal use is far inside the limit.
+// Rate limit (free tier): 10 requests/minute. A refresh needs 4 calls
+// (standings + PL matches + CL matches + PL past matches for form)
+// and is cached for 1h, so normal use is far inside the limit.
 //
 // Tests must NEVER hit the live API (no key exists): every public
 // fetch takes an injectable `fetchImpl`, and the parsers are pure.
 
 import { log } from "@/scripts/lib/log.js"
+import { epgListingMatchesKickoff } from "@/scripts/lib/sports-corner-v2-hub.js"
 
 /** Base URL for every football-data.org v4 call. */
 export const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4"
@@ -61,6 +63,8 @@ export const FOOTBALL_DATA_KEY_STORAGE_KEY = "xt_football_data_key"
 export const FOOTBALL_DATA_TABLE_CACHE_KEY = "xt_football_data_table_cache"
 export const FOOTBALL_DATA_FIXTURES_CACHE_KEY =
   "xt_football_data_fixtures_cache"
+export const FOOTBALL_DATA_RESULTS_CACHE_KEY =
+  "xt_football_data_results_cache"
 
 /** Default cache TTL: 1h (plan §5.1). */
 export const FOOTBALL_DATA_DEFAULT_TTL_MS = 60 * 60 * 1000
@@ -72,6 +76,46 @@ export const FOOTBALL_DATA_MAX_TABLE_AGE_MS = 24 * 60 * 60 * 1000
 /** "Station TBC" — the only station text used when the EPG has no
  *  listing for a feed fixture yet. Never a guessed channel. */
 export const STATION_TBC = "Station TBC"
+
+// ── Domestic cups — codes + free-tier gap (bug 5, 21 Nov 2026) ──
+
+/**
+ * FA Cup code (v4 lookup tables, id 2055) and Football League Cup
+ * code (id 2139) — the League Cup is the Carabao/EFL Cup.
+ * WARNING: ELC (id 2016) is the Championship, NOT the EFL Cup —
+ * never use it for the cup.
+ *
+ * NEITHER CUP IS FETCHED — both are outside the free tier (verified
+ * 2026-11-21 against the provider's own pages):
+ * - Free tier = exactly 12 competitions (TIER_ONE: PL, ELC, CL, EC,
+ *   FL1, BL1, SA, DED, PPL, PD, BSA, WC). No cup of any country is
+ *   among them (coverage: football-data.org/coverage, pricing:
+ *   football-data.org/pricing).
+ * - Per the provider's per-competition plan field (live-probed
+ *   2026-08-26, same free key 403s on the cups while PL returns
+ *   200): FAC is TIER_TWO, FLC is TIER_THREE. On the published
+ *   pricing (Standard €49/mo = 30 competitions, Advanced €99/mo =
+ *   50, Pro €199/mo = 100) that means the FA Cup alone needs
+ *   Advanced (€99/mo) and the League Cup needs Pro (€199/mo) — both
+ *   cups together need Pro. One secondary source claims the EFL Cup
+ *   is not sold at any tier, so confirm on the coverage page before
+ *   paying anything.
+ * - Nothing was bought and no key tier was changed. getNextFixtures
+ *   stays PL + CL until the user decides. If a paid key ever lands
+ *   in Settings, enabling a cup is a one-line change: extend
+ *   FOOTBALL_DATA_FIXTURE_COMPETITIONS — the fetcher, parser and
+ *   mock already handle any competition code.
+ */
+export const FOOTBALL_DATA_FA_CUP_CODE = "FAC"
+export const FOOTBALL_DATA_LEAGUE_CUP_CODE = "FLC"
+
+/** Competitions whose fixtures getNextFixtures actually fetches.
+ *  Free tier only: PL + CL. Cups stay out until a paid key exists
+ *  (see the note above) — adding "FAC" | "FLC" here is the whole
+ *  change when that day comes. */
+export const FOOTBALL_DATA_FIXTURE_COMPETITIONS: ReadonlyArray<
+  "PL" | "CL"
+> = ["PL", "CL"]
 
 // ── Types (plan §5.1, verbatim field sets) ───────────────────────
 
@@ -106,7 +150,20 @@ export interface FeedFixture {
   competition: string
   startMs: number
   venue?: string
+  /** Feed status (`SCHEDULED` / `TIMED` / `FINISHED` …) when the
+   *  payload carried one. Upcoming fixtures are filtered on it;
+   *  recent form is derived from it — never guessed. */
+  status?: string
+  /** Full-time score when the feed carried one. Nulls for a match
+   *  that has not kicked off; a FINISHED match without numeric
+   *  full-time goals is a bad row and the parser rejects it. */
+  score?: { home: number | null; away: number | null }
 }
+
+/** One Last-five mark, most recent first: W = United won, D = drew,
+ *  L = lost. Derived only from FINISHED Premier League results with
+ *  feed scores — never invented (mockup rebuild, 2026-11-21). */
+export type FormMark = "W" | "D" | "L"
 
 // ── Result shape (typed failure states, never invented data) ─────
 
@@ -137,6 +194,25 @@ export interface LeagueTableResult {
 export interface FeedFixturesResult {
   status: FootballDataFetchStatus
   fixtures: FeedFixture[] | null
+  stale: boolean
+  mayBeOutOfDate: boolean
+  fetchedAt: number | null
+  fromCache: boolean
+  error?: string
+}
+
+/**
+ * Recent-form result (Last five, mockup rebuild 2026-11-21).
+ * `form` is the W/D/L marks, most recent first (fewer than `n` early
+ * in the season — the hub renders what exists and omits the row when
+ * there is nothing). `results` is the finished United PL fixtures
+ * behind the marks, most recent first. Null on no-key/error; stale
+ * carries the last-good marks.
+ */
+export interface FeedFormResult {
+  status: FootballDataFetchStatus
+  form: FormMark[] | null
+  results: FeedFixture[] | null
   stale: boolean
   mayBeOutOfDate: boolean
   fetchedAt: number | null
@@ -218,6 +294,7 @@ interface Cached<T> {
 
 let memoryTable: Cached<LeagueTable> | null = null
 let memoryFixtures: Cached<FeedFixture[]> | null = null
+let memoryResults: Cached<FeedFixture[]> | null = null
 
 function readCache<T>(key: string): Cached<T> | null {
   const raw = lsGet(key)
@@ -239,8 +316,10 @@ function writeCache<T>(key: string, entry: Cached<T>): void {
 export function clearFootballDataCache(): void {
   memoryTable = null
   memoryFixtures = null
+  memoryResults = null
   lsRemove(FOOTBALL_DATA_TABLE_CACHE_KEY)
   lsRemove(FOOTBALL_DATA_FIXTURES_CACHE_KEY)
+  lsRemove(FOOTBALL_DATA_RESULTS_CACHE_KEY)
 }
 
 // ── Team-name normalisation (shared by fixture filter + matcher) ──
@@ -282,6 +361,42 @@ export function isUnitedFixture(fixture: FeedFixture): boolean {
     normaliseTeamName(fixture.home) === "manchester united" ||
     normaliseTeamName(fixture.away) === "manchester united"
   )
+}
+
+/**
+ * One fixture's result from United's side: "W" / "D" / "L", or null
+ * when the fixture is not a decidable United result (not United,
+ * not FINISHED, or no numeric full-time score). Pure.
+ */
+export function fixtureResultFor(fixture: FeedFixture): FormMark | null {
+  if (!isUnitedFixture(fixture)) return null
+  if (fixture.status !== "FINISHED") return null
+  const home = fixture.score?.home ?? null
+  const away = fixture.score?.away ?? null
+  if (home === null || away === null) return null
+  const unitedHome =
+    normaliseTeamName(fixture.home) === "manchester united"
+  const unitedGoals = unitedHome ? home : away
+  const opponentGoals = unitedHome ? away : home
+  if (unitedGoals > opponentGoals) return "W"
+  if (unitedGoals < opponentGoals) return "L"
+  return "D"
+}
+
+/**
+ * Last-five form from finished fixtures, most recent first: keep
+ * only decidable United results, newest kick-off first, take `n`.
+ * Pure — the mockup's chips are exactly this, never invented.
+ */
+export function deriveLastFive(
+  fixtures: ReadonlyArray<FeedFixture>,
+  n: number = 5,
+): FormMark[] {
+  return fixtures
+    .filter((fixture) => fixtureResultFor(fixture) !== null)
+    .sort((a, b) => b.startMs - a.startMs)
+    .slice(0, n)
+    .map((fixture) => fixtureResultFor(fixture) as FormMark)
 }
 
 // ── Response parsing (pure — no fetch, no clock, no storage) ─────
@@ -438,6 +553,25 @@ export function parseMatchesResponse(payload: unknown): FeedFixture[] {
     }
     const venue = nonEmptyString(match.venue)
     if (venue) fixture.venue = venue
+    // Status + full-time score: the upcoming filter needs the
+    // status, recent form needs both. A FINISHED row without numeric
+    // full-time goals is a bad row — reject the payload, never
+    // guess a result from it.
+    const status = matchStatusOf(match)
+    if (status !== null) fixture.status = status
+    const fullTime = isRecord(match.score)
+      ? isRecord(match.score.fullTime)
+        ? match.score.fullTime
+        : null
+      : null
+    const scoreHome = fullTime ? finiteNumber(fullTime.home) : null
+    const scoreAway = fullTime ? finiteNumber(fullTime.away) : null
+    if (status === "FINISHED" && (scoreHome === null || scoreAway === null)) {
+      throw new FootballDataError(
+        `Match ${index} is FINISHED but has no full-time score`,
+      )
+    }
+    fixture.score = { home: scoreHome, away: scoreAway }
     return fixture
   })
 }
@@ -447,6 +581,9 @@ const UPCOMING_STATUSES: ReadonlySet<string> = new Set([
   "SCHEDULED",
   "TIMED",
 ])
+
+/** The feed's own status value for a match with a final score. */
+const FINISHED_STATUSES: ReadonlySet<string> = new Set(["FINISHED"])
 
 function matchStatusOf(match: unknown): string | null {
   return isRecord(match) ? nonEmptyString(match.status) : null
@@ -573,7 +710,7 @@ export async function getLeagueTable(
   try {
     const payload = await fetchJson(
       fetchImpl,
-      `${FOOTBALL_DATA_BASE_URL}/v4/competitions/PL/standings`,
+      `${FOOTBALL_DATA_BASE_URL}/competitions/PL/standings`,
       apiKey,
     )
     const table = parseStandingsResponse(payload, nowMs)
@@ -616,11 +753,31 @@ export async function getLeagueTable(
   }
 }
 
-function matchesUrl(competition: "PL" | "CL", nowMs: number): string {
+function matchesUrl(
+  competition: (typeof FOOTBALL_DATA_FIXTURE_COMPETITIONS)[number],
+  nowMs: number,
+): string {
   const from = footballDataDate(new Date(nowMs))
   const to = footballDataDate(new Date(nowMs + 90 * 24 * 60 * 60 * 1000))
   return (
-    `${FOOTBALL_DATA_BASE_URL}/v4/competitions/${competition}/matches` +
+    `${FOOTBALL_DATA_BASE_URL}/competitions/${competition}/matches` +
+    `?dateFrom=${from}&dateTo=${to}`
+  )
+}
+
+/**
+ * Past-window matches URL for recent form: the same
+ * `/competitions/PL/matches` endpoint the fixtures call already
+ * uses, with the window flipped into the past (today − 90d to
+ * today). The future-only window carries no finished results, so
+ * form is not derivable from the fixtures payload — this one extra
+ * free-tier call is the whole gap (mockup rebuild, 2026-11-21).
+ */
+function pastMatchesUrl(nowMs: number): string {
+  const from = footballDataDate(new Date(nowMs - 90 * 24 * 60 * 60 * 1000))
+  const to = footballDataDate(new Date(nowMs))
+  return (
+    `${FOOTBALL_DATA_BASE_URL}/competitions/PL/matches` +
     `?dateFrom=${from}&dateTo=${to}`
   )
 }
@@ -629,7 +786,10 @@ function matchesUrl(competition: "PL" | "CL", nowMs: number): string {
  * The next `n` Manchester United fixtures (Premier League + Champions
  * League, D3 = A: next 5 by default), earliest first. Fixtures are
  * feed truth; the station for each comes from the EPG via
- * matchFixtureStations() — never from here.
+ * matchFixtureStations() — never from here. Domestic cups (FAC/FLC)
+ * are NOT included: both sit outside the free tier (see the
+ * FOOTBALL_DATA_FA_CUP_CODE note above) — the next-5 list spans
+ * PL + CL only until a paid key exists.
  */
 export async function getNextFixtures(
   n: number = 5,
@@ -669,10 +829,11 @@ export async function getNextFixtures(
   }
   const fetchImpl = options.fetchImpl ?? defaultFetch()
   try {
-    const [plPayload, clPayload] = await Promise.all([
-      fetchJson(fetchImpl, matchesUrl("PL", nowMs), apiKey),
-      fetchJson(fetchImpl, matchesUrl("CL", nowMs), apiKey),
-    ])
+    const payloads = await Promise.all(
+      FOOTBALL_DATA_FIXTURE_COMPETITIONS.map((competition) =>
+        fetchJson(fetchImpl, matchesUrl(competition, nowMs), apiKey),
+      ),
+    )
     // Statuses and the United filter are applied to the RAW payloads
     // first, so the parser only ever sees matches that matter — no
     // index alignment between raw and parsed arrays to keep in sync.
@@ -695,10 +856,7 @@ export async function getNextFixtures(
         )
       })
     }
-    const selected = [
-      ...selectUpcomingUnited(plPayload),
-      ...selectUpcomingUnited(clPayload),
-    ]
+    const selected = payloads.flatMap(selectUpcomingUnited)
     const upcoming = upcomingFrom(
       parseMatchesResponse({ matches: selected }),
     )
@@ -742,6 +900,131 @@ export async function getNextFixtures(
 }
 
 /**
+ * The last `n` Premier League results as W/D/L marks, most recent
+ * first (Last five, mockup rebuild 2026-11-21). Premier League only:
+ * the mockup's chips are league form, and the Champions League
+ * results are a different competition — mixing them would misstate
+ * the league run. One past-window PL matches call (same endpoint
+ * as the fixtures call, window flipped); the standings endpoint
+ * carries no form data, so this is the only honest source.
+ * Same typed failure states as the other getters: no key -> form
+ * null, feed down + cache -> stale marks, feed down + no cache ->
+ * error, form null. The hub omits the chips row when form is null
+ * or empty — never invented marks.
+ */
+export async function getRecentForm(
+  n: number = 5,
+  options: FootballDataCallOptions = {},
+): Promise<FeedFormResult> {
+  const nowMs = options.nowMs ?? Date.now()
+  const ttlMs = options.ttlMs ?? FOOTBALL_DATA_DEFAULT_TTL_MS
+  const apiKey = getFootballDataApiKey()
+  if (!apiKey) {
+    return {
+      status: "no-key",
+      form: null,
+      results: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: "No football-data.org API key saved in Settings.",
+    }
+  }
+  const recentFrom = (list: FeedFixture[]): FeedFixture[] =>
+    list
+      .filter((fixture) => fixtureResultFor(fixture) !== null)
+      .sort((a, b) => b.startMs - a.startMs)
+  const cached = cachedEntry<FeedFixture[]>(
+    memoryResults,
+    FOOTBALL_DATA_RESULTS_CACHE_KEY,
+  )
+  if (cached && !options.forceRefresh && ageMs(cached, nowMs) <= ttlMs) {
+    const recent = recentFrom(cached.data).slice(0, n)
+    return {
+      status: "ok",
+      form: deriveLastFive(recent, n),
+      results: recent,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: cached.fetchedAt,
+      fromCache: true,
+    }
+  }
+  const fetchImpl = options.fetchImpl ?? defaultFetch()
+  try {
+    const payload = await fetchJson(fetchImpl, pastMatchesUrl(nowMs), apiKey)
+    // Statuses and the United filter are applied to the RAW payload
+    // first, so the parser only ever sees matches that matter — the
+    // same shape as getNextFixtures' selectUpcomingUnited, with the
+    // status set flipped to FINISHED.
+    const selectFinishedUnited = (payload: unknown): unknown[] => {
+      if (!isRecord(payload) || !Array.isArray(payload.matches)) return []
+      return payload.matches.filter((match) => {
+        const status = matchStatusOf(match)
+        if (status === null || !FINISHED_STATUSES.has(status)) return false
+        if (!isRecord(match)) return false
+        const home = isRecord(match.homeTeam)
+          ? nonEmptyString(match.homeTeam.name)
+          : null
+        const away = isRecord(match.awayTeam)
+          ? nonEmptyString(match.awayTeam.name)
+          : null
+        if (home === null || away === null) return false
+        return (
+          normaliseTeamName(home) === "manchester united" ||
+          normaliseTeamName(away) === "manchester united"
+        )
+      })
+    }
+    const finished = recentFrom(
+      parseMatchesResponse({ matches: selectFinishedUnited(payload) }),
+    )
+    const entry: Cached<FeedFixture[]> = { fetchedAt: nowMs, data: finished }
+    memoryResults = entry
+    writeCache(FOOTBALL_DATA_RESULTS_CACHE_KEY, entry)
+    const recent = finished.slice(0, n)
+    return {
+      status: "ok",
+      form: deriveLastFive(recent, n),
+      results: recent,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: nowMs,
+      fromCache: false,
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Feed request failed"
+    log.warn("[xt:football-data] recent form fetch failed:", message)
+    if (cached) {
+      const age = ageMs(cached, nowMs)
+      const recent = recentFrom(cached.data).slice(0, n)
+      return {
+        status: "stale",
+        form: deriveLastFive(recent, n),
+        results: recent,
+        stale: true,
+        mayBeOutOfDate: age > FOOTBALL_DATA_MAX_TABLE_AGE_MS,
+        fetchedAt: cached.fetchedAt,
+        fromCache: true,
+        error: message,
+      }
+    }
+    return {
+      status: "error",
+      form: null,
+      results: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: message,
+    }
+  }
+}
+
+/**
  * Validate a key against the feed (Settings "Test key" button).
  * Returns ok only on a 2xx standings response. The key value is never
  * logged or stored here — the caller saves it via Settings storage.
@@ -756,7 +1039,7 @@ export async function validateFootballDataKey(
     const impl = fetchImpl ?? defaultFetch()
     await fetchJson(
       impl,
-      `${FOOTBALL_DATA_BASE_URL}/v4/competitions/PL/standings`,
+      `${FOOTBALL_DATA_BASE_URL}/competitions/PL/standings`,
       trimmed,
     )
     return { ok: true }
@@ -800,18 +1083,20 @@ export interface MatchedFixture {
 
 /**
  * Match one feed fixture to EPG listings by (normalised teams,
- * order-insensitive, start within the same minute). The match is for
- * the station only; the fixture itself is feed truth.
+ * order-insensitive, listing starts at kick-off or up to the
+ * pre-match window before it — see epgListingMatchesKickoff).
+ * The match is for the station only; the fixture itself is feed truth.
  */
 export function matchFixtureStation(
   fixture: FeedFixture,
   listings: ReadonlyArray<EpgStationListing>,
 ): MatchedFixture {
-  const fixtureMinute = Math.floor(fixture.startMs / 60_000)
   const home = normaliseTeamName(fixture.home)
   const away = normaliseTeamName(fixture.away)
   const match = listings.find((listing) => {
-    if (Math.floor(listing.startMs / 60_000) !== fixtureMinute) return false
+    if (!epgListingMatchesKickoff(listing.startMs, fixture.startMs)) {
+      return false
+    }
     const listingHome = normaliseTeamName(listing.home)
     const listingAway = normaliseTeamName(listing.away)
     return (

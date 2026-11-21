@@ -348,19 +348,59 @@ function classifyForMatch(
 /**
  * Match one programme title against Manchester United. Returns the
  * tier + squad + classification, or null when the title is not a
- * United fixture. Title-only matching (the classifier never reads
- * `desc`); channel/category are supporting evidence only and can
- * never create a match on their own.
+ * United fixture.
+ *
+ * Title-first, description as fallback (bug 3, 2026-11-21): the
+ * classifier never reads `desc`, so a generic title such as
+ * "Football Classics" used to be invisible even when its
+ * description named the fixture. The title path below is
+ * unchanged; only when it finds nothing is the description
+ * consulted (see matchDescFixture). Channel/category are
+ * supporting evidence only and can never create a match on their
+ * own.
  */
 export function matchUnitedFixture(
   title: string,
   channelName: string,
   category: string,
+  desc = "",
 ): UnitedMatch | null {
   const rawTitle = (title || "").trim()
   if (!rawTitle) return null
+  const titleOutcome = matchTitleFixture(rawTitle, channelName, category)
+  if (titleOutcome.match) return titleOutcome.match
+  return matchDescFixture(
+    rawTitle,
+    titleOutcome.classification,
+    desc,
+    channelName,
+    category,
+  )
+}
+
+interface TitleMatchOutcome {
+  match: UnitedMatch | null
+  /** Classification of the (prefix-stripped) title, for the
+   *  description-path guard: a title that IS another fixture
+   *  defines the programme, so its description is never mined. */
+  classification: SportsClassification
+}
+
+function matchTitleFixture(
+  rawTitle: string,
+  channelName: string,
+  category: string,
+): TitleMatchOutcome {
   // Step 1: cheap pre-filter.
-  if (!passesPrefilter(rawTitle.toLowerCase())) return null
+  if (!passesPrefilter(rawTitle.toLowerCase())) {
+    return {
+      match: null,
+      classification: classifySportsProgramme(rawTitle, {
+        channelName,
+        category,
+      }),
+    }
+  }
   // Step 2: classify (prefix-tolerant, see classifyForMatch).
   const rawClassification = classifyForMatch(rawTitle, channelName, category)
   // The WSL collision can also arrive on the direct path: drop a
@@ -371,29 +411,257 @@ export function matchUnitedFixture(
     WOMENS_FOOTBALL_PATTERN.test(rawTitle)
       ? { ...rawClassification, competition: undefined }
       : rawClassification
+  const outcome = (match: UnitedMatch | null): TitleMatchOutcome => ({
+    match,
+    classification,
+  })
   // Step 3: kind gate — fixture rows only.
-  if (classification.kind !== "fixture" || !classification.teams) return null
+  if (classification.kind !== "fixture" || !classification.teams) {
+    return outcome(null)
+  }
   // Step 4: sport guard — football or unknown; any other sport excludes.
   const sport = sportForGuard(classification, rawTitle)
-  if (sport !== null && sport !== "football") return null
+  if (sport !== null && sport !== "football") return outcome(null)
   // Step 5: side match against the alias set.
   const sides = classification.teams.map((side) =>
     normaliseSideForUnited(side),
   ) as [string, string]
   const squad = detectSquad(classification.teams, rawTitle)
   if (UNITED_ALIASES.has(sides[0]) || UNITED_ALIASES.has(sides[1])) {
-    return { tier: "confirmed", squad, classification }
+    return outcome({ tier: "confirmed", squad, classification })
   }
   // Step 6: ambiguous bare-"United" side → corroboration rule.
   const ambiguousIndex = sides[0] === "united" ? 0 : sides[1] === "united" ? 1 : -1
-  if (ambiguousIndex === -1) return null
+  if (ambiguousIndex === -1) return outcome(null)
   const otherSide = sides[1 - ambiguousIndex] as string
   if (
     isCorroboratedAmbiguous(otherSide, classification, channelName, category)
   ) {
-    return { tier: "possible", squad, classification }
+    return outcome({ tier: "possible", squad, classification })
+  }
+  return outcome(null)
+}
+
+// ── Description matching (bug 3, 2026-11-21) ────────────────────
+// The title path above is unchanged. Only when it finds nothing is
+// the description consulted, in two steps:
+//   (a) a fixture named in the description ("Football Classics"
+//       whose description reads "Manchester United v Arsenal,
+//       1999") — the fixture is recovered from the prose and run
+//       through the SAME title matcher, so tier, squad, sport
+//       guard and corroboration all apply unchanged;
+//   (b) a description that names United without a fixture ("a look
+//       back at Manchester United's treble season") — found only
+//       as POSSIBLE, and only with football evidence in the title
+//       or description (or sports-channel support). A bare
+//       "united" never counts here: only full aliases, so "Leeds
+//       United" or "United Rugby Championship" cannot match.
+// Guard, both steps: a title that IS another fixture ("Arsenal v
+// Chelsea") defines the programme — its description is never
+// mined, so a passing United mention cannot re-label that match.
+
+/** Full United aliases as they appear in prose (word-boundary:
+ *  "Manu" the person never matches, "Leeds United" never matches
+ *  — bare "united" is deliberately absent). */
+const UNITED_ALIAS_IN_TEXT =
+  /\b(manchester united|manchester utd|man utd|man united|manu|mufc)\b/i
+
+/** Fixture separators, scanned across the description prose. */
+const DESC_SEPARATOR_SCAN = /\s+(?:v\.?|vs\.?|versus|@)\s+/gi
+
+/** Words either side of one separator that can still name a club
+ *  — a 45-character window, far longer than any club name. */
+const DESC_FIXTURE_WINDOW_CHARS = 45
+
+function descWords(text: string): string[] {
+  return text
+    .replace(/[^A-Za-z0-9'’&]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+/**
+ * Longest leading (side B) or trailing (side A) word-run that names
+ * a club: a United alias, bare "united", or a known football club.
+ * Longest-first matters: "Leeds United" must win over its
+ * "United" suffix, or every Leeds fixture would read as a
+ * bare-United one.
+ */
+function longestNamedSide(words: string[], trailing: boolean): string | null {
+  const isNamed = (candidate: string): boolean => {
+    const norm = normaliseSideForUnited(candidate)
+    return (
+      UNITED_ALIASES.has(norm) ||
+      norm === "united" ||
+      isKnownFootballClub(norm)
+    )
+  }
+  if (trailing) {
+    for (let start = 0; start < words.length; start++) {
+      const candidate = words.slice(start).join(" ")
+      if (isNamed(candidate)) return candidate
+    }
+    return null
+  }
+  for (let end = words.length; end > 0; end--) {
+    const candidate = words.slice(0, end).join(" ")
+    if (isNamed(candidate)) return candidate
   }
   return null
+}
+
+function isUnitedSide(side: string): boolean {
+  const norm = normaliseSideForUnited(side)
+  return UNITED_ALIASES.has(norm) || norm === "united"
+}
+
+/**
+ * Recover the two sides around one description separator: side A
+ * is the trailing club-naming run before it, side B the leading
+ * club-naming run after it. Null unless at least one side is
+ * United — a fixture between two other clubs is not our match.
+ */
+function sidesFromDescSeparator(
+  before: string,
+  after: string,
+): [string, string] | null {
+  const sideA = longestNamedSide(descWords(before), true)
+  const sideB = longestNamedSide(descWords(after), false)
+  if (!sideA || !sideB) return null
+  if (!isUnitedSide(sideA) && !isUnitedSide(sideB)) return null
+  return [sideA, sideB]
+}
+
+function matchDescFixtureText(
+  rawDesc: string,
+  channelName: string,
+  category: string,
+  title: string,
+): UnitedMatch | null {
+  DESC_SEPARATOR_SCAN.lastIndex = 0
+  let separator: RegExpExecArray | null
+  while ((separator = DESC_SEPARATOR_SCAN.exec(rawDesc)) !== null) {
+    const before = rawDesc.slice(
+      Math.max(0, separator.index - DESC_FIXTURE_WINDOW_CHARS),
+      separator.index,
+    )
+    const afterStart = separator.index + separator[0].length
+    const after = rawDesc.slice(
+      afterStart,
+      afterStart + DESC_FIXTURE_WINDOW_CHARS,
+    )
+    const sides = sidesFromDescSeparator(before, after)
+    if (!sides) continue
+    const constructed = `${sides[0]} v ${sides[1]}`
+    const outcome = matchTitleFixture(constructed, channelName, category)
+    if (!outcome.match) continue
+    // A title match always carries teams (the kind gate); narrow
+    // the optional for the squad re-check below.
+    const teams = outcome.match.classification.teams
+    if (!teams) continue
+    // Squad markers may live in the surrounding title/description
+    // prose ("a women's classic: Man Utd v Chelsea") rather than
+    // in the recovered sides themselves.
+    const squad = detectSquad(teams, `${title} ${rawDesc}`)
+    return squad === outcome.match.squad
+      ? outcome.match
+      : { ...outcome.match, squad }
+  }
+  return null
+}
+
+/**
+ * Best-effort other side for a mention-only match: the first known
+ * football club named in the text (longest phrase first), so the
+ * synthetic teams can still feed station matching. Null when the
+ * description names no other club — the United side is then
+ * repeated, which can never match a feed fixture (both sides the
+ * same club) and only affects grouping.
+ */
+function otherKnownClubInText(text: string): string | null {
+  const words = descWords(text)
+  for (let size = 3; size >= 1; size--) {
+    for (let i = 0; i + size <= words.length; i++) {
+      const phrase = words.slice(i, i + size).join(" ")
+      const norm = normaliseSideForUnited(phrase)
+      if (UNITED_ALIASES.has(norm) || norm === "united") continue
+      if (isKnownFootballClub(norm)) return phrase
+    }
+  }
+  return null
+}
+
+function matchDescMention(
+  title: string,
+  rawDesc: string,
+  channelName: string,
+  category: string,
+): UnitedMatch | null {
+  if (!UNITED_ALIAS_IN_TEXT.test(rawDesc)) return null
+  const titleClass = classifySportsProgramme(title, {
+    channelName,
+    category,
+  })
+  const descClass = classifySportsProgramme(rawDesc, {
+    channelName,
+    category,
+  })
+  const footballEvidence =
+    titleClass.sport === "football" ||
+    descClass.sport === "football" ||
+    (titleClass.competition !== undefined &&
+      UNITED_COMPETITIONS.has(titleClass.competition)) ||
+    (descClass.competition !== undefined &&
+      UNITED_COMPETITIONS.has(descClass.competition)) ||
+    hasSportsChannelSupport({ channelName, category })
+  if (!footballEvidence) return null
+  const competition =
+    titleClass.competition !== undefined &&
+    UNITED_COMPETITIONS.has(titleClass.competition)
+      ? titleClass.competition
+      : descClass.competition !== undefined &&
+          UNITED_COMPETITIONS.has(descClass.competition)
+        ? descClass.competition
+        : undefined
+  const teams: [string, string] = [
+    "Manchester United",
+    otherKnownClubInText(rawDesc) ?? "Manchester United",
+  ]
+  const classification: SportsClassification = {
+    isSport: true,
+    sport: "football",
+    kind: "general-sport",
+    confidence: "low",
+    teams,
+  }
+  if (competition) classification.competition = competition
+  return {
+    tier: "possible",
+    squad: detectSquad(teams, `${title} ${rawDesc}`),
+    classification,
+  }
+}
+
+function matchDescFixture(
+  rawTitle: string,
+  titleClassification: SportsClassification,
+  desc: string,
+  channelName: string,
+  category: string,
+): UnitedMatch | null {
+  const rawDesc = (desc || "").trim()
+  if (!rawDesc) return null
+  // A title that IS another fixture defines the programme.
+  if (titleClassification.kind === "fixture") return null
+  // Cheap pre-filter: no United indicator in the description.
+  if (!UNITED_INDICATORS.some((indicator) => rawDesc.toLowerCase().includes(indicator))) {
+    return null
+  }
+  return (
+    matchDescFixtureText(rawDesc, channelName, category, rawTitle) ??
+    matchDescMention(rawTitle, rawDesc, channelName, category)
+  )
 }
 
 // ── Scan ────────────────────────────────────────────────────────
@@ -561,6 +829,58 @@ export function sportsFixtureState(
   return fixtureStateOf(fixture, nowMs)
 }
 
+// ── ON NOW vs LIVE badge (bug 4a, 2026-11-21) ───────────────────
+// An on-now row used to read "LIVE" whatever the programme was —
+// a classic, a replay and a highlights show all claimed to be
+// live. "LIVE" is reserved for a programme that is actually live
+// football: on now, with no non-live marker in its title or
+// description. Everything else on now reads "ON NOW". The marker
+// list is deliberately narrow (programme-type words, not teams or
+// competitions): a plain "Man Utd v Liverpool" on now still reads
+// LIVE, because without any signal to the contrary the listing IS
+// the live broadcast — only positive evidence of non-live content
+// downgrades it. Build-up/preview count as non-live: live studio
+// coverage before kick-off is not the match itself.
+
+export type SportsNowLabel = "LIVE" | "ON NOW"
+
+const NON_LIVE_PROGRAMME_MARKERS: ReadonlyArray<RegExp> = [
+  /\bclassics?\b/i,
+  /\breplays?\b/i,
+  /\bhighlights?\b/i,
+  /\barchive\b/i,
+  /\bretro\b/i,
+  /\brewind\b/i,
+  /\brepeats?\b/i,
+  /\breruns?\b/i,
+  /\bbest\s+of\b/i,
+  /\bbuild[\s-]?up\b/i,
+  /\bpreview\b/i,
+  /\bpost[\s-]?match\b/i,
+  /\bseason\s+review\b/i,
+  /\bdocumentary\b/i,
+]
+
+/**
+ * The on-now badge for one fixture: "LIVE" for live football,
+ * "ON NOW" for any other programme on now, null when the fixture
+ * is not on now. Pure — the row renderer calls this, so the
+ * labelling rule is testable without DOM.
+ */
+export function sportsFixtureLiveBadge(
+  fixture: SportsFixture,
+  nowMs: number = Date.now(),
+): SportsNowLabel | null {
+  if (fixtureStateOf(fixture, nowMs) !== "now") return null
+  const text = `${fixture.title} ${fixture.desc ?? ""}`
+  if (
+    NON_LIVE_PROGRAMME_MARKERS.some((pattern) => pattern.test(text))
+  ) {
+    return "ON NOW"
+  }
+  return "LIVE"
+}
+
 /**
  * Split fixtures into the hub's sections. The hero fixture ALSO
  * appears in `upcoming` — the hero is a featured presentation, not
@@ -658,7 +978,12 @@ export function scanSportsFixtures(
     const channelName = channelDisplayName(channel)
     const category = channelCategoryOf(channel)
     for (const programme of programmes) {
-      const match = matchUnitedFixture(programme.title, channelName, category)
+      const match = matchUnitedFixture(
+        programme.title,
+        channelName,
+        category,
+        programme.desc,
+      )
       if (!match) continue
       const fixture = buildFixture(programme, channel, match, nowMs)
       const key = groupKeyFor(

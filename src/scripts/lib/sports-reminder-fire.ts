@@ -30,6 +30,7 @@ import {
   type MatchedFixture,
 } from "@/scripts/lib/football-data.js"
 import { log } from "@/scripts/lib/log.js"
+import { epgListingMatchesKickoff } from "@/scripts/lib/sports-corner-v2-hub.js"
 import {
   SPORTS_REMINDER_BANNER_DISMISS_MS,
   clearSportsReminder,
@@ -103,12 +104,11 @@ export function buildNextMatchRows(
   return matched.map((row, index) => {
     if (!row.stationKnown) return { matched: row, epgFixture: null }
     const fixture = feedFixtures[index]
-    const fixtureMinute = Math.floor(fixture.startMs / 60_000)
     const home = normaliseTeamName(fixture.home)
     const away = normaliseTeamName(fixture.away)
     const epgFixture =
       epgFixtures.find((candidate) => {
-        if (Math.floor(candidate.startMs / 60_000) !== fixtureMinute) {
+        if (!epgListingMatchesKickoff(candidate.startMs, fixture.startMs)) {
           return false
         }
         const candidateHome = normaliseTeamName(candidate.teams[0])
