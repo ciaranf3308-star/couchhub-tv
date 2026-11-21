@@ -176,12 +176,17 @@ async function runMount(
       outcome = "skipped"
     }
     resolveResult?.({ outcome, saved: [...savedDuringSession], reason })
+    dlg.remove()
   }
 
-  dlg.addEventListener("close", () => {
-    finish()
-    dlg.remove()
+  dlg.addEventListener("close", () => finish())
+  // A body swap or a removeAttribute("open") close (jsdom has no
+  // showModal/close at all) never fires "close" — watch the attribute
+  // too, so the promise always settles and the dialog never leaks.
+  const openObserver = new MutationObserver(() => {
+    if (!dlg.hasAttribute("open")) finish()
   })
+  openObserver.observe(dlg, { attributes: true, attributeFilter: ["open"] })
   dlg
     .querySelector('[data-role="close"]')
     ?.addEventListener("click", () => closeCouchDialog(DIALOG_ID))
