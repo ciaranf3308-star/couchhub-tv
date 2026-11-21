@@ -1055,7 +1055,7 @@
   }
 
   /** Step 2 Continue: move to step 3 with the draws intact. */
-  function continueToBrief() {
+  function goToBrief() {
     flow = continueToBrief(flow)
     query = flow.brief
     void tick().then(() => inputEl?.focus({ preventScroll: true }))
@@ -1769,7 +1769,7 @@
           <div class="rs-flow-foot-row">
             <p class="rs-flow-selected">{selectedLine}</p>
             <button type="button" onclick={surpriseMe} data-nylah-item class="rs-flow-link">Surprise me</button>
-            <button type="button" onclick={continueToBrief} data-nylah-item class="rs-flow-primary rs-flow-primary--continue">Continue <span aria-hidden="true">→</span></button>
+            <button type="button" onclick={goToBrief} data-nylah-item class="rs-flow-primary rs-flow-primary--continue">Continue <span aria-hidden="true">→</span></button>
           </div>
           <p class="rs-flow-hints" aria-hidden="true">
             <span class="rs-hint-glyph">D-pad</span> Move
