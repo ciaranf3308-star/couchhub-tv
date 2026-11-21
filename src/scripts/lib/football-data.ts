@@ -73,6 +73,46 @@ export const FOOTBALL_DATA_MAX_TABLE_AGE_MS = 24 * 60 * 60 * 1000
  *  listing for a feed fixture yet. Never a guessed channel. */
 export const STATION_TBC = "Station TBC"
 
+// ── Domestic cups — codes + free-tier gap (bug 5, 21 Nov 2026) ──
+
+/**
+ * FA Cup code (v4 lookup tables, id 2055) and Football League Cup
+ * code (id 2139) — the League Cup is the Carabao/EFL Cup.
+ * WARNING: ELC (id 2016) is the Championship, NOT the EFL Cup —
+ * never use it for the cup.
+ *
+ * NEITHER CUP IS FETCHED — both are outside the free tier (verified
+ * 2026-11-21 against the provider's own pages):
+ * - Free tier = exactly 12 competitions (TIER_ONE: PL, ELC, CL, EC,
+ *   FL1, BL1, SA, DED, PPL, PD, BSA, WC). No cup of any country is
+ *   among them (coverage: football-data.org/coverage, pricing:
+ *   football-data.org/pricing).
+ * - Per the provider's per-competition plan field (live-probed
+ *   2026-08-26, same free key 403s on the cups while PL returns
+ *   200): FAC is TIER_TWO, FLC is TIER_THREE. On the published
+ *   pricing (Standard €49/mo = 30 competitions, Advanced €99/mo =
+ *   50, Pro €199/mo = 100) that means the FA Cup alone needs
+ *   Advanced (€99/mo) and the League Cup needs Pro (€199/mo) — both
+ *   cups together need Pro. One secondary source claims the EFL Cup
+ *   is not sold at any tier, so confirm on the coverage page before
+ *   paying anything.
+ * - Nothing was bought and no key tier was changed. getNextFixtures
+ *   stays PL + CL until the user decides. If a paid key ever lands
+ *   in Settings, enabling a cup is a one-line change: extend
+ *   FOOTBALL_DATA_FIXTURE_COMPETITIONS — the fetcher, parser and
+ *   mock already handle any competition code.
+ */
+export const FOOTBALL_DATA_FA_CUP_CODE = "FAC"
+export const FOOTBALL_DATA_LEAGUE_CUP_CODE = "FLC"
+
+/** Competitions whose fixtures getNextFixtures actually fetches.
+ *  Free tier only: PL + CL. Cups stay out until a paid key exists
+ *  (see the note above) — adding "FAC" | "FLC" here is the whole
+ *  change when that day comes. */
+export const FOOTBALL_DATA_FIXTURE_COMPETITIONS: ReadonlyArray<
+  "PL" | "CL"
+> = ["PL", "CL"]
+
 // ── Types (plan §5.1, verbatim field sets) ───────────────────────
 
 export interface LeagueTableEntry {
@@ -573,7 +613,7 @@ export async function getLeagueTable(
   try {
     const payload = await fetchJson(
       fetchImpl,
-      `${FOOTBALL_DATA_BASE_URL}/v4/competitions/PL/standings`,
+      `${FOOTBALL_DATA_BASE_URL}/competitions/PL/standings`,
       apiKey,
     )
     const table = parseStandingsResponse(payload, nowMs)
@@ -616,11 +656,14 @@ export async function getLeagueTable(
   }
 }
 
-function matchesUrl(competition: "PL" | "CL", nowMs: number): string {
+function matchesUrl(
+  competition: (typeof FOOTBALL_DATA_FIXTURE_COMPETITIONS)[number],
+  nowMs: number,
+): string {
   const from = footballDataDate(new Date(nowMs))
   const to = footballDataDate(new Date(nowMs + 90 * 24 * 60 * 60 * 1000))
   return (
-    `${FOOTBALL_DATA_BASE_URL}/v4/competitions/${competition}/matches` +
+    `${FOOTBALL_DATA_BASE_URL}/competitions/${competition}/matches` +
     `?dateFrom=${from}&dateTo=${to}`
   )
 }
@@ -629,7 +672,10 @@ function matchesUrl(competition: "PL" | "CL", nowMs: number): string {
  * The next `n` Manchester United fixtures (Premier League + Champions
  * League, D3 = A: next 5 by default), earliest first. Fixtures are
  * feed truth; the station for each comes from the EPG via
- * matchFixtureStations() — never from here.
+ * matchFixtureStations() — never from here. Domestic cups (FAC/FLC)
+ * are NOT included: both sit outside the free tier (see the
+ * FOOTBALL_DATA_FA_CUP_CODE note above) — the next-5 list spans
+ * PL + CL only until a paid key exists.
  */
 export async function getNextFixtures(
   n: number = 5,
@@ -669,10 +715,11 @@ export async function getNextFixtures(
   }
   const fetchImpl = options.fetchImpl ?? defaultFetch()
   try {
-    const [plPayload, clPayload] = await Promise.all([
-      fetchJson(fetchImpl, matchesUrl("PL", nowMs), apiKey),
-      fetchJson(fetchImpl, matchesUrl("CL", nowMs), apiKey),
-    ])
+    const payloads = await Promise.all(
+      FOOTBALL_DATA_FIXTURE_COMPETITIONS.map((competition) =>
+        fetchJson(fetchImpl, matchesUrl(competition, nowMs), apiKey),
+      ),
+    )
     // Statuses and the United filter are applied to the RAW payloads
     // first, so the parser only ever sees matches that matter — no
     // index alignment between raw and parsed arrays to keep in sync.
@@ -695,10 +742,7 @@ export async function getNextFixtures(
         )
       })
     }
-    const selected = [
-      ...selectUpcomingUnited(plPayload),
-      ...selectUpcomingUnited(clPayload),
-    ]
+    const selected = payloads.flatMap(selectUpcomingUnited)
     const upcoming = upcomingFrom(
       parseMatchesResponse({ matches: selected }),
     )
@@ -756,7 +800,7 @@ export async function validateFootballDataKey(
     const impl = fetchImpl ?? defaultFetch()
     await fetchJson(
       impl,
-      `${FOOTBALL_DATA_BASE_URL}/v4/competitions/PL/standings`,
+      `${FOOTBALL_DATA_BASE_URL}/competitions/PL/standings`,
       trimmed,
     )
     return { ok: true }

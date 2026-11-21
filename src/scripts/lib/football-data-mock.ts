@@ -34,6 +34,15 @@
 //
 // Broadcasters beyond Liverpool are NOT in this mock: the feed or the
 // EPG must supply them; they are not hard-coded from the plan.
+//
+// DOMESTIC CUPS INTENTIONALLY ABSENT (bug 5, 21 Nov 2026): there are
+// no MOCK_FAC/MOCK_FLC payloads and createMockFetch 404s those
+// endpoints, matching the client — FAC (FA Cup) and FLC (Football
+// League Cup / Carabao Cup) are outside the free tier (FAC TIER_TWO,
+// FLC TIER_THREE; free tier is exactly 12 competitions), so the
+// client never requests them. If a paid key ever enables cups, add
+// the cup payloads here, route them in createMockFetch, and extend
+// FOOTBALL_DATA_FIXTURE_COMPETITIONS in football-data.ts.
 
 import type {
   EpgStationListing,

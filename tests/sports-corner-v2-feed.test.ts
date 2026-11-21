@@ -13,8 +13,11 @@ import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
+  FOOTBALL_DATA_FA_CUP_CODE,
   FOOTBALL_DATA_FIXTURES_CACHE_KEY,
+  FOOTBALL_DATA_FIXTURE_COMPETITIONS,
   FOOTBALL_DATA_KEY_STORAGE_KEY,
+  FOOTBALL_DATA_LEAGUE_CUP_CODE,
   FOOTBALL_DATA_TABLE_CACHE_KEY,
   STATION_TBC,
   clearFootballDataCache,
@@ -200,6 +203,95 @@ describe("T-v2-2 — next 5 ordering + competitions on a Friday afternoon", () =
     await getNextFixtures(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
     await getNextFixtures(5, { fetchImpl: mockFetch, nowMs: FRIDAY + 30 * 60_000 })
     expect(mockFetch.calls.length).toBe(2) // PL + CL once; second call served from cache
+  })
+})
+
+describe("feed URL shape — exactly one /v4/ per request (bug 1, 21 Nov)", () => {
+  it("no request URL ever contains /v4/v4/ (base URL already ends in /v4)", async () => {
+    setKey(runtimeTestKey())
+    const mockFetch = createMockFetch()
+    await getLeagueTable({ fetchImpl: mockFetch, nowMs: FRIDAY })
+    await getNextFixtures(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(mockFetch.calls.length).toBe(3) // standings + PL matches + CL matches
+    for (const url of mockFetch.calls) {
+      expect(url).not.toContain("/v4/v4/")
+      // Exactly one /v4/ segment: the one in the base URL.
+      expect(url.split("/v4/").length - 1).toBe(1)
+    }
+  })
+
+  it("standings hits https://api.football-data.org/v4/competitions/PL/standings", async () => {
+    setKey(runtimeTestKey())
+    const mockFetch = createMockFetch()
+    await getLeagueTable({ fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(mockFetch.calls).toEqual([
+      "https://api.football-data.org/v4/competitions/PL/standings",
+    ])
+  })
+
+  it("fixtures hit the PL + CL matches URLs with the 90-day window", async () => {
+    setKey(runtimeTestKey())
+    const mockFetch = createMockFetch()
+    await getNextFixtures(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(mockFetch.calls).toEqual([
+      "https://api.football-data.org/v4/competitions/PL/matches?dateFrom=2026-11-20&dateTo=2027-02-18",
+      "https://api.football-data.org/v4/competitions/CL/matches?dateFrom=2026-11-20&dateTo=2027-02-18",
+    ])
+  })
+
+  it("validateFootballDataKey tests the key against the single-/v4/ standings URL", async () => {
+    const seen: string[] = []
+    const recordingFetch = (async (url: string) => {
+      seen.push(url)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => MOCK_STANDINGS_RESPONSE,
+        headers: { get: () => null },
+      }
+    }) as Parameters<typeof validateFootballDataKey>[1]
+    expect(await validateFootballDataKey(runtimeTestKey(), recordingFetch)).toEqual({
+      ok: true,
+    })
+    expect(seen).toEqual([
+      "https://api.football-data.org/v4/competitions/PL/standings",
+    ])
+    expect(seen[0]).not.toContain("/v4/v4/")
+  })
+})
+
+describe("domestic cups — free-tier gap, not fetched (bug 5, 21 Nov)", () => {
+  it("getNextFixtures only ever calls PL and CL — never FAC or FLC", async () => {
+    setKey(runtimeTestKey())
+    const mockFetch = createMockFetch()
+    const result = await getNextFixtures(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(result.status).toBe("ok")
+    expect(mockFetch.calls).toHaveLength(2)
+    expect(mockFetch.calls.some((url) => url.includes("/competitions/FAC/"))).toBe(false)
+    expect(mockFetch.calls.some((url) => url.includes("/competitions/FLC/"))).toBe(false)
+    expect(mockFetch.calls.some((url) => url.includes("/competitions/PL/matches"))).toBe(true)
+    expect(mockFetch.calls.some((url) => url.includes("/competitions/CL/matches"))).toBe(true)
+  })
+
+  it("cup codes are FAC (FA Cup) and FLC (League Cup) — ELC is the Championship, never a cup", () => {
+    // Codes from the v4 lookup tables (docs.football-data.org):
+    // FAC id 2055, FLC id 2139, ELC id 2016 = Championship.
+    expect(FOOTBALL_DATA_FA_CUP_CODE).toBe("FAC")
+    expect(FOOTBALL_DATA_LEAGUE_CUP_CODE).toBe("FLC")
+    expect(FOOTBALL_DATA_FIXTURE_COMPETITIONS).toEqual(["PL", "CL"])
+    expect(FOOTBALL_DATA_FIXTURE_COMPETITIONS).not.toContain("ELC")
+    expect(FOOTBALL_DATA_FIXTURE_COMPETITIONS).not.toContain("FAC")
+    expect(FOOTBALL_DATA_FIXTURE_COMPETITIONS).not.toContain("FLC")
+  })
+
+  it("the mock serves no cup payloads — a cup URL 404s, matching the client", async () => {
+    const mockFetch = createMockFetch()
+    const response = await mockFetch(
+      "https://api.football-data.org/v4/competitions/FAC/matches?dateFrom=2026-11-20&dateTo=2027-02-18",
+      { headers: { "X-Auth-Token": runtimeTestKey() } },
+    )
+    expect(response.ok).toBe(false)
+    expect(response.status).toBe(404)
   })
 })
 
