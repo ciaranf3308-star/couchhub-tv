@@ -794,6 +794,30 @@ import TvEmpty from "@/components/couch/TvEmpty.astro";
       font-size: 1.125rem;
       color: var(--rs-text-2);
     }
+    /* "Set up key" action on the no-key table / next-matches lines
+       (0.11.19 keys onboarding): a quiet secondary button, same
+       focus ring as the other hub actions. In the Next Matches grid
+       it spans the full width under the copy line. */
+    html[data-couch] .rs-sports-setup-key {
+      font-size: 1.125rem;
+      font-weight: 600;
+      padding: 0.625rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--rs-line);
+      background: var(--rs-bg-2);
+      color: var(--rs-text);
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    html[data-couch] .rs-sports-setup-key:hover,
+    html[data-couch] .rs-sports-setup-key:focus-visible {
+      border-color: var(--rs-focus);
+      outline: none;
+      box-shadow: 0 0 0 2px var(--rs-focus);
+    }
+    html[data-couch] .rs-sports-next-section > .rs-sports-setup-key {
+      grid-column: 1 / -1;
+    }
     html[data-couch] .rs-sports-state {
       display: flex;
       flex-direction: column;

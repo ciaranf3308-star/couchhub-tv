@@ -12,8 +12,9 @@
        results already returned — it never re-calls the model.
      - Refinements keep the conversation (see ai/generation.ts); New
        Search clears it. No chatbot UI: one subtle context line only.
-     - First run with no AI configured shows the "Unlock AI Discovery"
-       panel once; "Not Now" dismisses it for good (AI01). Browsing is
+     - First run with no AI configured opens the unified keys
+       onboarding dialog (0.11.19, reason "ai"); the old AI01 banner
+       is retired so the two can never show together. Browsing is
        never blocked by it.
      - No feedback buttons under posters here (B01): feedback lives on
        the detail screen. Cards show the reason line only.
@@ -114,13 +115,12 @@
     getAiStatus,
     getAiAutoRequests,
     getAiShareTaste,
-    hasDismissedAiOnboarding,
-    dismissAiOnboarding,
     AI_MODE_LABELS,
     AI_SEARCH_PHASE_LABELS,
     aiSearchRailTitle,
     aiSearchStateNote,
   } from "@/scripts/lib/ai/status.ts"
+  import { maybeOpenKeysOnboarding } from "@/scripts/lib/keys-feature-entry.ts"
   import { ensureFollowedLoaded, followedProvider } from "@/scripts/lib/followed.ts"
   import { fmtImdbRating } from "@/scripts/lib/format.ts"
   import TvKeyboard from "@/components/couch/TvKeyboard.svelte"
@@ -289,7 +289,6 @@
   let aiMode = $state(null)
   let aiDetail = $state("")
   let aiAuto = $state(false)
-  let showOnboarding = $state(false)
 
   // -- Guided three-step flow (0.11.18 redesign) ----------------------
   let flow = $state(freshDiscoverFlow())
@@ -1438,11 +1437,6 @@
     })
   }
 
-  function dismissOnboarding() {
-    dismissAiOnboarding()
-    showOnboarding = false
-  }
-
   async function refreshAiStatus() {
     try {
       const status = await getAiStatus()
@@ -1450,13 +1444,21 @@
       aiDetail = status.detail
       canAskAi = status.canAskAi
       aiKeySaved = status.keySaved
-      showOnboarding = status.mode === "not-configured" && !hasDismissedAiOnboarding()
+      if (status.mode === "not-configured") {
+        // Keys onboarding (0.11.19): entering Discover with no AI key
+        // routes into the unified dialog (reason "ai") instead of the
+        // old AI01 banner — the banner is gone, so the two can never
+        // show together. A skip this session (e.g. at the launch gate)
+        // suppresses it, and the dialog's in-flight dedupe stops a
+        // second dialog when the launch gate is still open. The
+        // local-catalogue fallback stays untouched.
+        void maybeOpenKeysOnboarding("ai")
+      }
     } catch {
       aiMode = "local"
       aiDetail = "AI status couldn't be checked — using local recommendations."
       canAskAi = false
       aiKeySaved = false
-      showOnboarding = false
     }
   }
 
@@ -1663,33 +1665,6 @@
       <span class="rs-step-text">0{flowStepNumber} / 03</span>
     </div>
   </div>
-
-  <!-- First-run onboarding (AI01): a polished invitation, never a
-       block — "Not Now" dismisses it for good. -->
-  {#if showOnboarding}
-    <section class="rs-discover-onboard" aria-label="Unlock AI Discovery" data-ai-onboarding>
-      <div class="rs-discover-onboard__text">
-        <h2>Unlock AI Discovery</h2>
-        <p>
-          Describe the night you're in the mood for — "something funny
-          for tonight" — and AI suggests titles from its own knowledge,
-          verifies each one against TMDB, explains each choice, and
-          shows which ones are in your library. Your watch history
-          stays on this device unless you choose to share it, and AI
-          is billed separately by your provider.
-        </p>
-      </div>
-      <div class="rs-discover-onboard__actions">
-        <a
-          href="/settings/discover-ai#card-ai-discovery"
-          data-nylah-item
-          class="rs-discover-onboard__primary">Set Up AI</a>
-        <button type="button" onclick={dismissOnboarding} data-nylah-item class="rs-discover-onboard__secondary">
-          Not Now
-        </button>
-      </div>
-    </section>
-  {/if}
 
   {#if loading}
     <div class="rs-skeleton rs-skeleton--hero" aria-hidden="true"></div>
@@ -2894,67 +2869,6 @@
   .rs-discover-prefs:hover,
   .rs-discover-prefs:focus-visible {
     color: #ffffff;
-    outline: none;
-  }
-
-  /* Onboarding panel. */
-  .rs-discover-onboard {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1.436rem;
-    flex-wrap: wrap;
-    margin: 0 3.375rem;
-    padding: 1.723rem 2.01rem;
-    border-radius: 1.149rem;
-    border: 0.072rem solid #43576f;
-    background: rgba(2, 24, 48, 0.9);
-  }
-  .rs-discover-onboard__text {
-    flex: 1 1 43.08rem;
-  }
-  .rs-discover-onboard__text h2 {
-    margin: 0 0 0.718rem;
-    font-size: 2.298rem;
-    color: #eef2f9;
-  }
-  .rs-discover-onboard__text p {
-    margin: 0;
-    font-size: 1.723rem;
-    line-height: 1.5;
-    color: #b7cee6;
-  }
-  .rs-discover-onboard__actions {
-    display: flex;
-    gap: 1.149rem;
-    align-items: center;
-  }
-  .rs-discover-onboard__primary {
-    padding: 1.005rem 1.867rem;
-    border-radius: 1.005rem;
-    background: linear-gradient(180deg, #1899f7 0%, #0579f0 100%);
-    color: #ffffff;
-    font-size: 1.723rem;
-    font-weight: 700;
-    text-decoration: none;
-  }
-  .rs-discover-onboard__primary:hover,
-  .rs-discover-onboard__primary:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 0.144rem rgba(205, 255, 255, 0.9);
-  }
-  .rs-discover-onboard__secondary {
-    padding: 1.005rem 1.436rem;
-    border-radius: 1.005rem;
-    border: 0.072rem solid #52718e;
-    background: transparent;
-    color: #e2ecfc;
-    font-size: 1.723rem;
-    cursor: pointer;
-  }
-  .rs-discover-onboard__secondary:hover,
-  .rs-discover-onboard__secondary:focus-visible {
-    border-color: #deffff;
     outline: none;
   }
 
