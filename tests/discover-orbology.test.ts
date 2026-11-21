@@ -207,6 +207,15 @@ describe("Orbology 9.5 gap-close", () => {
     expect(view).toContain("margin-top: 0.574rem;") // panel actions
     expect(view).toContain("Orbology 9.5 slack")
   })
+
+  it("reduced motion still jump-cuts the orb: the static frame is re-drawn on every step change", () => {
+    // 0.11.20 set orbCurrent in the reduced-motion branch but
+    // never re-drew, so the orb stayed frozen at step 1 for the
+    // whole session (no rAF loop exists to pick the change up).
+    const effect = view.slice(view.indexOf("// Orb glide:"), view.indexOf("</script>"))
+    expect(effect).toContain("orbCurrent = { ...target }")
+    expect(effect).toContain("drawNeural()")
+  })
 })
 
 describe("Orbology: float + focus", () => {

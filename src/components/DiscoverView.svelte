@@ -1316,20 +1316,26 @@
       mid.addColorStop(1, "rgba(13, 140, 253, 0)")
       ctx.fillStyle = mid
       ctx.fillRect(orbCx - rEff, orbCy - rEff, 2 * rEff, 2 * rEff)
-      // 3. Core (radius 0.55R) + feathered ring. The ring is a
-      // soft annulus of light, never a drawn stroke (Orbology
-      // 9.5): a radial gradient band peaking at 0.72R and fading
-      // to transparent on both sides (0.66R–0.80R), so its edge
-      // can never read as a diagram-circle line. The peak alpha
-      // breathes ±12% with the orb, so the band feels organic,
-      // and it rides the same flash/swell multipliers as the core.
+      // 3. Core (radius 0.55R) + feathered ring. The core's bright
+      // centre is wide (near-white out to 0.35 of the core
+      // radius, Orbology 9.5) so the orb reads as a bright disc,
+      // not a faint blue smudge — the bright centre is what the
+      // eye lands on.
       const core = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.55 * rEff)
       core.addColorStop(0, `rgba(205, 255, 255, ${coreAlpha(0.95)})`)
-      core.addColorStop(0.55, `rgba(80, 180, 255, ${coreAlpha(0.55)})`)
+      core.addColorStop(0.35, `rgba(185, 238, 255, ${coreAlpha(0.85)})`)
+      core.addColorStop(0.7, `rgba(80, 180, 255, ${coreAlpha(0.5)})`)
       core.addColorStop(1, "rgba(80, 180, 255, 0)")
       ctx.fillStyle = core
       ctx.fillRect(orbCx - 0.55 * rEff, orbCy - 0.55 * rEff, 1.1 * rEff, 1.1 * rEff)
       const ringBreath = 1 + 0.12 * Math.sin((2 * Math.PI * now) / breathingPeriod)
+      // Feathered ring (Orbology 9.5): a soft annulus of light,
+      // never a drawn stroke — a radial gradient band peaking at
+      // 0.72R and fading to transparent on both sides
+      // (0.66R–0.80R), so its edge can never read as a
+      // diagram-circle line. The peak alpha breathes ±12% with
+      // the orb, so the band feels organic, and it rides the same
+      // flash/swell multipliers as the core.
       const ringPeak = Math.min(1, 0.42 * alpha * ringBreath * coreBoost * swell)
       const ring = ctx.createRadialGradient(orbCx, orbCy, 0, orbCx, orbCy, 0.8 * rEff)
       ring.addColorStop(0, "rgba(205, 255, 255, 0)")
@@ -1835,6 +1841,11 @@
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       orbCurrent = { ...target }
       orbTweenStart = 0
+      // Reduced motion draws one static frame (no rAF loop), so
+      // re-draw here — otherwise the orb would stay frozen at the
+      // previous step's geometry for the whole session (the
+      // 0.11.20 static frame never moved off step 1).
+      drawNeural()
       return
     }
     orbFrom = { ...orbCurrent }
