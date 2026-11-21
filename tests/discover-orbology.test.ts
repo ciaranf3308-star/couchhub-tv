@@ -140,8 +140,12 @@ describe("Orbology: blemish fixes", () => {
   })
 
   it("fits step 3: the itemised budget values are in the CSS", () => {
-    expect(view).toContain("padding-bottom: 2.6rem;")
+    expect(view).toContain("padding-bottom: 2rem;")
     expect(view).toContain("min-height: 10.6rem;")
+    // rows="2", not 3: rows set the intrinsic height and min-height
+    // only raises it — rows="3" left the box at ~185px and the
+    // min-height cut nothing (spec §7 item 3 as written is a no-op).
+    expect(view).toContain('rows="2"')
     expect(view).toContain("font-size: 4.3rem;")
     expect(view).toContain("padding: 0.5rem 2.01rem;")
   })

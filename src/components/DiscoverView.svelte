@@ -1952,6 +1952,13 @@
                    works natively. The on-screen keyboard NEVER opens
                    on focus — only the explicit button below (or
                    ArrowDown) opens it. -->
+              <!-- rows="2" (not 3): the rows set the textarea's
+                   intrinsic height, and min-height only raises it —
+                   with rows="3" the box stayed ~185px and the
+                   10.6rem min-height cut nothing. At rows="2" the
+                   box renders at the 10.6rem min-height (~148px);
+                   the 2-line placeholder (92px) + padding (43px)
+                   still fits inside it. -->
               <textarea
                 id="discover-query"
                 bind:this={inputEl}
@@ -1961,7 +1968,7 @@
                 onclick={onSearchInputFocus}
                 onkeydown={onSearchInputKeyDown}
                 placeholder="Your mood, your limits, your reference films. Anything goes."
-                rows="3"
+                rows="2"
                 class="rs-flow-brief-input"></textarea>
               <TvKeyboard
                 bind:value={query}
@@ -2694,12 +2701,15 @@
   /* Bottom clearance (fix #6, Orbology): the shell's fixed hints
      pill overlays the bottom ~45px of the viewport. The brief step
      is the tall one (no-key panel + mode row below the actions),
-     so it carries extra bottom padding — 2.6rem leaves the foot
-     ~55px above the pill, and the step now fits without scrolling
-     in both key states at both viewports. Steps 1-2 fit without
-     scrolling, so they keep the tight padding above. */
+     so it carries extra bottom padding — 2rem leaves the foot
+     ~15px above the pill, and the step now fits without scrolling
+     in both key states at both viewports (the spec's 2.6rem assumed
+     a 13px mode-row saving that does not materialise: the row is
+     single-line with or without the detail <p> — see rows="2"
+     note on the textarea). Steps 1-2 fit without scrolling, so
+     they keep the tight padding above. */
   .rs-flow-step--brief {
-    padding-bottom: 2.6rem;
+    padding-bottom: 2rem;
   }
   .rs-flow-step--brief .rs-flow-sub--left {
     max-width: 57.44rem;
@@ -3015,7 +3025,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 1.436rem;
-    margin-top: 0.862rem;
+    margin-top: 0.574rem;
     max-width: 61.461rem;
   }
   .rs-discover-mode {
