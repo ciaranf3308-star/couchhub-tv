@@ -32,6 +32,7 @@
 // fetch takes an injectable `fetchImpl`, and the parsers are pure.
 
 import { log } from "@/scripts/lib/log.js"
+import { epgListingMatchesKickoff } from "@/scripts/lib/sports-corner-v2-hub.js"
 
 /** Base URL for every football-data.org v4 call. */
 export const FOOTBALL_DATA_BASE_URL = "https://api.football-data.org/v4"
@@ -844,18 +845,20 @@ export interface MatchedFixture {
 
 /**
  * Match one feed fixture to EPG listings by (normalised teams,
- * order-insensitive, start within the same minute). The match is for
- * the station only; the fixture itself is feed truth.
+ * order-insensitive, listing starts at kick-off or up to the
+ * pre-match window before it — see epgListingMatchesKickoff).
+ * The match is for the station only; the fixture itself is feed truth.
  */
 export function matchFixtureStation(
   fixture: FeedFixture,
   listings: ReadonlyArray<EpgStationListing>,
 ): MatchedFixture {
-  const fixtureMinute = Math.floor(fixture.startMs / 60_000)
   const home = normaliseTeamName(fixture.home)
   const away = normaliseTeamName(fixture.away)
   const match = listings.find((listing) => {
-    if (Math.floor(listing.startMs / 60_000) !== fixtureMinute) return false
+    if (!epgListingMatchesKickoff(listing.startMs, fixture.startMs)) {
+      return false
+    }
     const listingHome = normaliseTeamName(listing.home)
     const listingAway = normaliseTeamName(listing.away)
     return (

@@ -319,13 +319,21 @@ describe("T-v2-3 — station matched vs Station TBC, no invented Watch data", ()
     }
   })
 
-  it("matching is by normalised teams + start within the same minute", () => {
+  it("matching is by normalised teams + the pre-match window (bug 4b)", () => {
     const fixture = MOCK_NEXT_FIXTURES[0]
-    // Same minute, 30s later: still the same fixture.
-    const sameMinute = matchFixtureStation(fixture, [
+    // 30 minutes before kick-off (pre-match build-up): still the
+    // same fixture's broadcast.
+    const prematch = matchFixtureStation(fixture, [
+      { ...MOCK_EPG_LISTINGS[0], startMs: fixture.startMs - 30 * 60_000 },
+    ])
+    expect(prematch.stationKnown).toBe(true)
+    // After kick-off the broadcast has already begun elsewhere — a
+    // listing starting 30s late is NOT this fixture (the old
+    // same-minute rule matched it; the pre-match window does not).
+    const afterKickoff = matchFixtureStation(fixture, [
       { ...MOCK_EPG_LISTINGS[0], startMs: fixture.startMs + 30_000 },
     ])
-    expect(sameMinute.stationKnown).toBe(true)
+    expect(afterKickoff.station).toBe(STATION_TBC)
     // One minute later: a different slot, no match, TBC.
     const nextMinute = matchFixtureStation(fixture, [
       { ...MOCK_EPG_LISTINGS[0], startMs: fixture.startMs + 61_000 },
