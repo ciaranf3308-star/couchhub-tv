@@ -49,7 +49,6 @@
 
 import {
   getAiEnabled,
-  getAiEndpoint,
   getAiModel,
   getFootballDataApiKey,
   getTmdbApiKey,
