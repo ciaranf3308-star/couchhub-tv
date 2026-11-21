@@ -177,6 +177,10 @@ export type SportsHubState =
 export interface SportsHubModel {
   state: SportsHubState
   followed: boolean
+  /** No playlist / no channels yet — the EPG half is empty, but the
+   *  feed sections still render (bug 2). */
+  hasPlaylist: boolean
+  hasChannels: boolean
   /** EPG failed but last-good fixtures are shown (§2.5 keep-last-good). */
   stale: boolean
   hero: SportsFixture | null
@@ -235,6 +239,8 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
   const base: SportsHubModel = {
     state: "loading",
     followed,
+    hasPlaylist,
+    hasChannels,
     stale: false,
     hero: null,
     split: EMPTY_SPLIT,
@@ -248,25 +254,29 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
     onTvNow: [],
   }
   if (!followed) return { ...base, state: "unfollowed" }
-  if (!hasPlaylist) return { ...base, state: "no-playlist" }
-  if (!hasChannels) return { ...base, state: "no-channels" }
   // BUG 2 — the feed-backed sections must NOT wait for the TV guide:
   // the table and fixtures use a separate data source, so when feed
-  // data has arrived the hub is ready even though the guide hasn't.
+  // data has arrived the hub is ready even though the guide hasn't
+  // (no scan yet, no playlist, no channels, zero mapped channels).
   // The guide gate survives only for the parts that need the guide
   // (on-TV-now cards and their tune-in, which read the EPG scan).
+  // Without feed data the old gates stand exactly as before.
   const hasFeed = input.tableResult != null || input.feedResult != null
-  if (scanResult === null) {
-    if (hasFeed) {
+  if (!hasFeed) {
+    if (!hasPlaylist) return { ...base, state: "no-playlist" }
+    if (!hasChannels) return { ...base, state: "no-channels" }
+    if (scanResult === null) {
       return {
         ...base,
-        state: "ready",
-        stale: epgStatus === "failed",
+        state: epgStatus === "failed" ? "failed" : "loading",
       }
     }
+  }
+  if (scanResult === null) {
     return {
       ...base,
-      state: epgStatus === "failed" ? "failed" : "loading",
+      state: "ready",
+      stale: epgStatus === "failed",
     }
   }
   const split = splitSportsFixtures(scanResult.fixtures, input.nowMs)
@@ -285,10 +295,7 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
     hero: selectNextFixture(scanResult.fixtures, input.nowMs),
     lastUpdatedLabel: formatLastUpdated(scanResult),
   }
-  if (scanResult.mappedChannelCount === 0) {
-    if (hasFeed) {
-      return { ...model, state: "ready", stale: epgStatus === "failed" }
-    }
+  if (scanResult.mappedChannelCount === 0 && !hasFeed) {
     return { ...model, state: "no-mapping" }
   }
   return {
@@ -707,7 +714,7 @@ function buildTableSection(
       }
       const cells = [
         String(entry.position),
-        entry.team,
+        shortTeamName(entry.team),
         String(entry.played),
         String(entry.points),
       ]
@@ -1426,6 +1433,14 @@ export function renderSportsHub(
         "The guide covers about the next day and a half — check back closer to matchday.",
       ),
     )
+    // Bug 2: with feed data but no playlist, the hub still renders
+    // — the way in is the same Add-a-playlist link the old
+    // no-playlist state showed.
+    if (!model.hasPlaylist) {
+      const link = el("a", "rs-sports-state-action", "Add a playlist")
+      link.setAttribute("href", "/login")
+      empty.appendChild(link)
+    }
     fragment.appendChild(empty)
   } else {
     const upcomingSection = buildSection(

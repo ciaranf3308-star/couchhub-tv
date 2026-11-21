@@ -270,6 +270,59 @@ describe("bug 2 — feed sections render without the TV guide", () => {
     })
     expect(withoutFeed.state).toBe("no-mapping")
   })
+
+  it("no playlist / no channels + feed arrived → ready, with the Add-a-playlist way in", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    for (const input of [
+      { hasPlaylist: false, hasChannels: false },
+      { hasPlaylist: true, hasChannels: false },
+    ]) {
+      const model = buildSportsHubModel({
+        followed: true,
+        ...input,
+        epgStatus: "loading",
+        scanResult: null,
+        nowMs: FRIDAY,
+        tableResult,
+        feedResult,
+        nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+      })
+      expect(model.state).toBe("ready")
+      renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+      expect(document.querySelector(".rs-sports-table")).not.toBeNull()
+      expect(document.querySelector(".rs-sports-hero")).not.toBeNull()
+      expect(
+        document.querySelectorAll(".rs-sports-next-row"),
+      ).toHaveLength(5)
+      if (!input.hasPlaylist) {
+        expect(
+          document.querySelector(".rs-sports-state-action")?.textContent,
+        ).toBe("Add a playlist")
+      }
+      document.body.innerHTML = shellHtml()
+    }
+    // Without feed data the old gates stand.
+    expect(
+      buildSportsHubModel({
+        followed: true,
+        hasPlaylist: false,
+        hasChannels: true,
+        epgStatus: "loading",
+        scanResult: null,
+        nowMs: FRIDAY,
+      }).state,
+    ).toBe("no-playlist")
+    expect(
+      buildSportsHubModel({
+        followed: true,
+        hasPlaylist: true,
+        hasChannels: false,
+        epgStatus: "loading",
+        scanResult: null,
+        nowMs: FRIDAY,
+      }).state,
+    ).toBe("no-channels")
+  })
 })
 
 describe("bug 4b — both call sites use the pre-match window", () => {

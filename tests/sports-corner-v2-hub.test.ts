@@ -192,7 +192,7 @@ describe("T-v2-1 — mini-table renders United 18th, expand shows the full table
     expect(unitedRow).not.toBeNull()
     expect([...(unitedRow as HTMLElement).querySelectorAll("td")].map((cell) => cell.textContent)).toEqual([
       "18",
-      "Manchester United FC",
+      "Man Utd",
       "10",
       "8",
     ])
