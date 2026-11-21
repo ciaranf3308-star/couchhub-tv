@@ -45,11 +45,34 @@
     candidateDetailHref,
     candidateKey,
     MOOD_PRESETS,
-    EXAMPLE_PROMPTS,
     registerFollowedProvider,
     isNaturalLanguageQuery,
     detectMoodPresets,
   } from "@/scripts/lib/discover.ts"
+  // Guided three-step flow (0.11.18 redesign): the pure flow state
+  // machine, request builder and reveal queue live in
+  // discover-redesign.ts; the view only renders and calls the real
+  // Discovery 3.0 orchestrator.
+  import {
+    freshDiscoverFlow,
+    selectDiscoverKind,
+    toggleDiscoverCategory,
+    surpriseDiscoverCategories,
+    continueToBrief,
+    setDiscoverBrief,
+    refineFlowState,
+    stepBackFlow,
+    choicesSummary,
+    selectedSummary,
+    buildDiscoveryQuery,
+    playableRecommendations,
+    pickNextRecommendation,
+    shownTitles,
+    aiNotReadyMessage,
+    KIND_CARDS,
+    GENRE_CATEGORIES,
+  } from "@/scripts/lib/discover-redesign.ts"
+  import { isOnWatchlist, toggleWatchlist } from "@/scripts/lib/preferences.js"
   // AI-first discovery (0.11.6): the orchestrator (W1) + verification
   // (W2) + state transitions (W4) are the real modules; in-flight
   // progress arrives via subscribeAiDiscoveryPhase (the orchestrator
@@ -70,7 +93,6 @@
     visibleRecommendations,
     countMatched,
     recommendationDetailHref,
-    isRefinementSubmit,
     refinementContextLabel,
     formatTasteSummaryForAi,
     providerErrorMessage,
@@ -130,7 +152,7 @@
   // src/scripts/lib/couch-keyboard.ts for the full contract
   // (Escape / Hide-button dismiss, blur-to-a-real-element hides,
   // commit moves focus to results).
-  /** @type {HTMLInputElement | null} */
+  /** @type {HTMLTextAreaElement | null} */
   let inputEl = null
   /** @type {HTMLDivElement | null} */
   let rootEl = null
@@ -140,15 +162,12 @@
     keyboardOpen = keyboard.open
   }
   function onSearchInputFocus() {
-    keyboard.onInputFocus()
+    // Redesign: the brief is typed on a physical keyboard / chatpad
+    // straight into the textarea — the on-screen keyboard NEVER
+    // opens on focus. It opens only on the explicit "On-screen
+    // keyboard" button (openBriefKeyboard below) or ArrowDown.
+    // Focus stays in the textarea; nothing here touches the OSK.
     syncKeyboard()
-    // Contract E session: the keyboard Back layer and the B-close
-    // path need to know this input is being edited. Focus stays in
-    // the input (pointer / physical typing); the key grid is reached
-    // via ArrowDown or A on the input (W1 gamepad entry).
-    if (keyboard.open && inputEl) {
-      openCouchKeyboard(inputEl, onKeyboardCommit, { focusGrid: false })
-    }
   }
   function onSearchInputKeyDown(ev) {
     if (ev.key === "Escape") {
@@ -272,17 +291,47 @@
   let aiAuto = $state(false)
   let showOnboarding = $state(false)
 
-  const showingSearch = $derived(
-    queryDebounced.trim() !== "" || !!activeMood || aiResults !== null || aiUnavailable !== null
-  )
+  // -- Guided three-step flow (0.11.18 redesign) ----------------------
+  let flow = $state(freshDiscoverFlow())
+  /** Catalogue keys / session ids already revealed this session. */
+  let shownIds = $state(/** @type {Set<string>} */ (new Set()))
+  /** Index of the current pick inside visibleAiResults. */
+  let currentPick = $state(0)
+  /** Whether the current pick is already on the Watch Later list. */
+  let watchLaterSaved = $state(false)
+  /** Honest notice for the current step (no-key, empty queue, ...). */
+  let flowNotice = $state("")
+  /** One-shot explicit question for the next AI run (Ask AI / example
+      prompt). Null means "ask the guided flow's question". Cleared
+      by runAiSearch as soon as it is read. */
+  let aiQueryOverride = $state(/** @type {string | null} */ (null))
+  /** @type {HTMLCanvasElement | null} */
+  let neuralCanvas = null
+  /** rAF id for the neural drift animation, if running. */
+  let neuralRaf = 0
+  /** Resize handler for the neural canvas, if started. */
+  let neuralCanvasResize = null
+  /** Nodes / pulses for the neural canvas (owned by startNeuralCanvas). */
+  let neuralNodes = []
+  let neuralPulses = []
+
   /** Whether an AI rail (results, or an honest empty/unavailable
       state) is on screen, as opposed to a local rail. */
   const hasAiResults = $derived(aiResults !== null)
   /** Recommendations to show for the current toggle state — a pure
       client-side filter; toggling never re-calls the model. */
+  // The reveal queue is playable-only FIRST (verified + confirmed
+  // library match — discover-redesign.ts), then the toggle filter.
+  // Unplayable titles can never reach the reveal screen.
   const visibleAiResults = $derived(
-    visibleRecommendations(aiResults ?? [], availableOnly)
+    visibleRecommendations(playableRecommendations(aiResults ?? []), availableOnly)
   )
+  /** The one recommendation on screen right now (reveal is one at a time). */
+  const currentRec = $derived(visibleAiResults[currentPick] ?? null)
+  const currentHref = $derived(currentRec ? recommendationDetailHref(currentRec) : null)
+  const flowStepNumber = $derived(flow.step === "kind" ? 1 : flow.step === "categories" ? 2 : 3)
+  const choicesLine = $derived(choicesSummary(flow))
+  const selectedLine = $derived(selectedSummary(flow))
   const matchedAiCount = $derived(countMatched(aiResults ?? []))
   /** True when every AI recommendation on screen is TMDB-verified —
       the toggle note may only claim "verified" when that holds. */
@@ -295,14 +344,6 @@
       there is one, else the single honest "Asking AI" state. */
   const aiStatusText = $derived(
     aiPhase ? aiDiscoveryProgressText(aiPhase) : "Asking AI for recommendations…"
-  )
-  /** Submit button label: refining is a refinement, not a new search. */
-  const submitLabel = $derived(
-    isRefinementSubmit(conversation, hasAiResults, query)
-      ? "Refine"
-      : aiAuto
-        ? "Ask AI"
-        : "Search"
   )
   const searchPlaceholder = $derived(
     hasAiResults && conversation.turns.length > 0
@@ -556,8 +597,6 @@
     queryTimer = setTimeout(() => {
       queryTimer = null
       queryDebounced = value
-      activeMood = null
-      void runSearch()
     }, 250)
   }
 
@@ -592,21 +631,36 @@
    */
   async function runAiSearch() {
     if (!data) return
-    const q = query.trim()
+    // The request is the guided flow's ask (kind + draws + brief),
+    // with the titles already shown this session excluded — unless a
+    // caller passes an explicit question (Ask AI / example prompt).
+    // The orchestrator is the ONLY caller of the model: the LLM
+    // generates from its own knowledge, TMDB verifies, and the
+    // catalogue match decides playability. Diagnostics therefore show
+    // real model calls (sentToModelCount stays the honest 0 — the
+    // generation sends no candidate list to the model, by design).
+    const q = (
+      aiQueryOverride ??
+      buildDiscoveryQuery(flow, {
+        shownTitles: shownTitles(playableRecommendations(aiResults ?? []), shownIds),
+      })
+    ).trim()
+    aiQueryOverride = null
     if (!q) return
-    // No doomed requests: when AI cannot run, fall back to a local
-    // search and let the rail say why Ask AI is unavailable.
+    // No doomed requests: when AI cannot run, stay on step 3 and say
+    // why honestly — never pretend the model answered. The local
+    // catalogue fallback is offered from the same screen.
     if (!canAskAi) {
-      queryDebounced = q
+      queryDebounced = choicesSummary(flow) || q
       activeMood = null
-      await runSearch()
+      flowNotice = aiNotReadyMessage(aiMode, aiKeySaved)
       return
     }
     if (aiAbort) aiAbort.abort()
     const controller = new AbortController()
     aiAbort = controller
     const token = ++searchToken
-    queryDebounced = q
+    queryDebounced = choicesSummary(flow) || q
     activeMood = null
     searching = true
     searchingAi = true
@@ -615,6 +669,8 @@
     localSimilar = null
     searchResults = null
     resultsSource = null
+    flowNotice = ""
+    flow = { ...flow, step: "loading" }
     const runStartedAt = performance.now()
     const tasteSummary = getAiShareTaste()
       ? formatTasteSummaryForAi(summarizeTaste(data.taste))
@@ -667,6 +723,8 @@
         receipt = result.receipt
         resultsSource = "local"
         aiPhase = null
+        flow = { ...flow, step: "brief" }
+        flowNotice = aiUnavailable.message
         return
       }
       conversation = result.conversation
@@ -674,8 +732,25 @@
       receipt = result.receipt
       resultsSource = "ai"
       aiPhase = null
-      // Focus the first recommendation once it has rendered (the
-      // keyboard-dismiss-first discipline lives in focusFirstAiResult).
+      // Reveal ONE playable pick at a time: only verified titles with
+      // a confirmed library match ever reach the screen, and the
+      // first unshown one is the current pick. An empty playable
+      // queue is an honest empty state, never filler.
+      const playable = playableRecommendations(result.results)
+      const first = pickNextRecommendation(playable, shownIds)
+      if (!first.rec) {
+        flow = { ...flow, step: "brief" }
+        flowNotice =
+          playable.length === 0
+            ? "AI couldn't find anything in your library for that — try different draws, or a different brief."
+            : "You've seen every pick from that run — refine the brief for a fresh set."
+        return
+      }
+      shownIds = first.shownIds
+      currentPick = playable.indexOf(first.rec)
+      watchLaterSaved = false
+      flow = { ...flow, step: "reveal" }
+      // Focus the Watch action once it has rendered.
       await tick()
       if (token === searchToken) focusFirstAiResult()
     } catch (error) {
@@ -689,6 +764,8 @@
       aiResults = []
       resultsSource = "local"
       aiPhase = null
+      flow = { ...flow, step: "brief" }
+      flowNotice = aiUnavailable.message
       receipt = {
         phase: "fallback",
         engine: "ai",
@@ -781,6 +858,11 @@
     aiPhase = null
     searching = false
     searchingAi = false
+    flow = freshDiscoverFlow()
+    shownIds = new Set()
+    currentPick = 0
+    watchLaterSaved = false
+    flowNotice = ""
     closeDiagnostics()
     window.scrollTo(0, 0)
     inputEl?.focus()
@@ -824,10 +906,10 @@
     if (keyboard.dismiss()) syncKeyboard()
     requestAnimationFrame(() => {
       document
-        .querySelector("[data-ai-results] [data-ai-result-card]")
+        .querySelector("[data-reveal] [data-reveal-watch]")
         ?.scrollIntoView({ block: "nearest" })
       document
-        .querySelector("[data-ai-results] [data-ai-result-card]")
+        .querySelector("[data-reveal] [data-reveal-watch]")
         ?.focus({ preventScroll: true })
     })
   }
@@ -842,22 +924,15 @@
    */
   function submitSearch() {
     cancelQueryTimer()
-    const q = query.trim()
-    if (isRefinementSubmit(conversation, hasAiResults, q)) {
-      queryDebounced = q
-      void runAiSearch()
-      return
-    }
-    if (aiAuto && canAskAi && q) {
-      queryDebounced = q
-      activeMood = null
-      void runAiSearch()
-      return
-    }
-    queryDebounced = query
+    // Step 3 submit: the typed brief (or an empty brief, when the
+    // user skips typing) is the request. The flow state carries the
+    // kind + draws; runAiSearch builds the one natural-language ask
+    // from them. A refinement keeps the conversation, so a follow-up
+    // brief refines the picks on screen instead of starting over.
+    flow = setDiscoverBrief(flow, query)
+    queryDebounced = choicesSummary(flow) || query.trim()
     activeMood = null
-    void runSearch()
-    focusFirstResult()
+    void runAiSearch()
   }
 
   /** Explicit "Ask AI" — one paid request, on the user's tap. */
@@ -876,6 +951,7 @@
       queryDebounced = query
       activeMood = null
     }
+    aiQueryOverride = query
     void runAiSearch()
   }
 
@@ -888,6 +964,7 @@
     queryDebounced = prompt
     activeMood = null
     conversation = newConversation()
+    aiQueryOverride = prompt
     if (canAskAi) {
       void runAiSearch()
     } else {
@@ -936,6 +1013,7 @@
       preset's own fields (genres / rating floor / runtime cap) — never
       invented. */
   function moodSubtitle(preset) {
+    if (preset.tagline) return preset.tagline
     if (preset.maxRuntimeMinutes) return `Under ${preset.maxRuntimeMinutes} minutes`
     if (preset.hiddenGem)
       return `Rated ${(preset.minRating ?? 7.5).toFixed(1)}+ · under the radar`
@@ -949,6 +1027,246 @@
       return preset.minRating ? `Series rated ${preset.minRating}+` : "Series"
     if (preset.minRating) return `Rated ${preset.minRating}+`
     return "Anything in your library"
+  }
+
+  // -- Guided flow actions (0.11.18) --------------------------------
+  /** Step 1: pick a kind, move to step 2, send a pulse to the core. */
+  function pickKind(kind) {
+    flow = selectDiscoverKind(flow, kind)
+    pulseNeural()
+    void tick().then(() => {
+      document
+        .querySelector("[data-nav-region=\"flow-categories\"] [data-nylah-item]")
+        ?.focus({ preventScroll: true })
+    })
+  }
+
+  /** Step 2: toggle one draw tile (multi-select, never clears others). */
+  function toggleCategory(categoryId) {
+    flow = toggleDiscoverCategory(flow, categoryId)
+    pulseNeural()
+  }
+
+  /** Step 2 "Surprise me": clear the draws and move to step 3. */
+  function surpriseMe() {
+    flow = surpriseDiscoverCategories(flow)
+    query = flow.brief
+    void tick().then(() => inputEl?.focus({ preventScroll: true }))
+  }
+
+  /** Step 2 Continue: move to step 3 with the draws intact. */
+  function continueToBrief() {
+    flow = continueToBrief(flow)
+    query = flow.brief
+    void tick().then(() => inputEl?.focus({ preventScroll: true }))
+  }
+
+  /** Step 3 "Skip this step": ask with no brief at all. */
+  function skipBrief() {
+    cancelQueryTimer()
+    flow = setDiscoverBrief(flow, "")
+    query = ""
+    queryDebounced = choicesSummary(flow)
+    activeMood = null
+    void runAiSearch()
+  }
+
+  /**
+   * Refine (hard rule): back to step 3 with the ORIGINAL kind,
+   * categories and brief intact — "closer, but darker" without
+   * starting over. The conversation is kept, so the next submit is
+   * a refinement of the picks on screen.
+   */
+  function refineFlow() {
+    flow = refineFlowState(flow)
+    query = flow.brief
+    flowNotice = ""
+    void tick().then(() => inputEl?.focus({ preventScroll: true }))
+  }
+
+  /**
+   * Next pick: immediate, from the queue already on screen — no
+   * model call, and never a repeat within the session. Skipping
+   * records nothing: no dislike is stored anywhere.
+   */
+  function nextPick() {
+    const { rec, shownIds: nextShown } = pickNextRecommendation(visibleAiResults, shownIds)
+    if (rec) {
+      shownIds = nextShown
+      currentPick = visibleAiResults.indexOf(rec)
+      watchLaterSaved = false
+      void tick().then(() => focusFirstAiResult())
+      return
+    }
+    // Queue exhausted: one fresh request, with the shown titles
+    // excluded from the new ask. If that comes back empty too, the
+    // run says so honestly on step 3.
+    flowNotice = ""
+    void runAiSearch()
+  }
+
+  /** Catalogue key of the current pick, split for preferences.js. */
+  function currentMatchParts() {
+    const key = currentRec?.match?.catalogueKey
+    if (!key) return null
+    const colon = key.indexOf(":")
+    if (colon <= 0 || colon === key.length - 1) return null
+    const kind = key.slice(0, colon)
+    if (kind !== "movie" && kind !== "series") return null
+    return { prefKind: kind === "movie" ? "vod" : "series", id: key.slice(colon + 1) }
+  }
+
+  /** Whether the current pick is already on the Watch Later list. */
+  function isCurrentWatchLater() {
+    if (watchLaterSaved) return true
+    const parts = currentMatchParts()
+    if (!parts || !playlistId) return false
+    return isOnWatchlist(playlistId, parts.prefKind, parts.id)
+  }
+
+  /** Watch Later: the existing preferences.js watchlist, toggled for
+      the current pick. Never starts playback, never leaves Discover. */
+  function toggleCurrentWatchLater() {
+    const parts = currentMatchParts()
+    if (!parts || !playlistId || !currentRec) return
+    watchLaterSaved = toggleWatchlist(playlistId, parts.prefKind, parts.id, {
+      name: currentRec.title,
+      logo: currentRec.posterUrl ?? null,
+    })
+  }
+
+  /**
+   * Explicit on-screen keyboard: the ONLY path that opens the OSK
+   * in the redesign (button tap or ArrowDown). Focus never opens it.
+   */
+  function openBriefKeyboard() {
+    keyboard.onInputFocus()
+    syncKeyboard()
+    if (keyboard.open && inputEl) {
+      openCouchKeyboard(inputEl, onKeyboardCommit, { focusGrid: false })
+    }
+  }
+
+  /** Focus the current step's primary control (Back "focus" step). */
+  function focusFlowStep() {
+    if (flow.step === "brief") {
+      inputEl?.focus()
+      return
+    }
+    if (flow.step === "reveal") {
+      document
+        .querySelector("[data-reveal] [data-reveal-watch]")
+        ?.focus({ preventScroll: true })
+      return
+    }
+    document
+      .querySelector(`[data-nav-region="flow-${flow.step}"] [data-nylah-item]`)
+      ?.focus({ preventScroll: true })
+  }
+
+  // -- Neural background (one continuous space) ----------------------
+  /** One drifting-neuron frame: filaments, core glow, travelling pulses. */
+  function drawNeural() {
+    const canvas = neuralCanvas
+    if (!canvas) return
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    const cx = canvas.width * 0.5
+    const cy = canvas.height * 0.32
+    for (let i = 0; i < neuralNodes.length; i++) {
+      for (let j = i + 1; j < neuralNodes.length; j++) {
+        const a = neuralNodes[i]
+        const b = neuralNodes[j]
+        const d = Math.hypot(a.x - b.x, a.y - b.y)
+        if (d < 150) {
+          ctx.strokeStyle = `rgba(80, 160, 255, ${0.16 * (1 - d / 150)})`
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(a.x, a.y)
+          ctx.lineTo(b.x, b.y)
+          ctx.stroke()
+        }
+      }
+    }
+    for (const p of neuralPulses) {
+      const x = p.x + (cx - p.x) * p.t
+      const y = p.y + (cy - p.y) * p.t
+      ctx.fillStyle = "rgba(205, 255, 255, 0.9)"
+      ctx.beginPath()
+      ctx.arc(x, y, 2.4, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    neuralPulses = neuralPulses.filter((p) => p.t < 1)
+    for (const n of neuralNodes) {
+      ctx.fillStyle = "rgba(140, 200, 255, 0.85)"
+      ctx.beginPath()
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 130)
+    g.addColorStop(0, "rgba(13, 140, 253, 0.28)")
+    g.addColorStop(1, "rgba(13, 140, 253, 0)")
+    ctx.fillStyle = g
+    ctx.fillRect(cx - 130, cy - 130, 260, 260)
+  }
+
+  /** Start the neural drift (one static frame when reduced motion). */
+  function startNeuralCanvas() {
+    const canvas = neuralCanvas
+    if (!canvas) return
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect()
+      canvas.width = Math.max(1, Math.floor(rect.width))
+      canvas.height = Math.max(1, Math.floor(rect.height))
+      const count = Math.floor((canvas.width * canvas.height) / 26000)
+      neuralNodes = Array.from(
+        { length: Math.min(64, Math.max(24, count)) },
+        () => ({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.22,
+          vy: (Math.random() - 0.5) * 0.22,
+          r: 1 + Math.random() * 2.2,
+        }),
+      )
+    }
+    neuralCanvasResize = resize
+    resize()
+    drawNeural()
+    if (reduced) return
+    const frame = () => {
+      for (const n of neuralNodes) {
+        n.x += n.vx
+        n.y += n.vy
+        if (n.x < 0 || n.x > canvas.width) n.vx *= -1
+        if (n.y < 0 || n.y > canvas.height) n.vy *= -1
+      }
+      if (Math.random() < 0.02 && neuralNodes.length) {
+        const n = neuralNodes[Math.floor(Math.random() * neuralNodes.length)]
+        neuralPulses.push({ x: n.x, y: n.y, t: 0 })
+      }
+      for (const p of neuralPulses) p.t += 0.006
+      drawNeural()
+      neuralRaf = requestAnimationFrame(frame)
+    }
+    neuralRaf = requestAnimationFrame(frame)
+    window.addEventListener("resize", resize)
+  }
+
+  function stopNeuralCanvas() {
+    if (neuralRaf) cancelAnimationFrame(neuralRaf)
+    neuralRaf = 0
+    if (neuralCanvasResize) window.removeEventListener("resize", neuralCanvasResize)
+    neuralCanvasResize = null
+  }
+
+  /** A selection sends one pulse from a random neuron toward the core. */
+  function pulseNeural() {
+    if (!neuralNodes.length) return
+    const n = neuralNodes[Math.floor(Math.random() * neuralNodes.length)]
+    neuralPulses.push({ x: n.x, y: n.y, t: 0 })
   }
 
   function clearSearch() {
@@ -969,6 +1287,11 @@
     aiPhase = null
     searching = false
     searchingAi = false
+    flow = freshDiscoverFlow()
+    shownIds = new Set()
+    currentPick = 0
+    watchLaterSaved = false
+    flowNotice = ""
     closeDiagnostics()
     inputEl?.focus()
   }
@@ -1004,21 +1327,30 @@
     cancelQueryTimer()
     if (aiAbort) aiAbort.abort()
     searchToken++
-    query = ""
-    queryDebounced = ""
-    activeMood = null
-    searchResults = null
-    aiResults = null
-    resultsSource = null
-    receipt = null
-    aiUnavailable = null
-    localSimilar = null
-    aiPhase = null
-    searching = false
-    searchingAi = false
+    // One Back step in the flow: reveal -> brief (the picks and the
+    // refinement conversation are kept, so Refine can continue),
+    // brief -> categories, categories -> kind. Only leaving the
+    // first step's root clears the results. Never sends an AI
+    // request: cancellation only (debounce timer, abort, token bump).
+    const leavingFlow = flow.step === "kind"
+    flow = stepBackFlow(flow)
+    if (leavingFlow) {
+      query = ""
+      queryDebounced = ""
+      activeMood = null
+      searchResults = null
+      aiResults = null
+      resultsSource = null
+      receipt = null
+      aiUnavailable = null
+      localSimilar = null
+      aiPhase = null
+      searching = false
+      searchingAi = false
+    }
     closeDiagnostics()
     window.scrollTo(0, 0)
-    inputEl?.focus()
+    focusFlowStep()
   }
 
   /**
@@ -1038,8 +1370,9 @@
       diagnosticsOpen,
       keyboardOpen: keyboard.open,
       focusInResults:
-        !!active?.closest?.("[data-discover-results]") && active !== inputEl,
+        !!active?.closest?.("[data-discover-flow]") && active !== inputEl,
       hasResultsView:
+        flow.step !== "kind" ||
         aiResults !== null ||
         searchResults !== null ||
         query.trim() !== "" ||
@@ -1061,7 +1394,7 @@
       return true
     }
     if (step === "focus-search") {
-      inputEl?.focus()
+      focusFlowStep()
       return true
     }
     if (step === "root-state") {
@@ -1130,6 +1463,7 @@
   onMount(async () => {
     aiAuto = getAiAutoRequests()
     setLogicalView("discover")
+    startNeuralCanvas()
     // Region owner (§7.3): search -> examples -> quick picks ->
     // results, column-preserving, no rail hijack (kind "mixed"
     // via setLogicalView above). Unregistered on unmount.
@@ -1241,6 +1575,7 @@
       loading = false
     }
     return () => {
+      stopNeuralCanvas()
       clearInterval(clock)
       unregisterNavOwner()
       // Leaving with diagnostics open must not strand its legend.
@@ -1265,43 +1600,72 @@
     armTvImageFallbacks(document)
     void tick().then(() => restoreCouchFocus())
   })
+
+  // Controller hints follow the flow step (diagnostics keeps its own
+  // override while open — this effect never touches it then).
+  $effect(() => {
+    const step = flow.step
+    if (diagnosticsOpen) return
+    if (step === "kind") {
+      setControllerHints({
+        id: "discover-kind",
+        items: [
+          { glyph: "dpad", label: "Move" },
+          { glyph: "a", label: "Select" },
+          { glyph: "b", label: "Back" },
+        ],
+      })
+    } else if (step === "categories") {
+      setControllerHints({
+        id: "discover-categories",
+        items: [
+          { glyph: "dpad", label: "Move" },
+          { glyph: "a", label: "Select / deselect" },
+          { glyph: "b", label: "Back" },
+        ],
+      })
+    } else if (step === "brief") {
+      setControllerHints({
+        id: "discover-brief",
+        items: [
+          { glyph: "a", label: "Continue" },
+          { glyph: "b", label: "Back" },
+        ],
+      })
+    } else if (step === "reveal") {
+      setControllerHints({
+        id: "discover-reveal",
+        items: [
+          { glyph: "a", label: "Watch" },
+          { glyph: "b", label: "Back" },
+        ],
+      })
+    }
+  })
 </script>
 
 <div class="rs-discover" data-discover-root bind:this={rootEl} onkeydown={onDiscoverKeyDown}>
   <!-- Hero: Discover is a destination, with its purpose and its AI
        mode stated up front. -->
-  <header class="rs-discover__hero">
-    <div class="rs-discover__hero-text">
-      <p class="rs-discover__eyebrow">Discover</p>
-      <h1 class="rs-page-title">What are we watching?</h1>
-      <p class="rs-discover__lede">
-        Ask in your own words — AI suggests titles from its own
-        knowledge, checks each one against TMDB, and shows you which
-        are already in your library. Pick a quick pick, or browse
-        picks made for you.
-      </p>
+  <!-- Guided three-step flow (0.11.18 redesign): one continuous
+       neural space — the canvas behind this root drifts neurons and
+       sends pulses toward the core; each step is a deeper move in,
+       not a new page. The top navigation lives in CouchLayout and
+       is untouched. -->
+  <canvas class="rs-neural-canvas" bind:this={neuralCanvas} aria-hidden="true"></canvas>
+
+  <div class="rs-discover__top">
+    <p class="rs-discover__eyebrow">Discover</p>
+    <div class="rs-discover__steps" aria-label="Step {flowStepNumber} of 3">
+      {#each [1, 2, 3] as n (n)}
+        <span class="rs-step-dot" class:is-filled={n <= flowStepNumber} aria-hidden="true"></span>
+      {/each}
+      <span class="rs-step-text">0{flowStepNumber} / 03</span>
     </div>
-    <div class="rs-discover__hero-side">
-      <a
-        href="/settings/discover-ai#card-ai-discovery"
-        data-nylah-item
-        class="rs-discover-mode rs-discover-mode--{aiMode ?? 'unknown'}"
-        title={aiDetail}>
-        <span class="rs-discover-mode__dot" aria-hidden="true"></span>
-        <span>{modeLabel}</span>
-      </a>
-      <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
-        Discovery preferences
-      </a>
-      {#if aiDetail}
-        <p class="rs-discover-mode__detail">{aiDetail}</p>
-      {/if}
-    </div>
-  </header>
+  </div>
 
   <!-- First-run onboarding (AI01): a polished invitation, never a
-       block — the library below stays fully browsable, and "Not Now"
-       dismisses it for good. -->
+       block — "Not Now" dismisses it for good. -->
   {#if showOnboarding}
     <section class="rs-discover-onboard" aria-label="Unlock AI Discovery" data-ai-onboarding>
       <div class="rs-discover-onboard__text">
@@ -1327,104 +1691,6 @@
     </section>
   {/if}
 
-  <!-- Navigation regions (§7.3): search -> examples -> quick picks ->
-       results/rows. The registered region owner routes D-pad presses
-       between them; the OSK keys inside the search scope are
-       excluded (keyboard owns them). -->
-  <div class="rs-discover__search">
-    <div class="rs-discover__keyboard-scope" data-nav-region="search" onfocusout={onKeyboardScopeFocusOut}>
-      <form
-        class="rs-discover__input-row"
-        onsubmit={(e) => {
-          e.preventDefault()
-          submitSearch()
-        }}>
-        <label for="discover-query" class="sr-only">What are you in the mood for?</label>
-        <input
-          id="discover-query"
-          type="search"
-          bind:this={inputEl}
-          bind:value={query}
-          oninput={(e) => onQueryInput(e.currentTarget.value)}
-          onfocus={onSearchInputFocus}
-          onclick={onSearchInputFocus}
-          onkeydown={onSearchInputKeyDown}
-          placeholder={searchPlaceholder}
-          autocomplete="off"
-          class="rs-discover-input" />
-        <button type="submit" data-nylah-item class="rs-discover-ask">
-          {submitLabel}
-        </button>
-        {#if query || activeMood}
-          <button
-            type="button"
-            onclick={clearSearch}
-            data-nylah-item
-            class="rs-discover-clear">Clear</button>
-        {/if}
-      </form>
-
-      <!-- Refinement context: one subtle line, no chat bubbles. The
-           original question stays visible while follow-ups refine it,
-           and New Search is the obvious way back to a clean query. -->
-      {#if refineLabel && hasAiResults}
-        <div class="rs-discover-refine" data-refine-context>
-          <p class="rs-discover-refine__label">{refineLabel} — type a follow-up, or start fresh.</p>
-          <button
-            type="button"
-            onclick={newSearch}
-            data-nylah-item
-            class="rs-discover-refine__new">New Search</button>
-        </div>
-      {/if}
-
-      <TvKeyboard
-        bind:value={query}
-        open={keyboardOpen}
-        onInput={onOskInput}
-        onCommit={onKeyboardCommit}
-        onDismiss={dismissKeyboardToInput}
-        placeholder={searchPlaceholder} />
-    </div>
-
-    <!-- Example prompts: tap one and it asks, exactly as typed. -->
-    <div class="rs-discover__examples" data-nav-region="examples">
-      <p class="rs-discover__examples-title">Try asking</p>
-      <div class="rs-discover__example-grid" role="group" aria-label="Example prompts">
-        {#each EXAMPLE_PROMPTS.slice(0, 4) as prompt}
-          <button
-            type="button"
-            onclick={() => pickExample(prompt)}
-            data-nylah-item
-            class="rs-discover-example">
-            <span aria-hidden="true">“</span>{prompt}<span aria-hidden="true">”</span>
-          </button>
-        {/each}
-      </div>
-    </div>
-
-    <!-- Quick picks (B04): six large cards, one icon + label +
-         honest subtitle each, consistent focus, no nested panels. -->
-    <div class="rs-discover__moods" data-nav-region="quick-picks">
-      <p class="rs-discover__moods-title">Quick picks</p>
-      <div class="rs-discover__mood-grid" role="group" aria-label="Quick picks">
-        {#each MOOD_PRESETS as preset (preset.id)}
-          <button
-            type="button"
-            onclick={() => pickMood(preset.id)}
-            aria-pressed={activeMood === preset.id}
-            data-nylah-item
-            class="rs-discover-mood"
-            class:is-active={activeMood === preset.id}>
-            <span class="rs-discover-mood__icon" aria-hidden="true">{preset.icon}</span>
-            <span class="rs-discover-mood__label">{preset.label}</span>
-            <span class="rs-discover-mood__sub">{moodSubtitle(preset)}</span>
-          </button>
-        {/each}
-      </div>
-    </div>
-  </div>
-
   {#if loading}
     <div class="rs-skeleton rs-skeleton--hero" aria-hidden="true"></div>
     <div class="rs-skeleton-row" style="display: flex; gap: 1.25rem;" aria-hidden="true">
@@ -1444,247 +1710,314 @@
       <p class="rs-empty__message">Your library may still be warming up — try again in a moment.</p>
       <button type="button" class="rs-empty__action" onclick={() => location.reload()}>Try again</button>
     </div>
-  {:else if showingSearch}
-    <section class="rs-rail" data-discover-results data-nav-region="results" data-nylah-rail="discover-results" aria-label="Discover results">
-      <div class="rs-rail__head">
-        <!-- Rail title comes from the per-search receipt only: "AI
-             picks" for a validated live answer, "Cached AI picks" for
-             a cache hit, "Local recommendations" for the local engine.
-             A quick pick keeps its own label. While an AI run is in
-             flight the title says the question is being asked. -->
-        <h2 class="rs-section-title">{railTitle}</h2>
-        {#if searchingAi}
-          <p class="rs-meta" aria-live="polite" data-ai-phase>{aiStatusText} One request for this question.</p>
-        {:else if searching}
-          <p class="rs-meta">Searching your library…</p>
-        {/if}
-      </div>
-      {#if !searching && stateNote && !aiUnavailable}
-        <p class="rs-meta" data-ai-state-note>{stateNote}</p>
-      {/if}
-      {#if !searching && refineLabel && hasAiResults && !aiUnavailable}
-        <!-- Refinement context at the results, where the user's focus
-             is: the original question, one line, no chat UI. The New
-             Search action lives with the same line under the input. -->
-        <p class="rs-meta" data-refine-context-rail>{refineLabel}</p>
-      {/if}
-
-      {#if hasAiResults}
-        <!-- AI rail (0.11.6): verified recommendations, each with its
-             reason and an honest availability badge. Nothing is ever
-             substituted or padded: if only two are available, two
-             show as available and the rest say so. -->
-        {#if aiUnavailable}
-          <div class="rs-ai-panel" role="status" data-ai-unavailable>
-            <p class="rs-ai-panel__text">{aiUnavailable.message}</p>
-            <div class="rs-ai-panel__actions">
-              <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
-                Search for similar titles available locally
+  {:else}
+    <div data-discover-flow class="rs-flow">
+      {#if flow.step === "kind"}
+        <!-- Step 1 — "What are we watching?" -->
+        <section class="rs-flow-step rs-flow-step--kind" data-nav-region="flow-kind" aria-label="What are we watching?">
+          <div class="rs-brain rs-brain--step1" aria-hidden="true">
+            <img class="rs-brain__img" src="/art/discover/brain-step1.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+          </div>
+          <h1 class="rs-flow-title">What are we watching?</h1>
+          <p class="rs-flow-sub">Let&rsquo;s find what you&rsquo;re in the mood for.</p>
+          <div class="rs-kind-grid" role="group" aria-label="What are we watching?">
+            {#each KIND_CARDS as card (card.id)}
+              <button
+                type="button"
+                onclick={() => pickKind(card.id)}
+                data-nylah-item
+                class="rs-kind-card">
+                <img class="rs-kind-card__art" src={card.art} alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+                <span class="rs-kind-card__label">{card.label}</span>
+                <span class="rs-kind-card__sub">{card.subtitle}</span>
               </button>
-              <button type="button" onclick={() => void runAiSearch()} data-nylah-item class="rs-ai-panel__secondary">
-                Try again
+            {/each}
+          </div>
+          <p class="rs-flow-hints" aria-hidden="true">
+            <span class="rs-hint-glyph">D-pad</span> Move
+            <span class="rs-hint-glyph">A</span> Select
+            <span class="rs-hint-glyph">B</span> Back
+          </p>
+          <p class="rs-flow-foot">Step 1 of 3</p>
+        </section>
+      {:else if flow.step === "categories"}
+        <!-- Step 2 — "What are you drawn to?" -->
+        <section class="rs-flow-step rs-flow-step--categories" data-nav-region="flow-categories" aria-label="What are you drawn to?">
+          <div class="rs-brain rs-brain--step2" aria-hidden="true">
+            <img class="rs-brain__img" src="/art/discover/brain-step2.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+          </div>
+          <h1 class="rs-flow-title rs-flow-title--left">What are you drawn to?</h1>
+          <p class="rs-flow-sub rs-flow-sub--left">Choose one or more.</p>
+          <div class="rs-discover__mood-grid" role="group" aria-label="Genres you are drawn to">
+            {#each GENRE_CATEGORIES as genre (genre.id)}
+              <button
+                type="button"
+                onclick={() => toggleCategory(genre.id)}
+                aria-pressed={flow.categories.includes(genre.id)}
+                data-nylah-item
+                class="rs-discover-mood"
+                class:is-active={flow.categories.includes(genre.id)}>
+                <img class="rs-discover-mood__art" src={genre.art} alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+                {#if flow.categories.includes(genre.id)}
+                  <span class="rs-discover-mood__check" aria-hidden="true">✓</span>
+                {/if}
+                <span class="rs-discover-mood__label">{genre.label}</span>
+                <span class="rs-discover-mood__sub">{moodSubtitle(genre)}</span>
               </button>
+            {/each}
+          </div>
+          <div class="rs-flow-foot-row">
+            <p class="rs-flow-selected">{selectedLine}</p>
+            <button type="button" onclick={surpriseMe} data-nylah-item class="rs-flow-link">Surprise me</button>
+            <button type="button" onclick={continueToBrief} data-nylah-item class="rs-flow-primary rs-flow-primary--continue">Continue <span aria-hidden="true">→</span></button>
+          </div>
+          <p class="rs-flow-hints" aria-hidden="true">
+            <span class="rs-hint-glyph">D-pad</span> Move
+            <span class="rs-hint-glyph">A</span> Select / deselect
+            <span class="rs-hint-glyph">B</span> Back
+          </p>
+          <p class="rs-flow-foot">Step 2 of 3</p>
+        </section>
+      {:else if flow.step === "brief"}
+        <!-- Step 3 — "Tell me what you really want." -->
+        <section class="rs-flow-step rs-flow-step--brief" data-nav-region="flow-brief" aria-label="Tell me what you really want">
+          <div class="rs-brain rs-brain--step3" aria-hidden="true">
+            <img class="rs-brain__img" src="/art/discover/brain-step3.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+          </div>
+          <h1 class="rs-flow-title rs-flow-title--left">Tell me what you<br />really want.</h1>
+          <p class="rs-flow-sub rs-flow-sub--left">Anything to seek out, avoid, or already seen?</p>
+          {#if choicesLine}
+            <p class="rs-flow-choices">Your choices: {choicesLine}</p>
+          {/if}
+          <form
+            class="rs-flow-brief-form"
+            onsubmit={(e) => {
+              e.preventDefault()
+              submitSearch()
+            }}>
+            <div class="rs-discover__keyboard-scope" data-nav-region="brief-input" onfocusout={onKeyboardScopeFocusOut}>
+              <label for="discover-query" class="rs-flow-brief-label">
+                Anything else I should know?
+                <span class="rs-flow-brief-optional">Optional</span>
+              </label>
+              <!-- Real textarea: physical keyboard / chatpad typing
+                   works natively. The on-screen keyboard NEVER opens
+                   on focus — only the explicit button below (or
+                   ArrowDown) opens it. -->
+              <textarea
+                id="discover-query"
+                bind:this={inputEl}
+                bind:value={query}
+                oninput={(e) => onQueryInput(e.currentTarget.value)}
+                onfocus={onSearchInputFocus}
+                onclick={onSearchInputFocus}
+                onkeydown={onSearchInputKeyDown}
+                placeholder="Your mood, your limits, your reference films. Anything goes."
+                rows="3"
+                class="rs-flow-brief-input"></textarea>
+              <TvKeyboard
+                bind:value={query}
+                open={keyboardOpen}
+                onInput={onOskInput}
+                onCommit={onKeyboardCommit}
+                onDismiss={dismissKeyboardToInput}
+                placeholder={searchPlaceholder} />
             </div>
-          </div>
-        {:else if aiResults.length === 0 && !searching}
-          <div class="rs-ai-panel" role="status" data-ai-empty>
-            <h3 class="rs-ai-panel__title">AI couldn't suggest anything for that</h3>
-            <p class="rs-ai-panel__text">
-              Try rewording your question, or search for similar titles available in your library.
-            </p>
-            <div class="rs-ai-panel__actions">
-              <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
-                Search for similar titles available locally
+            <p class="rs-flow-hint">Your mood, your limits, your reference films. Anything goes.</p>
+            <div class="rs-flow-actions">
+              <button type="submit" data-nylah-item class="rs-flow-primary rs-flow-primary--find">
+                <span class="rs-hint-glyph" aria-hidden="true">A</span>
+                Find my next watch <span aria-hidden="true">→</span>
               </button>
-              <button type="button" onclick={newSearch} data-nylah-item class="rs-ai-panel__secondary">
-                New Search
-              </button>
+              <button type="button" onclick={skipBrief} data-nylah-item class="rs-flow-link">Skip this step</button>
+              <button type="button" onclick={openBriefKeyboard} data-nylah-item class="rs-flow-link">On-screen keyboard</button>
             </div>
-          </div>
-        {:else}
-          <div class="rs-ai-controls">
-            <button
-              type="button"
-              onclick={toggleAvailableOnly}
-              aria-pressed={availableOnly}
-              data-nylah-item
-              data-available-toggle
-              class="rs-ai-toggle"
-              class:is-on={availableOnly}>
-              <span class="rs-ai-toggle__box" aria-hidden="true">{availableOnly ? "✓" : ""}</span>
-              <span class="rs-ai-toggle__label">Available in My Library</span>
-              <span class="rs-ai-toggle__count">{matchedAiCount} of {aiResults.length} in your library</span>
-            </button>
-            <p class="rs-ai-controls__note">
-              {availableOnly
-                ? "Showing only titles in your library."
-                : allAiVerified
-                  ? "Showing all verified recommendations."
-                  : "Showing all recommendations — some couldn't be verified."} Toggling never asks AI again.
-            </p>
-          </div>
-          {#if matchedAiCount === 0 && aiResults.some((rec) => rec.verified) && !searching}
-            <div class="rs-ai-panel" role="status" data-none-available>
-              <h3 class="rs-ai-panel__title">None of these are in your library yet</h3>
-              <p class="rs-ai-panel__text">
-                These are AI's suggestions, verified against TMDB. Nothing has been
-                swapped for a weaker available title.
-              </p>
+          </form>
+          {#if flowNotice}
+            <p class="rs-flow-notice" role="status">{flowNotice}</p>
+          {/if}
+          {#if !canAskAi}
+            <!-- Honest no-key state: AI is not configured on this
+                 device, so no model call is made and nothing pretends
+                 it answered. Settings fixes it; the local catalogue
+                 fallback is offered instead. -->
+            <div class="rs-ai-panel" role="status" data-ai-not-configured>
+              <p class="rs-ai-panel__text">{askAiWhy}</p>
+              <p class="rs-ai-panel__text">AI picks need a key — or browse your library locally instead.</p>
               <div class="rs-ai-panel__actions">
-                <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
-                  Search for similar titles available locally
+                <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-ai-panel__primary">Open AI settings</a>
+                <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__secondary">
+                  Browse similar titles in my library
                 </button>
               </div>
             </div>
           {/if}
-          {#if visibleAiResults.length}
+          <div class="rs-discover-mode-row">
+            <a
+              href="/settings/discover-ai#card-ai-discovery"
+              data-nylah-item
+              class="rs-discover-mode rs-discover-mode--{aiMode ?? 'unknown'}"
+              title={aiDetail}>
+              <span class="rs-discover-mode__dot" aria-hidden="true"></span>
+              <span>{modeLabel}</span>
+            </a>
+            <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
+              Discovery preferences
+            </a>
+            {#if aiDetail}
+              <p class="rs-discover-mode__detail">{aiDetail}</p>
+            {/if}
+          </div>
+          <p class="rs-flow-hints" aria-hidden="true">
+            <span class="rs-hint-glyph">A</span> Continue
+            <span class="rs-hint-glyph">B</span> Back
+          </p>
+          <p class="rs-flow-foot">Step 3 of 3</p>
+        </section>
+      {:else if flow.step === "loading"}
+        <!-- Finding: one honest progress line from the orchestrator. -->
+        <section class="rs-flow-step rs-flow-step--loading" data-nav-region="flow-loading" aria-label="Finding your next watch">
+          <div class="rs-brain rs-brain--step3" aria-hidden="true">
+            <img class="rs-brain__img" src="/art/discover/brain-step3.png" alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
+          </div>
+          <h1 class="rs-flow-title">Finding your next watch…</h1>
+          <p class="rs-meta rs-flow-loading-note" aria-live="polite" data-ai-phase>{aiStatusText} One request for this question.</p>
+          {#if choicesLine}
+            <p class="rs-flow-choices">{choicesLine}</p>
+          {/if}
+          <p class="rs-flow-foot">Step 3 of 3</p>
+        </section>
+      {:else if flow.step === "reveal"}
+        <!-- Reveal: ONE playable recommendation at a time — cinematic
+             art, the facts, and why it fits. Watch links to the
+             detail page, which owns playback. -->
+        <section class="rs-flow-step rs-flow-step--reveal" data-nav-region="flow-reveal" data-reveal aria-label="Your next watch">
+          {#if aiUnavailable}
+            <div class="rs-ai-panel" role="status" data-ai-unavailable>
+              <p class="rs-ai-panel__text">{aiUnavailable.message}</p>
+              <div class="rs-ai-panel__actions">
+                <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
+                  Search for similar titles available locally
+                </button>
+                <button type="button" onclick={() => void runAiSearch()} data-nylah-item class="rs-ai-panel__secondary">
+                  Try again
+                </button>
+              </div>
+            </div>
+          {:else if currentRec}
             <div class="rs-ai-grid" data-ai-results>
               {#each visibleAiResults as rec, aiIndex (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${aiIndex}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
-                {@render aiRecommendationCard(rec, aiIndex)}
+                {#if aiIndex === currentPick}
+                  {@render aiRecommendationCard(rec, aiIndex)}
+                {/if}
               {/each}
             </div>
+            <div class="rs-reveal-actions" data-nav-region="reveal-actions">
+              {#if currentHref}
+                <a href={currentHref} data-nylah-item data-reveal-watch class="rs-flow-primary rs-flow-primary--watch">Watch</a>
+              {/if}
+              <button type="button" onclick={nextPick} data-nylah-item class="rs-flow-secondary">Next pick</button>
+              <button type="button" onclick={toggleCurrentWatchLater} data-nylah-item class="rs-flow-secondary">
+                {isCurrentWatchLater() ? "Saved to Watch Later ✓" : "Watch Later"}
+              </button>
+              <button type="button" onclick={refineFlow} data-nylah-item class="rs-flow-secondary">Refine what I&rsquo;m looking for</button>
+            </div>
+            <p class="rs-meta rs-reveal-count">
+              {railTitle} — pick {currentPick + 1} of {visibleAiResults.length} · {matchedAiCount} matched in your library{#if allAiVerified} · all verified by TMDB{/if}
+              {#if refineLabel} · {refineLabel}{/if}
+            </p>
+            <button type="button" onclick={askAi} data-nylah-item class="rs-discover-ask-ai">
+              Ask AI about “{askAiLabel}”
+            </button>
+            <button type="button" onclick={newSearch} data-nylah-item class="rs-flow-link">Start over</button>
           {:else if !searching}
-            <div class="rs-ai-panel" role="status" data-available-empty>
+            <div class="rs-ai-panel" role="status" data-ai-empty>
+              <h3 class="rs-ai-panel__title">AI couldn&rsquo;t suggest anything in your library for that</h3>
               <p class="rs-ai-panel__text">
-                None of these picks are in your library. Turn the toggle off to see
-                all of AI's suggestions, or search for similar titles available locally.
+                Try different draws, or a different brief — or search for similar titles available in your library.
               </p>
               <div class="rs-ai-panel__actions">
                 <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__primary">
                   Search for similar titles available locally
                 </button>
+                <button type="button" onclick={refineFlow} data-nylah-item class="rs-ai-panel__secondary">
+                  Refine what I&rsquo;m looking for
+                </button>
               </div>
             </div>
           {/if}
-        {/if}
+          {#if !searching && stateNote && !aiUnavailable}
+            <p class="rs-meta" data-ai-state-note>{stateNote}</p>
+          {/if}
+          <p class="rs-flow-foot">Step 3 of 3</p>
+        </section>
+      {/if}
+    </div>
 
-        {#if localSimilar}
-          <!-- Local similar titles: explicitly labelled local search,
-               never masquerading as LLM recommendations. -->
-          <div class="rs-ai-similar" data-local-similar>
-            <h3 class="rs-section-title">Similar titles in your library</h3>
-            <p class="rs-meta">Local search — similar titles from your library, not AI recommendations.</p>
-            {#if localSimilar.items.length}
-              <div class="rs-rail__row">
-                {#each localSimilar.items as item (candidateKey(item.candidate))}
-                  {@render discoverCard(item)}
-                {/each}
-              </div>
-            {:else}
-              <p class="rs-meta">No similar titles in your library either — try a different question.</p>
-            {/if}
-          </div>
-        {/if}
-      {:else}
-        <!-- Local rail: typing, quick picks, Manual submit. A local
-             rail says why it is local, next to the action that fixes
-             it — or why there is no action. -->
-        {#if resultsSource === "local" && !searching}
-          <p class="rs-meta" data-local-note>
-            {canAskAi
-              ? activeMood
-                ? "Quick picks are filtered locally. Ask AI below for AI picks about this mood."
-                : "Local results so far — Ask AI below for AI picks."
-              : askAiWhy}
-            {#if !canAskAi}
-              <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">Open AI settings</a>
-            {/if}
-          </p>
-        {/if}
-        {#if canAskAi && resultsSource === "local" && !searching && (queryDebounced.trim() || activeMood)}
-          <!-- 0.11.4: visible where AI can run — at the results, not only
-               as the small submit button in the search row (the TV
-               on-screen keyboard commits to the results instead of
-               submitting, so that button never fires in the TV flow).
-               0.11.5: gated on canAskAi (an attempt can run), not on a
-               passing test — an untested-but-configured AI is offered
-               here, and a failure surfaces through the unavailable
-               state. Shown in Manual AND Automatic: in Automatic it is
-               the only reachable ask for a typed query. Hides once AI
-               answers (the AI rail replaces the local rail). -->
-          <button type="button" onclick={askAi} data-nylah-item class="rs-discover-ask-ai">
-            Ask AI about “{askAiLabel}”
-          </button>
-        {/if}
-        {#if searchResults && searchResults.length}
+    {#if localSimilar}
+      <!-- Local similar titles: explicitly labelled local search,
+           never masquerading as LLM recommendations. -->
+      <div class="rs-ai-similar" data-local-similar>
+        <h3 class="rs-section-title">Similar titles in your library</h3>
+        <p class="rs-meta" data-local-note>Local results so far — Quick picks are filtered locally, so these are local matches for your choices, not AI recommendations.</p>
+        {#if localSimilar.items.length}
           <div class="rs-rail__row">
-            {#each searchResults as item (candidateKey(item.candidate))}
+            {#each localSimilar.items as item (candidateKey(item.candidate))}
               {@render discoverCard(item)}
             {/each}
           </div>
-        {:else if !searching}
-          <p class="rs-meta">Nothing matched — try a different word or a quick pick above.</p>
+        {:else}
+          <p class="rs-meta">No similar titles in your library either — try a different question.</p>
         {/if}
-      {/if}
-      {#if receipt}
-        <!-- Diagnostics (0.11.5/0.11.6): collapsible, off the main
-             path, one toggle reachable by controller. Shows what
-             actually produced this rail — engine, state, model, query
-             type, counts (generated / verified / matched / failures),
-             cache, duration, provider error, fallback reason. Fields
-             the orchestrator does not report yet read "Not reported
-             yet". Never any API key, credential or request text. -->
-        <section class="rs-discover-diag" data-ai-diagnostics aria-label="Why these results">
-          <button
-            type="button"
-            onclick={toggleDiagnostics}
-            aria-expanded={diagnosticsOpen}
-            data-nylah-item
-            class="rs-discover-diag__toggle">
-            {diagnosticsOpen ? "Hide diagnostics" : "Why these results?"}
-          </button>
-          {#if diagnosticsOpen}
-            <dl class="rs-discover-diag__grid">
-              <div><dt>Engine</dt><dd data-diag-engine>{diagEngineText}</dd></div>
-              <div><dt>State</dt><dd data-diag-phase>{diagPhaseText}</dd></div>
-              <div><dt>Model</dt><dd data-diag-model>{diagModelText}</dd></div>
-              <div>
-                <dt>Query type</dt>
-                <dd data-diag-query-type>{diagQueryTypeText}{receipt.diagnostics.intention ? ` — ${receipt.diagnostics.intention}` : ""}</dd>
-              </div>
-              <div><dt>Catalogue size</dt><dd data-diag-catalogue>{diagCount(receipt.diagnostics.catalogueSize)} titles</dd></div>
-              <div><dt>Suggestions generated</dt><dd data-diag-generated>{diagCount(receipt.diagnostics.generatedCount)}</dd></div>
-              <div><dt>Verified by TMDB</dt><dd data-diag-verified>{diagCount(receipt.diagnostics.verifiedCount)}</dd></div>
-              <div><dt>Matched in library</dt><dd data-diag-matched>{diagCount(receipt.diagnostics.matchedCount)}</dd></div>
-              <div><dt>Verification failures</dt><dd data-diag-verification-failures>{diagCount(receipt.diagnostics.verificationFailures)}</dd></div>
-              <div><dt>Retrieved candidates</dt><dd data-diag-retrieved>{diagCount(receipt.diagnostics.retrievedCount)}</dd></div>
-              <div><dt>Sent to the model</dt><dd data-diag-sent>{diagCount(receipt.diagnostics.sentToModelCount)}</dd></div>
-              <div><dt>Accepted</dt><dd data-diag-accepted>{diagCount(receipt.diagnostics.acceptedCount)}</dd></div>
-              <div><dt>Rejected by catalogue check</dt><dd data-diag-rejected>{diagCount(receipt.diagnostics.rejectedCount)}</dd></div>
-              <div><dt>Cache</dt><dd data-diag-cache>{diagCacheText}</dd></div>
-              <div><dt>Request time</dt><dd data-diag-duration>{diagDurationText}</dd></div>
-              <div><dt>Provider error</dt><dd data-diag-provider-error>{receipt.diagnostics.providerError ?? "—"}</dd></div>
-              <div><dt>Fallback reason</dt><dd data-diag-fallback>{receipt.diagnostics.fallbackReason ?? receipt.fallbackReason ?? "—"}</dd></div>
-            </dl>
-            <p class="rs-discover-diag__foot">Diagnostics never include API keys, credentials or request text.</p>
-          {/if}
-        </section>
-      {/if}
-    </section>
-  {:else}
-    <div data-discover-rows class="rs-discover__rows">
-      {#each rows as row (row.id)}
-        {#if row.items.length}
-          <section class="rs-rail" data-nav-region={row.id} data-nylah-rail={row.id} aria-label={row.title}>
-            <div class="rs-rail__head">
-              <h2 class="rs-section-title">{row.title}</h2>
+      </div>
+    {/if}
+
+    {#if receipt}
+      <!-- Diagnostics (0.11.5/0.11.6): collapsible, off the main
+           path, one toggle reachable by controller. Shows what
+           actually produced this rail — engine, state, model, query
+           type, counts (generated / verified / matched / failures),
+           cache, duration, provider error, fallback reason. Fields
+           the orchestrator does not report yet read "Not reported
+           yet". Never any API key, credential or request text. -->
+      <section class="rs-discover-diag" data-ai-diagnostics aria-label="Why these results">
+        <button
+          type="button"
+          onclick={toggleDiagnostics}
+          aria-expanded={diagnosticsOpen}
+          data-nylah-item
+          class="rs-discover-diag__toggle">
+          {diagnosticsOpen ? "Hide diagnostics" : "Why these results?"}
+        </button>
+        {#if diagnosticsOpen}
+          <dl class="rs-discover-diag__grid">
+            <div><dt>Engine</dt><dd data-diag-engine>{diagEngineText}</dd></div>
+            <div><dt>State</dt><dd data-diag-phase>{diagPhaseText}</dd></div>
+            <div><dt>Model</dt><dd data-diag-model>{diagModelText}</dd></div>
+            <div>
+              <dt>Query type</dt>
+              <dd data-diag-query-type>{diagQueryTypeText}{receipt.diagnostics.intention ? ` — ${receipt.diagnostics.intention}` : ""}</dd>
             </div>
-            {#if row.subtitle}<p class="rs-meta">{row.subtitle}</p>{/if}
-            <div class="rs-rail__row">
-              {#each row.items as item (candidateKey(item.candidate))}
-                {@render discoverCard(item)}
-              {/each}
-            </div>
-          </section>
+            <div><dt>Catalogue size</dt><dd data-diag-catalogue>{diagCount(receipt.diagnostics.catalogueSize)} titles</dd></div>
+            <div><dt>Suggestions generated</dt><dd data-diag-generated>{diagCount(receipt.diagnostics.generatedCount)}</dd></div>
+            <div><dt>Verified by TMDB</dt><dd data-diag-verified>{diagCount(receipt.diagnostics.verifiedCount)}</dd></div>
+            <div><dt>Matched in library</dt><dd data-diag-matched>{diagCount(receipt.diagnostics.matchedCount)}</dd></div>
+            <div><dt>Verification failures</dt><dd data-diag-verification-failures>{diagCount(receipt.diagnostics.verificationFailures)}</dd></div>
+            <div><dt>Retrieved candidates</dt><dd data-diag-retrieved>{diagCount(receipt.diagnostics.retrievedCount)}</dd></div>
+            <div><dt>Sent to the model</dt><dd data-diag-sent>{diagCount(receipt.diagnostics.sentToModelCount)}</dd></div>
+            <div><dt>Accepted</dt><dd data-diag-accepted>{diagCount(receipt.diagnostics.acceptedCount)}</dd></div>
+            <div><dt>Rejected by catalogue check</dt><dd data-diag-rejected>{diagCount(receipt.diagnostics.rejectedCount)}</dd></div>
+            <div><dt>Cache</dt><dd data-diag-cache>{diagCacheText}</dd></div>
+            <div><dt>Request time</dt><dd data-diag-duration>{diagDurationText}</dd></div>
+            <div><dt>Provider error</dt><dd data-diag-provider-error>{receipt.diagnostics.providerError ?? "—"}</dd></div>
+            <div><dt>Fallback reason</dt><dd data-diag-fallback>{receipt.diagnostics.fallbackReason ?? receipt.fallbackReason ?? "—"}</dd></div>
+          </dl>
+          <p class="rs-discover-diag__foot">Diagnostics never include API keys, credentials or request text.</p>
         {/if}
-      {/each}
-      {#if !rows.some((r) => r.items.length)}
-        <p class="rs-meta">Your library looks empty — once titles are in, Discover will have picks for you here.</p>
-      {/if}
-    </div>
+      </section>
+    {/if}
   {/if}
 </div>
-
 {#snippet discoverCard(item)}
   {@const c = item.candidate}
   {@const key = candidateKey(c)}
@@ -1736,858 +2069,985 @@
   </div>
 {/snippet}
 
-<!-- AI recommendation card (0.11.6): a horizontal card with room for
-     the reason — the point of the feature. Verified artwork only: an
-     unverified title gets fallback art, a "Couldn't verify" badge and
-     no detail link. Available titles link to the existing detail
-     flow (where playback starts); unavailable titles are focusable
-     but inert, with the genuine reason still shown. -->
-{#snippet aiCardBody(rec)}
-  {@const showArt = rec.verified && !!rec.posterUrl}
-  <span class="rs-ai-card__poster">
-    <span
-      class="rs-image rs-image--poster{showArt ? '' : ' is-fallback'}"
-      data-tv-image
-      data-kind="poster"
-    >
-      {#if showArt}
+<!-- Reveal card (0.11.18): ONE playable recommendation at a
+     time — cinematic artwork (the title's own backdrop/poster,
+     TMDB-verified), the facts, and the specific reason it fits.
+     Only verified + library-matched titles ever reach this snippet
+     (the reveal queue is filtered in discover-redesign.ts); Watch
+     lives in the actions row below and links to the detail page,
+     which owns playback. -->
+{#snippet aiRecommendationCard(rec, index)}
+  {@const key = rec.match?.catalogueKey ?? (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${index}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
+  {@const kindLabel = rec.kind === "series" ? "Series" : "Film"}
+  <article class="rs-reveal-card" data-ai-result-card data-couch-key={key} aria-label={`${rec.title}${rec.year ? ` (${rec.year})` : ""}, ${kindLabel}, in your library`}>
+    <div class="rs-reveal-card__art">
+      {#if rec.backdropUrl || rec.posterUrl}
         <img
-          src={rec.posterUrl}
+          src={rec.backdropUrl ?? rec.posterUrl}
           alt=""
-          loading="lazy"
-          fetchpriority="low"
+          loading="eager"
           decoding="async"
           referrerpolicy="no-referrer"
           data-tv-image-img
         />
-      {/if}
-      <span class="rs-image__fallback" aria-hidden="true">
-        <span class="rs-image__fallback-mark">{fallbackMarkFor("poster", rec.title)}</span>
-        <span class="rs-image__fallback-title">{rec.title}</span>
-      </span>
-    </span>
-  </span>
-  <span class="rs-ai-card__body">
-    <span class="rs-ai-card__title">{rec.title}</span>
-    <span class="rs-ai-card__badges">
-      <span class="rs-ai-badge">{rec.kind === "series" ? "Series" : "Film"}</span>
-      {#if !rec.verified}
-        <span class="rs-ai-badge rs-ai-badge--warn">Couldn't verify</span>
-      {:else if rec.match}
-        <span class="rs-ai-badge rs-ai-badge--ok">✓ In your library</span>
       {:else}
-        <span class="rs-ai-badge rs-ai-badge--muted">Not in your library</span>
+        <span class="rs-reveal-card__fallback" aria-hidden="true">
+          <span class="rs-image__fallback-mark">{fallbackMarkFor("poster", rec.title)}</span>
+          <span class="rs-image__fallback-title">{rec.title}</span>
+        </span>
       {/if}
-      {#if rec.year}<span class="rs-ai-card__year">{rec.year}</span>{/if}
-    </span>
-    <span class="rs-ai-card__reason">{rec.reason}</span>
-    <span class="rs-ai-card__meta">
-      {rec.tone + (rec.genres?.length ? ` · ${rec.genres.join(" · ")}` : "")}
-    </span>
-    {#if !rec.verified && rec.verificationNote}
-      <span class="rs-ai-card__note">{rec.verificationNote}</span>
-    {/if}
-  </span>
+      <span class="rs-reveal-card__badge">✓ In your library</span>
+    </div>
+    <div class="rs-reveal-card__body">
+      <p class="rs-reveal-card__kind">
+        {kindLabel}{rec.year ? ` · ${rec.year}` : ""}{rec.genres?.length ? ` · ${rec.genres.slice(0, 3).join(" · ")}` : ""}
+      </p>
+      <h2 class="rs-reveal-card__title">{rec.title}</h2>
+      {#if rec.synopsis}
+        <p class="rs-reveal-card__synopsis">{rec.synopsis}</p>
+      {/if}
+      <p class="rs-reveal-card__why"><span class="rs-reveal-card__why-label">Why this fits — </span>{rec.reason}</p>
+      {#if rec.tone}
+        <p class="rs-reveal-card__tone">{rec.tone}</p>
+      {/if}
+    </div>
+  </article>
 {/snippet}
-
-{#snippet aiRecommendationCard(rec, index)}
-  {@const href = recommendationDetailHref(rec)}
-  {@const key = rec.match?.catalogueKey ?? (rec.verified ? `tmdb:${rec.tmdbId}` : `gen:${index}:${rec.generated.title}:${rec.generated.kind}:${rec.generated.year ?? ""}`)}
-  {@const kindLabel = rec.kind === "series" ? "Series" : "Film"}
-  {#if href}
-    <a
-      href={href}
-      data-nylah-item
-      data-ai-result-card
-      data-couch-key={key}
-      aria-label={`${rec.title}${rec.year ? ` (${rec.year})` : ""}, ${kindLabel}, in your library — open details`}
-      class="rs-ai-card">
-      {@render aiCardBody(rec)}
-    </a>
-  {:else}
-    <article
-      tabindex="0"
-      data-nylah-item
-      data-ai-result-card
-      data-couch-key={key}
-      aria-label={`${rec.title}${rec.year ? ` (${rec.year})` : ""}, ${kindLabel}, ${rec.verified ? "not in your library" : "could not be verified"}`}
-      class="rs-ai-card rs-ai-card--unavailable">
-      {@render aiCardBody(rec)}
-    </article>
-  {/if}
-{/snippet}
-
 <style>
+  /* Discover redesign (0.11.18) — deep navy neural space.
+     Mockup geometry is 1672×941; sizes below are scaled to the
+     fluid TV layout (rem at the app's 10px root) so the same
+     proportions hold at any viewport. Palette (measured):
+     base #010E1E, mid #011327, card fill #021830, textbox #031930,
+     focused fill #051E46, primary #0D8CFD / #1568AA, glow #CDFFFF,
+     headline #E4EAF0, subhead #AEC9E8, muted #9FB6CE,
+     unselected border #43576F. */
   .rs-discover {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    min-height: 100%;
+    background:
+      radial-gradient(120rem 60rem at 50% -10%, #062a52 0%, transparent 55%),
+      radial-gradient(90rem 50rem at 85% 110%, #041a3a 0%, transparent 60%),
+      linear-gradient(180deg, #010e1e 0%, #011327 55%, #010e1e 100%);
+    isolation: isolate;
   }
-  .rs-discover__rows {
-    display: flex;
-    flex-direction: column;
-    gap: 2rem;
+  .rs-neural-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.9;
   }
-  /* Hero: title + lede on the left, mode + preferences on the right. */
-  .rs-discover__hero {
+  .rs-discover > *:not(.rs-neural-canvas) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Top row: DISCOVER label left, step dots + "01 / 03" right. */
+  .rs-discover__top {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 2rem;
-    flex-wrap: wrap;
-  }
-  .rs-discover__hero-text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    max-width: 46rem;
+    padding: 1.2rem 4.7rem 0;
   }
   .rs-discover__eyebrow {
     margin: 0;
-    font-size: 1.125rem;
+    font-size: 2.4rem;
     font-weight: 700;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--rs-focus);
+    color: #deeefc;
   }
-  .rs-discover__lede {
-    margin: 0;
-    font-size: 1.375rem;
-    line-height: 1.45;
-    color: var(--rs-text-2);
+  .rs-discover__steps {
+    display: flex;
+    align-items: center;
+    gap: 1.7rem;
   }
-  .rs-discover__hero-side {
+  .rs-step-dot {
+    width: 1.3rem;
+    height: 1.3rem;
+    border-radius: 50%;
+    border: 0.2rem solid rgba(222, 239, 252, 0.45);
+    background: transparent;
+  }
+  .rs-step-dot.is-filled {
+    background: #ffffff;
+    border-color: #ffffff;
+    box-shadow: 0 0 1.2rem rgba(205, 255, 255, 0.8);
+  }
+  .rs-step-text {
+    font-size: 2.6rem;
+    font-weight: 600;
+    color: #deeefc;
+    letter-spacing: 0.04em;
+  }
+
+  /* One continuous flow space. */
+  .rs-flow {
+    position: relative;
+    flex: 1;
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    gap: 0.5rem;
-    min-width: 16rem;
+  }
+  .rs-flow-step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 0 4.7rem 1rem;
+    min-height: 62rem;
+  }
+  .rs-flow-title {
+    margin: 0;
+    font-size: 8rem;
+    line-height: 1.05;
+    font-weight: 700;
+    color: #e4eaf0;
+    text-align: center;
+    text-wrap: balance;
+  }
+  .rs-flow-title--left {
+    text-align: left;
+    font-size: 6.5rem;
+    line-height: 1.08;
+  }
+  .rs-flow-sub {
+    margin: 1.4rem 0 0;
+    font-size: 3.6rem;
+    line-height: 1.3;
+    color: #b7cee6;
+    text-align: center;
+  }
+  .rs-flow-sub--left {
+    text-align: left;
+    font-size: 3rem;
+  }
+  .rs-flow-choices {
+    margin: 2rem 0 0;
+    font-size: 2.6rem;
+    color: #d2dff0;
+  }
+  .rs-flow-hint {
+    margin: 1.2rem 0 0 1rem;
+    font-size: 2.4rem;
+    font-style: italic;
+    color: #bcd6ee;
+  }
+  .rs-flow-notice {
+    margin: 2rem 0 0;
+    font-size: 2.4rem;
+    color: #cfe2f4;
+    background: rgba(2, 24, 48, 0.85);
+    border: 0.1rem solid #43576f;
+    border-radius: 1.2rem;
+    padding: 1.4rem 1.8rem;
+  }
+  .rs-flow-hints {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.6rem;
+    margin: 2.4rem 0 0;
+    font-size: 2rem;
+    color: #d9e4f1;
+  }
+  .rs-hint-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.2rem;
+    height: 3.2rem;
+    padding: 0 0.8rem;
+    border: 0.2rem solid #ffffff;
+    border-radius: 50%;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+  .rs-flow-foot {
+    margin: 1.6rem 0 0;
+    font-size: 1.8rem;
+    color: #9fb6ce;
+    text-align: center;
+  }
+
+  /* Brain / neural hero art. The generated PNG sits over a CSS
+     neural glow, so a missing asset degrades to the glow, never to
+     a broken image. */
+  .rs-brain {
+    position: relative;
+    margin: 0 auto;
+    pointer-events: none;
+    background:
+      radial-gradient(closest-side, rgba(13, 140, 253, 0.35) 0%, rgba(13, 140, 253, 0.12) 55%, transparent 75%);
+  }
+  .rs-brain--step1 {
+    width: min(72rem, 86%);
+    height: 30rem;
+  }
+  .rs-brain--step2 {
+    position: absolute;
+    top: 0;
+    right: 4.7rem;
+    width: 35rem;
+    height: 22rem;
+    margin: 0;
+  }
+  .rs-brain--step3 {
+    position: absolute;
+    top: 2rem;
+    right: 0;
+    width: 52rem;
+    height: 44rem;
+    margin: 0;
+  }
+  .rs-brain__img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 1.6rem;
+    mask-image: radial-gradient(closest-side, #000 55%, transparent 98%);
+    -webkit-mask-image: radial-gradient(closest-side, #000 55%, transparent 98%);
+  }
+
+  /* Step 1 — three kind cards. */
+  .rs-flow-step--kind .rs-flow-title {
+    margin-top: 1rem;
+  }
+  .rs-kind-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2.2rem;
+    margin: 4.5rem auto 0;
+    width: min(142.7rem, 100%);
+  }
+  .rs-kind-card {
+    position: relative;
+    height: 22.4rem;
+    overflow: hidden;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 1.6rem;
+    border: 0.2rem solid #43576f;
+    background:
+      linear-gradient(180deg, rgba(5, 30, 70, 0.55) 0%, rgba(2, 24, 48, 0.92) 78%),
+      #021830;
+    color: #e4eaf0;
+    padding: 0;
+  }
+  .rs-kind-card__art {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.85;
+  }
+  .rs-kind-card__label,
+  .rs-kind-card__sub {
+    position: relative;
+    z-index: 1;
+    display: block;
+    margin-left: 3.8rem;
+    text-shadow: 0 0.2rem 1.2rem rgba(1, 14, 30, 0.9);
+  }
+  .rs-kind-card__label {
+    margin-top: 11.5rem;
+    font-size: 5rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .rs-kind-card__sub {
+    margin-top: 1rem;
+    font-size: 2.7rem;
+    color: #d9e4f1;
+  }
+  .rs-kind-card:hover,
+  .rs-kind-card:focus-visible {
+    border-color: #deffff;
+    background-color: #051e46;
+    box-shadow:
+      0 0 0 0.2rem rgba(205, 255, 255, 0.9),
+      0 0 3.2rem rgba(23, 118, 186, 0.75);
+    outline: none;
+  }
+
+  /* Step 2 — eight genre tiles (the mood grid, reused class names). */
+  .rs-flow-step--categories {
+    padding-right: 4.7rem;
+  }
+  .rs-flow-step--categories .rs-brain--step2 {
+    top: 1rem;
+  }
+  .rs-discover__mood-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    margin-top: 3.2rem;
+    width: min(139.8rem, 100%);
+  }
+  .rs-discover-mood {
+    position: relative;
+    height: 20rem;
+    overflow: hidden;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 1.2rem;
+    border: 0.1rem solid #52718e;
+    background:
+      linear-gradient(180deg, rgba(0, 30, 56, 0.5) 0%, rgba(2, 24, 48, 0.94) 80%),
+      #021830;
+    color: #e6ecf6;
+    padding: 0;
+  }
+  .rs-discover-mood__art {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.8;
+  }
+  .rs-discover-mood__label,
+  .rs-discover-mood__sub {
+    position: relative;
+    z-index: 1;
+    display: block;
+    margin-left: 2.4rem;
+    margin-right: 2.4rem;
+    text-shadow: 0 0.2rem 1rem rgba(1, 14, 30, 0.9);
+  }
+  .rs-discover-mood__label {
+    margin-top: 13.4rem;
+    font-size: 3.8rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .rs-discover-mood__sub {
+    margin-top: 0.9rem;
+    font-size: 2rem;
+    color: #cfe2f4;
+  }
+  .rs-discover-mood__check {
+    position: absolute;
+    top: 2.4rem;
+    right: 2.4rem;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.8rem;
+    height: 3.8rem;
+    border-radius: 50%;
+    border: 0.2rem solid #acffff;
+    background: #043872;
+    color: #ffffff;
+    font-size: 2.2rem;
+    font-weight: 700;
+    box-shadow: 0 0 1.6rem rgba(172, 255, 255, 0.7);
+  }
+  .rs-discover-mood:hover,
+  .rs-discover-mood:focus-visible {
+    border-color: #deffff;
+    outline: none;
+    box-shadow: 0 0 2.4rem rgba(23, 118, 186, 0.65);
+  }
+  .rs-discover-mood.is-active {
+    border: 0.2rem solid #cdffff;
+    box-shadow:
+      0 0 0 0.2rem rgba(205, 255, 255, 0.55),
+      0 0 2.8rem rgba(23, 118, 186, 0.85);
+  }
+  .rs-flow-foot-row {
+    display: flex;
+    align-items: center;
+    gap: 3rem;
+    margin-top: 3rem;
+    width: min(139.8rem, 100%);
+  }
+  .rs-flow-selected {
+    margin: 0;
+    flex: 1;
+    font-size: 2.7rem;
+    color: #cfe2f4;
+    padding-left: 2.4rem;
+  }
+
+  /* Step 3 — brief. */
+  .rs-flow-step--brief .rs-flow-title--left {
+    max-width: 80rem;
+  }
+  .rs-flow-step--brief .rs-flow-sub--left {
+    max-width: 80rem;
+  }
+  .rs-flow-brief-form {
+    margin-top: 3.4rem;
+    max-width: 85.6rem;
+  }
+  .rs-discover__keyboard-scope {
+    position: relative;
+  }
+  .rs-flow-brief-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 1.4rem 1.2rem;
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #edf5ff;
+  }
+  .rs-flow-brief-optional {
+    font-size: 2.2rem;
+    font-style: italic;
+    font-weight: 400;
+    color: #a6c4e1;
+  }
+  .rs-flow-brief-input {
+    display: block;
+    width: 100%;
+    min-height: 18.5rem;
+    resize: vertical;
+    padding: 2.6rem 4.5rem;
+    border-radius: 1.8rem;
+    border: 0.2rem solid #dbffff;
+    background: #031930;
+    color: #e8f2fc;
+    font-size: 3.4rem;
+    line-height: 1.35;
+    font-family: inherit;
+    box-shadow: 0 0 2.4rem rgba(23, 118, 186, 0.35);
+  }
+  .rs-flow-brief-input::placeholder {
+    color: #7e9cc0;
+  }
+  .rs-flow-brief-input:focus-visible {
+    outline: none;
+    border-color: #cdffff;
+    box-shadow:
+      0 0 0 0.2rem rgba(205, 255, 255, 0.9),
+      0 0 3.2rem rgba(23, 118, 186, 0.8);
+  }
+  .rs-flow-actions {
+    display: flex;
+    align-items: center;
+    gap: 4.6rem;
+    margin-top: 3rem;
+  }
+  .rs-flow-link {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.6rem 0;
+    font-size: 2.6rem;
+    color: #e2ecfc;
+    text-decoration: none;
+  }
+  .rs-flow-link:hover,
+  .rs-flow-link:focus-visible {
+    color: #ffffff;
+    text-decoration: underline;
+    outline: none;
+  }
+
+  /* Primary buttons (Continue / Find my next watch / Watch). */
+  .rs-flow-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.4rem;
+    min-height: 6.6rem;
+    padding: 0 3.4rem;
+    border: none;
+    border-radius: 1.6rem;
+    cursor: pointer;
+    text-decoration: none;
+    font-size: 2.8rem;
+    font-weight: 700;
+    color: #ffffff;
+    background: linear-gradient(180deg, #1899f7 0%, #1587ea 55%, #0579f0 100%);
+    box-shadow: 0 0 2rem rgba(13, 140, 253, 0.45);
+  }
+  .rs-flow-primary:hover,
+  .rs-flow-primary:focus-visible {
+    outline: none;
+    box-shadow:
+      0 0 0 0.2rem rgba(205, 255, 255, 0.9),
+      0 0 3rem rgba(23, 118, 186, 0.9);
+  }
+  .rs-flow-primary--find {
+    min-height: 7.5rem;
+    min-width: 47.8rem;
+    font-size: 2.9rem;
+    background: linear-gradient(180deg, #42a6da 0%, #0d8cfd 55%, #006de6 100%);
+  }
+  .rs-flow-primary--continue {
+    min-width: 29.4rem;
+  }
+  .rs-flow-primary--watch {
+    min-width: 24rem;
+  }
+  .rs-flow-secondary {
+    min-height: 6.6rem;
+    padding: 0 2.8rem;
+    border-radius: 1.6rem;
+    border: 0.2rem solid #52718e;
+    background: rgba(2, 24, 48, 0.85);
+    color: #e2ecfc;
+    font-size: 2.6rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .rs-flow-secondary:hover,
+  .rs-flow-secondary:focus-visible {
+    border-color: #deffff;
+    color: #ffffff;
+    outline: none;
+    box-shadow: 0 0 2.4rem rgba(23, 118, 186, 0.65);
+  }
+
+  /* Loading + reveal. */
+  .rs-flow-step--loading {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .rs-flow-loading-note {
+    margin-top: 2rem;
+    font-size: 2.8rem;
+    color: #b7cee6;
+  }
+  .rs-flow-step--reveal {
+    align-items: center;
+  }
+  .rs-ai-grid {
+    width: min(132rem, 100%);
+    margin-top: 1rem;
+  }
+  .rs-reveal-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 3.2rem;
+    align-items: stretch;
+  }
+  .rs-reveal-card__art {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.6rem;
+    border: 0.2rem solid #43576f;
+    background: linear-gradient(135deg, #051e46 0%, #021830 60%, #010e1e 100%);
+    min-height: 40rem;
+  }
+  .rs-reveal-card__art img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .rs-reveal-card__fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.2rem;
+    min-height: 40rem;
+    padding: 3rem;
+    text-align: center;
+  }
+  .rs-reveal-card__badge {
+    position: absolute;
+    left: 1.6rem;
+    bottom: 1.6rem;
+    padding: 0.8rem 1.6rem;
+    border-radius: 999rem;
+    background: rgba(4, 56, 114, 0.92);
+    border: 0.1rem solid #acffff;
+    color: #ffffff;
+    font-size: 2.2rem;
+    font-weight: 700;
+  }
+  .rs-reveal-card__body {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1.6rem;
+    padding: 1rem 0;
+  }
+  .rs-reveal-card__kind {
+    margin: 0;
+    font-size: 2.4rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #a9c7e9;
+  }
+  .rs-reveal-card__title {
+    margin: 0;
+    font-size: 6rem;
+    line-height: 1.05;
+    font-weight: 700;
+    color: #eef2f9;
+    text-wrap: balance;
+  }
+  .rs-reveal-card__synopsis {
+    margin: 0;
+    font-size: 2.6rem;
+    line-height: 1.45;
+    color: #d2dff0;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rs-reveal-card__why {
+    margin: 0;
+    font-size: 2.6rem;
+    line-height: 1.45;
+    color: #e8f2fc;
+    border-left: 0.4rem solid #0d8cfd;
+    padding-left: 1.6rem;
+  }
+  .rs-reveal-card__why-label {
+    font-weight: 700;
+    color: #ffffff;
+  }
+  .rs-reveal-card__tone {
+    margin: 0;
+    font-size: 2.2rem;
+    font-style: italic;
+    color: #bcd6ee;
+  }
+  .rs-reveal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    margin-top: 3.2rem;
+  }
+  .rs-reveal-count {
+    margin-top: 2rem;
+    font-size: 2.2rem;
+    color: #9fb6ce;
+    text-align: center;
+  }
+
+  /* Ask AI about… + mode row. */
+  .rs-discover-ask-ai {
+    display: inline-block;
+    margin-top: 2rem;
+    padding: 1.4rem 2.6rem;
+    border-radius: 1.4rem;
+    border: 0.2rem solid #1568aa;
+    background: rgba(21, 104, 170, 0.25);
+    color: #e2ecfc;
+    font-size: 2.4rem;
+    cursor: pointer;
+  }
+  .rs-discover-ask-ai:hover,
+  .rs-discover-ask-ai:focus-visible {
+    border-color: #deffff;
+    color: #ffffff;
+    outline: none;
+  }
+  .rs-discover-mode-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2rem;
+    margin-top: 3rem;
+    max-width: 85.6rem;
   }
   .rs-discover-mode {
     display: inline-flex;
     align-items: center;
-    gap: 0.625rem;
-    padding: 0.625rem 1.125rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text);
-    font-size: 1.25rem;
-    font-weight: 700;
+    gap: 1rem;
+    padding: 1rem 1.8rem;
+    border-radius: 999rem;
+    border: 0.1rem solid #43576f;
+    background: rgba(2, 24, 48, 0.85);
+    color: #d9e4f1;
+    font-size: 2.2rem;
     text-decoration: none;
-    outline: none;
-    white-space: nowrap;
   }
   .rs-discover-mode:hover,
   .rs-discover-mode:focus-visible {
-    border-color: var(--rs-focus);
-  }
-  .rs-discover-mode:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+    border-color: #deffff;
+    outline: none;
   }
   .rs-discover-mode__dot {
-    width: 0.75rem;
-    height: 0.75rem;
+    width: 1.2rem;
+    height: 1.2rem;
     border-radius: 50%;
-    background: var(--rs-text-2);
-    flex: none;
+    background: #9fb6ce;
   }
   .rs-discover-mode--connected .rs-discover-mode__dot {
-    background: #3fb96f;
+    background: #37d67a;
   }
   .rs-discover-mode--unavailable .rs-discover-mode__dot {
-    background: #e0a63c;
+    background: #f0b429;
   }
   .rs-discover-mode--local .rs-discover-mode__dot {
-    background: #7fb3e8;
+    background: #f0b429;
   }
   .rs-discover-mode__detail {
     margin: 0;
-    max-width: 22rem;
-    text-align: right;
-    font-size: 1.0625rem;
-    line-height: 1.4;
-    color: var(--rs-text-2);
+    font-size: 2rem;
+    color: #9fb6ce;
   }
   .rs-discover-prefs {
-    font-size: 1.125rem;
-    color: var(--rs-focus);
-    text-decoration: underline;
-    text-underline-offset: 0.2em;
+    font-size: 2.2rem;
+    color: #c5d7f1;
+  }
+  .rs-discover-prefs:hover,
+  .rs-discover-prefs:focus-visible {
+    color: #ffffff;
     outline: none;
   }
-  .rs-discover-prefs:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus);
-    border-radius: 0.375rem;
-  }
-  /* Onboarding: one calm panel, not a modal — browsing continues below. */
+
+  /* Onboarding panel. */
   .rs-discover-onboard {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 2rem;
     flex-wrap: wrap;
-    padding: 1.5rem 1.75rem;
-    border-radius: 1rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
+    margin: 0 4.7rem;
+    padding: 2.4rem 2.8rem;
+    border-radius: 1.6rem;
+    border: 0.1rem solid #43576f;
+    background: rgba(2, 24, 48, 0.9);
   }
   .rs-discover-onboard__text {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    max-width: 52rem;
+    flex: 1 1 60rem;
   }
   .rs-discover-onboard__text h2 {
-    margin: 0;
-    font-size: 1.625rem;
-    font-weight: 700;
-    color: var(--rs-text);
+    margin: 0 0 1rem;
+    font-size: 3.2rem;
+    color: #eef2f9;
   }
   .rs-discover-onboard__text p {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 2.4rem;
     line-height: 1.5;
-    color: var(--rs-text-2);
+    color: #b7cee6;
   }
   .rs-discover-onboard__actions {
     display: flex;
+    gap: 1.6rem;
     align-items: center;
-    gap: 0.75rem;
-    flex: none;
   }
   .rs-discover-onboard__primary {
-    padding: 0.875rem 1.5rem;
-    border-radius: 0.75rem;
-    background: var(--rs-accent);
-    color: #fff;
-    font-size: 1.25rem;
+    padding: 1.4rem 2.6rem;
+    border-radius: 1.4rem;
+    background: linear-gradient(180deg, #1899f7 0%, #0579f0 100%);
+    color: #ffffff;
+    font-size: 2.4rem;
     font-weight: 700;
     text-decoration: none;
-    outline: none;
-    white-space: nowrap;
   }
   .rs-discover-onboard__primary:hover,
   .rs-discover-onboard__primary:focus-visible {
-    border-color: var(--rs-focus);
-  }
-  .rs-discover-onboard__primary:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+    outline: none;
+    box-shadow: 0 0 0 0.2rem rgba(205, 255, 255, 0.9);
   }
   .rs-discover-onboard__secondary {
-    padding: 0.875rem 1.25rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
+    padding: 1.4rem 2rem;
+    border-radius: 1.4rem;
+    border: 0.1rem solid #52718e;
     background: transparent;
-    color: var(--rs-text-2);
-    font-size: 1.25rem;
+    color: #e2ecfc;
+    font-size: 2.4rem;
     cursor: pointer;
-    outline: none;
-    white-space: nowrap;
   }
   .rs-discover-onboard__secondary:hover,
   .rs-discover-onboard__secondary:focus-visible {
-    color: var(--rs-text);
-    border-color: var(--rs-focus);
+    border-color: #deffff;
+    outline: none;
   }
-  .rs-discover__search {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
+
+  /* AI panels (unavailable / empty / not-configured). */
+  .rs-ai-panel {
+    margin: 2rem auto 0;
+    padding: 2.4rem 2.8rem;
+    max-width: 90rem;
+    border-radius: 1.6rem;
+    border: 0.1rem solid #43576f;
+    background: rgba(2, 24, 48, 0.9);
   }
-  .rs-discover__input-row {
+  .rs-ai-panel__title {
+    margin: 0 0 1rem;
+    font-size: 3rem;
+    color: #eef2f9;
+  }
+  .rs-ai-panel__text {
+    margin: 0 0 1.2rem;
+    font-size: 2.4rem;
+    line-height: 1.5;
+    color: #d2dff0;
+  }
+  .rs-ai-panel__actions {
     display: flex;
+    flex-wrap: wrap;
+    gap: 1.6rem;
+    margin-top: 1.6rem;
+  }
+  .rs-ai-panel__primary,
+  .rs-ai-panel__secondary {
+    display: inline-flex;
     align-items: center;
-    gap: 0.75rem;
-  }
-  .rs-discover-input {
-    min-width: 0;
-    flex: 1;
-    font-size: 1.375rem;
-    padding: 0.875rem 1.25rem;
-    border-radius: 0.75rem;
-    background: var(--rs-bg-2);
-    border: 1px solid var(--rs-line);
-    color: var(--rs-text);
-    outline: none;
-  }
-  .rs-discover-input::placeholder {
-    color: var(--rs-text-2);
-  }
-  .rs-discover-input:focus-visible {
-    border-color: var(--rs-focus);
-    box-shadow: 0 0 0 2px var(--rs-focus-glow);
-  }
-  .rs-discover-ask {
-    padding: 0.875rem 1.5rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-focus);
-    background: var(--rs-accent);
-    color: #fff;
-    font-size: 1.25rem;
+    padding: 1.4rem 2.4rem;
+    border-radius: 1.4rem;
+    font-size: 2.4rem;
     font-weight: 700;
+    text-decoration: none;
     cursor: pointer;
-    white-space: nowrap;
-    outline: none;
   }
-  .rs-discover-ask:hover,
-  .rs-discover-ask:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
+  .rs-ai-panel__primary {
+    border: none;
+    background: linear-gradient(180deg, #1899f7 0%, #0579f0 100%);
+    color: #ffffff;
   }
-  .rs-discover-clear {
-    font-size: 1.25rem;
-    padding: 0.625rem 1.25rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text-2);
-    cursor: pointer;
-    white-space: nowrap;
-    outline: none;
-  }
-  .rs-discover-clear:hover,
-  .rs-discover-clear:focus-visible {
-    color: var(--rs-text);
-    background: var(--rs-surface);
-    border-color: var(--rs-focus);
-  }
-  .rs-discover__examples {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .rs-discover__examples-title,
-  .rs-discover__moods-title {
-    margin: 0;
-    font-size: 1.375rem;
-    font-weight: 700;
-    color: var(--rs-text);
-  }
-  .rs-discover__example-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.75rem;
-  }
-  /* Example prompts are quiet text buttons, not pills and not cards:
-     one line each, left aligned, clearly tappable. */
-  .rs-discover-example {
-    padding: 0.75rem 1rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line-soft);
+  .rs-ai-panel__secondary {
+    border: 0.1rem solid #52718e;
     background: transparent;
-    color: var(--rs-text-2);
-    font-size: 1.25rem;
-    line-height: 1.35;
-    text-align: left;
-    cursor: pointer;
+    color: #e2ecfc;
+  }
+  .rs-ai-panel__primary:hover,
+  .rs-ai-panel__primary:focus-visible,
+  .rs-ai-panel__secondary:hover,
+  .rs-ai-panel__secondary:focus-visible {
+    border-color: #deffff;
     outline: none;
+    box-shadow: 0 0 0 0.2rem rgba(205, 255, 255, 0.6);
   }
-  .rs-discover-example:hover,
-  .rs-discover-example:focus-visible {
-    color: var(--rs-text);
-    border-color: var(--rs-focus);
-    background: var(--rs-surface);
+
+  /* Local similar rail. */
+  .rs-ai-similar {
+    margin: 0 4.7rem;
   }
-  .rs-discover-example:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus);
+  .rs-ai-similar .rs-section-title {
+    font-size: 3rem;
+    color: #eef2f9;
   }
-  .rs-discover__moods {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-  .rs-discover__mood-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1rem;
-  }
-  @media (max-width: 56rem) {
-    .rs-discover__mood-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-  }
-  /* Large navigable quick-pick card: icon + big label + an honest
-     subtitle derived from the preset itself. One clear focus ring,
-     and the active card reads as selected, not as a pressed pill. */
-  .rs-discover-mood {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.375rem;
-    min-height: 6.5rem;
-    padding: 1.25rem 1.5rem;
-    border-radius: 1rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text);
-    text-align: left;
-    cursor: pointer;
-    outline: none;
-  }
-  .rs-discover-mood:hover,
-  .rs-discover-mood:focus-visible {
-    border-color: var(--rs-focus);
-    background: var(--rs-bg-2);
-  }
-  .rs-discover-mood:focus-visible {
-    box-shadow:
-      0 0 0 3px var(--rs-focus),
-      0 0 1.5rem 0.25rem var(--rs-focus-glow);
-  }
-  .rs-discover-mood.is-active {
-    background: var(--rs-accent);
-    border-color: var(--rs-focus);
-    color: #fff;
-  }
-  .rs-discover-mood__icon {
-    font-size: 1.5rem;
-    line-height: 1;
-    color: var(--rs-focus);
-  }
-  .rs-discover-mood.is-active .rs-discover-mood__icon {
-    color: #fff;
-  }
-  .rs-discover-mood__label {
-    font-size: 1.5rem;
-    font-weight: 700;
-    line-height: 1.2;
-  }
-  .rs-discover-mood__sub {
-    font-size: 1.125rem;
-    line-height: 1.35;
-    color: var(--rs-text-2);
-  }
-  .rs-discover-mood.is-active .rs-discover-mood__sub {
-    color: rgb(255 255 255 / 0.85);
-  }
-  .rs-discover-ask-ai {
-    align-self: flex-start;
-    padding: 0.875rem 1.5rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-focus);
-    background: var(--rs-accent);
-    color: #fff;
-    font-size: 1.25rem;
-    font-weight: 700;
-    cursor: pointer;
-    outline: none;
-  }
-  .rs-discover-ask-ai:hover,
-  .rs-discover-ask-ai:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
-  }
-  /* Diagnostics (0.11.5): collapsible, off the main path — one quiet
-     toggle, and a compact definition list when open. Plain buttons and
-     text only: no focus traps, controller-reachable like everything
-     else on Discover. */
+
+  /* Diagnostics. */
   .rs-discover-diag {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
+    margin: 1rem 4.7rem 2rem;
   }
   .rs-discover-diag__toggle {
-    padding: 0.625rem 1.125rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: transparent;
-    color: var(--rs-text-2);
-    font-size: 1.125rem;
+    padding: 1.2rem 2.2rem;
+    border-radius: 1.2rem;
+    border: 0.1rem solid #43576f;
+    background: rgba(2, 24, 48, 0.85);
+    color: #d9e4f1;
+    font-size: 2.2rem;
     cursor: pointer;
-    outline: none;
   }
   .rs-discover-diag__toggle:hover,
   .rs-discover-diag__toggle:focus-visible {
-    color: var(--rs-text);
-    border-color: var(--rs-focus);
-    background: var(--rs-surface);
+    border-color: #deffff;
+    outline: none;
   }
   .rs-discover-diag__toggle:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus);
+    box-shadow: 0 0 0 0.2rem rgba(205, 255, 255, 0.9);
   }
   .rs-discover-diag__grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.5rem 2rem;
-    width: 100%;
-    margin: 0;
-    padding: 1rem 1.25rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
+    grid-template-columns: repeat(auto-fill, minmax(28rem, 1fr));
+    gap: 1.2rem 2.4rem;
+    margin: 1.6rem 0 0;
+    padding: 2rem 2.4rem;
+    border-radius: 1.2rem;
+    border: 0.1rem solid #43576f;
+    background: rgba(2, 24, 48, 0.9);
   }
   .rs-discover-diag__grid > div {
     display: flex;
-    gap: 0.75rem;
-    align-items: baseline;
-    min-width: 0;
+    flex-direction: column;
+    gap: 0.4rem;
   }
   .rs-discover-diag__grid dt {
-    flex: none;
-    font-size: 1.0625rem;
-    font-weight: 700;
-    color: var(--rs-text-2);
+    font-size: 1.9rem;
+    color: #9fb6ce;
   }
   .rs-discover-diag__grid dd {
     margin: 0;
-    min-width: 0;
-    overflow-wrap: anywhere;
-    font-size: 1.0625rem;
-    color: var(--rs-text);
+    font-size: 2.2rem;
+    color: #e8f2fc;
   }
   .rs-discover-diag__foot {
-    margin: 0;
-    font-size: 1rem;
-    color: var(--rs-text-2);
+    margin: 1.2rem 0 0;
+    font-size: 1.9rem;
+    color: #9fb6ce;
   }
+
+  /* Local cards (discoverCard snippet, reused for local similar). */
   .rs-discover-cell {
     flex: 0 0 auto;
-    min-width: 0;
   }
   .rs-discover-cell--poster {
-    flex-basis: clamp(9rem, 11.5vw, 13rem);
-    width: clamp(9rem, 11.5vw, 13rem);
+    width: 22rem;
   }
   .rs-discover-card {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    min-width: 0;
+    height: 100%;
   }
   .rs-discover-card .rs-card {
-    width: 100%;
+    height: 100%;
   }
   .rs-discover-rating {
     position: absolute;
-    /* Top-left, like TvCard's badge: bottom-left collides with the
-       fallback art's own title line (0.10.0 integration — the rating
-       pill sat on top of "Bulk Comedy 14"'s first letter). */
-    top: 0.625rem;
-    left: 0.625rem;
-    z-index: 1;
+    top: 1rem;
+    right: 1rem;
     display: inline-flex;
+    gap: 0.6rem;
     align-items: center;
-    gap: 0.25rem;
-    border-radius: 0.5rem;
-    padding: 0.25rem 0.5rem;
-    background: rgb(0 0 0 / 0.55);
-    color: #fff;
-    font-size: 1rem;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
+    padding: 0.6rem 1rem;
+    border-radius: 999rem;
+    background: rgba(1, 14, 30, 0.85);
+    color: #ffd166;
+    font-size: 2rem;
+    font-weight: 700;
   }
-  /* The reason reads as a second line under the title, not a clipped
-     single-line meta. */
   .rs-discover-reason {
-    white-space: normal;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  /* -- AI-first Discover (0.11.6) ---------------------------------- */
-
-  /* Refinement context: one subtle line under the search box — the
-     original question plus the obvious New Search action. No chat
-     bubbles, no transcript. */
-  .rs-discover-refine {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex-wrap: wrap;
-    padding: 0 0.25rem;
-  }
-  .rs-discover-refine__label {
-    margin: 0;
-    font-size: 1.125rem;
-    color: var(--rs-text-2);
-  }
-  .rs-discover-refine__new {
-    padding: 0.5rem 1rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text);
-    font-size: 1.125rem;
-    font-weight: 700;
-    cursor: pointer;
-    outline: none;
-    white-space: nowrap;
-  }
-  .rs-discover-refine__new:hover,
-  .rs-discover-refine__new:focus-visible {
-    border-color: var(--rs-focus);
-  }
-  .rs-discover-refine__new:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus);
-  }
-
-  /* Available-only toggle row: the toggle is one controller-reachable
-     button; the note states the no-new-request guarantee plainly. */
-  .rs-ai-controls {
-    display: flex;
-    align-items: center;
-    gap: 1.25rem;
-    flex-wrap: wrap;
-  }
-  .rs-ai-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem 1.25rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text);
-    font-size: 1.25rem;
-    cursor: pointer;
-    outline: none;
-  }
-  .rs-ai-toggle:hover,
-  .rs-ai-toggle:focus-visible {
-    border-color: var(--rs-focus);
-  }
-  .rs-ai-toggle:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
-  }
-  .rs-ai-toggle.is-on {
-    border-color: var(--rs-focus);
-    background: var(--rs-bg-2);
-  }
-  .rs-ai-toggle__box {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 1.5rem;
-    height: 1.5rem;
-    flex: none;
-    border-radius: 0.375rem;
-    border: 2px solid var(--rs-text-2);
-    color: #fff;
-    font-size: 1.125rem;
-    font-weight: 800;
-    line-height: 1;
-  }
-  .rs-ai-toggle.is-on .rs-ai-toggle__box {
-    border-color: var(--rs-focus);
-    background: var(--rs-accent);
-  }
-  .rs-ai-toggle__label {
-    font-weight: 700;
-    white-space: nowrap;
-  }
-  .rs-ai-toggle__count {
-    color: var(--rs-text-2);
-    font-size: 1.125rem;
-    white-space: nowrap;
-  }
-  .rs-ai-controls__note {
-    margin: 0;
-    font-size: 1.125rem;
-    color: var(--rs-text-2);
-  }
-
-  /* AI recommendation grid: two horizontal cards per row at 1080p —
-     poster on the left, readable reason on the right. One column on
-     narrow viewports. No horizontal scrolling: the whole set reads
-     as one coherent answer. */
-  .rs-ai-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.25rem;
-    padding: 0.25rem;
-  }
-  @media (max-width: 64rem) {
-    .rs-ai-grid {
-      grid-template-columns: minmax(0, 1fr);
+  @media (max-width: 110rem) {
+    .rs-kind-grid {
+      grid-template-columns: 1fr;
+    }
+    .rs-kind-card {
+      height: 16rem;
+    }
+    .rs-kind-card__label {
+      margin-top: 6rem;
+    }
+    .rs-discover__mood-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .rs-flow-title {
+      font-size: 5.6rem;
+    }
+    .rs-flow-title--left {
+      font-size: 4.8rem;
+    }
+    .rs-reveal-card {
+      grid-template-columns: 1fr;
+    }
+    .rs-brain--step2,
+    .rs-brain--step3 {
+      display: none;
     }
   }
-  .rs-ai-card {
-    display: flex;
-    gap: 1.25rem;
-    min-width: 0;
-    padding: 1rem;
-    border-radius: 1rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-    color: var(--rs-text);
-    text-decoration: none;
-    outline: none;
-  }
-  a.rs-ai-card {
-    cursor: pointer;
-  }
-  .rs-ai-card:hover,
-  .rs-ai-card:focus-visible {
-    border-color: var(--rs-focus);
-    background: var(--rs-bg-2);
-  }
-  .rs-ai-card:focus-visible {
-    box-shadow:
-      0 0 0 3px var(--rs-focus),
-      0 0 1.5rem 0.25rem var(--rs-focus-glow);
-  }
-  /* Unavailable cards read as present-but-not-playable: full reason,
-     honest badge, slightly dimmed poster — never hidden, never
-     replaced. */
-  .rs-ai-card--unavailable .rs-ai-card__poster {
-    opacity: 0.62;
-  }
-  .rs-ai-card__poster {
-    flex: none;
-    width: clamp(7rem, 8.5vw, 9.5rem);
-  }
-  .rs-ai-card__poster .rs-image {
-    height: 100%;
-    border-radius: 0.625rem;
-    overflow: hidden;
-  }
-  .rs-ai-card__body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    min-width: 0;
-    padding: 0.25rem 0;
-  }
-  .rs-ai-card__title {
-    font-size: 1.5rem;
-    font-weight: 700;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
-  }
-  .rs-ai-card__badges {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-  .rs-ai-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 0.25rem 0.625rem;
-    border-radius: 999px;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-bg-2);
-    color: var(--rs-text-2);
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-  .rs-ai-badge--ok {
-    border-color: #3fb96f;
-    background: rgb(63 185 111 / 0.16);
-    color: #7fd6a4;
-  }
-  .rs-ai-badge--muted {
-    color: var(--rs-text-2);
-  }
-  .rs-ai-badge--warn {
-    border-color: #e0a63c;
-    background: rgb(224 166 60 / 0.16);
-    color: #f0c573;
-  }
-  .rs-ai-card__year {
-    font-size: 1.125rem;
-    color: var(--rs-text-2);
-    font-variant-numeric: tabular-nums;
-  }
-  /* The reason is the point of the feature: full sentences, three
-     lines, never a clipped single-line meta. */
-  .rs-ai-card__reason {
-    font-size: 1.25rem;
-    line-height: 1.45;
-    color: var(--rs-text);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  .rs-ai-card__meta {
-    font-size: 1.125rem;
-    line-height: 1.4;
-    color: var(--rs-text-2);
-  }
-  .rs-ai-card__note {
-    font-size: 1.0625rem;
-    line-height: 1.4;
-    color: #f0c573;
-  }
-
-  /* Honest-state panels (none available / unavailable / empty): one
-     calm surface, plain explanation, labelled actions. */
-  .rs-ai-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-    align-items: flex-start;
-    padding: 1.25rem 1.5rem;
-    border-radius: 1rem;
-    border: 1px solid var(--rs-line);
-    background: var(--rs-surface);
-  }
-  .rs-ai-panel__title {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--rs-text);
-  }
-  .rs-ai-panel__text {
-    margin: 0;
-    font-size: 1.25rem;
-    line-height: 1.5;
-    color: var(--rs-text-2);
-  }
-  .rs-ai-panel__actions {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
-  .rs-ai-panel__primary {
-    padding: 0.875rem 1.5rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-focus);
-    background: var(--rs-accent);
-    color: #fff;
-    font-size: 1.25rem;
-    font-weight: 700;
-    cursor: pointer;
-    outline: none;
-    white-space: nowrap;
-  }
-  .rs-ai-panel__primary:hover,
-  .rs-ai-panel__primary:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus), 0 0 1.5rem 0.25rem var(--rs-focus-glow);
-  }
-  .rs-ai-panel__secondary {
-    padding: 0.875rem 1.25rem;
-    border-radius: 0.75rem;
-    border: 1px solid var(--rs-line);
-    background: transparent;
-    color: var(--rs-text);
-    font-size: 1.25rem;
-    font-weight: 700;
-    cursor: pointer;
-    outline: none;
-    white-space: nowrap;
-  }
-  .rs-ai-panel__secondary:hover,
-  .rs-ai-panel__secondary:focus-visible {
-    border-color: var(--rs-focus);
-  }
-  .rs-ai-panel__secondary:focus-visible {
-    box-shadow: 0 0 0 3px var(--rs-focus);
-  }
-
-  /* Local similar titles: same rail language as the rest of Discover,
-     with its labelling carried in the markup, not the styling. */
-  .rs-ai-similar {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+  @media (prefers-reduced-motion: reduce) {
+    .rs-neural-canvas {
+      opacity: 0.35;
+    }
   }
 </style>

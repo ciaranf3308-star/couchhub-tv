@@ -63,15 +63,17 @@ export const GENRE_CATEGORIES: Array<{
   id: string
   label: string
   art: string
+  /** One-line subtitle shown under the tile label. */
+  tagline: string
 }> = [
-  { id: "anime", label: "Anime", art: "/art/discover/genre-anime.png" },
-  { id: "thriller", label: "Thriller", art: "/art/discover/genre-thriller.png" },
-  { id: "horror", label: "Horror", art: "/art/discover/genre-horror.png" },
-  { id: "scifi", label: "Sci-Fi", art: "/art/discover/genre-scifi.png" },
-  { id: "crime", label: "Crime", art: "/art/discover/genre-crime.png" },
-  { id: "comedy", label: "Comedy", art: "/art/discover/genre-comedy.png" },
-  { id: "drama", label: "Drama", art: "/art/discover/genre-drama.png" },
-  { id: "documentary", label: "Documentary", art: "/art/discover/genre-documentary.png" },
+  { id: "anime", label: "Anime", art: "/art/discover/genre-anime.png", tagline: "Bold, stylised worlds" },
+  { id: "thriller", label: "Thriller", art: "/art/discover/genre-thriller.png", tagline: "Tension that never lets up" },
+  { id: "horror", label: "Horror", art: "/art/discover/genre-horror.png", tagline: "Best watched with the lights on" },
+  { id: "scifi", label: "Sci-Fi", art: "/art/discover/genre-scifi.png", tagline: "Other worlds, big ideas" },
+  { id: "crime", label: "Crime", art: "/art/discover/genre-crime.png", tagline: "Mysteries and mean streets" },
+  { id: "comedy", label: "Comedy", art: "/art/discover/genre-comedy.png", tagline: "Something to laugh at" },
+  { id: "drama", label: "Drama", art: "/art/discover/genre-drama.png", tagline: "Stories that stay with you" },
+  { id: "documentary", label: "Documentary", art: "/art/discover/genre-documentary.png", tagline: "Real life, stranger than fiction" },
 ]
 
 export const GENRE_LABELS: Record<string, string> = Object.fromEntries(
