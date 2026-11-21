@@ -1,8 +1,9 @@
 // Sports Corner v2 — football-data.org feed client (Phase 1, plan §5.1).
 //
-// Table + next fixtures come from football-data.org (free tier, €0 —
-// approved 2026-11-20, D1-A). Stations and tune-in still come from the
-// EPG; this module NEVER invents a station, a table row or a fixture.
+// Table + next fixtures + recent form come from football-data.org
+// (free tier, €0 — approved 2026-11-20, D1-A). Stations and tune-in
+// still come from the EPG; this module NEVER invents a station, a
+// table row, a fixture or a result.
 //
 // Honesty contract (plan §3 + §5.1):
 // - No API key in code, ever. The key lives in Settings localStorage
@@ -24,9 +25,9 @@
 // client (tmdb.ts). No Tauri allow-list entry is needed:
 // src-tauri/capabilities/default.json already allows `https://**/*`,
 // and safe_fetch.rs is only the manifest probe, not a fetch gate.
-// Rate limit (free tier): 10 requests/minute. A refresh needs 3 calls
-// (standings + PL matches + CL matches) and is cached for 1h, so
-// normal use is far inside the limit.
+// Rate limit (free tier): 10 requests/minute. A refresh needs 4 calls
+// (standings + PL matches + CL matches + PL past matches for form)
+// and is cached for 1h, so normal use is far inside the limit.
 //
 // Tests must NEVER hit the live API (no key exists): every public
 // fetch takes an injectable `fetchImpl`, and the parsers are pure.
@@ -62,6 +63,8 @@ export const FOOTBALL_DATA_KEY_STORAGE_KEY = "xt_football_data_key"
 export const FOOTBALL_DATA_TABLE_CACHE_KEY = "xt_football_data_table_cache"
 export const FOOTBALL_DATA_FIXTURES_CACHE_KEY =
   "xt_football_data_fixtures_cache"
+export const FOOTBALL_DATA_RESULTS_CACHE_KEY =
+  "xt_football_data_results_cache"
 
 /** Default cache TTL: 1h (plan §5.1). */
 export const FOOTBALL_DATA_DEFAULT_TTL_MS = 60 * 60 * 1000
@@ -147,7 +150,20 @@ export interface FeedFixture {
   competition: string
   startMs: number
   venue?: string
+  /** Feed status (`SCHEDULED` / `TIMED` / `FINISHED` …) when the
+   *  payload carried one. Upcoming fixtures are filtered on it;
+   *  recent form is derived from it — never guessed. */
+  status?: string
+  /** Full-time score when the feed carried one. Nulls for a match
+   *  that has not kicked off; a FINISHED match without numeric
+   *  full-time goals is a bad row and the parser rejects it. */
+  score?: { home: number | null; away: number | null }
 }
+
+/** One Last-five mark, most recent first: W = United won, D = drew,
+ *  L = lost. Derived only from FINISHED Premier League results with
+ *  feed scores — never invented (mockup rebuild, 2026-11-21). */
+export type FormMark = "W" | "D" | "L"
 
 // ── Result shape (typed failure states, never invented data) ─────
 
@@ -178,6 +194,25 @@ export interface LeagueTableResult {
 export interface FeedFixturesResult {
   status: FootballDataFetchStatus
   fixtures: FeedFixture[] | null
+  stale: boolean
+  mayBeOutOfDate: boolean
+  fetchedAt: number | null
+  fromCache: boolean
+  error?: string
+}
+
+/**
+ * Recent-form result (Last five, mockup rebuild 2026-11-21).
+ * `form` is the W/D/L marks, most recent first (fewer than `n` early
+ * in the season — the hub renders what exists and omits the row when
+ * there is nothing). `results` is the finished United PL fixtures
+ * behind the marks, most recent first. Null on no-key/error; stale
+ * carries the last-good marks.
+ */
+export interface FeedFormResult {
+  status: FootballDataFetchStatus
+  form: FormMark[] | null
+  results: FeedFixture[] | null
   stale: boolean
   mayBeOutOfDate: boolean
   fetchedAt: number | null
@@ -259,6 +294,7 @@ interface Cached<T> {
 
 let memoryTable: Cached<LeagueTable> | null = null
 let memoryFixtures: Cached<FeedFixture[]> | null = null
+let memoryResults: Cached<FeedFixture[]> | null = null
 
 function readCache<T>(key: string): Cached<T> | null {
   const raw = lsGet(key)
@@ -280,8 +316,10 @@ function writeCache<T>(key: string, entry: Cached<T>): void {
 export function clearFootballDataCache(): void {
   memoryTable = null
   memoryFixtures = null
+  memoryResults = null
   lsRemove(FOOTBALL_DATA_TABLE_CACHE_KEY)
   lsRemove(FOOTBALL_DATA_FIXTURES_CACHE_KEY)
+  lsRemove(FOOTBALL_DATA_RESULTS_CACHE_KEY)
 }
 
 // ── Team-name normalisation (shared by fixture filter + matcher) ──
@@ -323,6 +361,42 @@ export function isUnitedFixture(fixture: FeedFixture): boolean {
     normaliseTeamName(fixture.home) === "manchester united" ||
     normaliseTeamName(fixture.away) === "manchester united"
   )
+}
+
+/**
+ * One fixture's result from United's side: "W" / "D" / "L", or null
+ * when the fixture is not a decidable United result (not United,
+ * not FINISHED, or no numeric full-time score). Pure.
+ */
+export function fixtureResultFor(fixture: FeedFixture): FormMark | null {
+  if (!isUnitedFixture(fixture)) return null
+  if (fixture.status !== "FINISHED") return null
+  const home = fixture.score?.home ?? null
+  const away = fixture.score?.away ?? null
+  if (home === null || away === null) return null
+  const unitedHome =
+    normaliseTeamName(fixture.home) === "manchester united"
+  const unitedGoals = unitedHome ? home : away
+  const opponentGoals = unitedHome ? away : home
+  if (unitedGoals > opponentGoals) return "W"
+  if (unitedGoals < opponentGoals) return "L"
+  return "D"
+}
+
+/**
+ * Last-five form from finished fixtures, most recent first: keep
+ * only decidable United results, newest kick-off first, take `n`.
+ * Pure — the mockup's chips are exactly this, never invented.
+ */
+export function deriveLastFive(
+  fixtures: ReadonlyArray<FeedFixture>,
+  n: number = 5,
+): FormMark[] {
+  return fixtures
+    .filter((fixture) => fixtureResultFor(fixture) !== null)
+    .sort((a, b) => b.startMs - a.startMs)
+    .slice(0, n)
+    .map((fixture) => fixtureResultFor(fixture) as FormMark)
 }
 
 // ── Response parsing (pure — no fetch, no clock, no storage) ─────
@@ -479,6 +553,25 @@ export function parseMatchesResponse(payload: unknown): FeedFixture[] {
     }
     const venue = nonEmptyString(match.venue)
     if (venue) fixture.venue = venue
+    // Status + full-time score: the upcoming filter needs the
+    // status, recent form needs both. A FINISHED row without numeric
+    // full-time goals is a bad row — reject the payload, never
+    // guess a result from it.
+    const status = matchStatusOf(match)
+    if (status !== null) fixture.status = status
+    const fullTime = isRecord(match.score)
+      ? isRecord(match.score.fullTime)
+        ? match.score.fullTime
+        : null
+      : null
+    const scoreHome = fullTime ? finiteNumber(fullTime.home) : null
+    const scoreAway = fullTime ? finiteNumber(fullTime.away) : null
+    if (status === "FINISHED" && (scoreHome === null || scoreAway === null)) {
+      throw new FootballDataError(
+        `Match ${index} is FINISHED but has no full-time score`,
+      )
+    }
+    fixture.score = { home: scoreHome, away: scoreAway }
     return fixture
   })
 }
@@ -488,6 +581,9 @@ const UPCOMING_STATUSES: ReadonlySet<string> = new Set([
   "SCHEDULED",
   "TIMED",
 ])
+
+/** The feed's own status value for a match with a final score. */
+const FINISHED_STATUSES: ReadonlySet<string> = new Set(["FINISHED"])
 
 function matchStatusOf(match: unknown): string | null {
   return isRecord(match) ? nonEmptyString(match.status) : null
@@ -670,6 +766,23 @@ function matchesUrl(
 }
 
 /**
+ * Past-window matches URL for recent form: the same
+ * `/competitions/PL/matches` endpoint the fixtures call already
+ * uses, with the window flipped into the past (today − 90d to
+ * today). The future-only window carries no finished results, so
+ * form is not derivable from the fixtures payload — this one extra
+ * free-tier call is the whole gap (mockup rebuild, 2026-11-21).
+ */
+function pastMatchesUrl(nowMs: number): string {
+  const from = footballDataDate(new Date(nowMs - 90 * 24 * 60 * 60 * 1000))
+  const to = footballDataDate(new Date(nowMs))
+  return (
+    `${FOOTBALL_DATA_BASE_URL}/competitions/PL/matches` +
+    `?dateFrom=${from}&dateTo=${to}`
+  )
+}
+
+/**
  * The next `n` Manchester United fixtures (Premier League + Champions
  * League, D3 = A: next 5 by default), earliest first. Fixtures are
  * feed truth; the station for each comes from the EPG via
@@ -777,6 +890,131 @@ export async function getNextFixtures(
     return {
       status: "error",
       fixtures: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: message,
+    }
+  }
+}
+
+/**
+ * The last `n` Premier League results as W/D/L marks, most recent
+ * first (Last five, mockup rebuild 2026-11-21). Premier League only:
+ * the mockup's chips are league form, and the Champions League
+ * results are a different competition — mixing them would misstate
+ * the league run. One past-window PL matches call (same endpoint
+ * as the fixtures call, window flipped); the standings endpoint
+ * carries no form data, so this is the only honest source.
+ * Same typed failure states as the other getters: no key -> form
+ * null, feed down + cache -> stale marks, feed down + no cache ->
+ * error, form null. The hub omits the chips row when form is null
+ * or empty — never invented marks.
+ */
+export async function getRecentForm(
+  n: number = 5,
+  options: FootballDataCallOptions = {},
+): Promise<FeedFormResult> {
+  const nowMs = options.nowMs ?? Date.now()
+  const ttlMs = options.ttlMs ?? FOOTBALL_DATA_DEFAULT_TTL_MS
+  const apiKey = getFootballDataApiKey()
+  if (!apiKey) {
+    return {
+      status: "no-key",
+      form: null,
+      results: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: "No football-data.org API key saved in Settings.",
+    }
+  }
+  const recentFrom = (list: FeedFixture[]): FeedFixture[] =>
+    list
+      .filter((fixture) => fixtureResultFor(fixture) !== null)
+      .sort((a, b) => b.startMs - a.startMs)
+  const cached = cachedEntry<FeedFixture[]>(
+    memoryResults,
+    FOOTBALL_DATA_RESULTS_CACHE_KEY,
+  )
+  if (cached && !options.forceRefresh && ageMs(cached, nowMs) <= ttlMs) {
+    const recent = recentFrom(cached.data).slice(0, n)
+    return {
+      status: "ok",
+      form: deriveLastFive(recent, n),
+      results: recent,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: cached.fetchedAt,
+      fromCache: true,
+    }
+  }
+  const fetchImpl = options.fetchImpl ?? defaultFetch()
+  try {
+    const payload = await fetchJson(fetchImpl, pastMatchesUrl(nowMs), apiKey)
+    // Statuses and the United filter are applied to the RAW payload
+    // first, so the parser only ever sees matches that matter — the
+    // same shape as getNextFixtures' selectUpcomingUnited, with the
+    // status set flipped to FINISHED.
+    const selectFinishedUnited = (payload: unknown): unknown[] => {
+      if (!isRecord(payload) || !Array.isArray(payload.matches)) return []
+      return payload.matches.filter((match) => {
+        const status = matchStatusOf(match)
+        if (status === null || !FINISHED_STATUSES.has(status)) return false
+        if (!isRecord(match)) return false
+        const home = isRecord(match.homeTeam)
+          ? nonEmptyString(match.homeTeam.name)
+          : null
+        const away = isRecord(match.awayTeam)
+          ? nonEmptyString(match.awayTeam.name)
+          : null
+        if (home === null || away === null) return false
+        return (
+          normaliseTeamName(home) === "manchester united" ||
+          normaliseTeamName(away) === "manchester united"
+        )
+      })
+    }
+    const finished = recentFrom(
+      parseMatchesResponse({ matches: selectFinishedUnited(payload) }),
+    )
+    const entry: Cached<FeedFixture[]> = { fetchedAt: nowMs, data: finished }
+    memoryResults = entry
+    writeCache(FOOTBALL_DATA_RESULTS_CACHE_KEY, entry)
+    const recent = finished.slice(0, n)
+    return {
+      status: "ok",
+      form: deriveLastFive(recent, n),
+      results: recent,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: nowMs,
+      fromCache: false,
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Feed request failed"
+    log.warn("[xt:football-data] recent form fetch failed:", message)
+    if (cached) {
+      const age = ageMs(cached, nowMs)
+      const recent = recentFrom(cached.data).slice(0, n)
+      return {
+        status: "stale",
+        form: deriveLastFive(recent, n),
+        results: recent,
+        stale: true,
+        mayBeOutOfDate: age > FOOTBALL_DATA_MAX_TABLE_AGE_MS,
+        fetchedAt: cached.fetchedAt,
+        fromCache: true,
+        error: message,
+      }
+    }
+    return {
+      status: "error",
+      form: null,
+      results: null,
       stale: false,
       mayBeOutOfDate: false,
       fetchedAt: null,

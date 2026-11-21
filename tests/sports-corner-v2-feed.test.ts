@@ -18,12 +18,16 @@ import {
   FOOTBALL_DATA_FIXTURE_COMPETITIONS,
   FOOTBALL_DATA_KEY_STORAGE_KEY,
   FOOTBALL_DATA_LEAGUE_CUP_CODE,
+  FOOTBALL_DATA_RESULTS_CACHE_KEY,
   FOOTBALL_DATA_TABLE_CACHE_KEY,
   STATION_TBC,
   clearFootballDataCache,
+  deriveLastFive,
+  fixtureResultFor,
   getFootballDataKeyState,
   getLeagueTable,
   getNextFixtures,
+  getRecentForm,
   matchFixtureStation,
   matchFixtureStations,
   parseMatchesResponse,
@@ -37,6 +41,7 @@ import {
   MOCK_LEAGUE_TABLE,
   MOCK_NEXT_FIXTURES,
   MOCK_PL_MATCHES_RESPONSE,
+  MOCK_PL_RESULTS_RESPONSE,
   MOCK_STANDINGS_RESPONSE,
   createFailingFetch,
   createMockFetch,
@@ -505,5 +510,168 @@ describe("key storage — honest no-key state, key never in code", () => {
     }
     walk(srcDir)
     expect(offenders).toEqual([])
+  })
+})
+
+describe("Last five — recent form from finished PL results (mockup rebuild, 21 Nov)", () => {
+  it("parser keeps status + full-time score on FINISHED rows, nulls on SCHEDULED rows", () => {
+    const finished = parseMatchesResponse(MOCK_PL_RESULTS_RESPONSE)
+    expect(finished).toHaveLength(5)
+    // Most recent first in the payload is last: Villa 4–4 at home.
+    const villa = finished[4]
+    expect(villa.home).toBe("Manchester United FC")
+    expect(villa.status).toBe("FINISHED")
+    expect(villa.score).toEqual({ home: 4, away: 4 })
+    const upcoming = parseMatchesResponse(MOCK_PL_MATCHES_RESPONSE)
+    expect(upcoming[0].status).toBe("SCHEDULED")
+    expect(upcoming[0].score).toEqual({ home: null, away: null })
+  })
+
+  it("parser rejects a FINISHED row with no full-time score — never guess a result", () => {
+    expect(() =>
+      parseMatchesResponse({
+        matches: [
+          {
+            id: 1,
+            utcDate: "2026-11-08T15:00:00Z",
+            status: "FINISHED",
+            homeTeam: { name: "Manchester United FC" },
+            awayTeam: { name: "Aston Villa FC" },
+            score: {
+              fullTime: { home: null, away: null },
+            },
+            competition: { name: "Premier League" },
+          },
+        ],
+      }),
+    ).toThrow("no full-time score")
+  })
+
+  it("deriveLastFive: real mock results → D L L D D, most recent first", () => {
+    const fixtures = parseMatchesResponse(MOCK_PL_RESULTS_RESPONSE)
+    expect(deriveLastFive(fixtures)).toEqual(["D", "L", "L", "D", "D"])
+  })
+
+  it("deriveLastFive ignores non-United finished rows, scheduled rows, and unscored rows", () => {
+    const fixtures = parseMatchesResponse({
+      matches: [
+        {
+          id: 1,
+          utcDate: "2026-11-08T15:00:00Z",
+          status: "FINISHED",
+          homeTeam: { name: "Arsenal FC" },
+          awayTeam: { name: "Chelsea FC" },
+          score: { fullTime: { home: 2, away: 0 } },
+          competition: { name: "Premier League" },
+        },
+        {
+          id: 2,
+          utcDate: "2026-11-20T20:00:00Z",
+          status: "SCHEDULED",
+          homeTeam: { name: "Manchester United FC" },
+          awayTeam: { name: "Coventry City FC" },
+          score: { fullTime: { home: null, away: null } },
+          competition: { name: "Premier League" },
+        },
+        {
+          id: 3,
+          utcDate: "2026-11-08T15:00:00Z",
+          status: "FINISHED",
+          homeTeam: { name: "Manchester United FC" },
+          awayTeam: { name: "Aston Villa FC" },
+          score: { fullTime: { home: 4, away: 4 } },
+          competition: { name: "Premier League" },
+        },
+      ],
+    })
+    expect(deriveLastFive(fixtures)).toEqual(["D"])
+  })
+
+  it("fixtureResultFor reads the result from United's side (away win is W, home loss is L)", () => {
+    const [awayWin, homeLoss] = parseMatchesResponse({
+      matches: [
+        {
+          id: 1,
+          utcDate: "2026-10-31T15:00:00Z",
+          status: "FINISHED",
+          homeTeam: { name: "Chelsea FC" },
+          awayTeam: { name: "Manchester United FC" },
+          score: { fullTime: { home: 0, away: 2 } },
+          competition: { name: "Premier League" },
+        },
+        {
+          id: 2,
+          utcDate: "2026-10-25T15:00:00Z",
+          status: "FINISHED",
+          homeTeam: { name: "Manchester United FC" },
+          awayTeam: { name: "AFC Bournemouth" },
+          score: { fullTime: { home: 0, away: 3 } },
+          competition: { name: "Premier League" },
+        },
+      ],
+    })
+    expect(fixtureResultFor(awayWin)).toBe("W")
+    expect(fixtureResultFor(homeLoss)).toBe("L")
+    expect(deriveLastFive([])).toEqual([])
+  })
+
+  it("getRecentForm calls the past-window PL matches URL and returns D L L D D", async () => {
+    setKey(runtimeTestKey())
+    const mockFetch = createMockFetch()
+    const form = await getRecentForm(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(form.status).toBe("ok")
+    expect(form.form).toEqual(["D", "L", "L", "D", "D"])
+    expect(form.results).toHaveLength(5)
+    // Most recent first: Villa 4–4 at home, 8 Nov.
+    expect(form.results?.[0].home).toBe("Manchester United FC")
+    expect(form.results?.[0].away).toBe("Aston Villa FC")
+    expect(form.results?.[0].score).toEqual({ home: 4, away: 4 })
+    // The call went to the past window (today − 90d → today), not
+    // the future fixtures window — the mock routes on dateFrom.
+    expect(mockFetch.calls).toHaveLength(1)
+    expect(mockFetch.calls[0]).toContain("/competitions/PL/matches")
+    expect(mockFetch.calls[0]).toContain("dateFrom=2026-08-22")
+    expect(mockFetch.calls[0]).toContain("dateTo=2026-11-20")
+    // Second call inside the TTL is served from cache: no new fetch.
+    const cached = await getRecentForm(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(cached.status).toBe("ok")
+    expect(cached.fromCache).toBe(true)
+    expect(cached.form).toEqual(["D", "L", "L", "D", "D"])
+    expect(mockFetch.calls).toHaveLength(1)
+  })
+
+  it("getRecentForm: no key → no-key + null form + no fetch; feed down → error + null form", async () => {
+    const mockFetch = createMockFetch()
+    const noKey = await getRecentForm(5, { fetchImpl: mockFetch, nowMs: FRIDAY })
+    expect(noKey.status).toBe("no-key")
+    expect(noKey.form).toBeNull()
+    expect(noKey.results).toBeNull()
+    expect(mockFetch.calls).toHaveLength(0)
+
+    setKey(runtimeTestKey())
+    const down = await getRecentForm(5, {
+      fetchImpl: createFailingFetch(500),
+      nowMs: FRIDAY,
+    })
+    expect(down.status).toBe("error")
+    expect(down.form).toBeNull()
+  })
+
+  it("getRecentForm: stale cache is served with the stale flag when the feed fails", async () => {
+    setKey(runtimeTestKey())
+    const recent = parseMatchesResponse(MOCK_PL_RESULTS_RESPONSE)
+    localStorage.setItem(
+      FOOTBALL_DATA_RESULTS_CACHE_KEY,
+      JSON.stringify({ fetchedAt: FRIDAY - 25 * HOUR_MS, data: recent }),
+    )
+    const stale = await getRecentForm(5, {
+      fetchImpl: createFailingFetch(500),
+      nowMs: FRIDAY,
+      ttlMs: 0,
+    })
+    expect(stale.status).toBe("stale")
+    expect(stale.stale).toBe(true)
+    expect(stale.mayBeOutOfDate).toBe(true)
+    expect(stale.form).toEqual(["D", "L", "L", "D", "D"])
   })
 })

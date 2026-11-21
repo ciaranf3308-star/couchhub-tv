@@ -66,9 +66,12 @@ import {
   STATION_TBC,
   getLeagueTable,
   getNextFixtures,
+  getRecentForm,
   normaliseTeamName,
   type FeedFixture,
   type FeedFixturesResult,
+  type FeedFormResult,
+  type FormMark,
   type LeagueTableResult,
 } from "@/scripts/lib/football-data.js"
 import {
@@ -194,6 +197,9 @@ export interface SportsHubModel {
   tableResult: LeagueTableResult | null
   /** Feed fixtures result (v2 Phase 2). Null = not fetched yet. */
   feedResult: FeedFixturesResult | null
+  /** Recent-form result (Last five, mockup rebuild 0.11.17).
+   *  Null = not fetched yet — the chips row is omitted, never faked. */
+  formResult: FeedFormResult | null
   /** Feed fixtures matched to EPG listings, feed order (v2 §4.1). */
   nextMatches: NextMatchRow[]
   /** Mini-table vs full 20 (v2 §4.1). */
@@ -223,6 +229,7 @@ export interface SportsHubModelInput {
   /** Feed results (v2 Phase 2). Omitted = not fetched yet. */
   tableResult?: LeagueTableResult | null
   feedResult?: FeedFixturesResult | null
+  formResult?: FeedFormResult | null
   nextMatches?: NextMatchRow[]
   tableExpanded?: boolean
 }
@@ -249,6 +256,7 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
     channelCount: scanResult?.channelCount ?? 0,
     tableResult: input.tableResult ?? null,
     feedResult: input.feedResult ?? null,
+    formResult: input.formResult ?? null,
     nextMatches: input.nextMatches ?? [],
     tableExpanded: input.tableExpanded ?? false,
     onTvNow: [],
@@ -665,14 +673,19 @@ function buildOtherSquadsSection(
  * Dated + sourced on screen; stale >24h says "may be out of date";
  * feed down / no key shows honest failure copy, never invented data.
  *
- * No "Last five" chips: the free-tier standings carry no form, and
- * nothing here invents W/D/L — the panel omits the row rather than
- * guessing it (the mockup's chips are sample data).
+ * "Last five" chips (mockup rebuild, 0.11.17): the `form` marks
+ * come from getRecentForm — W/D/L derived from FINISHED Premier
+ * League results with feed scores, most recent first. The
+ * standings endpoint carries no form, so the chips live on that
+ * call, not on the table; when form is null or empty the row is
+ * omitted rather than guessed (the mockup's W W D L W chips are
+ * sample data — the real marks are D L L D D as of 21 Nov 2026).
  */
 function buildTableSection(
   tableResult: LeagueTableResult,
   expanded: boolean,
   callbacks: SportsHubCallbacks,
+  form: ReadonlyArray<FormMark> | null = null,
 ): HTMLElement {
   const section = el("section", "rs-sports-section rs-sports-table-section")
   section.setAttribute("data-sports-section", "table")
@@ -726,6 +739,26 @@ function buildTableSection(
       tableEl.appendChild(rowEl)
     }
     section.appendChild(tableEl)
+    // Last five (mockup right panel): W green, D grey, L red.
+    // Rendered only when the feed derived real marks; null/empty
+    // omits the row — the panel never guesses form.
+    if (form !== null && form.length > 0) {
+      const formRow = el("p", "rs-sports-form-row")
+      formRow.appendChild(el("span", "rs-sports-form-label", "Last five"))
+      for (const mark of form) {
+        const chip = el(
+          "span",
+          `rs-sports-form-chip rs-sports-form-chip--${mark.toLowerCase()}`,
+          mark,
+        )
+        chip.setAttribute(
+          "aria-label",
+          mark === "W" ? "Win" : mark === "D" ? "Draw" : "Loss",
+        )
+        formRow.appendChild(chip)
+      }
+      section.appendChild(formRow)
+    }
     const asOf = formatTableAsOf(table)
     const meta = [asOf, FOOTBALL_DATA_ATTRIBUTION]
       .filter((part): part is string => part !== null)
@@ -1387,6 +1420,7 @@ export function renderSportsHub(
         model.tableResult,
         model.tableExpanded,
         callbacks,
+        model.formResult?.form ?? null,
       ),
     )
   }
@@ -1915,6 +1949,7 @@ interface HubRuntime {
    *  the table / Next Matches sections are omitted until then. */
   tableResult: LeagueTableResult | null
   feedResult: FeedFixturesResult | null
+  formResult: FeedFormResult | null
   nextMatches: NextMatchRow[]
   tableExpanded: boolean
   feedInFlight: boolean
@@ -1939,6 +1974,7 @@ export function mountSportsHubPage(): void {
     playlistAttempted: false,
     tableResult: null,
     feedResult: null,
+    formResult: null,
     nextMatches: [],
     tableExpanded: false,
     feedInFlight: false,
@@ -1975,6 +2011,7 @@ export function mountSportsHubPage(): void {
       nowMs: Date.now(),
       tableResult: runtime.tableResult,
       feedResult: runtime.feedResult,
+      formResult: runtime.formResult,
       nextMatches: runtime.nextMatches,
       tableExpanded: runtime.tableExpanded,
     })
@@ -2072,23 +2109,25 @@ export function mountSportsHubPage(): void {
   }
 
   /**
-   * Feed refresh (v2 Phase 2): table + next 5 fixtures through the
-   * Phase 1 client (1h cache, so repeat calls are cheap). A
-   * no-key/error result still lands in the runtime — the table and
-   * Next Matches sections render their honest failure copy from
-   * it. Never throws: the client returns typed results.
+   * Feed refresh (v2 Phase 2): table + next 5 fixtures + last-five
+   * form through the Phase 1 client (1h cache, so repeat calls are
+   * cheap). A no-key/error result still lands in the runtime — the
+   * table and Next Matches sections render their honest failure copy
+   * from it. Never throws: the client returns typed results.
    */
   async function refreshFeed(): Promise<void> {
     if (!mounted || runtime.feedInFlight) return
     runtime.feedInFlight = true
     try {
-      const [tableResult, feedResult] = await Promise.all([
+      const [tableResult, feedResult, formResult] = await Promise.all([
         getLeagueTable(),
         getNextFixtures(5),
+        getRecentForm(5),
       ])
       if (!mounted) return
       runtime.tableResult = tableResult
       runtime.feedResult = feedResult
+      runtime.formResult = formResult
       runtime.nextMatches = buildNextMatchRows(
         feedResult.fixtures ?? [],
         currentFixtures(),

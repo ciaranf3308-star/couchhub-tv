@@ -18,6 +18,15 @@
 //   (H) Sat 5 Dec 15:00 PL. Exact, in the matches responses.
 // - Liverpool 4th on 18 points; Sunderland level with United on 8
 //   points; Crystal Palace one behind on 7 points (plan §2).
+// - The last 5 Premier League results (most recent first): Aston
+//   Villa 4–4 (H) Sun 8 Nov, Chelsea 0–2 (A) Sat 31 Oct, Bournemouth
+//   0–3 (H) Sun 25 Oct, Leeds 1–1 (A) Sun 18 Oct, Tottenham 1–1 (H)
+//   Sat 10 Oct 2026 — form D L L D D. Cross-checked 2026-11-21
+//   across StatMuse, bet-tracker, bandwagon and bettingapps (all
+//   agree; 6 scored, 11 conceded, −5 GD over the five — and the
+//   five leave W1 D5 L4 over the first ten, matching the table row).
+//   Exact, in MOCK_PL_RESULTS_RESPONSE. Venues: Old Trafford (home
+//   games), Elland Road (Leeds), Stamford Bridge (Chelsea).
 // - Venues Anfield (Liverpool) and Old Trafford (Brentford, Coventry)
 //   are the only venues stated; the away venues for Sporting CP and
 //   Newcastle are OMITTED, not guessed.
@@ -31,6 +40,9 @@
 //   Tests assert ONLY the United row's full record and Liverpool's
 //   position/points — never the filler numbers.
 // - The football-data match ids (fd-535xxx): arbitrary mock ids.
+// - The 15:00 kick-off times on the results rows are date-ordering
+//   placeholders — the dates and scores are the verified facts, and
+//   the client orders by date only; no test asserts a results time.
 //
 // Broadcasters beyond Liverpool are NOT in this mock: the feed or the
 // EPG must supply them; they are not hard-coded from the plan.
@@ -146,17 +158,20 @@ function mockMatch(
   competition: string,
   competitionCode: string,
   venue?: string,
+  status: "SCHEDULED" | "FINISHED" = "SCHEDULED",
+  scoreHome: number | null = null,
+  scoreAway: number | null = null,
 ) {
   return {
     id,
     utcDate,
-    status: "SCHEDULED",
+    status,
     matchday: 11,
     stage: "REGULAR_SEASON",
     group: null,
     homeTeam: { id: 1, name: homeTeam },
     awayTeam: { id: 2, name: awayTeam },
-    score: { winner: null, duration: "REGULAR", fullTime: { home: null, away: null }, halfTime: { home: null, away: null } },
+    score: { winner: null, duration: "REGULAR", fullTime: { home: scoreHome, away: scoreAway }, halfTime: { home: null, away: null } },
     competition: { id: competitionCode === "PL" ? 2021 : 2001, name: competition, code: competitionCode },
     ...(venue ? { venue } : {}),
   }
@@ -219,6 +234,85 @@ export const MOCK_CL_MATCHES_RESPONSE = {
       "Manchester United FC",
       "UEFA Champions League",
       "CL",
+    ),
+  ],
+}
+
+/**
+ * Premier League results (raw v4 shape, ascending date order like
+ * the live endpoint). The last 5 finished United league games —
+ * LIVE FACTS, see header: D L L D D most recent first. Served by
+ * createMockFetch only for the past-window call (dateFrom before
+ * the mock today); the future-window call serves the fixtures
+ * above. (A SCHEDULED row inside a past window — a later-today
+ * kick-off — must be ignored by the client; that case is covered
+ * by an inline payload in the feed tests, not by an invented row
+ * here.)
+ */
+export const MOCK_PL_RESULTS_RESPONSE = {
+  filters: { dateFrom: "2026-08-22", dateTo: "2026-11-20" },
+  resultSet: { count: 5 },
+  competition: { id: 2021, name: "Premier League", code: "PL" },
+  matches: [
+    mockMatch(
+      535001,
+      "2026-10-10T15:00:00Z",
+      "Manchester United FC",
+      "Tottenham Hotspur FC",
+      "Premier League",
+      "PL",
+      "Old Trafford",
+      "FINISHED",
+      1,
+      1,
+    ),
+    mockMatch(
+      535002,
+      "2026-10-18T15:00:00Z",
+      "Leeds United FC",
+      "Manchester United FC",
+      "Premier League",
+      "PL",
+      "Elland Road",
+      "FINISHED",
+      1,
+      1,
+    ),
+    mockMatch(
+      535003,
+      "2026-10-25T15:00:00Z",
+      "Manchester United FC",
+      "AFC Bournemouth",
+      "Premier League",
+      "PL",
+      "Old Trafford",
+      "FINISHED",
+      0,
+      3,
+    ),
+    mockMatch(
+      535004,
+      "2026-10-31T15:00:00Z",
+      "Chelsea FC",
+      "Manchester United FC",
+      "Premier League",
+      "PL",
+      "Stamford Bridge",
+      "FINISHED",
+      2,
+      0,
+    ),
+    mockMatch(
+      535005,
+      "2026-11-08T15:00:00Z",
+      "Manchester United FC",
+      "Aston Villa FC",
+      "Premier League",
+      "PL",
+      "Old Trafford",
+      "FINISHED",
+      4,
+      4,
     ),
   ],
 }
@@ -318,8 +412,10 @@ export interface MockFetch extends FootballDataFetchImpl {
 
 /**
  * A stub fetch that serves the mock payloads by endpoint and records
- * calls. Never touches the network. The standings + matches URLs are
- * matched on path only (query params ignored).
+ * calls. Never touches the network. The standings + CL matches URLs
+ * are matched on path only; the PL matches URL is split by its
+ * `dateFrom` query param (past window -> results, future window ->
+ * fixtures) — see the branch above.
  */
 export function createMockFetch(): MockFetch {
   const calls: string[] = []
@@ -335,6 +431,14 @@ export function createMockFetch(): MockFetch {
       return mockResponse(MOCK_STANDINGS_RESPONSE)
     }
     if (url.includes("/competitions/PL/matches")) {
+      // Same path, two windows: the past-window form call
+      // (dateFrom before the mock today, 2026-11-20) gets the
+      // finished results; the future-window fixtures call gets the
+      // upcoming fixtures. Query params are otherwise ignored.
+      const dateFrom = new URL(url).searchParams.get("dateFrom") ?? ""
+      if (dateFrom !== "" && dateFrom < "2026-11-20") {
+        return mockResponse(MOCK_PL_RESULTS_RESPONSE)
+      }
       return mockResponse(MOCK_PL_MATCHES_RESPONSE)
     }
     if (url.includes("/competitions/CL/matches")) {

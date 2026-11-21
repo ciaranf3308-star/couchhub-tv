@@ -16,9 +16,11 @@ import {
   clearFootballDataCache,
   getLeagueTable,
   getNextFixtures,
+  getRecentForm,
   matchFixtureStation,
   STATION_TBC,
   type FeedFixturesResult,
+  type FeedFormResult,
   type LeagueTableResult,
 } from "@/scripts/lib/football-data.ts"
 import {
@@ -552,5 +554,100 @@ describe("mockup layout — feed hero, panel, on-TV-now, fixtures row", () => {
     expect(feedFixtureHomeAway(MOCK_NEXT_FIXTURES[0])).toBe("AWAY")
     expect(feedFixtureOpponent(MOCK_NEXT_FIXTURES[2])).toBe("Brentford")
     expect(feedFixtureHomeAway(MOCK_NEXT_FIXTURES[2])).toBe("HOME")
+  })
+})
+
+describe("Last five chips (mockup rebuild, 0.11.17)", () => {
+  async function feedResultsWithForm(nowMs: number): Promise<{
+    tableResult: LeagueTableResult
+    feedResult: FeedFixturesResult
+    formResult: FeedFormResult
+  }> {
+    const { tableResult, feedResult } = await feedResults(nowMs)
+    const formResult = await getRecentForm(5, {
+      fetchImpl: createMockFetch(),
+      nowMs,
+    })
+    return { tableResult, feedResult, formResult }
+  }
+
+  function chips(): string[] {
+    return [...document.querySelectorAll(".rs-sports-form-chip")].map(
+      (chip) => chip.textContent ?? "",
+    )
+  }
+
+  it("renders the real D L L D D chips under the mini-table when form arrived", async () => {
+    const { tableResult, feedResult, formResult } =
+      await feedResultsWithForm(FRIDAY)
+    expect(formResult.form).toEqual(["D", "L", "L", "D", "D"])
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "loading",
+      scanResult: null,
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      formResult,
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    expect(document.querySelector(".rs-sports-form-label")?.textContent).toBe(
+      "Last five",
+    )
+    expect(chips()).toEqual(["D", "L", "L", "D", "D"])
+    // Chips sit in the table section, directly under the mini-table.
+    const section = document.querySelector('[data-sports-section="table"]')
+    expect(section?.querySelector(".rs-sports-form-row")).not.toBeNull()
+    expect(section?.querySelector(".rs-sports-table")).not.toBeNull()
+  })
+
+  it("omits the chips row when no form result has arrived (never guessed)", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "loading",
+      scanResult: null,
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    expect(document.querySelector(".rs-sports-form-row")).toBeNull()
+    expect(chips()).toEqual([])
+    expect(document.querySelector(".rs-sports-table")).not.toBeNull()
+  })
+
+  it("omits the chips row when the feed derived no marks (empty form)", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    const emptyForm: FeedFormResult = {
+      status: "ok",
+      form: [],
+      results: [],
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: FRIDAY,
+      fromCache: false,
+    }
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "loading",
+      scanResult: null,
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      formResult: emptyForm,
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    expect(document.querySelector(".rs-sports-form-row")).toBeNull()
+    expect(chips()).toEqual([])
   })
 })
