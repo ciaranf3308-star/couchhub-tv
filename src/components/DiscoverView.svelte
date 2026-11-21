@@ -1730,6 +1730,11 @@
                 <img class="rs-kind-card__art" src={card.art} alt="" onerror={(e) => { e.currentTarget.style.display = "none" }} />
                 <span class="rs-kind-card__label">{card.label}</span>
                 <span class="rs-kind-card__sub">{card.subtitle}</span>
+                {#if card.id === "either"}
+                  <!-- Mockup: the (A) badge sits bottom-right of the
+                       Either card (Ø36px, centre ≈ (1529, 750)). -->
+                  <span class="rs-kind-card__badge" aria-hidden="true">A</span>
+                {/if}
               </button>
             {/each}
           </div>
@@ -1738,7 +1743,7 @@
             <span class="rs-hint-glyph">A</span> Select
             <span class="rs-hint-glyph">B</span> Back
           </p>
-          <p class="rs-flow-foot">Step 1 of 3</p>
+          <p class="rs-flow-foot">Discover concept · Step 1 of 3</p>
         </section>
       {:else if flow.step === "categories"}
         <!-- Step 2 — "What are you drawn to?" -->
@@ -1776,7 +1781,7 @@
             <span class="rs-hint-glyph">A</span> Select / deselect
             <span class="rs-hint-glyph">B</span> Back
           </p>
-          <p class="rs-flow-foot">Step 2 of 3</p>
+          <p class="rs-flow-foot">Discover concept · Step 2 of 3</p>
         </section>
       {:else if flow.step === "brief"}
         <!-- Step 3 — "Tell me what you really want." -->
@@ -1872,7 +1877,7 @@
             <span class="rs-hint-glyph">A</span> Continue
             <span class="rs-hint-glyph">B</span> Back
           </p>
-          <p class="rs-flow-foot">Step 3 of 3</p>
+          <p class="rs-flow-foot">Discover concept · Step 3 of 3</p>
         </section>
       {:else if flow.step === "loading"}
         <!-- Finding: one honest progress line from the orchestrator. -->
@@ -1885,7 +1890,7 @@
           {#if choicesLine}
             <p class="rs-flow-choices">{choicesLine}</p>
           {/if}
-          <p class="rs-flow-foot">Step 3 of 3</p>
+          <p class="rs-flow-foot">Discover concept · Step 3 of 3</p>
         </section>
       {:else if flow.step === "reveal"}
         <!-- Reveal: ONE playable recommendation at a time — cinematic
@@ -1949,7 +1954,7 @@
           {#if !searching && stateNote && !aiUnavailable}
             <p class="rs-meta" data-ai-state-note>{stateNote}</p>
           {/if}
-          <p class="rs-flow-foot">Step 3 of 3</p>
+          <p class="rs-flow-foot">Discover concept · Step 3 of 3</p>
         </section>
       {/if}
     </div>
@@ -2115,19 +2120,27 @@
 {/snippet}
 <style>
   /* Discover redesign (0.11.18) — deep navy neural space.
-     Mockup geometry is 1672×941; sizes below are scaled to the
-     fluid TV layout (rem at the app's 10px root) so the same
-     proportions hold at any viewport. Palette (measured):
-     base #010E1E, mid #011327, card fill #021830, textbox #031930,
-     focused fill #051E46, primary #0D8CFD / #1568AA, glow #CDFFFF,
-     headline #E4EAF0, subhead #AEC9E8, muted #9FB6CE,
-     unselected border #43576F. */
+     Mockup geometry is 1672×941; sizes below are in rem against
+     the app's real root font-size (clamp(12px, min(100vw/120,
+     100vh/67.5), 32px) — 13.93px at 1672×941, 16px at 1920×1080),
+     i.e. mockup px ÷ 13.93. Do NOT author these as px ÷ 10: that
+     was the 0.11.18 scale bug (everything ~39% oversized at 1672).
+     Palette (measured): base #010E1E, mid #011327, card fill
+     #021830, textbox #031930, focused fill #051E46, primary
+     #0D8CFD / #1568AA, glow #CDFFFF, headline #E4EAF0, subhead
+     #AEC9E8, muted #9FB6CE, unselected border #43576F. */
   .rs-discover {
     position: relative;
     display: flex;
     flex-direction: column;
     gap: 1.077rem;
     min-height: 100%;
+    /* Full-bleed below the top nav: cancel the shell .rs-main
+       side padding (clamp(1.5rem, 3vw, 3rem)) and bottom padding
+       (3rem) so the navy fills edge-to-edge; the mockup shows no
+       burgundy frame around the panel. The same clamp expression
+       cancels it exactly at any root font-size. */
+    margin: 0 calc(-1 * clamp(1.5rem, 3vw, 3rem)) -3rem;
     background:
       radial-gradient(86.16rem 43.08rem at 50% -10%, #062a52 0%, transparent 55%),
       radial-gradient(64.62rem 35.9rem at 85% 110%, #041a3a 0%, transparent 60%),
@@ -2365,6 +2378,26 @@
     margin-top: 0.718rem;
     font-size: 1.939rem;
     color: #d9e4f1;
+  }
+  /* (A) badge on the Either card (mockup: Ø36px, bottom-right,
+     ring white, dark-blue fill, 'A' ~18px). */
+  .rs-kind-card__badge {
+    position: absolute;
+    right: 0.144rem;
+    bottom: 2.728rem;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.585rem;
+    height: 2.585rem;
+    border-radius: 50%;
+    border: 0.144rem solid #ffffff;
+    background: #043872;
+    color: #ffffff;
+    font-size: 1.292rem;
+    font-weight: 700;
+    box-shadow: 0 0 1.15rem rgba(172, 255, 255, 0.7);
   }
   .rs-kind-card:hover,
   .rs-kind-card:focus-visible {
