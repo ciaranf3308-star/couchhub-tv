@@ -556,13 +556,14 @@ function matchDescFixtureText(
     const constructed = `${sides[0]} v ${sides[1]}`
     const outcome = matchTitleFixture(constructed, channelName, category)
     if (!outcome.match) continue
+    // A title match always carries teams (the kind gate); narrow
+    // the optional for the squad re-check below.
+    const teams = outcome.match.classification.teams
+    if (!teams) continue
     // Squad markers may live in the surrounding title/description
     // prose ("a women's classic: Man Utd v Chelsea") rather than
     // in the recovered sides themselves.
-    const squad = detectSquad(
-      outcome.match.classification.teams,
-      `${title} ${rawDesc}`,
-    )
+    const squad = detectSquad(teams, `${title} ${rawDesc}`)
     return squad === outcome.match.squad
       ? outcome.match
       : { ...outcome.match, squad }
