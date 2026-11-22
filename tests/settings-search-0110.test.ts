@@ -22,6 +22,11 @@
 // keyboard session and the query survives.
 // Back presses go through resolveBack(): jsdom events are
 // untrusted and never reach the coordinator's capture listener.
+//
+// 0.11.24: the jump-to menu the search used to filter is gone — the
+// fixture mirrors the new page: a .settings-stack of section cards
+// plus the relocated Exit action row. Search marks the cards (and
+// the Exit row) in place; the rail is never filtered.
 import { describe, it, expect, beforeAll } from "vitest"
 import { resolveBack } from "../src/scripts/lib/back-handler"
 import { isCouchKeyboardOpen } from "../src/scripts/lib/couch-keyboard"
@@ -30,7 +35,9 @@ const INPUT_ID = "settings-search-input"
 
 function buildFixture(): {
   input: HTMLInputElement
-  rows: HTMLElement[]
+  rows: HTMLButtonElement[]
+  cards: HTMLElement[]
+  exitRow: HTMLElement
   clearBtn: HTMLButtonElement
 } {
   document.body.innerHTML = `
@@ -40,18 +47,34 @@ function buildFixture(): {
       <p id="settings-search-empty" hidden>No results</p>
       <div id="settings-search-xpage" hidden></div>
     </div>
-    <div id="settings-home-list">
-      <a class="settings-home-row" href="/settings#playlists" data-search-text="playlists sources xtream m3u">Playlists</a>
-      <a class="settings-home-row" href="/settings#display" data-search-text="display font scale density">Display</a>
-      <a class="settings-home-row" href="/settings#playback" data-search-text="playback player audio captions">Playback</a>
+    <div class="settings-stack">
+      <div id="settings-exit-row" data-search-text="exit quit the app completely.">
+        <div data-settings-item><button type="button">Exit</button></div>
+      </div>
+      <section class="settings-group" id="playlists">
+        <h2 class="settings-group__title">Playlists</h2>
+        <div data-settings-item><button type="button">Add playlist</button><p>m3u xtream sources</p></div>
+      </section>
+      <section class="settings-group" id="display">
+        <h2 class="settings-group__title">Display</h2>
+        <div data-settings-item><button type="button">Font scale</button><p>display font scale density</p></div>
+      </section>
+      <section class="settings-group" id="playback">
+        <h2 class="settings-group__title">Playback</h2>
+        <div data-settings-item><button type="button">Player</button><p>playback player audio captions</p></div>
+      </section>
     </div>
   `
   const input = document.getElementById(INPUT_ID) as HTMLInputElement
-  const rows = [...document.querySelectorAll<HTMLElement>(".settings-home-row")]
+  const cards = [...document.querySelectorAll<HTMLElement>("section [data-settings-item]")]
+  const rows = cards.map(
+    (card) => card.querySelector("button") as HTMLButtonElement,
+  )
+  const exitRow = document.getElementById("settings-exit-row") as HTMLElement
   const clearBtn = document.getElementById(
     "settings-search-clear",
   ) as HTMLButtonElement
-  return { input, rows, clearBtn }
+  return { input, rows, cards, exitRow, clearBtn }
 }
 
 function keydown(
@@ -71,13 +94,22 @@ function keydown(
 
 describe("settings search (§34)", () => {
   let input: HTMLInputElement
-  let rows: HTMLElement[]
+  let rows: HTMLButtonElement[]
+  let cards: HTMLElement[]
+  let exitRow: HTMLElement
 
   beforeAll(async () => {
     // The module wires itself on import; the fixture must exist first.
+    // Point jsdom at /settings first: applyPageFilter drops cross-page
+    // hits whose path is the current page, and on the real page the
+    // path is /settings — without this the index hits leak into the
+    // (normally empty) xpage box and steal Enter focus.
+    window.history.replaceState({}, "", "/settings")
     const fixture = buildFixture()
     input = fixture.input
     rows = fixture.rows
+    cards = fixture.cards
+    exitRow = fixture.exitRow
     await import("../src/scripts/settings/settings_search")
   })
 
@@ -90,18 +122,18 @@ describe("settings search (§34)", () => {
 
   it("Escape with text clears only the text; input keeps focus", () => {
     input.focus()
-    // "m3u" matches only the Playlists row ("play" would also
+    // "m3u" matches only the Playlists card ("play" would also
     // match "display").
     input.value = "m3u"
     input.dispatchEvent(new Event("input", { bubbles: true }))
-    expect(rows[0].dataset.search).toBe("match")
-    expect(rows[1].dataset.search).toBe("miss")
+    expect(cards[0].dataset.search).toBe("match")
+    expect(cards[1].dataset.search).toBe("miss")
 
     const event = keydown(input, "Escape")
     expect(event.defaultPrevented).toBe(true)
     expect(input.value).toBe("")
     expect(document.activeElement).toBe(input)
-    expect(rows[1].dataset.search).toBeUndefined()
+    expect(cards[1].dataset.search).toBeUndefined()
   })
 
   it("B with an empty input while editing closes the keyboard, then exits search and restores previous focus", () => {
@@ -137,7 +169,7 @@ describe("settings search (§34)", () => {
     // Focus was already on a live setting row; exiting search
     // leaves it there and un-filters the list.
     expect(document.activeElement).toBe(rows[1])
-    expect(rows[0].dataset.search).toBeUndefined()
+    expect(cards[0].dataset.search).toBeUndefined()
   })
 
   it("Enter in the input commits to the first matching row", () => {
@@ -146,6 +178,21 @@ describe("settings search (§34)", () => {
     input.dispatchEvent(new Event("input", { bubbles: true }))
     keydown(input, "Enter")
     expect(document.activeElement).toBe(rows[2])
+  })
+
+  it("Enter with an 'exit' query commits to the Exit action row", () => {
+    input.focus()
+    input.value = "exit"
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+    expect(exitRow.dataset.search).toBe("match")
+    expect(cards[0].dataset.search).toBe("miss")
+    keydown(input, "Enter")
+    expect(document.activeElement).toBe(
+      exitRow.querySelector("button"),
+    )
+    // Clean up for later tests in this file.
+    input.value = ""
+    input.dispatchEvent(new Event("input", { bubbles: true }))
   })
 
   it("B after leaving the input to nowhere closes the keyboard; the query survives", () => {
@@ -164,9 +211,9 @@ describe("settings search (§34)", () => {
     expect(isCouchKeyboardOpen()).toBe(false)
     expect(input.value).toBe("play")
     expect(document.activeElement).toBe(input)
-    // "play" matches every row (Display contains "play"), so the
-    // filter surviving means the rows stay marked as matches.
-    expect(rows[1].dataset.search).toBe("match")
+    // "play" matches every card (Display contains "play"), so the
+    // filter surviving means the cards stay marked as matches.
+    expect(cards[1].dataset.search).toBe("match")
     // Clean up for later tests in this file.
     input.value = ""
     input.dispatchEvent(new Event("input", { bubbles: true }))

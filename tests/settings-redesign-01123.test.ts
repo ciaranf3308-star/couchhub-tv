@@ -66,8 +66,10 @@ function allIds(source: string): string[] {
 // (or the distinctive label text where a row has no id of its own).
 // Duplicates are listed where they appear — Q1/Q2 stay duplicated.
 const AUDIT_107: Array<[string, string]> = [
-  // §1 home
-  ["1.1 section list", "settings-home-list"],
+  // §1 home — 0.11.24: the jump-to menu is gone (the rail is the one
+  // navigation), so the section list is the rail links, not a home
+  // list; the Exit home copy is the action row above Playlists.
+  ["1.1 section list", "settings-nav-link"],
   ["1.2 search", "settings-search-input"],
   ["1.3 exit (home copy)", "settings-exit-row"],
   // §2 playlists
@@ -231,14 +233,29 @@ describe("settings redesign 0.11.23 — all 107 audit items on one page", () => 
     expect(missing).toEqual([])
   })
 
-  it("the home Exit copy sits inside the jump-to list, so search filters it", () => {
+  it("the home Exit copy is a compact action row above Playlists — no jump grid", () => {
     const page = read("src/pages/settings.astro")
-    const listStart = page.indexOf('id="settings-home-list"')
-    const firstHead = page.indexOf('id="playlists"')
-    expect(listStart).toBeGreaterThan(-1)
-    expect(firstHead).toBeGreaterThan(listStart)
-    const menu = page.slice(listStart, firstHead)
-    expect(menu).toContain('id="settings-exit-row"')
+    // 0.11.24: the jump-to menu is gone; the rail is the one nav.
+    expect(page).not.toContain('id="settings-home-list"')
+    expect(page).not.toContain("settings-jump-grid")
+    expect(page).not.toContain("settings-home-row")
+    expect(page).not.toContain("Pick a section below")
+    // The Exit row is the first thing in the slot, before Playlists,
+    // and keeps its id + search text so search still filters it.
+    const exitAt = page.indexOf('id="settings-exit-row"')
+    const headDivAt = page.indexOf(
+      '<div class="settings-section-head" id="playlists"',
+    )
+    expect(exitAt).toBeGreaterThan(-1)
+    expect(headDivAt).toBeGreaterThan(exitAt)
+    const row = page.slice(exitAt, headDivAt)
+    expect(row).toContain('data-search-text="exit quit the app completely."')
+    expect(row).toContain("ExitAppCard")
+    // Nothing but the row sits between the header and Playlists:
+    // the row's closing tag is followed by only whitespace, then
+    // the Playlists head — it is an action row, not a section.
+    const exitCloseAt = page.indexOf("</div>", exitAt)
+    expect(page.slice(exitCloseAt + "</div>".length, headDivAt).trim()).toBe("")
   })
 
   it("keeps both duplicates, both wired to the same store", () => {

@@ -354,7 +354,9 @@ function buildRouteCases(): RouteCase[] {
       path: "/settings",
       ready: async (page) => {
         await page.goto("/settings")
-        await page.waitForSelector("#settings-home-list .settings-home-row")
+        // 0.11.24: the jump grid is gone — the page renders when the
+        // relocated Exit action row is present.
+        await page.waitForSelector("#settings-exit-row")
       },
     },
     {

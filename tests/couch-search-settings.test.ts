@@ -274,6 +274,9 @@ describe("couch-settings: preservation", () => {
     // sections are components composed by the single page.
     // 0.11.23: the 0.11.4 split into one page per section is undone for
     // the same reason — one page, grouped sections, jump-to menu on top.
+    // 0.11.24: the jump-to menu is gone too — the rail in the sticky
+    // subheader is the one navigation, and the Exit home copy is a
+    // compact action row above Playlists.
     const src = settingsSources();
     expect(src).not.toContain('id="settings-quick"');
     expect(src).not.toContain('id="settings-advanced"');
@@ -301,7 +304,8 @@ describe("couch-settings: preservation", () => {
     // the old 6,305-line monolith is not back.
     const home = pageSource("src/pages/settings.astro");
     expect(home.split("\n").length).toBeLessThan(300);
-    expect(home).toContain('id="settings-home-list"');
+    expect(home).not.toContain('id="settings-home-list"');
+    expect(home).not.toContain("settings-jump-grid");
     expect(home).toContain('id="settings-exit-row"');
     for (const f of sections) {
       const slug = f.replace(/\.astro$/, "");
