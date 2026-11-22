@@ -1,19 +1,20 @@
 ---
-// Settings — one page (0.11.23 rebuild).
+// Settings — one page (0.11.23 rebuild; jump grid removed in 0.11.24).
 //
 // The 0.11.4 split into one page per section made Settings a maze: twelve
 // sub-pages, each short, none findable without knowing where to look. This
 // page puts every one of the 107 audited settings back on a single page,
-// grouped into plain-English sections, with a jump-to menu at the top and
-// the section rail as anchor links. Nothing is merged, renamed or
-// re-defaulted: each section below is the verbatim component extracted
-// from its old sub-page (same markup, same ids, same storage keys — see
-// src/components/settings/sections/), and the old /settings/<slug> routes
-// redirect to the matching anchor. Duplicates are kept as the user left
-// them (Resume last channel in Playback + Live TV, Exit in the menu +
-// Display) until he picks a surviving home.
+// grouped into plain-English sections, with the section rail in the
+// sticky subheader as the one navigation — the jump-to menu that used to
+// sit at the top duplicated every section name and pushed the first real
+// setting below the fold, so it is gone (0.11.24). Nothing is merged,
+// renamed or re-defaulted: each section below is the verbatim component
+// extracted from its old sub-page (same markup, same ids, same storage
+// keys — see src/components/settings/sections/), and the old
+// /settings/<slug> routes redirect to the matching anchor. Duplicates
+// are kept as the user left them (Resume last channel in Playback +
+// Live TV, Exit in this row + Display) until he picks a surviving home.
 import SettingsShell from "@/components/settings/SettingsShell.astro"
-import { SETTINGS_SECTIONS } from "@/scripts/settings/settings-index.ts"
 import ExitAppCard from "@/components/ExitAppCard.svelte"
 import PlaylistsSection from "@/components/settings/sections/playlists.astro"
 import ProfileSection from "@/components/settings/sections/profile.astro"
@@ -32,41 +33,20 @@ import DangerSection from "@/components/settings/sections/danger.astro"
 <SettingsShell
   title="Settings"
   titleKey="settings.title"
-  sub="Everything about how the app looks, plays and connects — in one place. Pick a section below, or just scroll."
+  sub="Everything about how the app looks, plays and connects — in one place. Jump to a section above, or just scroll."
   subKey="page.settings.sub"
   current="home">
-  <!-- Jump-to menu: the old home list, now anchor links into this page. -->
-  <div id="settings-home-list" class="settings-jump-grid">
-    {
-      SETTINGS_SECTIONS.map((section) => (
-        <a
-          class="settings-home-row"
-          data-search={section.slug}
-          data-search-text={`${section.title} ${section.desc} ${section.keywords}`.toLowerCase()}
-          href={section.href}
-          data-nylah-item
-          data-couch-key={`settings-home:${section.slug}`}
-          {...(section.danger ? { "data-danger": "true" } : {})}>
-          <span class="settings-home-row__text">
-            <span class="settings-home-row__title" data-i18n={section.titleKey || undefined}>
-              {section.title}
-            </span>
-            <span class="settings-home-row__desc">{section.desc}</span>
-          </span>
-          <span class="settings-home-row__chev" aria-hidden="true">›</span>
-        </a>
-      ))
-    }
-
-    <!-- Exit (home copy — the second copy lives in Display, as before).
-         Inside the jump-to list so search filters it like every row. -->
-    <div
-      class="settings-home-row settings-home-row--exit"
-      id="settings-exit-row"
-      data-search-text="exit quit the app completely."
-      data-w3-slot="exit-button">
-      <ExitAppCard client:load />
-    </div>
+  <!-- Exit (home copy — the second copy lives in Display, as before).
+       A single compact action row, first on the page and clearly not a
+       section: it sits above Playlists so it is reachable without
+       scrolling. Search filters it by its data-search-text, like the
+       old jump-grid row did. -->
+  <div
+    class="settings-exit-row"
+    id="settings-exit-row"
+    data-search-text="exit quit the app completely."
+    data-w3-slot="exit-button">
+    <ExitAppCard client:load />
   </div>
 
   <div class="settings-section-head" id="playlists">

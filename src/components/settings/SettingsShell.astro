@@ -21,8 +21,9 @@
 //  (e) Helper text is enlarged + contrast raised (see CSS below).
 //  (f) Booleans are On/Off pills everywhere (net-log checkbox converted;
 //      PlayerPicker reuse checkboxes converted to pills too).
-//  (i) Search is in this shell: it filters the jump-to menu AND every
-//      section's rows in place (see settings_search.ts).
+//  (i) Search is in this shell: it filters the Exit action row and
+//      every section's rows in place (see settings_search.ts). The
+//      section rail itself is never filtered — it is the navigation.
 //
 // DO NOT regress the 0.11.3 Nylah icon: the nav lockup lives in
 // CouchLayout/TvLogo and is untouched by this shell.
@@ -238,6 +239,14 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     // scroll-margin are set from the real layout, not a hardcoded rem.
     // Fallbacks (101px topnav + 131px subheader at 1920x1080) cover the
     // first paint before this runs.
+    //
+    // 0.11.24: a ResizeObserver keeps the measurement fresh — the old
+    // resize/load/fonts-only sync went stale whenever the subheader
+    // changed height in place (the search empty-state and cross-page
+    // hits grow it by a row; the wrapped rail changes height with
+    // locale/font), and a stale --settings-header-bottom is what used
+    // to land anchor heads under the header. Setting the properties
+    // never resizes anything, so the observer cannot self-trigger.
     function syncSettingsStickyOffsets() {
       try {
         const topnav = document.querySelector(".rs-topnav")
@@ -251,6 +260,13 @@ const { title, titleKey, sub, subKey, current } = Astro.props
       } catch {}
     }
     syncSettingsStickyOffsets()
+    try {
+      const stickyObserver = new ResizeObserver(() => syncSettingsStickyOffsets())
+      const subEl = document.querySelector(".settings-subheader")
+      const topEl = document.querySelector(".rs-topnav")
+      if (subEl) stickyObserver.observe(subEl)
+      if (topEl) stickyObserver.observe(topEl)
+    } catch {}
     window.addEventListener("resize", syncSettingsStickyOffsets)
     window.addEventListener("load", () => {
       syncSettingsStickyOffsets()
@@ -264,9 +280,12 @@ const { title, titleKey, sub, subKey, current } = Astro.props
   <style is:global>
     /* Mobile chip rail wraps the nav in a scroll container so the nav
        itself can be content-width (w-max) while the wrapper is parent
-       width with overflow-x:auto. On lg+ the wrapper becomes
-       display:contents and the nav takes over as the sticky vertical
-       rail directly inside the flex-row parent. */
+       width with overflow-x:auto. At lg+ (0.11.24) the rail WRAPS onto
+       a second row instead of scrolling horizontally: all 12 sections
+       + All settings stay visible at 1672/1920 with nothing hidden
+       and no affordance needed. The sticky offsets are measured live
+       (syncSettingsStickyOffsets + ResizeObserver), so the taller
+       subheader is handled — a wrapped rail is ~48px taller. */
     .settings-page .settings-nav-scroller {
       overflow-x: auto;
       overflow-y: hidden;
@@ -276,6 +295,13 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     }
 
     .settings-page .settings-nav-scroller::-webkit-scrollbar { display: none; }
+
+    @media (min-width: 64em) {
+      .settings-page .settings-nav-scroller {
+        overflow: visible;
+        max-width: 100%;
+      }
+    }
 
 
     /* Item styling: ghost text-only link with bg-tint hover/active. No
@@ -602,6 +628,15 @@ const { title, titleKey, sub, subKey, current } = Astro.props
       width: max-content;
       min-width: 100%;
     }
+    @media (min-width: 64em) {
+      /* Wrap the rail (see scroller comment above): content-width
+         would never wrap, so the nav takes the full row and lets its
+         links flow onto a second row. */
+      .settings-page .settings-nav {
+        flex-wrap: wrap;
+        width: 100%;
+      }
+    }
     .settings-page .settings-searchbar {
       flex: none;
     }
@@ -612,11 +647,20 @@ const { title, titleKey, sub, subKey, current } = Astro.props
        target on a Settings page carries a scroll margin for topnav +
        sticky subheader (measured: 101px + 131px at 1920x1080, +8px
        breathing room). Unlayered author CSS beats Tailwind's
-       scroll-mt-* utilities (Tailwind v4 layers its utilities). */
+       scroll-mt-* utilities (Tailwind v4 layers its utilities).
+       0.11.24: this is the ONE scroll-margin rule on the page. The
+       .settings-section-head rule used to carry its own, different
+       value (var(--settings-header-bottom, 12rem), no +8px) — same
+       specificity as this one, so the winner depended on source
+       order and the fallback was 40px short of the real 232px
+       header at 1920. The head rule keeps its layout only.
+       The html rule carries [data-couch] so it outranks CouchLayout's
+       `html[data-couch]{scroll-padding-top:7.5rem}` on specificity,
+       not load order. */
     .settings-page [id] {
       scroll-margin-top: calc(var(--settings-header-bottom, 232px) + 8px);
     }
-    html:has(.settings-page) {
+    html[data-couch]:has(.settings-page) {
       scroll-padding-top: calc(var(--settings-header-bottom, 232px) + 8px);
     }
     /* (d) Reserved footer so the fixed controller pill never covers
@@ -645,9 +689,11 @@ const { title, titleKey, sub, subKey, current } = Astro.props
     .settings-page [data-settings-item] .text-fg-3 {
       color: var(--color-fg-2);
     }
-    /* (i) Home search: filtered rows hide in place; the list is never
-       yanked to the top. */
-    .settings-page #settings-home-list[data-search-active] [data-search="miss"] {
+    /* (i) Search: the Exit action row hides in place when it misses
+       (settings_search.ts marks it); the page is never yanked to the
+       top. Section cards hide via the [data-search-active] rules
+       above. */
+    .settings-page .settings-stack[data-search-active] #settings-exit-row[data-search="miss"] {
       display: none;
     }
     /* Cross-page search hits (section pages only). */
@@ -688,70 +734,20 @@ const { title, titleKey, sub, subKey, current } = Astro.props
       color: var(--color-fg-2);
       white-space: nowrap;
     }
-    /* Home section rows. */
-    .settings-page .settings-jump-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 0.75rem;
-    }
-    @media (min-width: 40em) {
-      .settings-page .settings-jump-grid {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
-    .settings-page .settings-jump-grid > .settings-home-row--exit {
-      grid-column: 1 / -1;
-    }
-    .settings-page .settings-home-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      width: 100%;
-      padding: 1.1rem 1.25rem;
+    /* Exit action row (0.11.24): the jump grid is gone, and the home
+       Exit copy lives here instead — one compact row above Playlists,
+       clearly an action (bad-tinted border, no section orb/head), not
+       a section. The card inside keeps its own row styling; the
+       wrapper only frames it and kills the card's top border so the
+       two don't double up. */
+    .settings-page .settings-exit-row {
+      border: 1px solid color-mix(in oklch, var(--color-bad) 35%, var(--color-line));
       border-radius: 1rem;
-      border: 1px solid var(--color-line);
       background: linear-gradient(165deg, var(--color-surface), var(--color-surface-2));
-      color: var(--color-fg);
-      text-decoration: none;
-      text-align: left;
-      min-height: 4.5rem;
+      padding: 0.25rem 1.25rem;
     }
-    .settings-page a.settings-home-row:hover,
-    .settings-page a.settings-home-row:focus-visible {
-      border-color: var(--color-accent);
-    }
-    .settings-page .settings-home-row__text {
-      flex: 1;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 0.15rem;
-    }
-    .settings-page .settings-home-row__title {
-      font-family: var(--font-serif);
-      font-weight: 400;
-      font-size: 1.35rem;
-      line-height: 1.2;
-    }
-    .settings-page .settings-home-row__desc {
-      font-size: 0.9375rem;
-      line-height: 1.45;
-      color: var(--color-fg-2);
-    }
-    .settings-page .settings-home-row__chev {
-      flex: none;
-      color: var(--color-fg-3);
-      font-size: 1.25rem;
-    }
-    .settings-page .settings-home-row--exit {
-      border-color: color-mix(in oklch, var(--color-bad) 35%, var(--color-line));
-    }
-    .settings-page .settings-home-row--exit .settings-home-row__title {
-      color: var(--color-bad);
-    }
-    .settings-page .settings-home-row--exit .settings-home-row__note {
-      font-size: 0.8125rem;
-      color: var(--color-fg-3);
+    .settings-page .settings-exit-row .settings-row {
+      border-top: 0;
     }
     /* One control pattern per kind (f): the segmented On/Off pill
        groups are the boolean pattern; keep them from wrapping awkwardly. */
@@ -770,7 +766,9 @@ const { title, titleKey, sub, subKey, current } = Astro.props
       align-items: flex-start;
       gap: 0.9rem;
       margin: 3.25rem 0 1.1rem;
-      scroll-margin-top: var(--settings-header-bottom, 12rem);
+      /* No scroll-margin here: the single .settings-page [id] rule
+         above owns it (0.11.24 — a second, different value here used
+         to win by source order). */
     }
     .settings-page .settings-section-head:first-of-type {
       margin-top: 2.5rem;

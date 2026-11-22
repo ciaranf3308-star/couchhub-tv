@@ -1,20 +1,23 @@
-// Settings search, single-page edition (0.11.23; multi-page in 0.11.4 W1).
+// Settings search, single-page edition (0.11.23; jump grid removed
+// in 0.11.24).
 //
 // Settings is one page now, so search filters IN PLACE — nothing ever
 // yanks the view to the top — across both layers at once:
 //
-//  * The jump-to menu at the top: each row carries data-search-text
-//    (title + description + keywords from settings-index), so a query
-//    matches sections by the controls inside them, not just their names.
 //  * Every section's own [data-settings-item] rows (same AND-token
 //    index as before), so matching cards stay visible in place while
 //    the rest of the page hides.
+//  * The Exit action row at the top of the page: it carries
+//    data-search-text ("exit quit the app completely.") and is filtered
+//    the same way, so a query that doesn't match it hides it.
 //  * The cross-page hits box from the split era stays wired but empty:
 //    every index hit is a same-page anchor now, so it filters itself
 //    out — the in-place matches above are the results.
 //
 // The old scroll-spy/nav-link miss marking is gone with the spy: the
 // section nav is anchor-based now and always stays usable while searching.
+// (0.11.24: the jump-to menu the search used to filter is gone — the
+// rail is the one navigation and is never filtered.)
 
 import { LOCALE_EVENT } from "@/scripts/lib/i18n.js"
 import { searchSettingsIndex } from "@/scripts/settings/settings-index.ts"
@@ -36,7 +39,7 @@ const INPUT_ID = "settings-search-input"
 const CLEAR_ID = "settings-search-clear"
 const EMPTY_ID = "settings-search-empty"
 const XPAGE_ID = "settings-search-xpage"
-const HOME_LIST_ID = "settings-home-list"
+const EXIT_ROW_ID = "settings-exit-row"
 
 interface CardEntry {
   card: HTMLElement
@@ -227,29 +230,25 @@ function applyPageFilter(
   return { visibleCount, xpageCount }
 }
 
-function applyHomeFilter(
+// The Exit action row at the top of the page (0.11.24: the jump-to
+// menu it used to sit in is gone). Same AND-token match against its
+// data-search-text; the row hides in place when it misses, like every
+// card. Returns 1 when the row counts as a visible result.
+function applyExitFilter(
   query: string,
-  list: HTMLElement
+  row: HTMLElement | null
 ): number {
+  if (!row) return 0
   const tokens = tokenize(query)
   const active = tokens.length > 0
-  if (active) list.setAttribute("data-search-active", "true")
-  else list.removeAttribute("data-search-active")
-
-  const rows = list.querySelectorAll<HTMLElement>("[data-search-text]")
-  let visibleCount = 0
-  for (const row of rows) {
-    if (!active) {
-      delete row.dataset.search
-      visibleCount++
-      continue
-    }
-    const hay = (row.dataset.searchText ?? "").toLowerCase()
-    const matches = tokens.every((token) => hay.includes(token))
-    row.dataset.search = matches ? "match" : "miss"
-    if (matches) visibleCount++
+  if (!active) {
+    delete row.dataset.search
+    return 1
   }
-  return visibleCount
+  const hay = (row.dataset.searchText ?? "").toLowerCase()
+  const matches = tokens.every((token) => hay.includes(token))
+  row.dataset.search = matches ? "match" : "miss"
+  return matches ? 1 : 0
 }
 
 function init(): void {
@@ -259,11 +258,11 @@ function init(): void {
   const xpageEl = document.getElementById(XPAGE_ID)
   if (!input) return
 
-  const homeList = document.getElementById(HOME_LIST_ID)
+  const exitRow = document.getElementById(EXIT_ROW_ID)
   const stack = document.querySelector<HTMLElement>(".settings-stack")
-  // Single page (0.11.23): the jump-to menu AND all sections live on
-  // this page, so search filters both in place — the menu rows and the
-  // cards — with one shared empty state.
+  // Single page (0.11.23): all sections live on this page, so search
+  // filters the cards in place — plus the Exit action row at the top —
+  // with one shared empty state.
   if (stack) {
     buildStructure(stack)
     buildIndex()
@@ -278,7 +277,7 @@ function init(): void {
       visible += page.visibleCount
       xpage += page.xpageCount
     }
-    if (homeList) visible += applyHomeFilter(input.value, homeList)
+    visible += applyExitFilter(input.value, exitRow)
     if (emptyEl) emptyEl.hidden = !active || visible > 0 || xpage > 0
   }
   const syncClearVisibility = (): void => {
@@ -332,20 +331,27 @@ function init(): void {
       firstHit.focus({ preventScroll: true })
       return
     }
-    if (homeList) {
-      const firstRow = homeList.querySelector<HTMLElement>(
-        ".settings-home-row:not([data-search='miss'])",
-      )
-      if (firstRow) {
-        firstRow.focus({ preventScroll: true })
+    // The Exit action row is the first result on the page when the
+    // active query matches it — but only then: with no query (or a
+    // miss) Enter must land on a real setting, never on Exit.
+    if (exitRow && input.value.trim() && exitRow.dataset.search === "match") {
+      const exitBtn = exitRow.querySelector<HTMLElement>("button:not([disabled])")
+      if (exitBtn) {
+        exitBtn.focus({ preventScroll: true })
         return
       }
     }
-    const firstControl = stack?.querySelector<HTMLElement>(
+    const controls = stack?.querySelectorAll<HTMLElement>(
       "[data-settings-item]:not([data-search='miss']) a[href], " +
         "[data-settings-item]:not([data-search='miss']) button:not([disabled]), " +
         "[data-settings-item]:not([data-search='miss']) input:not([disabled]), " +
         "[data-settings-item]:not([data-search='miss']) select:not([disabled])",
+    )
+    // The Exit card itself carries data-settings-item, so its button
+    // is the first control in DOM order — skip anything inside the
+    // exit row here; the branch above owns it.
+    const firstControl = [...(controls ?? [])].find(
+      (el) => !el.closest("#settings-exit-row"),
     )
     firstControl?.focus({ preventScroll: true })
   }

@@ -1208,7 +1208,7 @@
   "aria.backToLiveTv": "Back to Live TV",
   "aria.showEpgDefault": "Show EPG by default",
   "aria.channelColumnWidth": "Channel column width",
-  "page.settings.sub": "Everything about how the app looks, plays and connects — in one place. Pick a section below, or just scroll.",
+  "page.settings.sub": "Everything about how the app looks, plays and connects — in one place. Jump to a section above, or just scroll.",
   "catalog.warming": "Loading catalog",
   "catalog.retry": "Retry",
   "catalog.partialFailed": "Some items couldn't load",
