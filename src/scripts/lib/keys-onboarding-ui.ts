@@ -10,13 +10,14 @@
 //
 // - AI step: endpoint (defaults to the OpenAI default) + model
 //   (Settings' select + Custom pairing via resolveAiModelControl —
-//   the model has NO default, so the step can't reach a testable
-//   state without it) + "Turn on AI Discovery" (checked). The AI
-//   test saves the typed key first, exactly like Settings' Test
-//   button, because the Rust test reads the STORED key; after a
-//   passed AI test the button is "Continue" (the key is already
-//   stored). TMDB / football-data.org keys are only saved by their
-//   Save button, after a passing test.
+//   no saved model pre-fills the default `gpt-4o-mini`, so the step
+//   can always reach a testable state: the key test requires a model
+//   and an empty model fails as `invalid_model`) + "Turn on AI
+//   Discovery" (checked). The AI test saves the typed key first,
+//   exactly like Settings' Test button, because the Rust test reads
+//   the STORED key; after a passed AI test the button is "Continue"
+//   (the key is already stored). TMDB / football-data.org keys are
+//   only saved by their Save button, after a passing test.
 // - "Save without testing" is the offline escape hatch: it saves the
 //   typed key unverified and moves on. A bad key saved this way is an
 //   error state, never a re-prompt (see validateSavedKey).
@@ -55,6 +56,7 @@ import {
 } from "@/scripts/lib/keys-onboarding.js"
 import { getAiEndpoint, getAiModel } from "@/scripts/lib/app-settings.js"
 import {
+  DEFAULT_AI_MODEL,
   SUPPORTED_MODELS,
   resolveAiModelControl,
 } from "@/scripts/lib/ai/status.ts"
@@ -239,8 +241,11 @@ async function runMount(
     }
     // AI step state lives in locals until Test/Save applies it — a
     // skip must not half-write endpoint/model/enabled to Settings.
+    // No saved model pre-fills the default (gpt-4o-mini): the key
+    // test requires a model, and "Custom…" with an empty box cannot
+    // pass — the step would not be completable with a valid key.
     let aiEndpoint = getAiEndpoint()
-    let aiModel = getAiModel()
+    let aiModel = getAiModel() || DEFAULT_AI_MODEL
     let aiEnable = true
     let testedOk = false
 

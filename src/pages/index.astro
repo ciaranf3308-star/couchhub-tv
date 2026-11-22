@@ -27,8 +27,10 @@ import HomeView from "@/components/HomeView.svelte";
 <script>
   // Keys onboarding launch gate (0.11.19): first run with a key
   // missing opens the unified setup dialog (reason "launch"). It
-  // never blocks the app — a failed check resolves to "do not show" —
-  // and a skip this session suppresses it until the next launch.
+  // never blocks the app — a failed check resolves to "do not show"
+  // (the AI presence check retries once, then propagates a store
+  // failure to the gate's fail-safe) — and a skip this session
+  // suppresses it until the next launch.
   import { runKeysLaunchGate } from "@/scripts/lib/keys-feature-entry.ts";
   void runKeysLaunchGate();
 </script>

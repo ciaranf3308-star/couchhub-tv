@@ -18,6 +18,13 @@
 // - It never throws and never blocks the caller: a store error in the
 //   status check resolves to "do not show", and an open failure resolves
 //   to null. The app behind the gate always stays usable.
+//   FAIL-SAFE (0.11.22): this catch is real now — `shouldShowKeysOnboarding`
+//   propagates an AI presence-check failure (a store that cannot be
+//   reached) instead of swallowing it into "missing", so a failed
+//   check lands here and resolves to null ("do not show", fail closed)
+//   rather than re-prompting for a saved key. The trade-off is
+//   deliberate: on an AI store error the gate stays silent for every
+//   key this launch; the keys can still be added in Settings.
 
 import {
   shouldShowKeysOnboarding,

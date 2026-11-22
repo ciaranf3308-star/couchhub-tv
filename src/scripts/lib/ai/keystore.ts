@@ -7,9 +7,18 @@
 //   file, and NEVER logged — not even its length or prefix.
 // - `getAiKey()` hands the key to JS memory for one request's Authorization
 //   header only. Callers must use it immediately and never retain it.
-// - `hasAiKey()` / `deleteAiKey()` never throw for a missing store —
-//   presence checks must not break the page on web/Android, where the
-//   commands are unsupported and AI simply stays off.
+// - `hasAiKey()` is TRI-STATE (0.11.22): it returns true/false when
+//   presence is known and THROWS `AiKeystoreError` when presence is
+//   UNKNOWN (the store could not be reached). It NEVER returns false
+//   for a store failure — collapsing an error into "no key" is the
+//   false-missing bug (22 Nov 2026): the launch gate asked for an AI
+//   key that was already saved. The one exception is a non-Tauri
+//   runtime (web/Android), where no store exists at all, so presence
+//   is genuinely false. Callers: the launch gate treats a throw as
+//   "do not show" (fail closed); Discover/Settings treat it as
+//   "AI off / unknown", never a crash and never a prompt.
+// - `deleteAiKey()` never throws for a missing store — deletion is
+//   best-effort and a failure there must not break the page.
 //
 // Save-failure contract (0.11.1): a failed save MUST surface its cause.
 // Earlier code collapsed every failure into one generic "Could not save
@@ -36,9 +45,25 @@ export class AiKeystoreError extends Error {
   }
 }
 
-const isTauri =
-  typeof window !== "undefined" &&
-  (!!window.__TAURI_INTERNALS__ || !!window.__TAURI__)
+/** Evaluated at CALL time, never at module-import time: the Tauri
+ *  bridge (`window.__TAURI_INTERNALS__`) can be injected after this
+ *  module is first imported, and an import-time snapshot would poison
+ *  every call on that page load with "unavailable". */
+export function isTauriRuntime(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    (!!window.__TAURI_INTERNALS__ || !!window.__TAURI__)
+  )
+}
+
+/** Delay before `hasAiKey()` retries a failed presence check once —
+ *  long enough for a late bridge injection to land, short enough to
+ *  stay invisible at launch. */
+export const AI_KEY_PRESENCE_RETRY_DELAY_MS = 200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /** Max chars of a Rust error message kept in `detail`. Long enough for a
  *  Win32 message, short enough to show under a settings field. */
@@ -53,7 +78,7 @@ function scrubDetail(detail: string, secret?: string): string {
 }
 
 async function invokeAi<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!isTauri) {
+  if (!isTauriRuntime()) {
     throw new AiKeystoreError("unavailable", "AI key storage needs the desktop app")
   }
   let invoke: (command: string, args?: Record<string, unknown>) => Promise<T>
@@ -171,13 +196,33 @@ export async function getAiKey(): Promise<string | null> {
   }
 }
 
-/** Whether a key is stored. Never throws for a missing/unsupported store. */
+/**
+ * Whether a key is stored. Tri-state by throw (0.11.22):
+ * - `true` / `false` — presence is known.
+ * - throws `AiKeystoreError` — presence is UNKNOWN because the store
+ *   could not be reached. Never collapsed into `false` (see header).
+ *   The one non-throwing `false` is a non-Tauri runtime (web/Android):
+ *   no store exists there, so no key can be stored and AI is off.
+ * One retry after a short delay covers a bridge injected just after
+ * the first call (late `window.__TAURI_INTERNALS__`) or a transient
+ * store hiccup — a single failed read must not report "no key".
+ */
 export async function hasAiKey(): Promise<boolean> {
   try {
     return (await invokeAi<boolean>("ai_key_has")) === true
-  } catch (error) {
-    log.warn("[xt:ai] key presence check failed:", error)
-    return false
+  } catch {
+    await sleep(AI_KEY_PRESENCE_RETRY_DELAY_MS)
+    try {
+      return (await invokeAi<boolean>("ai_key_has")) === true
+    } catch (error) {
+      const classified = classifyInvokeError(error)
+      if (classified.kind === "unavailable") {
+        // Not the desktop app — no store exists, so no key can be stored.
+        return false
+      }
+      log.warn("[xt:ai] key presence check failed:", error)
+      throw classified
+    }
   }
 }
 

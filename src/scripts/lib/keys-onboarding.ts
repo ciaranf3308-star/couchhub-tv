@@ -31,6 +31,14 @@
 // `shouldShowKeysOnboarding()` stays false for that key. The onboarding
 // only ever appears for keys that are actually missing.
 //
+// CHECK-FAILURE RULE (0.11.22): a presence check that FAILS is not
+// "missing" either. `hasAiKey()` rejects when the store cannot be
+// reached, `getKeysOnboardingStatus()` propagates that rejection, and
+// `maybeOpenKeysOnboarding()` catches it into "do not show" (fail
+// closed). The old code swallowed the failure into `aiSaved = false`
+// twice upstream, so the gate re-prompted for a saved key — the
+// false-missing bug (22 Nov 2026).
+//
 // SKIP RULE: skip / "I'll do it later" / B / Escape dismisses the
 // CURRENT prompt only. The dismissal is session-scoped
 // (`sessionStorage`, `KEYS_ONBOARDING_DISMISSED_KEY`); it recurs on
@@ -147,7 +155,12 @@ export interface KeysOnboardingStatus {
 }
 
 /** Injectable seams for tests. Defaults are the real stores/validators;
- *  tests inject fakes and never hit the live API. */
+ *  tests inject fakes and never hit the live API.
+ *  `hasAiKey` is tri-state (0.11.22): it resolves true/false when
+ *  presence is known and REJECTS when presence is unknown (store
+ *  unreachable). That rejection must propagate out of
+ *  `getKeysOnboardingStatus` — never be collapsed into "missing" —
+ *  so the launch gate's fail-safe ("do not show") engages. */
 export interface KeysOnboardingDeps {
   hasAiKey?: () => Promise<boolean>
   saveAiKey?: (key: string) => Promise<void>
@@ -229,18 +242,21 @@ function clearSessionFlag(): void {
 }
 
 /** Compose the three statuses into one. Presence only — a stored key
- *  counts as saved even if it would fail validation (see header). */
+ *  counts as saved even if it would fail validation (see header).
+ *  TRI-STATE (0.11.22): when the AI presence check fails, this REJECTS
+ *  instead of reporting the AI key missing. A failed check is
+ *  indistinguishable from "no key" only if it is swallowed — swallowing
+ *  it is the false-missing bug (22 Nov): the gate asked for a saved
+ *  key. The rejection propagates through `shouldShowKeysOnboarding`
+ *  to `maybeOpenKeysOnboarding`, whose catch resolves it to
+ *  "do not show" (fail closed, never blocks the app). */
 export async function getKeysOnboardingStatus(
   deps: KeysOnboardingDeps = {},
 ): Promise<KeysOnboardingStatus> {
   const checkAi = deps.hasAiKey ?? hasAiKey
-  let aiSaved = false
-  try {
-    aiSaved = (await checkAi()) === true
-  } catch {
-    // hasAiKey() never throws by contract; stay unsaved if it ever does.
-    aiSaved = false
-  }
+  // No try/catch here on purpose: hasAiKey() rejects when presence is
+  // unknown, and that rejection IS the signal (see doc above).
+  const aiSaved = (await checkAi()) === true
   const tmdbKey = getTmdbApiKey()
   const footballKey = getFootballDataApiKey()
   const model = getAiModel().trim()
@@ -310,6 +326,10 @@ export function clearKeysOnboardingDismissal(): void {
  * stored key that would fail validation (that is an error state, see
  * `validateSavedKey()`, not a prompt). The legacy AI-only flag is
  * never consulted.
+ * FAIL-SAFE (0.11.22): when the AI presence check fails, this REJECTS
+ * (via `getKeysOnboardingStatus`) instead of answering "show" — the
+ * caller (`maybeOpenKeysOnboarding`) catches that into "do not show",
+ * so a store error can never re-prompt for a key that is saved.
  */
 export async function shouldShowKeysOnboarding(
   deps: KeysOnboardingDeps = {},
