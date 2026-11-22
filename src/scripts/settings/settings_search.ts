@@ -1,19 +1,20 @@
-// Settings search, multi-page edition (0.11.4 W1).
+// Settings search, single-page edition (0.11.23; multi-page in 0.11.4 W1).
 //
-// Settings is split into one short page per section, so search has two
-// modes, both filtering IN PLACE — nothing ever yanks the view to the top:
+// Settings is one page now, so search filters IN PLACE — nothing ever
+// yanks the view to the top — across both layers at once:
 //
-//  * Home (/settings): the input filters the section list. Each row
-//    carries data-search-text (title + description + keywords from
-//    settings-index), so a query matches sections by the controls inside
-//    them, not just their names.
-//  * Section page (/settings/*): the input filters that page's own
-//    [data-settings-item] rows (same AND-token index as before), AND
-//    shows cross-page hits from settings-index as links under the box,
-//    so the search indexes everything including the section homes.
+//  * The jump-to menu at the top: each row carries data-search-text
+//    (title + description + keywords from settings-index), so a query
+//    matches sections by the controls inside them, not just their names.
+//  * Every section's own [data-settings-item] rows (same AND-token
+//    index as before), so matching cards stay visible in place while
+//    the rest of the page hides.
+//  * The cross-page hits box from the split era stays wired but empty:
+//    every index hit is a same-page anchor now, so it filters itself
+//    out — the in-place matches above are the results.
 //
 // The old scroll-spy/nav-link miss marking is gone with the spy: the
-// section nav is page-based now and always stays usable while searching.
+// section nav is anchor-based now and always stays usable while searching.
 
 import { LOCALE_EVENT } from "@/scripts/lib/i18n.js"
 import { searchSettingsIndex } from "@/scripts/settings/settings-index.ts"
@@ -110,9 +111,8 @@ function tokenize(query: string): string[] {
 function applyPageFilter(
   query: string,
   stack: HTMLElement,
-  emptyEl: HTMLElement | null,
   xpageEl: HTMLElement | null
-): void {
+): { visibleCount: number; xpageCount: number } {
   const tokens = tokenize(query)
   const active = tokens.length > 0
 
@@ -126,12 +126,15 @@ function applyPageFilter(
         delete cardEntry.card.dataset.search
       }
     }
-    if (emptyEl) emptyEl.hidden = true
+    // Search cleared: every section head comes back with its section.
+    for (const head of stack.querySelectorAll<HTMLElement>(".settings-section-head")) {
+      head.style.display = ""
+    }
     if (xpageEl) {
       xpageEl.hidden = true
       xpageEl.replaceChildren()
     }
-    return
+    return { visibleCount: 0, xpageCount: 0 }
   }
 
   let visibleCount = 0
@@ -163,10 +166,26 @@ function applyPageFilter(
     sectionEntry.section.dataset.search = sectionHasMatch ? "match" : "miss"
   }
 
-  // Cross-page hits: same query against every section + headline item,
-  // excluding this page (its own matches are already visible above).
-  // Rendered in place under the search box; each hit is a link to the
-  // section page (and card anchor when known).
+  // Section heads are not sections themselves: a head with no matching
+  // section below it (up to the next head — Help has two sections)
+  // would be an orphan, so hide it alongside its sections.
+  for (const head of stack.querySelectorAll<HTMLElement>(".settings-section-head")) {
+    let el: Element | null = head.nextElementSibling
+    let anyVisible = false
+    while (el && !el.classList.contains("settings-section-head")) {
+      if (el instanceof HTMLElement && el.tagName === "SECTION" && el.dataset.search !== "miss") {
+        anyVisible = true
+        break
+      }
+      el = el.nextElementSibling
+    }
+    head.style.display = anyVisible ? "" : "none"
+  }
+
+  // Cross-page hits (0.11.23: Settings is one page, so every index hit
+  // is a same-page anchor — the filter below yields none and the box
+  // stays hidden; in-place filtering above already shows the matches.
+  // The block stays so a future split page gets its hits back for free.)
   let xpageCount = 0
   if (xpageEl) {
     xpageEl.replaceChildren()
@@ -205,14 +224,13 @@ function applyPageFilter(
     }
   }
 
-  if (emptyEl) emptyEl.hidden = visibleCount > 0 || xpageCount > 0
+  return { visibleCount, xpageCount }
 }
 
 function applyHomeFilter(
   query: string,
-  list: HTMLElement,
-  emptyEl: HTMLElement | null
-): void {
+  list: HTMLElement
+): number {
   const tokens = tokenize(query)
   const active = tokens.length > 0
   if (active) list.setAttribute("data-search-active", "true")
@@ -231,7 +249,7 @@ function applyHomeFilter(
     row.dataset.search = matches ? "match" : "miss"
     if (matches) visibleCount++
   }
-  if (emptyEl) emptyEl.hidden = !active || visibleCount > 0
+  return visibleCount
 }
 
 function init(): void {
@@ -243,14 +261,25 @@ function init(): void {
 
   const homeList = document.getElementById(HOME_LIST_ID)
   const stack = document.querySelector<HTMLElement>(".settings-stack")
-  if (stack && !homeList) {
+  // Single page (0.11.23): the jump-to menu AND all sections live on
+  // this page, so search filters both in place — the menu rows and the
+  // cards — with one shared empty state.
+  if (stack) {
     buildStructure(stack)
     buildIndex()
   }
 
   const apply = (): void => {
-    if (homeList) applyHomeFilter(input.value, homeList, emptyEl)
-    else if (stack) applyPageFilter(input.value, stack, emptyEl, xpageEl)
+    const active = tokenize(input.value).length > 0
+    let visible = 0
+    let xpage = 0
+    if (stack) {
+      const page = applyPageFilter(input.value, stack, xpageEl)
+      visible += page.visibleCount
+      xpage += page.xpageCount
+    }
+    if (homeList) visible += applyHomeFilter(input.value, homeList)
+    if (emptyEl) emptyEl.hidden = !active || visible > 0 || xpage > 0
   }
   const syncClearVisibility = (): void => {
     if (clearBtn) clearBtn.hidden = input.value.length === 0
@@ -417,7 +446,7 @@ function init(): void {
       if (input.value) apply()
     })
   }
-  if (stack && !homeList) {
+  if (stack) {
     try {
       const hydrationObserver = new MutationObserver(scheduleReindex)
       hydrationObserver.observe(stack, { childList: true, subtree: true })

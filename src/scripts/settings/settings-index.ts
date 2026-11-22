@@ -1,11 +1,12 @@
-// Settings section index (0.11.4 W1).
+// Settings section index (0.11.4 W1; single page since 0.11.23).
 //
-// Single source of truth for the split Settings: the Settings home list,
-// the per-page section nav in SettingsShell, and the cross-page search
-// results. One entry per section page; `items` are the headline controls
-// on that page so search can point at the right page (and card anchor)
-// even from another section. Keywords are lowercase match text, not
-// display copy — keep them in sync with the controls when a page changes.
+// Single source of truth for Settings: the jump-to menu on /settings,
+// the section rail in SettingsShell, and the search results. One entry
+// per section; `items` are the headline controls in that section so
+// search can point at the right card anchor. `href` is a same-page
+// anchor — the old /settings/<slug> routes redirect here. Keywords are
+// lowercase match text, not display copy — keep them in sync with the
+// controls when the page changes.
 
 export interface SettingsIndexItem {
   label: string
@@ -29,10 +30,10 @@ export interface SettingsSectionEntry {
 export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   {
     slug: "playlists",
-    href: "/settings/playlists",
+    href: "/settings#playlists",
     title: "Playlists",
     titleKey: "settings.group.playlists",
-    desc: "Add, refresh and switch playlists",
+    desc: "Your sources — add, refresh and switch what the app plays",
     keywords: "playlists add refresh switch m3u xtream custom website login",
     items: [
       { label: "Playlists", keywords: "playlist list switch active", anchor: "settings-playlists" },
@@ -44,19 +45,19 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "profile",
-    href: "/settings/profile",
+    href: "/settings#profile",
     title: "Profile",
     titleKey: "settings.group.profile",
-    desc: "Who is watching",
+    desc: "Who's watching — switch between the people in your house",
     keywords: "profile who watching switcher user account",
     items: [{ label: "Profile", keywords: "profile switcher who watching", anchor: "settings-profile" }],
   },
   {
     slug: "display",
-    href: "/settings/display",
+    href: "/settings#display",
     title: "Display",
     titleKey: "settings.section.display",
-    desc: "Language, text size, sounds and home sections",
+    desc: "How it looks — language, text size, sounds and your home screen",
     keywords: "display language font scale density text size tv safe area overscan performance mode interface sounds close to tray home page sections rendering linux",
     items: [
       { label: "Language", keywords: "language locale translate", anchor: "card-language" },
@@ -72,10 +73,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "playback",
-    href: "/settings/playback",
+    href: "/settings#playback",
     title: "Playback",
     titleKey: "settings.playback.title",
-    desc: "Players, audio, captions and continue watching",
+    desc: "How things play — players, audio, captions and where you left off",
     keywords: "playback player audio captions subtitles hevc ffmpeg transcode mono language continue watching retention",
     items: [
       { label: "Player", keywords: "player picker external mpv vlc", anchor: "playback-section" },
@@ -90,10 +91,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "live-tv",
-    href: "/settings/live-tv",
+    href: "/settings#live-tv",
     title: "Live TV",
     titleKey: "nav.livetv",
-    desc: "Channels, EPG, categories and favourites",
+    desc: "Channels and the TV guide — layout, programme times and favourites",
     keywords: "live tv channels epg time zone column width categories hidden channel edits favorites reorder resume last channel",
     items: [
       { label: "Resume last channel", keywords: "resume last channel reopen start", anchor: "card-resume-last-channel-livetv" },
@@ -106,10 +107,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "followed",
-    href: "/settings/followed",
+    href: "/settings#followed",
     title: "Followed Series",
     titleKey: "settings.followed.title",
-    desc: "New-episode checks and notifications",
+    desc: "New episodes — the app checks for you, even while it's closed",
     keywords: "followed series new episodes scheduled checks interval notifications",
     items: [
       { label: "Scheduled background checks", keywords: "scheduled background checks task", anchor: "card-followed" },
@@ -119,10 +120,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "discover-ai",
-    href: "/settings/discover-ai",
+    href: "/settings#discover-ai",
     title: "Discover & AI",
     titleKey: "",
-    desc: "Recommendations, metadata and AI",
+    desc: "Recommendations and keys — smarter picks, artwork and Sports Corner",
     keywords: "discover ai recommendations metadata tmdb tvdb enrichment api key endpoint model test connection sports corner football data manchester united table fixtures",
     items: [
       { label: "Metadata enrichment", keywords: "metadata enrichment tmdb tvdb api key", anchor: "card-tmdb" },
@@ -133,10 +134,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "casting",
-    href: "/settings/casting",
+    href: "/settings#casting",
     title: "Casting",
     titleKey: "settings.casting.title",
-    desc: "Cast to this TV and play on other TVs",
+    desc: "Watch on another screen — let this TV receive, or send to one",
     keywords: "casting cast receiver pair code device play on tv paired",
     items: [
       { label: "Allow casting to this device", keywords: "allow casting receiver", anchor: "card-tv-receiver" },
@@ -148,10 +149,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "data-backup",
-    href: "/settings/data-backup",
+    href: "/settings#data-backup",
     title: "Data & Backup",
     titleKey: "",
-    desc: "Downloads, backup and storage",
+    desc: "Your stuff, safe — downloads, backups, storage and logs",
     keywords: "data backup restore downloads folder storage cache clear history export import",
     items: [
       { label: "Downloads", keywords: "downloads folder save scan concurrent", anchor: "downloads-folder-section" },
@@ -161,10 +162,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "app-updates",
-    href: "/settings/app-updates",
+    href: "/settings#app-updates",
     title: "App & Updates",
     titleKey: "",
-    desc: "Version, update channel and what's new",
+    desc: "The app itself — version, updates and what's new",
     keywords: "app update version channel auto update whats new changelog licenses attribution display diagnostics",
     items: [
       { label: "App update", keywords: "app update version check install channel", anchor: "update-section" },
@@ -174,10 +175,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "help-diagnostics",
-    href: "/settings/help-diagnostics",
+    href: "/settings#help-diagnostics",
     title: "Help & Diagnostics",
     titleKey: "",
-    desc: "Docs, feedback and network log",
+    desc: "Stuck? Guides, feedback and the details that help fix things",
     keywords: "help diagnostics docs feedback bug report network log user agent timeout developer mode export",
     items: [
       { label: "Network", keywords: "network user agent timeout developer mode", anchor: "card-network" },
@@ -188,10 +189,10 @@ export const SETTINGS_SECTIONS: SettingsSectionEntry[] = [
   },
   {
     slug: "danger",
-    href: "/settings/danger",
+    href: "/settings#danger",
     title: "Danger zone",
     titleKey: "settings.group.dangerZone",
-    desc: "Reset everything",
+    desc: "Careful — this wipes things. There's no undo without a backup",
     keywords: "danger zone reset everything restore wipe",
     danger: true,
     items: [
@@ -218,7 +219,7 @@ export function searchSettingsIndex(query: string, limit = 8): SettingsSearchHit
       hits.push({
         label: item.label,
         sectionTitle: section.title,
-        href: item.anchor ? `${section.href}#${item.anchor}` : section.href,
+        href: item.anchor ? `/settings#${item.anchor}` : section.href,
       })
       if (hits.length >= limit) return hits
     }

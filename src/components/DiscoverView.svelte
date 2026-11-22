@@ -2029,7 +2029,7 @@
             <div class="rs-ai-panel" role="status" data-ai-not-configured>
               <p class="rs-ai-panel__text">{askAiWhy}</p>
               <div class="rs-ai-panel__actions">
-                <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-ai-panel__primary">Open AI settings</a>
+                <a href="/settings#card-ai-discovery" data-nylah-item class="rs-ai-panel__primary">Open AI settings</a>
                 <button type="button" onclick={searchLocalSimilar} data-nylah-item class="rs-ai-panel__secondary">
                   Browse similar titles in my library
                 </button>
@@ -2038,14 +2038,14 @@
           {/if}
           <div class="rs-discover-mode-row">
             <a
-              href="/settings/discover-ai#card-ai-discovery"
+              href="/settings#card-ai-discovery"
               data-nylah-item
               class="rs-discover-mode rs-discover-mode--{aiMode ?? 'unknown'}"
               title={aiDetail}>
               <span class="rs-discover-mode__dot" aria-hidden="true"></span>
               <span>{modeLabel}</span>
             </a>
-            <a href="/settings/discover-ai#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
+            <a href="/settings#card-ai-discovery" data-nylah-item class="rs-discover-prefs">
               Discovery preferences
             </a>
           </div>

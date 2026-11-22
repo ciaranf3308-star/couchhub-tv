@@ -250,8 +250,10 @@ import ExitAppCard from "@/components/ExitAppCard.svelte"
 
             <CloseToTrayCard client:load />
 
-            <!-- 0.11.4 W3: in-app Exit, directly under the Close button behavior card. -->
-            <ExitAppCard client:load />
+            <!-- 0.11.4 W3: in-app Exit, directly under the Close button behavior card.
+                 Second copy on the page (the other is in the Settings jump-to
+                 index) — distinct id so the page has no duplicate ids. -->
+            <ExitAppCard client:load id="exit-app-section-display" />
 
             <!-- Rendering: Linux WebKitGTK DMA-BUF safe mode -->
             <details id="card-rendering" data-settings-item class="hidden group scroll-mt-6 lg:scroll-mt-20">

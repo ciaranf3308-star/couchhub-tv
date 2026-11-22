@@ -10,6 +10,11 @@
   import { t, LOCALE_EVENT } from "@/scripts/lib/i18n.js"
   import { requestAppExit } from "@/scripts/lib/app-exit.ts"
 
+  // The card renders twice on the single Settings page (jump-to index +
+  // Display), so the wrapper id must be overridable — duplicate ids
+  // break anchor jumps and getElementById lookups.
+  let { id = "exit-app-section" } = $props()
+
   let locale = $state(0)
   let armed = $state(false)
   let exiting = $state(false)
@@ -50,7 +55,7 @@
 </script>
 
 <div
-  id="exit-app-section"
+  id={id}
   data-settings-item
   data-testid="exit-app-section"
   class="settings-row scroll-mt-6 lg:scroll-mt-20 border-t border-line/60">

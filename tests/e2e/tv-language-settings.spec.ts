@@ -150,7 +150,7 @@ async function primeTvWithLiveEpg(page: Page): Promise<void> {
 test.describe("TV settings: language grouping / audio language / EPG time zone", () => {
   test("language grouping toggle and preferred audio language rows exist and store values", async ({ page }) => {
     await primeTv(page)
-    await page.goto("/settings/playback")
+    await page.goto("/settings#playback")
     await page.waitForSelector("#lang-grouping-select")
 
     const groupingSelect = page.locator("#lang-grouping-select")
@@ -191,7 +191,7 @@ test.describe("TV settings: language grouping / audio language / EPG time zone",
     await expect.poll(readHeroMeta, { timeout: 10_000 }).toContain("Now Playing")
     const before = await readHeroMeta()
 
-    await page.goto("/settings/live-tv")
+    await page.goto("/settings#live-tv")
     await page.waitForSelector("#epg-tz-select")
     const offsetSelect = page.locator("#epg-tz-select")
     // Options populate once the active playlist is known; the select stays

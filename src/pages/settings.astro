@@ -1,26 +1,42 @@
 ---
-// Settings home (0.11.4 W1).
+// Settings — one page (0.11.23 rebuild).
 //
-// The old single page (6,305 lines, 9,608px tall) is gone: each section is
-// now its own short page under /settings/*, and this home lists them with
-// a one-line description each. No "Quick settings", no "Advanced" split —
-// one Settings, every control exactly one home. The search box in the
-// shell filters this list in place (no scroll yank).
-//
-// Exit row at the bottom: W3 builds the Exit button itself; this page
-// only provides the row and its placement.
+// The 0.11.4 split into one page per section made Settings a maze: twelve
+// sub-pages, each short, none findable without knowing where to look. This
+// page puts every one of the 107 audited settings back on a single page,
+// grouped into plain-English sections, with a jump-to menu at the top and
+// the section rail as anchor links. Nothing is merged, renamed or
+// re-defaulted: each section below is the verbatim component extracted
+// from its old sub-page (same markup, same ids, same storage keys — see
+// src/components/settings/sections/), and the old /settings/<slug> routes
+// redirect to the matching anchor. Duplicates are kept as the user left
+// them (Resume last channel in Playback + Live TV, Exit in the menu +
+// Display) until he picks a surviving home.
 import SettingsShell from "@/components/settings/SettingsShell.astro"
 import { SETTINGS_SECTIONS } from "@/scripts/settings/settings-index.ts"
 import ExitAppCard from "@/components/ExitAppCard.svelte"
+import PlaylistsSection from "@/components/settings/sections/playlists.astro"
+import ProfileSection from "@/components/settings/sections/profile.astro"
+import DisplaySection from "@/components/settings/sections/display.astro"
+import PlaybackSection from "@/components/settings/sections/playback.astro"
+import LiveTvSection from "@/components/settings/sections/live-tv.astro"
+import FollowedSection from "@/components/settings/sections/followed.astro"
+import DiscoverAiSection from "@/components/settings/sections/discover-ai.astro"
+import CastingSection from "@/components/settings/sections/casting.astro"
+import DataBackupSection from "@/components/settings/sections/data-backup.astro"
+import AppUpdatesSection from "@/components/settings/sections/app-updates.astro"
+import HelpDiagnosticsSection from "@/components/settings/sections/help-diagnostics.astro"
+import DangerSection from "@/components/settings/sections/danger.astro"
 ---
 
 <SettingsShell
   title="Settings"
   titleKey="settings.title"
-  sub="Playlists, preferences, cache, and the app itself."
+  sub="Everything about how the app looks, plays and connects — in one place. Pick a section below, or just scroll."
   subKey="page.settings.sub"
   current="home">
-  <div id="settings-home-list" class="flex flex-col gap-3">
+  <!-- Jump-to menu: the old home list, now anchor links into this page. -->
+  <div id="settings-home-list" class="settings-jump-grid">
     {
       SETTINGS_SECTIONS.map((section) => (
         <a
@@ -41,14 +57,122 @@ import ExitAppCard from "@/components/ExitAppCard.svelte"
         </a>
       ))
     }
+  </div>
 
-    <!-- Exit row (W3): full-width, controller-focusable Exit button. -->
-    <div
-      class="settings-home-row settings-home-row--exit"
-      id="settings-exit-row"
-      data-search-text="exit quit the app completely."
-      data-w3-slot="exit-button">
-      <ExitAppCard client:load />
+  <!-- Exit (home copy — the second copy lives in Display, as before). -->
+  <div
+    class="settings-home-row settings-home-row--exit"
+    id="settings-exit-row"
+    data-search-text="exit quit the app completely."
+    data-w3-slot="exit-button">
+    <ExitAppCard client:load />
+  </div>
+
+  <div class="settings-section-head" id="playlists">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Playlists</h2>
+      <p>Your sources — add, refresh and switch what the app plays.</p>
     </div>
   </div>
+  <PlaylistsSection />
+
+  <div class="settings-section-head" id="profile">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Profile</h2>
+      <p>Who's watching — switch between the people in your house.</p>
+    </div>
+  </div>
+  <ProfileSection />
+
+  <div class="settings-section-head" id="display">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Display</h2>
+      <p>How it looks — language, text size, sounds and your home screen.</p>
+    </div>
+  </div>
+  <DisplaySection />
+
+  <div class="settings-section-head" id="playback">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Playback</h2>
+      <p>How things play — players, audio, captions and where you left off.</p>
+    </div>
+  </div>
+  <PlaybackSection />
+
+  <div class="settings-section-head" id="live-tv">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Live TV</h2>
+      <p>Channels and the TV guide — layout, programme times and favourites.</p>
+    </div>
+  </div>
+  <LiveTvSection />
+
+  <div class="settings-section-head" id="followed">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Followed Series</h2>
+      <p>New episodes — the app checks for you, even while it's closed.</p>
+    </div>
+  </div>
+  <FollowedSection />
+
+  <div class="settings-section-head" id="discover-ai">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Discover &amp; AI</h2>
+      <p>Recommendations and keys — smarter picks, artwork and Sports Corner.</p>
+    </div>
+  </div>
+  <DiscoverAiSection />
+
+  <div class="settings-section-head" id="casting">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Casting</h2>
+      <p>Watch on another screen — let this TV receive, or send to one.</p>
+    </div>
+  </div>
+  <CastingSection />
+
+  <div class="settings-section-head" id="data-backup">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Data &amp; Backup</h2>
+      <p>Your stuff, safe — downloads, backups, storage and logs.</p>
+    </div>
+  </div>
+  <DataBackupSection />
+
+  <div class="settings-section-head" id="app-updates">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>App &amp; Updates</h2>
+      <p>The app itself — version, updates and what's new.</p>
+    </div>
+  </div>
+  <AppUpdatesSection />
+
+  <div class="settings-section-head" id="help-diagnostics">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Help &amp; Diagnostics</h2>
+      <p>Stuck? Guides, feedback and the details that help fix things.</p>
+    </div>
+  </div>
+  <HelpDiagnosticsSection />
+
+  <div class="settings-section-head settings-section-head--danger" id="danger">
+    <span class="settings-section-head__orb" aria-hidden="true"></span>
+    <div class="settings-section-head__text">
+      <h2>Danger zone</h2>
+      <p>Careful — this wipes things. There's no undo without a backup.</p>
+    </div>
+  </div>
+  <DangerSection />
 </SettingsShell>

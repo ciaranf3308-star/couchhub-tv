@@ -1,9 +1,9 @@
 ---
-// SettingsShell — shared shell for every Settings page (0.11.4 W1).
-//
-// Replaces the single 9,608px settings.astro: each section is now its own
-// short page (one or two viewports) under /settings/*, reached from the
-// Settings home. The shell owns what the old page got wrong:
+// SettingsShell — shell for the single Settings page (0.11.4 W1; one
+// page again since 0.11.23 — the 0.11.4 split into one page per section
+// under /settings/* became a maze, so every section is back on /settings
+// as an anchored group and the old routes redirect to their anchor).
+// The shell owns what the old page got wrong:
 //
 //  (a) Sticky nav + sticky search that actually stick. Root cause of the
 //      old failure: the page nested its own scrolling <main> inside
@@ -14,16 +14,15 @@
 //  (b) scroll-mt: every in-page anchor target gets a 12rem scroll margin
 //      (topnav + sticky subheader), so no heading lands under the header.
 //  (c) Scroll-spy is gone — deleted, not fixed. A lying indicator is
-//      worse than none. Navigation is page-based now, so the current
-//      section is marked server-side with aria-current and cannot lie.
+//      worse than none. Navigation is anchor-based now; the page itself
+//      is marked with aria-current and cannot lie.
 //  (d) The floating controller pill (TvButtonHints, fixed bottom) gets a
 //      reserved footer spacer, so it never covers live content.
 //  (e) Helper text is enlarged + contrast raised (see CSS below).
 //  (f) Booleans are On/Off pills everywhere (net-log checkbox converted;
 //      PlayerPicker reuse checkboxes converted to pills too).
-//  (i) Search is in this shell on every page: on the home it filters the
-//      section list in place; on a section page it filters that page's
-//      rows in place AND shows cross-page hits from settings-index.
+//  (i) Search is in this shell: it filters the jump-to menu AND every
+//      section's rows in place (see settings_search.ts).
 //
 // DO NOT regress the 0.11.3 Nylah icon: the nav lockup lives in
 // CouchLayout/TvLogo and is untouched by this shell.
@@ -690,6 +689,19 @@ const { title, titleKey, sub, subKey, current } = Astro.props
       white-space: nowrap;
     }
     /* Home section rows. */
+    .settings-page .settings-jump-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+    }
+    @media (min-width: 40em) {
+      .settings-page .settings-jump-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    .settings-page .settings-jump-grid + .settings-home-row--exit {
+      margin-top: 0.75rem;
+    }
     .settings-page .settings-home-row {
       display: flex;
       align-items: center;
@@ -745,6 +757,69 @@ const { title, titleKey, sub, subKey, current } = Astro.props
        groups are the boolean pattern; keep them from wrapping awkwardly. */
     .settings-page .settings-seg {
       flex-wrap: wrap;
+    }
+
+    /* ── Single-page rebuild (0.11.23) ───────────────────────────────
+       Section heads: a small glowing orb (the Orbology nod) + a serif
+       display title + one plain-English line, with breathing room above
+       so each group reads as a chapter, not the next grey row. The head
+       itself is the anchor target, so it carries the scroll margin the
+       sticky header would otherwise eat. */
+    .settings-page .settings-section-head {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.9rem;
+      margin: 3.25rem 0 1.1rem;
+      scroll-margin-top: var(--settings-header-bottom, 12rem);
+    }
+    .settings-page .settings-section-head:first-of-type {
+      margin-top: 2.5rem;
+    }
+    .settings-page .settings-section-head__orb {
+      flex: none;
+      width: 0.85rem;
+      height: 0.85rem;
+      margin-top: 0.55rem;
+      border-radius: 9999px;
+      background: radial-gradient(
+        circle at 35% 30%,
+        color-mix(in oklch, var(--color-accent) 55%, white),
+        var(--color-accent) 55%,
+        color-mix(in oklch, var(--color-accent) 65%, black)
+      );
+      box-shadow:
+        0 0 12px var(--nylah-focus-glow),
+        0 0 28px color-mix(in oklch, var(--color-accent) 45%, transparent);
+    }
+    .settings-page .settings-section-head__text h2 {
+      font-family: var(--font-serif);
+      font-weight: 400;
+      font-size: clamp(1.6rem, 0.8vw + 1.3rem, 2.1rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+    .settings-page .settings-section-head__text h2::first-letter {
+      color: var(--color-accent);
+    }
+    .settings-page .settings-section-head__text p {
+      margin-top: 0.2rem;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      color: var(--color-fg-2);
+    }
+    .settings-page .settings-section-head--danger .settings-section-head__orb {
+      background: radial-gradient(
+        circle at 35% 30%,
+        color-mix(in oklch, var(--color-bad) 55%, white),
+        var(--color-bad) 55%,
+        color-mix(in oklch, var(--color-bad) 65%, black)
+      );
+      box-shadow:
+        0 0 12px color-mix(in oklch, var(--color-bad) 55%, transparent),
+        0 0 28px color-mix(in oklch, var(--color-bad) 40%, transparent);
+    }
+    .settings-page .settings-section-head--danger .settings-section-head__text h2 {
+      color: var(--color-bad);
     }
   </style>
 </CouchLayout>

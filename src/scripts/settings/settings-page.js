@@ -2730,13 +2730,17 @@
     )
     const footballDataMsgEl = document.getElementById("settings-football-data-msg")
     const footballDataStateEl = document.getElementById("settings-football-data-state")
+    const footballDataSetupBtn = document.getElementById("settings-football-data-setup-key")
 
     function syncFootballDataState() {
       if (!footballDataStateEl) return
-      footballDataStateEl.textContent =
-        getFootballDataEnrichmentState() === "active"
-          ? "Feed active — table and fixtures available."
-          : "No key — Sports Corner shows no table or fixtures until you add one."
+      const active = getFootballDataEnrichmentState() === "active"
+      footballDataStateEl.textContent = active
+        ? "Feed active — table and fixtures available."
+        : "No key — Sports Corner shows no table or fixtures until you add one."
+      // Keys onboarding (0.11.23): same "Set up key" entry point as TMDB —
+      // same unified dialog, same storage. Shown only while no key is saved.
+      if (footballDataSetupBtn) footballDataSetupBtn.hidden = active
     }
     syncFootballDataState()
 
@@ -2804,6 +2808,20 @@
       }
     })
 
+    // Keys onboarding (0.11.23): "Set up key" opens the unified dialog
+    // at the football-data step; a completed save refreshes this card's
+    // field + state from the same storage Settings already uses.
+    footballDataSetupBtn?.addEventListener("click", async () => {
+      const result = await maybeOpenKeysOnboarding("football-data")
+      if (result?.outcome === "completed") {
+        if (footballDataKeyInput) {
+          footballDataKeyInput.value = getFootballDataApiKey()
+          syncFootballDataTestDisabled()
+        }
+        syncFootballDataState()
+      }
+    })
+
     // -------------------------------------------------------------------
     // AI Discovery (optional) — key lives in the OS credential store,
     // never in localStorage; the field is never filled back from it.
@@ -2844,6 +2862,7 @@
       document.getElementById("settings-ai-keys-link")
     )
     const aiKeysNote = document.getElementById("settings-ai-keys-note")
+    const aiSetupBtn = document.getElementById("settings-ai-setup-key")
 
     /** Refresh the connection-status row from the C4 status model. */
     async function syncAiStatus() {
@@ -2969,6 +2988,10 @@
       }
       aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
       if (aiClearBtn) aiClearBtn.disabled = !has
+      // Keys onboarding (0.11.23): same "Set up key" entry point as TMDB —
+      // same unified dialog, same keyring storage. Shown only while no key
+      // is saved; unknown (store unreachable) hides it rather than lying.
+      if (aiSetupBtn) aiSetupBtn.hidden = has
       // Saved state on the field itself (0.11.4): the input stays empty
       // by design (the key is never read back), so the placeholder +
       // badge say the key is saved — an empty box must never read as
@@ -3080,6 +3103,17 @@
       await syncAiKeyStatus()
       await syncAiStatus()
       flashMsg(aiMsgEl, t("settings.ai.keyCleared"))
+    })
+
+    // Keys onboarding (0.11.23): "Set up key" opens the unified dialog
+    // at the AI step; a completed save refreshes this card's status from
+    // the same keyring storage Settings already uses.
+    aiSetupBtn?.addEventListener("click", async () => {
+      const result = await maybeOpenKeysOnboarding("ai")
+      if (result?.outcome === "completed") {
+        await syncAiKeyStatus()
+        await syncAiStatus()
+      }
     })
 
     aiTestBtn?.addEventListener("click", async () => {

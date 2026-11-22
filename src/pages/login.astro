@@ -2082,7 +2082,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 		isActive: () => !findOpenModal() && !isTitleContextMenuOpen(),
 		handle: () => {
 			if (!loginIsDirty()) {
-				navigateBackWithOrigin("/settings/playlists");
+				navigateBackWithOrigin("/settings#playlists");
 				return true;
 			}
 			void confirmDialog({
@@ -2092,7 +2092,7 @@ import { IconArrowLeft, IconChevronDown, IconPlus } from "@tabler/icons-svelte";
 				cancelLabel: t("common.cancel"),
 				destructive: true,
 			}).then((confirmed) => {
-				if (confirmed) navigateBackWithOrigin("/settings/playlists");
+				if (confirmed) navigateBackWithOrigin("/settings#playlists");
 			});
 			return true;
 		},

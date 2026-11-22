@@ -24,6 +24,10 @@
 //   - TMDb API key: it used to be written into the file in plaintext.
 //     It is no longer exported; a restore leaves the key on the device
 //     untouched, and a fresh device needs the key re-entered.
+//   - football-data.org API key (verified 0.11.23, audit Q10): same
+//     treatment as the TMDb key — never written into the file, never
+//     restored from one. A restore leaves the on-device key untouched;
+//     the Danger-zone / Backup copy says so.
 //   - xt_theme / xt_accent: stored values are ignored since 0.11.1
 //     (Layout forces dark + burgundy), so exporting them is dead weight.
 //   - Discord client id + per-playlist mute: no UI sets them.
