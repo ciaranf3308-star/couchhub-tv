@@ -349,10 +349,18 @@ export function dueSportsReminders(
  * for a match already played can never fire. Returns how many
  * reminders were restored. No event is emitted — restore re-renders
  * through its own flow.
+ *
+ * The clock override (tests) matches read/prune: without it the
+ * restore reads the real clock, so a test seeded on a fixed
+ * matchday (Liverpool, Sun 22 Nov 16:30) goes stale the moment
+ * real time passes kick-off + 2h.
  */
-export function restoreSportsReminders(value: unknown): number {
+export function restoreSportsReminders(
+  value: unknown,
+  nowMs: number = Date.now(),
+): number {
   const parsed = parseSportsReminders(value)
-  const { map } = pruneRemindersMap(parsed, Date.now())
+  const { map } = pruneRemindersMap(parsed, nowMs)
   const count = Object.keys(map).length
   if (count === 0) return 0
   const current = readSportsRemindersRaw()

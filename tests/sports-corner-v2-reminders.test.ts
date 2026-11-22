@@ -318,17 +318,23 @@ describe("store — set / toggle / persist (plan §5.2)", () => {
   })
 
   it("restore validates, drops bad entries, and returns the count kept", () => {
-    const kept = restoreSportsReminders({
-      "fd-535101": {
-        fixtureId: "fd-535101",
-        title: "Liverpool v Man Utd",
-        startMs: LIVERPOOL_KICKOFF,
-        leadMinutes: 30,
-        createdAt: new Date(FRIDAY).toISOString(),
-        delivered: false,
+    // FRIDAY clock: restore prunes fixtures >2h past, and the good
+    // entry is Liverpool (Sun 22 Nov 16:30) — on the real clock
+    // this test goes stale the moment real time passes 18:30.
+    const kept = restoreSportsReminders(
+      {
+        "fd-535101": {
+          fixtureId: "fd-535101",
+          title: "Liverpool v Man Utd",
+          startMs: LIVERPOOL_KICKOFF,
+          leadMinutes: 30,
+          createdAt: new Date(FRIDAY).toISOString(),
+          delivered: false,
+        },
+        "fd-bad": { fixtureId: "fd-bad", title: "Bogus" },
       },
-      "fd-bad": { fixtureId: "fd-bad", title: "Bogus" },
-    })
+      FRIDAY,
+    )
     expect(kept).toBe(1)
     expect(hasSportsReminder("fd-535101", FRIDAY)).toBe(true)
     expect(restoreSportsReminders("junk")).toBe(0)
