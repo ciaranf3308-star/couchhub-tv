@@ -2568,6 +2568,32 @@
       setAutoUpdateEnabled(autoUpdateSelectEl.value === "on")
     })
 
+    // Keys onboarding (settings-polish-95 w3): refresh every keys card
+    // after ANY onboarding dialog closes with a save — not only on
+    // outcome "completed". Saving one key and skipping the rest
+    // ("skipped" with that key in `saved`) is still a save, and the
+    // dialog can save a key for a card whose own button was not the
+    // entry point, so all three cards re-read their storage. A pure
+    // skip (nothing saved) re-reads the same state and is a no-op.
+    // Each sync is null-safe when its card is absent.
+    async function refreshKeysCardsAfterOnboarding(result) {
+      if (!result) return
+      const saved = Array.isArray(result.saved) ? result.saved : []
+      if (result.outcome !== "completed" && saved.length === 0) return
+      if (tmdbKeyInput) {
+        tmdbKeyInput.value = getTmdbApiKey()
+        syncTmdbTestDisabled()
+      }
+      syncTmdbState()
+      if (footballDataKeyInput) {
+        footballDataKeyInput.value = getFootballDataApiKey()
+        syncFootballDataTestDisabled()
+      }
+      syncFootballDataState()
+      await syncAiKeyStatus()
+      await syncAiStatus()
+    }
+
     // -------------------------------------------------------------------
     // TMDb metadata enrichment
     // -------------------------------------------------------------------
@@ -2581,12 +2607,24 @@
     const tmdbMsgEl = document.getElementById("settings-tmdb-msg")
     const tmdbStateEl = document.getElementById("settings-tmdb-state")
     const tmdbSetupBtn = document.getElementById("settings-tmdb-setup-key")
+    const tmdbRecheckBtn = document.getElementById("settings-tmdb-recheck")
 
     /** Honest toggle state (0.11.4): with no key, On and Off are
      * indistinguishable unless the line below says the key is missing. */
     function syncTmdbState() {
       if (!tmdbStateEl) return
       const state = getTmdbEnrichmentState()
+      // Fail-closed (settings-polish-95 w3): "unknown" means the saved
+      // key could not be read — never show the no-key line or the
+      // "Set up key" prompt for a key that may be saved. The recheck
+      // button is the retest control (rule 4): it re-reads presence
+      // and, once readable, shows the real state.
+      if (tmdbRecheckBtn) tmdbRecheckBtn.hidden = state !== "unknown"
+      if (state === "unknown") {
+        tmdbStateEl.textContent = t("settings.keys.checkFailed")
+        if (tmdbSetupBtn) tmdbSetupBtn.hidden = true
+        return
+      }
       tmdbStateEl.textContent =
         state === "active"
           ? "Enrichment active."
@@ -2612,17 +2650,23 @@
     syncTmdbEnabled()
 
     // Keys onboarding (0.11.19): "Set up key" opens the unified
-    // dialog at the TMDB step; a completed save refreshes this card's
-    // field + state from the same storage Settings already uses.
+    // dialog at the TMDB step; any save refreshes this card's field +
+    // state from the same storage Settings already uses — completed
+    // or skipped-after-save (settings-polish-95 w3).
     tmdbSetupBtn?.addEventListener("click", async () => {
       const result = await maybeOpenKeysOnboarding("tmdb")
-      if (result?.outcome === "completed") {
-        if (tmdbKeyInput) {
-          tmdbKeyInput.value = getTmdbApiKey()
-          syncTmdbTestDisabled()
-        }
-        syncTmdbState()
+      await refreshKeysCardsAfterOnboarding(result)
+    })
+
+    // Fail-closed retest (settings-polish-95 w3): re-read presence
+    // and refill the field — it was empty while the read failed,
+    // which must never read as "nothing saved".
+    tmdbRecheckBtn?.addEventListener("click", () => {
+      if (tmdbKeyInput) {
+        tmdbKeyInput.value = getTmdbApiKey()
+        syncTmdbTestDisabled()
       }
+      syncTmdbState()
     })
 
     tmdbEnabledGroup?.addEventListener("click", (event) => {
@@ -2731,10 +2775,22 @@
     const footballDataMsgEl = document.getElementById("settings-football-data-msg")
     const footballDataStateEl = document.getElementById("settings-football-data-state")
     const footballDataSetupBtn = document.getElementById("settings-football-data-setup-key")
+    const footballDataRecheckBtn = document.getElementById("settings-football-data-recheck")
 
     function syncFootballDataState() {
       if (!footballDataStateEl) return
-      const active = getFootballDataEnrichmentState() === "active"
+      const state = getFootballDataEnrichmentState()
+      // Fail-closed (settings-polish-95 w3): "unknown" means the saved
+      // key could not be read — never show the no-key line or the
+      // "Set up key" prompt for a key that may be saved. The recheck
+      // button is the retest control (rule 4).
+      if (footballDataRecheckBtn) footballDataRecheckBtn.hidden = state !== "unknown"
+      if (state === "unknown") {
+        footballDataStateEl.textContent = t("settings.keys.checkFailed")
+        if (footballDataSetupBtn) footballDataSetupBtn.hidden = true
+        return
+      }
+      const active = state === "active"
       footballDataStateEl.textContent = active
         ? "Feed active — table and fixtures available."
         : "No key — Sports Corner shows no table or fixtures until you add one."
@@ -2809,17 +2865,23 @@
     })
 
     // Keys onboarding (0.11.23): "Set up key" opens the unified dialog
-    // at the football-data step; a completed save refreshes this card's
-    // field + state from the same storage Settings already uses.
+    // at the football-data step; any save refreshes this card's field +
+    // state from the same storage Settings already uses — completed
+    // or skipped-after-save (settings-polish-95 w3).
     footballDataSetupBtn?.addEventListener("click", async () => {
       const result = await maybeOpenKeysOnboarding("football-data")
-      if (result?.outcome === "completed") {
-        if (footballDataKeyInput) {
-          footballDataKeyInput.value = getFootballDataApiKey()
-          syncFootballDataTestDisabled()
-        }
-        syncFootballDataState()
+      await refreshKeysCardsAfterOnboarding(result)
+    })
+
+    // Fail-closed retest (settings-polish-95 w3): re-read presence
+    // and refill the field — it was empty while the read failed,
+    // which must never read as "nothing saved".
+    footballDataRecheckBtn?.addEventListener("click", () => {
+      if (footballDataKeyInput) {
+        footballDataKeyInput.value = getFootballDataApiKey()
+        syncFootballDataTestDisabled()
       }
+      syncFootballDataState()
     })
 
     // -------------------------------------------------------------------
@@ -2979,11 +3041,15 @@
       try {
         has = await hasAiKey()
       } catch {
-        // Presence UNKNOWN (store unreachable, 0.11.22): never claim
-        // "No key saved" for a key that may be saved, and never throw
-        // out of a status sync (callers await this after a save — a
-        // throw here would flash a false save-failure). Leave the row
-        // showing its previous state (blank on first load = unknown).
+        // Presence UNKNOWN (store unreachable, 0.11.22; explicit line
+        // since settings-polish-95 w3): never claim "No key saved"
+        // for a key that may be saved, and never throw out of a
+        // status sync (callers await this after a save — a throw here
+        // would flash a false save-failure). Say the check failed and
+        // leave badge / placeholder / setup button on their previous
+        // state; Test connection is the retest control (it re-runs
+        // this sync — see the Test handler below).
+        aiKeyStatusEl.textContent = t("settings.ai.keyUnknown")
         return
       }
       aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
@@ -3106,14 +3172,12 @@
     })
 
     // Keys onboarding (0.11.23): "Set up key" opens the unified dialog
-    // at the AI step; a completed save refreshes this card's status from
-    // the same keyring storage Settings already uses.
+    // at the AI step; any save refreshes this card's status from the
+    // same keyring storage Settings already uses — completed or
+    // skipped-after-save (settings-polish-95 w3).
     aiSetupBtn?.addEventListener("click", async () => {
       const result = await maybeOpenKeysOnboarding("ai")
-      if (result?.outcome === "completed") {
-        await syncAiKeyStatus()
-        await syncAiStatus()
-      }
+      await refreshKeysCardsAfterOnboarding(result)
     })
 
     aiTestBtn?.addEventListener("click", async () => {
@@ -3131,6 +3195,10 @@
         // says (0.11.4) — the toggle gates use, never verification.
         const result = await testAiConnection()
         await syncAiStatus()
+        // Retest control for the key row (settings-polish-95 w3): a
+        // failed presence check leaves "Couldn't check whether a key
+        // is saved." there until this re-probes the store.
+        await syncAiKeyStatus()
         if (result.ok) {
           flashMsg(aiMsgEl, t("settings.ai.testOk"))
           if (aiTestDetailEl) {
