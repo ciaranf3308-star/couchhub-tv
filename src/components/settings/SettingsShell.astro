@@ -699,8 +699,8 @@ const { title, titleKey, sub, subKey, current } = Astro.props
         grid-template-columns: 1fr 1fr;
       }
     }
-    .settings-page .settings-jump-grid + .settings-home-row--exit {
-      margin-top: 0.75rem;
+    .settings-page .settings-jump-grid > .settings-home-row--exit {
+      grid-column: 1 / -1;
     }
     .settings-page .settings-home-row {
       display: flex;

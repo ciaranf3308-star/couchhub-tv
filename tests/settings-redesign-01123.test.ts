@@ -231,6 +231,16 @@ describe("settings redesign 0.11.23 — all 107 audit items on one page", () => 
     expect(missing).toEqual([])
   })
 
+  it("the home Exit copy sits inside the jump-to list, so search filters it", () => {
+    const page = read("src/pages/settings.astro")
+    const listStart = page.indexOf('id="settings-home-list"')
+    const firstHead = page.indexOf('id="playlists"')
+    expect(listStart).toBeGreaterThan(-1)
+    expect(firstHead).toBeGreaterThan(listStart)
+    const menu = page.slice(listStart, firstHead)
+    expect(menu).toContain('id="settings-exit-row"')
+  })
+
   it("keeps both duplicates, both wired to the same store", () => {
     expect(ids.has("settings-resume-last-playback")).toBe(true)
     expect(ids.has("settings-resume-last-livetv")).toBe(true)

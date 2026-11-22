@@ -57,15 +57,16 @@ import DangerSection from "@/components/settings/sections/danger.astro"
         </a>
       ))
     }
-  </div>
 
-  <!-- Exit (home copy — the second copy lives in Display, as before). -->
-  <div
-    class="settings-home-row settings-home-row--exit"
-    id="settings-exit-row"
-    data-search-text="exit quit the app completely."
-    data-w3-slot="exit-button">
-    <ExitAppCard client:load />
+    <!-- Exit (home copy — the second copy lives in Display, as before).
+         Inside the jump-to list so search filters it like every row. -->
+    <div
+      class="settings-home-row settings-home-row--exit"
+      id="settings-exit-row"
+      data-search-text="exit quit the app completely."
+      data-w3-slot="exit-button">
+      <ExitAppCard client:load />
+    </div>
   </div>
 
   <div class="settings-section-head" id="playlists">
