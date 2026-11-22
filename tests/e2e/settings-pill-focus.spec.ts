@@ -49,7 +49,10 @@ async function gotoSettings(page: Page, hash = "") {
     route.fulfill({ status: 200, contentType: "application/json", body: "[]" }),
   )
   await page.goto(`/settings${hash}`, { waitUntil: "networkidle" })
-  await page.waitForSelector("[data-button-hints]")
+  // The pill idle-hides (visibility:hidden) after 4 s without input,
+  // so it may already be "hidden" by the time the page settles —
+  // wait for attachment, not visibility.
+  await page.waitForSelector("[data-button-hints]", { state: "attached" })
   await page.waitForSelector(".settings-page")
 }
 
@@ -232,11 +235,11 @@ for (const { width, height, tag } of [
       await gotoSettings(page, "#danger")
       await page.waitForTimeout(400)
       const danger = await page.evaluate(() => {
-        const section = document.querySelector("#settings-danger")!
-        // The section itself is ~1000px tall; its head (orb + title)
-        // is the jump target that must land clear, not the section's
-        // far bottom edge.
-        const head = section.querySelector(".settings-section-head") ?? section
+        // The jump target IS the head itself (#danger, in
+        // settings.astro); #settings-danger is the Reset card BELOW
+        // it, ~200px tall, which extends past the fold — measuring
+        // the card instead of the head falsely fails this check.
+        const head = document.querySelector("#danger")!
         const r = head.getBoundingClientRect()
         const pillEl = document.querySelector("[data-button-hints]")!
         const pr = pillEl.getBoundingClientRect()
@@ -266,12 +269,12 @@ for (const { width, height, tag } of [
       await expect
         .poll(async () => (await pillState(page)).idleHidden, { timeout: 8_000 })
         .toBe(true)
-      // Same for a mid-page anchor.
+      // Same for a mid-page anchor. The head itself carries the slug
+      // id (settings.astro) — there is no #settings-playback.
       await page.goto("/settings#playback", { waitUntil: "networkidle" })
       await page.waitForTimeout(400)
       const play = await page.evaluate(() => {
-        const section = document.querySelector("#settings-playback")!
-        const head = section.querySelector(".settings-section-head") ?? section
+        const head = document.querySelector("#playback")!
         const r = head.getBoundingClientRect()
         const pillEl = document.querySelector("[data-button-hints]")!
         const pr = pillEl.getBoundingClientRect()
@@ -288,54 +291,199 @@ for (const { width, height, tag } of [
     })
 
     test("GAP 6: full Tab walk — reading order, all 12 rail links, never under pill", async ({ page }) => {
-      test.setTimeout(180_000)
+      test.setTimeout(300_000)
       await gotoSettings(page)
-      // Start from the top: click the (non-focusable) page heading so
-      // focus is on the body, then Tab through everything.
-      await page.locator(".settings-pagehead h1").click({ position: { x: 5, y: 5 } })
+      // Start from the very first focusable: a plain load leaves
+      // focus wherever the page put it (couch-focus restoration),
+      // so a click-then-Tab walk would silently skip the first ~146
+      // stops. Focus element 0 explicitly, then Tab to the end.
+      // Headless Chromium does NOT wrap Tab to the first element —
+      // past the last focusable focus lands on <body> — so reaching
+      // the last index and then body IS the complete traversal.
+      // Wait for the focusable count to settle first: under load,
+      // client-rendered rows land after networkidle.
+      // Tab-reachable is NOT the visible count (289): 133 links
+      // sit inside the CLOSED licenses <details> (they have layout
+      // boxes, so the visible filter counts them, but sequential
+      // focus never enters a closed details) and 2 unchecked radios
+      // of the player-backend group are skipped by native radio
+      // behaviour (only the checked radio is tabbable). The
+      // reachable set below encodes exactly those two rules, so a
+      // future unreachable focusable fails loudly instead of
+      // silently shrinking the walk.
+      const { total, reachable } = await page.evaluate(async () => {
+        const SEL =
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        const countVisible = () =>
+          [
+            ...document.querySelectorAll<HTMLElement>(SEL),
+          ].filter((n) => {
+            const b = n.getBoundingClientRect()
+            return b.width > 0 && b.height > 0 && getComputedStyle(n).visibility !== "hidden"
+          })
+        let last = -1
+        let stable = 0
+        const deadline = Date.now() + 15_000
+        while (Date.now() < deadline) {
+          const c = countVisible().length
+          if (c === last) {
+            stable++
+            if (stable >= 2) break
+          } else {
+            stable = 0
+            last = c
+          }
+          await new Promise((r) => setTimeout(r, 500))
+        }
+        const list = countVisible()
+        const reachable: number[] = []
+        list.forEach((el, i) => {
+          if (el.closest("details:not([open])")) return
+          if (el instanceof HTMLInputElement && el.type === "radio" && el.name) {
+            const checked = document.querySelector<HTMLInputElement>(
+              `input[type="radio"][name="${CSS.escape(el.name)}"]:checked`,
+            )
+            if (checked && checked !== el) return
+          }
+          reachable.push(i)
+        })
+        return { total: list.length, reachable }
+      })
+      await page.evaluate(() => {
+        const focusables = [
+          ...document.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ].filter((n) => {
+          const b = n.getBoundingClientRect()
+          return b.width > 0 && b.height > 0 && getComputedStyle(n).visibility !== "hidden"
+        })
+        focusables[0]?.focus()
+      })
+      expect(total).toBeGreaterThan(200)
       const seenRail = new Set<string>()
+      const seenIndex = new Set<number>()
+      const unlisted: string[] = []
       let prevIndex = -1
       let walked = 0
-      let violations: string[] = []
-      let wrapped = false
-      for (let i = 0; i < 600; i++) {
-        await page.keyboard.press("Tab")
-        const info = await focusedInfo(page)
-        if (!info) break
+      let lastIndex = -1
+      let endedAtBody = false
+      const violations: string[] = []
+      // One evaluate per stop returns both the focused element and
+      // the pill state, so the walk stays fast enough for 289 stops.
+      const step = () =>
+        page.evaluate(() => {
+          const el = document.activeElement as HTMLElement | null
+          const pillEl = document.querySelector<HTMLElement>("[data-button-hints]")
+          const pr = pillEl?.getBoundingClientRect()
+          const pill = {
+            visible:
+              !!pillEl &&
+              !pillEl.hasAttribute("hidden") &&
+              !pillEl.classList.contains("rs-button-hints--idle-hidden") &&
+              getComputedStyle(pillEl).opacity !== "0" &&
+              getComputedStyle(pillEl).visibility !== "hidden",
+            top: pr?.top ?? null,
+            bottom: pr?.bottom ?? null,
+            left: pr?.left ?? null,
+            right: pr?.right ?? null,
+          }
+          if (!el || el === document.body) return { focus: null, pill }
+          const r = el.getBoundingClientRect()
+          const focusables = [
+            ...document.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          ].filter((n) => {
+            const b = n.getBoundingClientRect()
+            return b.width > 0 && b.height > 0 && getComputedStyle(n).visibility !== "hidden"
+          })
+          return {
+            focus: {
+              tag: el.tagName,
+              id: el.id || null,
+              href: (el as HTMLAnchorElement).href || null,
+              text: (el.textContent ?? "").trim().slice(0, 60),
+              top: r.top,
+              bottom: r.bottom,
+              left: r.left,
+              right: r.right,
+              domIndex: focusables.indexOf(el),
+              focusableCount: focusables.length,
+            },
+            pill,
+          }
+        })
+      const check = (s: Awaited<ReturnType<typeof step>>) => {
+        if (!s.focus) return false
         walked++
-        if (info.domIndex <= prevIndex) {
-          wrapped = true
-          break
+        // Tab can land on an element outside the visible list
+        // (e.g. the licenses <summary>, which is tabbable but not
+        // in the selector): still check it against the pill, but
+        // don't let it break the reading-order walk.
+        if (s.focus.domIndex === -1) {
+          unlisted.push(`${s.focus.tag}#${s.focus.id ?? ""} "${s.focus.text}"`)
+        } else {
+          if (s.focus.domIndex <= prevIndex) return false
+          prevIndex = s.focus.domIndex
+          lastIndex = s.focus.domIndex
+          seenIndex.add(s.focus.domIndex)
         }
-        prevIndex = info.domIndex
-        if (info.href) {
-          const m = info.href.match(/#([a-z-]+)$/)
+        if (s.focus.href) {
+          const m = s.focus.href.match(/#([a-z-]+)$/)
           if (m && RAIL_SLUGS.includes(m[1])) seenRail.add(m[1])
         }
-        const pill = await pillState(page)
-        if (pillCoversPill(pill, info)) {
+        if (
+          s.pill.visible &&
+          s.pill.top != null &&
+          s.pill.bottom != null &&
+          s.pill.left != null &&
+          s.pill.right != null &&
+          s.focus.bottom > s.pill.top &&
+          s.focus.top < s.pill.bottom &&
+          s.focus.right > s.pill.left &&
+          s.focus.left < s.pill.right
+        ) {
           violations.push(
-            `#${walked} ${info.tag}#${info.id ?? ""} "${info.text}" bottom=${Math.round(info.bottom)} pillTop=${Math.round(pill.top ?? 0)}`,
+            `#${walked} ${s.focus.tag}#${s.focus.id ?? ""} "${s.focus.text}" bottom=${Math.round(s.focus.bottom)} pillTop=${Math.round(s.pill.top)}`,
           )
         }
-        // Screenshot a few focused states for the report.
         if (walked === 3) {
           mkdirSync(SHOTS, { recursive: true })
-          await page.screenshot({ path: join(SHOTS, `w2-${tag}-focus-early.png`) })
+          void page.screenshot({ path: join(SHOTS, `w2-${tag}-focus-early.png`) })
         }
-        if (info.id === "settings-search-input") {
-          await page.screenshot({ path: join(SHOTS, `w2-${tag}-focus-search.png`) })
+        if (s.focus.id === "settings-search-input") {
+          void page.screenshot({ path: join(SHOTS, `w2-${tag}-focus-search.png`) })
         }
+        return true
       }
-      expect(walked).toBeGreaterThan(50)
+      // Stop 0: the explicitly focused first element.
+      check(await step())
+      for (let i = 0; i < total + 10; i++) {
+        await page.keyboard.press("Tab")
+        const s = await step()
+        if (!s.focus) {
+          endedAtBody = true
+          break
+        }
+        if (!check(s)) break
+      }
+      expect(walked).toBeGreaterThanOrEqual(reachable.length)
+      expect(lastIndex, `walk stopped at index ${lastIndex} of ${total}`).toBe(total - 1)
+      expect(endedAtBody, "Tab past the last focusable should land on <body>").toBe(true)
+      // Exact reachable set: every Tab-reachable focusable visited,
+      // and nothing visited that the reachable model did not predict
+      // (unlisted stops like the licenses <summary> are reported,
+      // not hidden, in `unlisted`).
+      expect([...seenIndex].sort((a, b) => a - b)).toEqual(reachable)
+      expect(unlisted, `Tab landed on unlisted elements: ${unlisted.join("; ")}`).toEqual([])
       expect(
         [...seenRail].sort(),
         `rail links reached by Tab: ${[...seenRail].sort().join(",")}`,
       ).toEqual([...RAIL_SLUGS].sort())
       expect(violations, `focused elements under pill:\n${violations.join("\n")}`).toEqual([])
-      expect(wrapped, `Tab walk ended after ${walked} stops without wrapping`).toBe(true)
-      // The rail itself scrolls under focus: focus the last rail
-      // link and check it is fully inside the viewport.
+      // The rail itself scrolls/wraps under focus: focus the last
+      // rail link and check it is fully inside the viewport.
       await page.locator('.settings-nav-link[href="/settings#danger"]').focus()
       await page.waitForTimeout(300)
       const rail = await page.evaluate(() => {
@@ -360,7 +508,11 @@ for (const { width, height, tag } of [
 
     test("GAP 6: Y reaches search, pill hints follow focus", async ({ page }) => {
       await gotoSettings(page)
-      await page.locator(".settings-pagehead h1").click({ position: { x: 5, y: 5 } })
+      // Enter search from a real focused setting (the controller
+      // path): Escape then restores focus to it. Entering from
+      // <body> focus leaves nowhere to restore to, and the input
+      // keeps focus — the editing legend then correctly stays.
+      await page.locator('.settings-nav-link[href="/settings#playlists"]').focus()
       const before = await pillState(page)
       expect(before.text).toContain("Settings search")
       await page.keyboard.press("y")
@@ -371,9 +523,14 @@ for (const { width, height, tag } of [
       expect(editing.text).not.toContain("Settings search")
       mkdirSync(SHOTS, { recursive: true })
       await page.screenshot({ path: join(SHOTS, `w2-${tag}-search-editing.png`) })
-      // Escape with an empty query exits search and restores focus.
+      // Back is one step per press: the first Escape closes the
+      // on-screen-keyboard session (focus stays in the input — the
+      // close refocuses it), the second exits search and restores
+      // focus to the setting focused before Y.
       await page.keyboard.press("Escape")
-      await page.waitForTimeout(300)
+      await expect(page.locator("#settings-search-input")).toBeFocused()
+      await page.keyboard.press("Escape")
+      await expect(page.locator('.settings-nav-link[href="/settings#playlists"]')).toBeFocused()
       const after = await pillState(page)
       expect(after.text).toContain("Settings search")
     })
@@ -442,6 +599,7 @@ for (const { width, height, tag } of [
     })
 
     test("GAP 6: arrow-key spatial walk never lands under the pill", async ({ page }) => {
+      test.setTimeout(120_000)
       await gotoSettings(page)
       await page.locator('.settings-nav-link[href="/settings#playlists"]').focus()
       await page.waitForTimeout(300)

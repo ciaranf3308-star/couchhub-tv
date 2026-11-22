@@ -204,4 +204,21 @@ describe("GAP 6 — pill hints follow focus (override must not shadow them)", ()
     expect(hints).toMatch(/const dialogClaimedHints = dialogIsOpen && override !== overrideBeforeDialog/)
     expect(hints).toMatch(/dialogIsOpen && !dialogClaimedHints/)
   })
+
+  it("settings fallback legend says 'Settings search' like the shell override", () => {
+    // The shell claims the legend with Y = "Settings search"
+    // (SettingsShell.astro); the search-exit path releases that
+    // override, so the fallback (HINT_CONFIGS.settings) must read
+    // the same or the pill relabels Y mid-session. Pinned at the
+    // source: the e2e Y test asserts the live pill text after
+    // Escape-Escape.
+    const lib = readFileSync(
+      join(process.cwd(), "src/scripts/lib/couch-button-hints.ts"),
+      "utf8",
+    )
+    const settings = lib.match(/settings: \{[\s\S]*?\n {2}\},/)
+    expect(settings, "HINT_CONFIGS.settings block").not.toBeNull()
+    expect(settings![0]).toContain('{ glyph: "y", label: "Settings search" }')
+    expect(settings![0]).not.toContain('{ glyph: "y", label: "Search" }')
+  })
 })

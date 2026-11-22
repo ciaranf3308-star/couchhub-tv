@@ -448,7 +448,11 @@ export const HINT_CONFIGS: Readonly<Record<string, HintConfig>> = {
     items: [
       { glyph: "dpad", label: "Move" },
       { glyph: "a", label: "Select" },
-      { glyph: "y", label: "Search" },
+      // "Settings search", not "Search": the Settings shell claims
+      // the legend with this label (SettingsShell.astro), and the
+      // search-exit path releases that override — the fallback must
+      // read the same or the pill relabels Y mid-session.
+      { glyph: "y", label: "Settings search" },
       RETURN_HOME_HINT,
     ],
   },
