@@ -357,6 +357,32 @@ describe("exportAll", () => {
     expect(snapshot.appSettings.tmdbEnabled).toBe(true)
   })
 
+  // Settings redesign 0.11.23, audit Q10 (verified): the football-data
+  // key gets the same treatment as the TMDb key — never written into
+  // the file, so a backup can never leak it and a restore never
+  // overwrites the key on the device.
+  it("never exports the football-data key, even when one is saved", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      get length() { return [...this.store.keys()].length }
+      key(index: number) { return [...this.store.keys()][index] ?? null }
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    memoryStorage.setItem("xt_football_data_key", "fd-test-key-1234")
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      const snapshot = (await exportAll()) as any
+      expect(JSON.stringify(snapshot)).not.toContain("fd-test-key-1234")
+      expect(JSON.stringify(snapshot)).not.toContain("xt_football_data_key")
+      expect(snapshot.appSettings.footballDataKey).toBeUndefined()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("includes the TVDb enabled flag", async () => {
     settingsState.tvdbEnabled = false
 
@@ -575,6 +601,34 @@ describe("importAll", () => {
       appSettings: { tmdbKey: "leaked-key", tmdbEnabled: false },
     })
     expect(settingsState.tmdbEnabled).toBe(false)
+  })
+
+  // Settings redesign 0.11.23, audit Q10: a foreign backup carrying a
+  // football-data key must not overwrite the key on this device.
+  it("never restores a football-data key from a backup", async () => {
+    class MemoryStorage {
+      private store = new Map<string, string>()
+      get length() { return [...this.store.keys()].length }
+      key(index: number) { return [...this.store.keys()][index] ?? null }
+      getItem(key: string) { return this.store.has(key) ? this.store.get(key)! : null }
+      setItem(key: string, value: string) { this.store.set(key, String(value)) }
+      removeItem(key: string) { this.store.delete(key) }
+    }
+    const memoryStorage = new MemoryStorage()
+    memoryStorage.setItem("xt_football_data_key", "my-own-key")
+    vi.stubGlobal("localStorage", memoryStorage as unknown as Storage)
+    try {
+      await importAll({
+        format: "extreme-infinitv-backup",
+        version: 1,
+        creds: { entries: [], selectedId: "" },
+        prefs: {},
+        appSettings: { footballDataKey: "leaked-fd-key" },
+      })
+      expect(memoryStorage.getItem("xt_football_data_key")).toBe("my-own-key")
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("round-trips the TVDb enabled flag through export then import", async () => {
