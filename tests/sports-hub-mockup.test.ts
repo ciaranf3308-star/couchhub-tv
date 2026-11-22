@@ -442,7 +442,13 @@ describe("mockup layout — feed hero, panel, on-TV-now, fixtures row", () => {
     expect(hero?.textContent).not.toContain("TV listing to be confirmed")
   })
 
-  it("on-TV-now: a live classic gets an ON NOW card with channel, type, minutes left, Watch", async () => {
+  // Feed-first (0.11.26) — the old test pinned a classic on now
+  // as an ON NOW on-TV-now card. That was the bug: a classic is a
+  // TV programme, not a fixture, and on-TV-now is feed fixtures
+  // only. A classic on now with no feed fixture behind it is NOT
+  // an on-TV-now entry — the section keeps its honest empty line,
+  // and the recorded programme appears nowhere as a fixture.
+  it("on-TV-now: a live classic is NOT an on-TV-now card — no feed fixture, no entry", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
     const classic = fixture({
       title: "United v Bayern Classic 1999",
@@ -452,8 +458,9 @@ describe("mockup layout — feed hero, panel, on-TV-now, fixtures row", () => {
       startMs: FRIDAY - 30 * MINUTE,
       stopMs: FRIDAY + 60 * MINUTE,
       id: "301:classic",
+      // What the real classifier produces for a classic title.
+      tier: "recorded",
     })
-    const callbacks = stubCallbacks()
     const model = buildSportsHubModel({
       followed: true,
       hasPlaylist: true,
@@ -465,72 +472,96 @@ describe("mockup layout — feed hero, panel, on-TV-now, fixtures row", () => {
       feedResult,
       nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
     })
-    renderSportsHub(hubRoot(), model, callbacks, FRIDAY)
-    const cards = [...document.querySelectorAll(".rs-sports-onnow-card")]
-    expect(cards).toHaveLength(1)
-    const card = cards[0]
-    expect(card.querySelector(".rs-sports-badge")?.textContent).toBe("ON NOW")
-    expect(card.querySelector(".rs-sports-onnow-title")?.textContent).toBe(
-      "United v Bayern Classic 1999",
+    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    expect(document.querySelectorAll(".rs-sports-onnow-card")).toHaveLength(
+      0,
     )
-    expect(card.querySelector(".rs-sports-onnow-meta")?.textContent).toBe(
-      "MUTV · Classic · 60 min left",
-    )
-    const watch = card.querySelector<HTMLElement>(
-      '[data-couch-key^="sports:onnow:watch:"]',
-    )
-    expect(watch?.textContent).toBe("Ⓐ Watch")
-    watch?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-    expect(callbacks.calls).toEqual([{ action: "watch", fixture: classic }])
+    expect(
+      document.querySelector('[data-sports-section="on-tv-now"]')
+        ?.textContent,
+    ).toContain("No Manchester United programmes on TV right now")
+    // The recorded programme is not a fixture anywhere — no row,
+    // no badge, no title in the hub.
+    expect(
+      document.querySelectorAll('[data-couch-key^="sports:fixture:"]'),
+    ).toHaveLength(0)
+    expect(document.body.textContent).not.toContain("Bayern Classic")
+    // The feed's next match still leads the hub.
+    expect(document.querySelector(".rs-sports-hero")).not.toBeNull()
+    expect(document.body.textContent).toContain("Liverpool v Man Utd")
   })
 
-  it("on-TV-now: a live match gets a LIVE badge, not ON NOW", async () => {
+  // Feed-first (0.11.26) — the old test drove the card from the
+  // EPG listing alone. Now the card needs the feed: Liverpool live
+  // (feed) + the Sky listing (EPG station). Rendered at 17:33 on
+  // Sunday, 63 minutes after the 16:30 kick-off, with the listing
+  // running to 18:53 — 80 minutes left.
+  it("on-TV-now: a live feed fixture gets a LIVE badge, not ON NOW", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
-    const live = fixture({
-      title: "Man Utd v Sunderland",
-      startMs: FRIDAY - 10 * MINUTE,
-      stopMs: FRIDAY + 80 * MINUTE,
-      id: "101:live",
+    const sunday = KICKOFF + 63 * MINUTE
+    const listing = fixture({
+      title: "Liverpool v Man Utd",
+      teams: ["Liverpool", "Man Utd"],
+      channelId: 201,
+      channelName: "Sky Sports Main Event",
+      alsoOn: [{ channelId: 202, channelName: "Sky Sports Premier League" }],
+      startMs: KICKOFF,
+      stopMs: KICKOFF + 143 * MINUTE,
+      id: "201:liverpool-live",
     })
     const model = buildSportsHubModel({
       followed: true,
       hasPlaylist: true,
       hasChannels: true,
       epgStatus: "ready",
-      scanResult: scanResult([live]),
-      nowMs: FRIDAY,
+      scanResult: scanResult([listing]),
+      nowMs: sunday,
       tableResult,
       feedResult,
-      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], [listing]),
+      liveMatches: buildNextMatchRows([MOCK_NEXT_FIXTURES[0]], [listing]),
     })
-    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    renderSportsHub(hubRoot(), model, stubCallbacks(), sunday)
     const card = document.querySelector(".rs-sports-onnow-card")
     expect(card?.querySelector(".rs-sports-badge")?.textContent).toBe("LIVE")
+    expect(card?.querySelector(".rs-sports-onnow-title")?.textContent).toBe(
+      "Liverpool v Man Utd",
+    )
     expect(card?.querySelector(".rs-sports-onnow-meta")?.textContent).toBe(
-      "Sky Sports Main Event · Sports · 80 min left",
+      "Sky Sports Main Event · Premier League · 80 min left",
     )
   })
 
+  // Feed-first (0.11.26) — the old test drove the card from the
+  // EPG listing alone. Now the card needs the feed: Liverpool live
+  // (feed) + the Sky listing (EPG). The listing is excluded from
+  // Upcoming by its EPG id, so the fixture is featured once.
   it("a fixture on now is featured once — in the card, not repeated in Upcoming", async () => {
     const { tableResult, feedResult } = await feedResults(FRIDAY)
-    const live = fixture({
-      title: "Man Utd v Sunderland",
-      startMs: FRIDAY - 10 * MINUTE,
-      stopMs: FRIDAY + 80 * MINUTE,
-      id: "101:live",
+    const sunday = KICKOFF + 63 * MINUTE
+    const listing = fixture({
+      title: "Liverpool v Man Utd",
+      teams: ["Liverpool", "Man Utd"],
+      channelId: 201,
+      channelName: "Sky Sports Main Event",
+      alsoOn: [{ channelId: 202, channelName: "Sky Sports Premier League" }],
+      startMs: KICKOFF,
+      stopMs: KICKOFF + 143 * MINUTE,
+      id: "201:liverpool-live",
     })
     const model = buildSportsHubModel({
       followed: true,
       hasPlaylist: true,
       hasChannels: true,
       epgStatus: "ready",
-      scanResult: scanResult([live]),
-      nowMs: FRIDAY,
+      scanResult: scanResult([listing]),
+      nowMs: sunday,
       tableResult,
       feedResult,
-      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], [listing]),
+      liveMatches: buildNextMatchRows([MOCK_NEXT_FIXTURES[0]], [listing]),
     })
-    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    renderSportsHub(hubRoot(), model, stubCallbacks(), sunday)
     // One badge in the whole hub for this fixture (the card's).
     expect(
       [...document.querySelectorAll(".rs-sports-badge")].map(

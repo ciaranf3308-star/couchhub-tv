@@ -632,9 +632,10 @@ const LIVE_STATUSES: ReadonlySet<string> = new Set(["IN_PLAY", "PAUSED"])
  * kick-off is older than this is stale data (a finished match a
  * failed refresh left behind), never a match still playing — the
  * live filter drops it so a stale cache can never keep a finished
- * match on TV now.
+ * match on TV now. The hub's on-TV-now derivation applies the same
+ * bound, so the two can never disagree about what counts as live.
  */
-const LIVE_FIXTURE_MAX_AGE_MS = 3 * 60 * 60 * 1000
+export const FOOTBALL_DATA_LIVE_FIXTURE_MAX_AGE_MS = 3 * 60 * 60 * 1000
 
 function matchStatusOf(match: unknown): string | null {
   return isRecord(match) ? nonEmptyString(match.status) : null
@@ -1099,7 +1100,7 @@ export async function getLiveFixtures(
           fixture.status !== undefined &&
           LIVE_STATUSES.has(fixture.status) &&
           fixture.startMs <= nowMs &&
-          nowMs - fixture.startMs <= LIVE_FIXTURE_MAX_AGE_MS,
+          nowMs - fixture.startMs <= FOOTBALL_DATA_LIVE_FIXTURE_MAX_AGE_MS,
       )
       .sort((a, b) => a.startMs - b.startMs)
   const cached = cachedEntry<FeedFixture[]>(

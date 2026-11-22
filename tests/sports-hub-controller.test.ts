@@ -573,7 +573,11 @@ describe("controller contract (T25, T26, T27, T28)", () => {
     controller.destroy()
   })
 
-  it("initial focus falls back to the hero Watch button when no memory exists", () => {
+  // Feed-first (0.11.26) — the EPG hero (and its Watch button)
+  // is gone: the hub hero is the feed's next match or the honest
+  // feed-state hero, never an EPG fixture. With an EPG fixture
+  // and no feed, initial focus falls to the first fixture row.
+  it("initial focus falls back to the first fixture row when no memory exists", () => {
     const { controller } = mountHub([
       fixture({ title: "Man Utd v Sunderland" }),
     ])
@@ -582,7 +586,7 @@ describe("controller contract (T25, T26, T27, T28)", () => {
       (document.activeElement as HTMLElement | null)?.getAttribute(
         "data-couch-key",
       ),
-    ).toBe("sports:hero:watch")
+    ).toMatch(/^sports:fixture:/)
     controller.destroy()
   })
 })

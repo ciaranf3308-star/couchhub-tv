@@ -63,8 +63,10 @@ import { findOpenModal } from "@/scripts/lib/dialog-spatial-nav.js"
 import { toast } from "@/scripts/lib/toast.js"
 import {
   FOOTBALL_DATA_ATTRIBUTION,
+  FOOTBALL_DATA_LIVE_FIXTURE_MAX_AGE_MS,
   STATION_TBC,
   getLeagueTable,
+  getLiveFixtures,
   getNextFixtures,
   getRecentForm,
   normaliseTeamName,
@@ -75,6 +77,7 @@ import {
   type LeagueTableResult,
 } from "@/scripts/lib/football-data.js"
 import {
+  SPORTS_PREMATCH_WINDOW_MS,
   findUnitedTableEntry,
   formatFeedFixtureDateTime,
   formatFeedFixtureTitle,
@@ -187,6 +190,16 @@ export interface SportsHubModel {
   hasChannels: boolean
   /** EPG failed but last-good fixtures are shown (§2.5 keep-last-good). */
   stale: boolean
+  /** The next live EPG fixture (guide view) — selectNextFixture
+   *  over the scanned programmes. This is NOT the hub hero: the
+   *  hero is the feed's next match (nextMatches[0]) or the honest
+   *  feed-state hero when the feed has none. The field survives
+   *  for the Followed entry card's next-fixture parity (T24) —
+   *  the card and the hub's guide view agree on the next live
+   *  listing — and for tests. The render never presents it as the
+   *  hub's next match: feed-first (0.11.26), an EPG listing must
+   *  never stand in for the feed's next match, however live it
+   *  looks. */
   hero: SportsFixture | null
   split: SplitSportsFixtures
   /** "Last updated HH:MM" from the EPG revision time, when known. */
@@ -203,11 +216,19 @@ export interface SportsHubModel {
   formResult: FeedFormResult | null
   /** Feed fixtures matched to EPG listings, feed order (v2 §4.1). */
   nextMatches: NextMatchRow[]
+  /** Live feed fixtures matched to EPG listings (feed-first,
+   *  0.11.26) — the live half of on-TV-now. Null = not fetched
+   *  yet; [] = the feed says nothing is live. */
+  liveMatches: NextMatchRow[]
   /** Mini-table vs full 20 (v2 §4.1). */
   tableExpanded: boolean
-  /** First-team EPG fixtures on air right now (mockup "United on
-   *  TV now" cards). Empty when the guide has none — never faked. */
-  onTvNow: SportsFixture[]
+  /** Feed fixtures on TV now (mockup "United on TV now" cards):
+   *  live feed fixtures + upcoming feed fixtures inside the
+   *  pre-match window, each with its station from the EPG. Empty
+   *  when the feed has none on now — never faked, and never an EPG
+   *  programme standing in for a fixture: no feed fixture, no
+   *  on-TV-now entry. */
+  onTvNow: NextMatchRow[]
 }
 
 const EMPTY_SPLIT: SplitSportsFixtures = {
@@ -232,7 +253,57 @@ export interface SportsHubModelInput {
   feedResult?: FeedFixturesResult | null
   formResult?: FeedFormResult | null
   nextMatches?: NextMatchRow[]
+  /** Live feed fixtures matched to EPG listings (feed-first,
+   *  0.11.26). Omitted = not fetched yet. */
+  liveMatches?: NextMatchRow[]
   tableExpanded?: boolean
+}
+
+/**
+ * The on-TV-now rows, feed-first (0.11.26): a feed fixture that is
+ * live (from getLiveFixtures) or inside the 60-minute pre-match
+ * window (from getNextFixtures), with its station from the EPG. No
+ * feed fixture, no on-TV-now entry — an EPG programme on now (a
+ * classic, a replay, a magazine show) is a TV programme, not a
+ * fixture, and it never appears here.
+ *
+ * Live rows: the feed says the fixture is being played and
+ * kick-off was within the last 3 hours (a match cannot run
+ * longer — the same bound getLiveFixtures applies, so a stale
+ * live row can never linger here). A live row shows with Station
+ * TBC when the EPG has no listing for it — the match IS live,
+ * the station is just unknown.
+ * Pre-match rows: kick-off within the pre-match window AND
+ * stationKnown — without a listing the fixture is not "on TV"
+ * yet, it is just upcoming (and it already appears in Next
+ * fixtures). Live rows first, then pre-match, each earliest
+ * first; capped at three cards (the mockup's three).
+ */
+export function selectOnTvNowRows(
+  liveMatches: ReadonlyArray<NextMatchRow>,
+  nextMatches: ReadonlyArray<NextMatchRow>,
+  nowMs: number = Date.now(),
+): NextMatchRow[] {
+  const live = liveMatches
+    .filter((row) => {
+      const startMs = row.matched.fixture.startMs
+      return (
+        startMs <= nowMs &&
+        nowMs - startMs <= FOOTBALL_DATA_LIVE_FIXTURE_MAX_AGE_MS
+      )
+    })
+    .sort((a, b) => a.matched.fixture.startMs - b.matched.fixture.startMs)
+  const prematch = nextMatches
+    .filter((row) => {
+      const startMs = row.matched.fixture.startMs
+      return (
+        row.matched.stationKnown &&
+        startMs > nowMs &&
+        startMs - nowMs <= SPORTS_PREMATCH_WINDOW_MS
+      )
+    })
+    .sort((a, b) => a.matched.fixture.startMs - b.matched.fixture.startMs)
+  return [...live, ...prematch].slice(0, 3)
 }
 
 
@@ -259,6 +330,7 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
     feedResult: input.feedResult ?? null,
     formResult: input.formResult ?? null,
     nextMatches: input.nextMatches ?? [],
+    liveMatches: input.liveMatches ?? [],
     tableExpanded: input.tableExpanded ?? false,
     onTvNow: [],
   }
@@ -286,17 +358,23 @@ export function buildSportsHubModel(input: SportsHubModelInput): SportsHubModel 
       ...base,
       state: "ready",
       stale: epgStatus === "failed",
+      onTvNow: selectOnTvNowRows(
+        input.liveMatches ?? [],
+        input.nextMatches ?? [],
+        input.nowMs,
+      ),
     }
   }
   const split = splitSportsFixtures(scanResult.fixtures, input.nowMs)
-  const onTvNow = scanResult.fixtures
-    .filter(
-      (fixture) =>
-        fixture.squad === "first-team" &&
-        fixture.tier === "confirmed" &&
-        sportsFixtureState(fixture, input.nowMs) === "now",
-    )
-    .sort((a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title))
+  // Feed-first (0.11.26): on-TV-now comes from the feed's live +
+  // pre-match fixtures (selectOnTvNowRows), never from the EPG scan
+  // alone — an EPG programme on now (classic, replay, magazine
+  // show) is not a fixture and never appears here.
+  const onTvNow = selectOnTvNowRows(
+    input.liveMatches ?? [],
+    input.nextMatches ?? [],
+    input.nowMs,
+  )
   const model: SportsHubModel = {
     ...base,
     split,
@@ -1137,7 +1215,7 @@ function buildNextMatchesSection(
       el(
         "p",
         "rs-sports-empty-line",
-        "Next matches unavailable — the feed couldn't be reached. United on TV now below still comes from your programme guide.",
+        "Next matches unavailable — the feed couldn't be reached.",
       ),
     )
   }
@@ -1237,32 +1315,22 @@ function buildFeedHero(
 // ── United on TV now (mockup cards, 0.11.17) ────────────────────
 
 /**
- * Programme kind for the card meta line, from the title/desc
- * markers the classifier already uses for the ON NOW badge — a
- * classic, replay or highlights programme names its kind; a live
- * match names its competition instead. Display only; the badge
- * itself still comes from sportsFixtureLiveBadge (untouched).
- */
-function programmeType(fixture: SportsFixture): string {
-  const text = `${fixture.title} ${fixture.desc ?? ""}`
-  if (/\bclassics?\b/i.test(text)) return "Classic"
-  if (/\bhighlights?\b/i.test(text)) return "Highlights"
-  if (/\breplays?\b/i.test(text)) return "Replay"
-  if (/\barchive\b|\bretro\b/i.test(text)) return "Classic"
-  return fixture.competition ?? fixture.channelCategory ?? "Live"
-}
-
-/**
- * "United on TV now" — up to three cards for first-team EPG
- * fixtures on air right now, mockup shape: artwork thumb with the
- * ON NOW/LIVE badge (badge logic untouched), Watch pill, title,
- * "channel · type · N min left". REAL EPG programmes only: when
- * the guide has no United programme on now, the section renders
- * its honest empty line — never invented cards. The mockup's three
- * classics are samples, not data.
+ * "United on TV now" — up to three cards, feed-first (0.11.26):
+ * each card is a feed fixture that is live or kicking off within
+ * the hour, with its station from the EPG (Station TBC when the
+ * guide has no listing). The feed is the truth about live: a live
+ * feed fixture is LIVE even when the EPG has no listing for it,
+ * and an EPG programme on now with no feed fixture behind it
+ * (a classic, a replay, a magazine show) is never a card here.
+ * A pre-match card's badge comes from the EPG listing (ON NOW
+ * when build-up coverage is airing); the Watch pill tunes the
+ * EPG listing, so a card with no listing has no pill. When the
+ * feed has nothing on now the section renders its honest empty
+ * line — never invented cards.
  */
 function buildOnTvNowSection(
-  onTvNow: SportsFixture[],
+  rows: NextMatchRow[],
+  feedResult: FeedFixturesResult | null,
   ctx: RowContext,
   nowMs: number = Date.now(),
 ): HTMLElement {
@@ -1273,51 +1341,70 @@ function buildOnTvNowSection(
     el(
       "p",
       "rs-sports-section-note",
-      "Classics, replays and highlights on your channels",
+      "Live now or kicking off within the hour",
     ),
   )
-  if (onTvNow.length === 0) {
-    section.appendChild(
-      el(
-        "p",
-        "rs-sports-empty-line",
-        "No Manchester United programmes on TV right now — check back closer to matchday.",
-      ),
-    )
+  if (rows.length === 0) {
+    const empty =
+      feedResult?.status === "no-key"
+        ? "United on TV now needs your football-data.org API key — add it in Settings."
+        : feedResult?.status === "error"
+          ? "Can't tell what's on TV right now — the feed couldn't be reached."
+          : "No Manchester United programmes on TV right now — check back closer to matchday."
+    section.appendChild(el("p", "rs-sports-empty-line", empty))
     return section
   }
   const grid = el("div", "rs-sports-onnow-grid")
-  for (const fixture of onTvNow.slice(0, 3)) {
+  for (const row of rows.slice(0, 3)) {
+    const fixture = row.matched.fixture
+    const epgFixture = row.epgFixture
+    const live = fixture.startMs <= nowMs
     const card = el("article", "rs-sports-onnow-card")
-    card.setAttribute("data-fixture-id", fixture.id)
+    card.setAttribute("data-fixture-id", epgFixture?.id ?? fixture.id)
     const thumb = el("div", "rs-sports-onnow-thumb")
-    const badge = sportsFixtureLiveBadge(fixture, nowMs)
+    // Badge: the feed is the truth about live — a live feed
+    // fixture is LIVE; a pre-match fixture gets the EPG badge
+    // (ON NOW when build-up coverage is airing).
+    const badge = live
+      ? "LIVE"
+      : epgFixture
+        ? sportsFixtureLiveBadge(epgFixture, nowMs)
+        : null
     if (badge) {
       thumb.appendChild(
         el("span", "rs-sports-badge rs-sports-badge-live", badge),
       )
     }
-    const watch = el("button", "rs-sports-onnow-watch", "Ⓐ Watch")
-    watch.type = "button"
-    watch.setAttribute("data-couch-key", `sports:onnow:watch:${fixture.id}`)
-    watch.setAttribute("data-fixture-id", fixture.id)
-    watch.addEventListener("click", () => {
-      ctx.callbacks.onWatch(fixture)
-    })
-    thumb.appendChild(watch)
+    if (epgFixture) {
+      const watch = el("button", "rs-sports-onnow-watch", "Ⓐ Watch")
+      watch.type = "button"
+      watch.setAttribute(
+        "data-couch-key",
+        `sports:onnow:watch:${epgFixture.id}`,
+      )
+      watch.setAttribute("data-fixture-id", epgFixture.id)
+      watch.addEventListener("click", () => {
+        ctx.callbacks.onWatch(epgFixture)
+      })
+      thumb.appendChild(watch)
+    }
     card.appendChild(thumb)
-    card.appendChild(el("div", "rs-sports-onnow-title", fixture.title))
-    const minutesLeft = Math.max(
-      0,
-      Math.ceil((fixture.stopMs - nowMs) / 60_000),
-    )
     card.appendChild(
       el(
         "div",
-        "rs-sports-onnow-meta",
-        `${fixture.channelName} · ${programmeType(fixture)} · ${minutesLeft} min left`,
+        "rs-sports-onnow-title",
+        formatFeedFixtureTitle(fixture),
       ),
     )
+    // Station is the listing's primary channel (the old card
+    // shape) — Station TBC when the guide has no listing for it.
+    const station = epgFixture?.channelName ?? STATION_TBC
+    const meta = live
+      ? epgFixture && epgFixture.stopMs > nowMs
+        ? `${station} · ${fixture.competition} · ${Math.max(0, Math.ceil((epgFixture.stopMs - nowMs) / 60_000))} min left`
+        : `${station} · ${fixture.competition} · Live now`
+      : `${station} · ${fixture.competition} · Starts in ${Math.max(1, Math.ceil((fixture.startMs - nowMs) / 60_000))} min`
+    card.appendChild(el("div", "rs-sports-onnow-meta", meta))
     grid.appendChild(card)
   }
   section.appendChild(grid)
@@ -1326,8 +1413,8 @@ function buildOnTvNowSection(
 
 /**
  * Card artwork only: one enrichment call per on-now card, backdrop
- * variant — same shape as applyHeroArtwork. A null URL leaves the
- * branded gradient fallback untouched.
+ * variant — same shape as the fixture-row artwork below. A null
+ * URL leaves the branded gradient fallback untouched.
  */
 export async function applyOnTvNowArtwork(
   cardElement: HTMLElement,
@@ -1398,76 +1485,56 @@ export async function applyFixtureCardArtwork(
 
 // ── Hero ────────────────────────────────────────────────────────
 
-function buildHero(
-  fixture: SportsFixture,
-  ctx: RowContext,
+/**
+ * The feed-state hero (feed-first, 0.11.26): when the feed has no
+ * next match, the hero says so honestly instead of silently
+ * substituting an EPG fixture — an EPG listing is a TV programme,
+ * never the hub's next match. Same crest-first body and Old
+ * Trafford photo as the feed hero (`.rs-sports-hero-feed`), so
+ * the corner keeps its identity in every feed state:
+ *  - no-key: the key is missing — a Set up key button (the same
+ *    `sports:setup-key:hero` hook the Next fixtures section uses)
+ *    takes the user to Settings.
+ *  - error: the feed could not be reached.
+ *  - ok/stale with no rows: the feed has no upcoming United
+ *    fixtures right now.
+ *  - null (not fetched yet): the feed hero is simply not shown —
+ *    the hub renders without a hero rather than a wrong one.
+ */
+function buildFeedStateHero(
+  feedResult: FeedFixturesResult,
+  callbacks: SportsHubCallbacks,
 ): HTMLElement {
-  const hero = el("section", "rs-sports-hero")
+  const hero = el("section", "rs-sports-hero rs-sports-hero-feed")
   hero.setAttribute("data-sports-section", "hero")
-  hero.setAttribute("data-fixture-id", fixture.id)
   const body = el("div", "rs-sports-hero-body")
   const crest = el("img", "rs-sports-hero-crest")
   crest.src = MAN_UTD_CREST_SRC
   crest.alt = MAN_UTD_CREST_ALT
   crest.decoding = "async"
   body.appendChild(crest)
+  body.appendChild(el("h2", "rs-sports-hero-title", "UNITED CORNER"))
   body.appendChild(el("p", "rs-sports-hero-eyebrow", "Next match"))
-  body.appendChild(el("h2", "rs-sports-hero-title", fixture.title))
-  body.appendChild(
-    el("p", "rs-sports-hero-meta", fixtureMetaLine(fixture, ctx.nowMs)),
-  )
-  const alsoOn = alsoOnLine(fixture)
-  if (alsoOn) {
-    body.appendChild(el("p", "rs-sports-hero-also", alsoOn))
+  const message =
+    feedResult.status === "no-key"
+      ? "Next matches need your football-data.org API key in Settings."
+      : feedResult.status === "error"
+        ? "Next matches unavailable — the feed couldn't be reached."
+        : "No upcoming Manchester United fixtures from the feed right now."
+  body.appendChild(el("p", "rs-sports-hero-match", message))
+  if (feedResult.status === "no-key") {
+    const actions = el("div", "rs-sports-hero-actions")
+    const setup = el("button", "rs-sports-setup-key", "Set up key")
+    setup.type = "button"
+    setup.setAttribute("data-couch-key", "sports:setup-key:hero")
+    setup.addEventListener("click", () => {
+      callbacks.onSetupFootballDataKey?.()
+    })
+    actions.appendChild(setup)
+    body.appendChild(actions)
   }
-  if (fixture.desc) {
-    body.appendChild(el("p", "rs-sports-hero-desc", fixture.desc))
-  }
-  const watch = el(
-    "button",
-    "rs-sports-hero-watch",
-    fixtureActionLabel(fixture, ctx.nowMs),
-  )
-  watch.type = "button"
-  watch.setAttribute("data-couch-key", "sports:hero:watch")
-  watch.setAttribute("data-fixture-id", fixture.id)
-  watch.addEventListener("click", () => {
-    ctx.callbacks.onWatch(fixture)
-  })
-  body.appendChild(watch)
   hero.appendChild(body)
   return hero
-}
-
-/**
- * Hero artwork only (§10): one enrichment call for the hero
- * fixture, backdrop variant. Rows carry no artwork calls. A null
- * URL leaves the branded gradient fallback untouched — never a
- * stretched logo, never a broken image.
- */
-export async function applyHeroArtwork(
-  heroElement: HTMLElement,
-  fixture: SportsFixture,
-): Promise<string | null> {
-  try {
-    const art = await enrichProgramme({
-      title: fixture.title,
-      channelName: fixture.channelName,
-      startMs: fixture.startMs,
-      endMs: fixture.stopMs,
-      category: fixture.channelCategory,
-      channelLogoUrl: fixture.channelLogo,
-    })
-    const url = pickArtworkUrl(art, "backdrop")
-    if (!url) return null
-    if (!heroElement.isConnected) return null
-    if (heroElement.getAttribute("data-fixture-id") !== fixture.id) return null
-    heroElement.style.setProperty("--rs-sports-hero-art", `url("${url}")`)
-    heroElement.classList.add("rs-sports-hero-has-art")
-    return url
-  } catch {
-    return null
-  }
 }
 
 // ── Hub render ──────────────────────────────────────────────────
@@ -1512,7 +1579,7 @@ const HUB_STATE_COPY: Record<
   },
   loading: {
     title: "Loading the programme guide…",
-    message: "Fixtures from your programme guide will appear here.",
+    message: "United fixtures will appear here.",
   },
   failed: {
     title: "The programme guide couldn't be loaded",
@@ -1588,8 +1655,8 @@ export function renderSportsHub(
   if (root.headerMeta) {
     root.headerMeta.textContent =
       model.lastUpdatedLabel !== null
-        ? `Fixtures from your programme guide · Last updated ${model.lastUpdatedLabel}`
-        : "Fixtures from your programme guide"
+        ? `Fixtures from football-data.org · Guide last updated ${model.lastUpdatedLabel}`
+        : "Fixtures from football-data.org"
   }
   if (root.staleNote) {
     root.staleNote.hidden = !model.stale
@@ -1614,16 +1681,17 @@ export function renderSportsHub(
   const ctx: RowContext = { nowMs, callbacks, showPossibleBadge: false }
   const fragment = document.createDocumentFragment()
   // Section order (mockup, 0.11.17): top block (League position
-  // panel + feed/EPG hero, side by side) → United on TV now →
-  // Next fixtures → Upcoming (EPG) → Possible → Other Squads →
-  // Recent. Recent NEVER leads; when Upcoming is empty the honest
-  // empty line names the ~36h guide window and Next fixtures
-  // carries "what's coming". The feed hero leads the fixtures: on
-  // a Friday afternoon the EPG has no next match and the feed hero
-  // is what the user sees. The table and fixtures render as soon
-  // as their own (feed) data arrives — they never wait for the
-  // guide (bug 2); only the on-TV-now cards and their tune-in need
-  // the guide, and they render an honest empty line without it.
+  // panel + feed hero / feed-state hero, side by side) → United on
+  // TV now → Next fixtures → United on TV soon (EPG) → Possible →
+  // Other Squads → Recent. Recent NEVER leads; when the EPG
+  // Upcoming is empty the honest empty line names the ~36h guide
+  // window and Next fixtures carries "what's coming". The feed
+  // hero leads the fixtures: on a Friday afternoon the EPG has no
+  // next match and the feed hero is what the user sees. The table
+  // and fixtures render as soon as their own (feed) data arrives
+  // — they never wait for the guide (bug 2); only the on-TV-now
+  // cards and their tune-in need the guide, and they render an
+  // honest empty line without it.
   const tableShowsFeedData =
     model.tableResult !== null &&
     (model.tableResult.status === "ok" ||
@@ -1642,11 +1710,16 @@ export function renderSportsHub(
   const feedHeroRow = model.nextMatches[0] ?? null
   if (feedHeroRow) {
     top.appendChild(buildFeedHero(feedHeroRow, callbacks, nowMs))
-  } else if (model.hero) {
-    top.appendChild(buildHero(model.hero, ctx))
+  } else if (model.feedResult) {
+    // Feed-first (0.11.26): no feed next match, no hero fixture —
+    // the honest feed-state hero, never an EPG listing standing in
+    // for the next match. model.hero is the guide view only.
+    top.appendChild(buildFeedStateHero(model.feedResult, callbacks))
   }
   if (top.childElementCount > 0) fragment.appendChild(top)
-  fragment.appendChild(buildOnTvNowSection(model.onTvNow, ctx, nowMs))
+  fragment.appendChild(
+    buildOnTvNowSection(model.onTvNow, model.feedResult, ctx, nowMs),
+  )
   if (model.feedResult) {
     fragment.appendChild(
       buildNextMatchesSection(
@@ -1660,13 +1733,19 @@ export function renderSportsHub(
   }
   const { possible, otherSquadsUpcoming, otherSquadsRecent, recent } =
     model.split
-  // A fixture on air right now is featured once, in the on-TV-now
-  // cards above — it does NOT repeat in Upcoming (which is for
-  // fixtures still to come). This also keeps each fixture's badge
-  // painted exactly once in the hub: the on-now badge tests collect
-  // badges document-wide, and the card and the row would double it.
+  // A feed fixture featured in the on-TV-now cards above does NOT
+  // repeat in Upcoming — it is featured once. An EPG fixture the
+  // feed does NOT back (feed down, or a match the feed cannot see)
+  // still renders here with its LIVE badge instead of vanishing:
+  // Upcoming is the guide's view, and the feed's Next fixtures
+  // above are the upcoming matches.
+  const onTvNowFixtureIds = new Set(
+    model.onTvNow
+      .map((row) => row.epgFixture?.id)
+      .filter((id): id is string => id != null),
+  )
   const upcoming = model.split.upcoming.filter(
-    (fixture) => sportsFixtureState(fixture, nowMs) !== "now",
+    (fixture) => !onTvNowFixtureIds.has(fixture.id),
   )
   const hasAnyFixture =
     upcoming.length > 0 ||
@@ -1702,8 +1781,8 @@ export function renderSportsHub(
     fragment.appendChild(empty)
   } else {
     const upcomingSection = buildSection(
-      "Upcoming Matches",
-      null,
+      "United on TV soon",
+      "TV listings from your programme guide — the feed's Next fixtures above are the upcoming matches.",
       upcoming,
       ctx,
       "No upcoming matches in the guide right now — the guide covers about the next day and a half.",
@@ -1882,11 +1961,12 @@ export function installSportsHubController(
 
 /**
  * Initial focus (plan §6.4 intent): a returning visitor's recorded
- * focus first, else the hero Remind button (feed hero) or hero
- * Watch button (EPG hero), else the first on-TV-now Watch, else
- * the table expand action, else the first Next Fixtures Watch
- * button, before falling back to the follow control. The Followed
- * page does not seed nav focus, so the hub sets its own explicitly.
+ * focus first, else the hero Remind button (feed hero), else the
+ * first on-TV-now Watch, else the table expand action, else the
+ * first Next Fixtures Watch button, before falling back to the
+ * follow control. The EPG hero is gone (feed-first, 0.11.26), so
+ * there is no hero Watch step any more. The Followed page does not
+ * seed nav focus, so the hub sets its own explicitly.
  */
 export function focusSportsHubInitial(root: ParentNode): void {
   const restored = restoreListFocus(document, SPORTS_HUB_ROUTE, root)
@@ -1896,13 +1976,6 @@ export function focusSportsHubInitial(root: ParentNode): void {
   )
   if (heroRemind) {
     heroRemind.focus({ preventScroll: true })
-    return
-  }
-  const heroWatch = root.querySelector<HTMLElement>(
-    '[data-couch-key="sports:hero:watch"]',
-  )
-  if (heroWatch) {
-    heroWatch.focus({ preventScroll: true })
     return
   }
   const firstOnNowWatch = root.querySelector<HTMLElement>(
@@ -2152,7 +2225,6 @@ interface HubRuntime {
   epgStatus: "loading" | "failed" | "ready"
   scanResult: SportsScanResult | null
   pipelineFailed: boolean
-  heroArtworkFor: string | null
   timer: ReturnType<typeof setInterval> | null
   /** First resolution pass done — render() waits for this so the
    *  static shell's loading block is never replaced by a wrong
@@ -2166,8 +2238,17 @@ interface HubRuntime {
   feedResult: FeedFixturesResult | null
   formResult: FeedFormResult | null
   nextMatches: NextMatchRow[]
+  /** Live feed fixtures, matched to EPG listings (feed-first,
+   *  0.11.26) — the live half of on-TV-now. Null until fetched. */
+  liveResult: FeedFixturesResult | null
+  liveMatches: NextMatchRow[]
   tableExpanded: boolean
   feedInFlight: boolean
+  /** Wall-clock ms of the last feed fetch — the 60s timer uses it
+   *  to tell a kick-off boundary (a next-match row whose kick-off
+   *  has passed since the last fetch) from a row that was already
+   *  live when fetched. */
+  feedFetchedAt: number
 }
 
 export function mountSportsHubPage(): void {
@@ -2183,7 +2264,6 @@ export function mountSportsHubPage(): void {
     epgStatus: "loading",
     scanResult: null,
     pipelineFailed: false,
-    heroArtworkFor: null,
     timer: null,
     resolved: false,
     playlistAttempted: false,
@@ -2191,8 +2271,11 @@ export function mountSportsHubPage(): void {
     feedResult: null,
     formResult: null,
     nextMatches: [],
+    liveResult: null,
+    liveMatches: [],
     tableExpanded: false,
     feedInFlight: false,
+    feedFetchedAt: 0,
   }
 
   let callbacks: SportsHubCallbacks | null = null
@@ -2228,6 +2311,7 @@ export function mountSportsHubPage(): void {
       feedResult: runtime.feedResult,
       formResult: runtime.formResult,
       nextMatches: runtime.nextMatches,
+      liveMatches: runtime.liveMatches,
       tableExpanded: runtime.tableExpanded,
     })
     const activeCallbacks =
@@ -2265,13 +2349,11 @@ export function mountSportsHubPage(): void {
       if (result?.outcome === "completed") await refreshFeed()
     }
     renderSportsHub(root!, model, activeCallbacks)
-    if (model.hero && model.hero.id !== runtime.heroArtworkFor) {
-      runtime.heroArtworkFor = model.hero.id
-      const heroEl = shell!.querySelector<HTMLElement>(".rs-sports-hero")
-      if (heroEl) void applyHeroArtwork(heroEl, model.hero)
-    }
     // On-TV-now card artwork: one enrichment call per card, only
-    // for cards that have not had art applied yet.
+    // for cards that have not had art applied yet. A card whose
+    // data-fixture-id is a feed fixture id (live, no EPG listing)
+    // finds no EPG fixture and keeps its branded gradient — art
+    // is decoration, never data.
     for (const card of shell!.querySelectorAll<HTMLElement>(
       ".rs-sports-onnow-card:not([data-art-applied])",
     )) {
@@ -2346,27 +2428,37 @@ export function mountSportsHubPage(): void {
   }
 
   /**
-   * Feed refresh (v2 Phase 2): table + next 5 fixtures + last-five
-   * form through the Phase 1 client (1h cache, so repeat calls are
-   * cheap). A no-key/error result still lands in the runtime — the
-   * table and Next Matches sections render their honest failure copy
-   * from it. Never throws: the client returns typed results.
+   * Feed refresh (v2 Phase 2, feed-first 0.11.26): table + next 5
+   * fixtures + last-five form through the Phase 1 client (1h
+   * cache, so repeat calls are cheap), plus the live fixtures
+   * (5-min cache) that drive on-TV-now. A no-key/error result
+   * still lands in the runtime — the table and Next Matches
+   * sections render their honest failure copy from it. Never
+   * throws: the client returns typed results.
    */
   async function refreshFeed(): Promise<void> {
     if (!mounted || runtime.feedInFlight) return
     runtime.feedInFlight = true
     try {
-      const [tableResult, feedResult, formResult] = await Promise.all([
-        getLeagueTable(),
-        getNextFixtures(5),
-        getRecentForm(5),
-      ])
+      const [tableResult, feedResult, formResult, liveResult] =
+        await Promise.all([
+          getLeagueTable(),
+          getNextFixtures(5),
+          getRecentForm(5),
+          getLiveFixtures(5),
+        ])
       if (!mounted) return
       runtime.tableResult = tableResult
       runtime.feedResult = feedResult
       runtime.formResult = formResult
+      runtime.liveResult = liveResult
+      runtime.feedFetchedAt = Date.now()
       runtime.nextMatches = buildNextMatchRows(
         feedResult.fixtures ?? [],
+        currentFixtures(),
+      )
+      runtime.liveMatches = buildNextMatchRows(
+        liveResult.fixtures ?? [],
         currentFixtures(),
       )
       render()
@@ -2460,11 +2552,18 @@ export function mountSportsHubPage(): void {
     runtime.epgStatus = "ready"
     scan()
     // A fresh EPG revision can bring the station for a feed
-    // fixture that was Station TBC — re-match from the cached feed
-    // result (no refetch inside the 1h TTL).
+    // fixture that was Station TBC — re-match BOTH the next and
+    // the live fixtures from the cached feed results (no refetch
+    // inside the TTLs).
     if (runtime.feedResult?.fixtures) {
       runtime.nextMatches = buildNextMatchRows(
         runtime.feedResult.fixtures,
+        currentFixtures(),
+      )
+    }
+    if (runtime.liveResult?.fixtures) {
+      runtime.liveMatches = buildNextMatchRows(
+        runtime.liveResult.fixtures,
         currentFixtures(),
       )
     }
@@ -2526,6 +2625,26 @@ export function mountSportsHubPage(): void {
     if (signature === lastStateSignature) return
     lastStateSignature = signature
     render()
+    // Feed-first (0.11.26): a kick-off boundary is a feed event,
+    // not an EPG state change — when a next-match row kicked off
+    // since the last fetch, or a live row ended, the feed slices
+    // are stale (the kicked-off fixture leaves getNextFixtures,
+    // the ended fixture leaves getLiveFixtures) and only a
+    // refresh re-derives them. refreshFeed is guarded by
+    // feedInFlight, so a slow fetch never stacks.
+    const kickoffCrossed = runtime.nextMatches.some(
+      (row) =>
+        row.matched.fixture.startMs <= nowMs &&
+        row.matched.fixture.startMs > runtime.feedFetchedAt,
+    )
+    const liveEnded = runtime.liveMatches.some((row) => {
+      const endMs = row.epgFixture
+        ? row.epgFixture.stopMs
+        : row.matched.fixture.startMs +
+          FOOTBALL_DATA_LIVE_FIXTURE_MAX_AGE_MS
+      return endMs <= nowMs
+    })
+    if (kickoffCrossed || liveEnded) void refreshFeed()
   }, 60_000)
 
   const followButton = root.followButton

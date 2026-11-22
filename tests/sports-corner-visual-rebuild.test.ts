@@ -19,6 +19,7 @@ import {
 } from "@/scripts/lib/football-data.ts"
 import {
   MOCK_FRIDAY_AFTERNOON_MS,
+  MOCK_NEXT_FIXTURES,
   createMockFetch,
 } from "@/scripts/lib/football-data-mock.ts"
 import {
@@ -39,6 +40,7 @@ import type {
 const FRIDAY = MOCK_FRIDAY_AFTERNOON_MS
 const HOUR = 3_600_000
 const MINUTE = 60_000
+const KICKOFF = Date.UTC(2026, 10, 22, 16, 30, 0)
 
 function memoryStorage() {
   const store = new Map<string, string>()
@@ -147,7 +149,10 @@ async function feedResults(nowMs: number): Promise<{
   return { tableResult, feedResult, formResult }
 }
 
-/** Full hub: one EPG fixture per bucket, plus the live classic. */
+/** Full hub: one EPG fixture per bucket. The live classic is
+ *  tier "recorded" (what the real classifier produces for a
+ *  classic title) — it is a TV programme, not a fixture, so it
+ *  appears nowhere as a row or a card. */
 function fullHubFixtures(): SportsFixture[] {
   return [
     fixture({
@@ -158,6 +163,7 @@ function fullHubFixtures(): SportsFixture[] {
       startMs: FRIDAY - 30 * MINUTE,
       stopMs: FRIDAY + 60 * MINUTE,
       id: "301:classic",
+      tier: "recorded",
     }),
     fixture({
       title: "Man Utd v Sunderland",
@@ -326,13 +332,44 @@ describe("visual rebuild — EPG sections are fixture cards, not text lists", ()
     expect(other?.classList.contains("rs-sports-row--other")).toBe(true)
   })
 
-  it("on-TV-now classic badge sits on the card thumb", async () => {
-    await renderFullHub()
+  // Feed-first (0.11.26) — the old test pinned an ON NOW badge
+  // on a classic's on-TV-now card. A classic is never an
+  // on-TV-now card now (no feed fixture, no entry). The badge
+  // placement pin survives in its correct form: a feed-backed
+  // live fixture's LIVE badge sits on the card thumb.
+  it("on-TV-now live badge sits on the card thumb", async () => {
+    const { tableResult, feedResult, formResult } =
+      await feedResults(FRIDAY)
+    const sunday = KICKOFF + 63 * MINUTE
+    const listing = fixture({
+      title: "Liverpool v Man Utd",
+      teams: ["Liverpool", "Man Utd"],
+      channelId: 201,
+      channelName: "Sky Sports Main Event",
+      alsoOn: [{ channelId: 202, channelName: "Sky Sports Premier League" }],
+      startMs: KICKOFF,
+      stopMs: KICKOFF + 143 * MINUTE,
+      id: "201:liverpool-live",
+    })
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "ready",
+      scanResult: scanResult([listing]),
+      nowMs: sunday,
+      tableResult,
+      feedResult,
+      formResult,
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], [listing]),
+      liveMatches: buildNextMatchRows([MOCK_NEXT_FIXTURES[0]], [listing]),
+    })
+    renderSportsHub(hubRoot(), model, stubCallbacks(), sunday)
     const card = document.querySelector(".rs-sports-onnow-card")
     expect(
       card?.querySelector(".rs-sports-onnow-thumb .rs-sports-badge")
         ?.textContent,
-    ).toBe("ON NOW")
+    ).toBe("LIVE")
   })
 
   it("section titles carry count pills", async () => {
@@ -347,27 +384,39 @@ describe("visual rebuild — EPG sections are fixture cards, not text lists", ()
     }
   })
 
+  // Feed-first (0.11.26) — the old test used an EPG-only live
+  // fixture, which now stays in Upcoming. Empty Upcoming needs a
+  // feed-backed live fixture: Liverpool live (feed) + the Sky
+  // listing (EPG) is featured once in on-TV-now and excluded from
+  // Upcoming, so Upcoming renders its designed empty panel.
   it("empty Upcoming renders a designed empty panel, not a bare line", async () => {
-    const { tableResult, feedResult, formResult } = await feedResults(FRIDAY)
-    const live = fixture({
-      title: "Man Utd v Sunderland",
-      startMs: FRIDAY - 10 * MINUTE,
-      stopMs: FRIDAY + 80 * MINUTE,
-      id: "101:live",
+    const { tableResult, feedResult, formResult } =
+      await feedResults(FRIDAY)
+    const sunday = KICKOFF + 63 * MINUTE
+    const listing = fixture({
+      title: "Liverpool v Man Utd",
+      teams: ["Liverpool", "Man Utd"],
+      channelId: 201,
+      channelName: "Sky Sports Main Event",
+      alsoOn: [{ channelId: 202, channelName: "Sky Sports Premier League" }],
+      startMs: KICKOFF,
+      stopMs: KICKOFF + 143 * MINUTE,
+      id: "201:liverpool-live",
     })
     const model = buildSportsHubModel({
       followed: true,
       hasPlaylist: true,
       hasChannels: true,
       epgStatus: "ready",
-      scanResult: scanResult([live]),
-      nowMs: FRIDAY,
+      scanResult: scanResult([listing]),
+      nowMs: sunday,
       tableResult,
       feedResult,
       formResult,
-      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], []),
+      nextMatches: buildNextMatchRows(feedResult.fixtures ?? [], [listing]),
+      liveMatches: buildNextMatchRows([MOCK_NEXT_FIXTURES[0]], [listing]),
     })
-    renderSportsHub(hubRoot(), model, stubCallbacks(), FRIDAY)
+    renderSportsHub(hubRoot(), model, stubCallbacks(), sunday)
     const empty = document.querySelector(
       '[data-sports-section="upcoming"] .rs-sports-empty-line',
     )
