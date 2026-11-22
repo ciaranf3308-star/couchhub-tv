@@ -1,0 +1,15 @@
+---
+// Settings section: Profile (0.11.23 single-page rebuild).
+//
+// Extracted verbatim from src/pages/settings/profile.astro — same markup,
+// same element ids, same wiring via settings-page.js. Do not rename ids
+// or storage keys here; the section is rendered on /settings and the old
+// /settings/profile route redirects to /settings#profile.
+import ProfileSwitcher from "@/components/ProfileSwitcher.astro"
+---
+
+    <section id="settings-profile" class="settings-group scroll-mt-8 lg:scroll-mt-20">
+      <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6">
+        <ProfileSwitcher />
+      </div>
+    </section>

@@ -1,16 +1,16 @@
 ---
-import SettingsShell from "@/components/settings/SettingsShell.astro"
-import ProfileSwitcher from "@/components/ProfileSwitcher.astro"
+// Redirect (0.11.23): Settings is one page now. Old section URLs land
+// on the matching section of /settings so bookmarks and deep links keep working.
 ---
-<SettingsShell
-  title="Profile"
-  titleKey="settings.group.profile"
-  sub="Who is watching"
-  subKey=""
-  current="profile">
-    <section id="settings-profile" class="settings-group scroll-mt-8 lg:scroll-mt-20">
-      <div class="rounded-2xl border border-line bg-surface p-5 sm:p-6">
-        <ProfileSwitcher />
-      </div>
-    </section>
-</SettingsShell>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="refresh" content="0; url=/settings#profile" />
+    <title>Settings — Profile</title>
+    <script is:inline>window.location.replace("/settings#profile");</script>
+  </head>
+  <body>
+    <p><a href="/settings#profile">Continue to Settings — Profile</a></p>
+  </body>
+</html>
