@@ -21,16 +21,36 @@
 // - Attribution (provider terms §7.1): FOOTBALL_DATA_ATTRIBUTION must
 //   be shown wherever the table/fixtures are shown (hub, Phase 2).
 //
-// Network: plain `fetch()` from the frontend, exactly like the TMDB
-// client (tmdb.ts). No Tauri allow-list entry is needed:
-// src-tauri/capabilities/default.json already allows `https://**/*`,
-// and safe_fetch.rs is only the manifest probe, not a fetch gate.
+// Network: inside the Tauri webview the feed goes through the app's
+// own providerFetch (src/scripts/lib/provider-fetch.js), which routes
+// via @tauri-apps/plugin-http — the request is issued by Rust
+// (reqwest), outside the webview, so no CORS check applies. A plain
+// webview fetch() CANNOT reach this API: api.football-data.org never
+// sends Access-Control-Allow-Origin on GET responses, and its OPTIONS
+// preflight always answers the fixed value `http://localhost`, which
+// matches neither the production webview origin
+// (`https://tauri.localhost`) nor dev (`http://localhost:4321`) —
+// verified live 2026-11-22 in a real Chromium (preflight rejection
+// quoted in tests/e2e/football-data-live.spec.ts). That CORS failure
+// is why the key test and the hub both reported "couldn't be reached"
+// while the API itself was up (invalid token -> HTTP 400, no token ->
+// HTTP 403). TMDB works from the same dialog because it answers
+// `Access-Control-Allow-Origin: *`. The http plugin is already
+// registered in src-tauri/src/lib.rs and the `http:default`
+// capability already allows `https://**/*`; no native change was
+// needed. Outside Tauri (plain browser preview, unit tests) the
+// transport stays plain fetch() — a browser origin cannot reach this
+// API, which is the honest pre-existing limit there, not a regression.
 // Rate limit (free tier): 10 requests/minute. A refresh needs 4 calls
 // (standings + PL matches + CL matches + PL past matches for form)
 // and is cached for 1h, so normal use is far inside the limit.
 //
-// Tests must NEVER hit the live API (no key exists): every public
-// fetch takes an injectable `fetchImpl`, and the parsers are pure.
+// Tests must NEVER hit the live API in the unit suite (no key
+// exists): every public fetch takes an injectable `fetchImpl`, and
+// the parsers are pure. Live reachability through the real client
+// path is proven by tests/e2e/football-data-live.spec.ts (gated
+// behind FOOTBALL_DATA_LIVE_TEST=1), which runs the real module in
+// a real Chromium against the live API with a dummy token.
 
 import { log } from "@/scripts/lib/log.js"
 import { epgListingMatchesKickoff } from "@/scripts/lib/sports-corner-v2-hub.js"
@@ -591,7 +611,68 @@ function matchStatusOf(match: unknown): string | null {
 
 // ── Feed fetching ─────────────────────────────────────────────────
 
-function defaultFetch(): FootballDataFetchImpl {
+// ── Default transport (CORS: webview fetch cannot reach this API) ──
+
+/**
+ * True when the code runs inside the Tauri webview. Mirrors the
+ * check in provider-fetch.js (`window.__TAURI_INTERNALS__` /
+ * `window.__TAURI__`).
+ */
+function isTauriEnvironment(): boolean {
+  if (typeof window === "undefined") return false
+  const w = window as unknown as {
+    __TAURI_INTERNALS__?: unknown
+    __TAURI__?: unknown
+  }
+  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__)
+}
+
+/** Cached promise for the lazily-imported provider-fetch module. */
+let providerFetchPromise: Promise<{
+  providerFetch: FootballDataFetchImpl
+}> | null = null
+
+function loadProviderFetch(): Promise<{
+  providerFetch: FootballDataFetchImpl
+}> {
+  if (!providerFetchPromise) {
+    providerFetchPromise = import(
+      "@/scripts/lib/provider-fetch.js"
+    ).catch((error: unknown) => {
+      providerFetchPromise = null
+      throw error
+    })
+  }
+  return providerFetchPromise
+}
+
+/**
+ * The default fetch implementation for every feed call. Inside the
+ * Tauri webview this is providerFetch (plugin-http, Rust-side
+ * reqwest — no CORS); outside Tauri it is plain webview fetch().
+ * The import is lazy so this module keeps no static cycle with
+ * app-settings.js (which imports this module's key constant, and
+ * which provider-fetch.js itself imports).
+ */
+async function defaultFetch(): Promise<FootballDataFetchImpl> {
+  if (isTauriEnvironment()) {
+    try {
+      const { providerFetch } = await loadProviderFetch()
+      return (url: string, init?: { headers?: Record<string, string>; signal?: unknown }) =>
+        providerFetch(url, {
+          ...init,
+          // providerFetch reads logKind for its net log, then strips
+          // it before the request — the cast only carries it past
+          // this module's narrower fetch-init type.
+          logKind: "football-data",
+        } as { headers?: Record<string, string>; signal?: unknown }) as unknown as Promise<FootballDataFetchResponse>
+    } catch (error) {
+      log.warn(
+        "[xt:football-data] providerFetch unavailable, falling back to webview fetch:",
+        error,
+      )
+    }
+  }
   const impl = (globalThis as { fetch?: unknown }).fetch
   if (typeof impl !== "function") {
     throw new FootballDataError("fetch is not available in this environment")
@@ -706,7 +787,7 @@ export async function getLeagueTable(
       fromCache: true,
     }
   }
-  const fetchImpl = options.fetchImpl ?? defaultFetch()
+  const fetchImpl = options.fetchImpl ?? (await defaultFetch())
   try {
     const payload = await fetchJson(
       fetchImpl,
@@ -827,7 +908,7 @@ export async function getNextFixtures(
       fromCache: true,
     }
   }
-  const fetchImpl = options.fetchImpl ?? defaultFetch()
+  const fetchImpl = options.fetchImpl ?? (await defaultFetch())
   try {
     const payloads = await Promise.all(
       FOOTBALL_DATA_FIXTURE_COMPETITIONS.map((competition) =>
@@ -951,7 +1032,7 @@ export async function getRecentForm(
       fromCache: true,
     }
   }
-  const fetchImpl = options.fetchImpl ?? defaultFetch()
+  const fetchImpl = options.fetchImpl ?? (await defaultFetch())
   try {
     const payload = await fetchJson(fetchImpl, pastMatchesUrl(nowMs), apiKey)
     // Statuses and the United filter are applied to the RAW payload
@@ -1036,7 +1117,7 @@ export async function validateFootballDataKey(
   const trimmed = (key || "").trim()
   if (!trimmed) return { ok: false }
   try {
-    const impl = fetchImpl ?? defaultFetch()
+    const impl = fetchImpl ?? (await defaultFetch())
     await fetchJson(
       impl,
       `${FOOTBALL_DATA_BASE_URL}/competitions/PL/standings`,
