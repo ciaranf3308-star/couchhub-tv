@@ -146,12 +146,16 @@ async function startAuthForwarder(): Promise<{
   return { port, close: () => server.close() }
 }
 
-test.beforeAll(async () => {
+test.beforeAll(async (_fixtures, testInfo) => {
+  // Playwright hooks take no timeout argument (the 150_000 that used
+  // to sit here was silently ignored — the hook ran under the 30s
+  // default and a cold astro start timed it out). Set it on testInfo.
+  testInfo.setTimeout(150_000)
   forwarder = await startAuthForwarder()
   // Reuse a dev server already running on the default port (local
   // runs); otherwise spawn one on a scratch port. A cold start
   // re-optimizes dependencies and can take well over the default
-  // 30s hook timeout, hence the explicit timeout below.
+  // 30s hook timeout, hence the testInfo.setTimeout above.
   const defaultUp = await waitForDevServer("http://localhost:4321")
   if (defaultUp) {
     devUrl = "http://localhost:4321"
@@ -164,7 +168,7 @@ test.beforeAll(async () => {
   devUrl = `http://localhost:${DEV_PORT}`
   const up = await waitForDevServer(devUrl)
   if (!up) throw new Error("Astro dev server did not start")
-}, 150_000)
+})
 
 test.afterAll(async () => {
   devServer?.kill("SIGTERM")
