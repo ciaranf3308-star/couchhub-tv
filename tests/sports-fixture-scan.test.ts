@@ -16,6 +16,7 @@ import {
   scanSportsFixtures,
   selectNextFixture,
   splitSportsFixtures,
+  sportsChannelPreferenceTier,
   sportsFixtureLiveBadge,
   type SportsFixture,
   type SportsScanChannel,
@@ -911,5 +912,281 @@ describe("sportsFixtureLiveBadge — ON NOW vs LIVE (bug 4a, 2026-11-21)", () =>
         NOW,
       ),
     ).toBeNull()
+  })
+})
+
+describe("station preference (fix-3, 2026-11-22) — Stan Sport must never beat Sky", () => {
+  // Liverpool v Man Utd, Sun 22 Nov 2026, 16:30 kick-off — the live
+  // incident: the hub routed to Stan Sport (first in catalogue
+  // order) instead of Sky Sports Main Event 4K, and Stan Sport
+  // did not load.
+  const KICKOFF = Date.UTC(2026, 10, 22, 16, 30, 0)
+  const NOW_LIVERPOOL = Date.UTC(2026, 10, 22, 15, 0, 0)
+
+  it("sportsChannelPreferenceTier ranks UK/Irish rights holders above international feeds", () => {
+    expect(sportsChannelPreferenceTier("Sky Sports Main Event 4K")).toBe(0)
+    expect(sportsChannelPreferenceTier("Sky Sports Main Event")).toBe(0)
+    expect(sportsChannelPreferenceTier("Sky Sports Premier League")).toBe(0)
+    expect(sportsChannelPreferenceTier("Sky Sports Football")).toBe(0)
+    expect(sportsChannelPreferenceTier("TNT Sports 1")).toBe(1)
+    expect(sportsChannelPreferenceTier("Premier Sports 1")).toBe(1)
+    expect(sportsChannelPreferenceTier("BBC One")).toBe(1)
+    expect(sportsChannelPreferenceTier("RTÉ Two")).toBe(1)
+    expect(sportsChannelPreferenceTier("Virgin Media One")).toBe(1)
+    expect(sportsChannelPreferenceTier("Sky Sports Arena")).toBe(2)
+    expect(sportsChannelPreferenceTier("MUTV")).toBe(2)
+    expect(sportsChannelPreferenceTier("Stan Sport")).toBe(3)
+    expect(sportsChannelPreferenceTier("beIN Sports")).toBe(3)
+    expect(sportsChannelPreferenceTier("ESPN")).toBe(3)
+    expect(sportsChannelPreferenceTier("")).toBe(3)
+  })
+
+  it("preference order: Sky Sports Main Event 4K beats Stan Sport even when Stan Sport is first in catalogue order", () => {
+    const state = epgState([
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "sky-main-4k",
+        name: "Sky Sports Main Event 4K",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "sky-pl",
+        name: "Sky Sports Premier League",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        channel(1, "Stan Sport", "stan"),
+        channel(2, "Sky Sports Main Event 4K", "sky-main-4k"),
+        channel(3, "Sky Sports Premier League", "sky-pl"),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures).toHaveLength(1)
+    const fixture = result.fixtures[0]!
+    expect(fixture.channelName).toBe("Sky Sports Main Event 4K")
+    expect(fixture.channelId).toBe(2)
+    // Multi-station display: every carrier is shown, ranked.
+    expect(fixture.alsoOn.map((c) => c.channelName)).toEqual([
+      "Sky Sports Premier League",
+      "Stan Sport",
+    ])
+  })
+
+  it("catalogue order still decides within a tier", () => {
+    const state = epgState([
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "bein",
+        name: "beIN Sports",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [channel(1, "Stan Sport", "stan"), channel(2, "beIN Sports", "bein")],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures).toHaveLength(1)
+    expect(result.fixtures[0]!.channelName).toBe("Stan Sport")
+    expect(result.fixtures[0]!.alsoOn.map((c) => c.channelName)).toEqual([
+      "beIN Sports",
+    ])
+  })
+
+  it("dead-channel-never-primary: a carrier with an explicitly blank stream URL never leads while a playable carrier exists", () => {
+    const state = epgState([
+      {
+        id: "sky-main",
+        name: "Sky Sports Main Event",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        // Tier 0 but no stream to play: blank url on the row.
+        channel(1, "Sky Sports Main Event", "sky-main", { url: "" }),
+        channel(2, "Stan Sport", "stan"),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures).toHaveLength(1)
+    expect(result.fixtures[0]!.channelName).toBe("Stan Sport")
+    expect(result.fixtures[0]!.alsoOn.map((c) => c.channelName)).toEqual([
+      "Sky Sports Main Event",
+    ])
+  })
+
+  it("dead-channel-never-primary: an Xtream-style row with NO url field is playable, not demoted", () => {
+    const state = epgState([
+      {
+        id: "sky-main",
+        name: "Sky Sports Main Event",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        // No url key at all: Xtream rows carry none (built at tune
+        // time) — absence must not read as dead.
+        channel(1, "Sky Sports Main Event", "sky-main"),
+        channel(2, "Stan Sport", "stan"),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures[0]!.channelName).toBe("Sky Sports Main Event")
+  })
+
+  it("all carriers unplayable: the fixture still shows (never hidden), best-ranked first", () => {
+    const state = epgState([
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "sky-main",
+        name: "Sky Sports Main Event",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        channel(1, "Stan Sport", "stan", { url: "" }),
+        channel(2, "Sky Sports Main Event", "sky-main", { url: "   " }),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures).toHaveLength(1)
+    expect(result.fixtures[0]!.channelName).toBe("Sky Sports Main Event")
+  })
+
+  it("hero tie-break: same fixture listed twice, earlier-starting Stan Sport build-up loses to Sky at kick-off", () => {
+    const state = epgState([
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(
+            KICKOFF - HOUR,
+            KICKOFF + HOUR,
+            "Liverpool v Man Utd",
+          ),
+        ],
+      },
+      {
+        id: "sky-main-4k",
+        name: "Sky Sports Main Event 4K",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        channel(1, "Stan Sport", "stan"),
+        channel(2, "Sky Sports Main Event 4K", "sky-main-4k"),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    // Different starts → two rows; the hero must still be Sky.
+    expect(result.fixtures).toHaveLength(2)
+    const hero = selectNextFixture(result.fixtures, NOW_LIVERPOOL)
+    expect(hero).not.toBeNull()
+    expect(hero!.channelName).toBe("Sky Sports Main Event 4K")
+  })
+
+  it("hero tie-break does not disturb different fixtures: earliest live fixture still wins", () => {
+    const state = epgState([
+      {
+        id: "stan",
+        name: "Stan Sport",
+        programmes: [
+          programme(KICKOFF, KICKOFF + 2 * HOUR, "Liverpool v Man Utd"),
+        ],
+      },
+      {
+        id: "sky-main",
+        name: "Sky Sports Main Event",
+        programmes: [
+          programme(
+            KICKOFF + 2 * HOUR,
+            KICKOFF + 4 * HOUR,
+            "Man Utd v Brentford",
+          ),
+        ],
+      },
+    ])
+    const result = scanSportsFixtures(
+      [
+        channel(1, "Stan Sport", "stan"),
+        channel(2, "Sky Sports Main Event", "sky-main"),
+      ],
+      state,
+      {},
+      "pl1",
+      NOW_LIVERPOOL,
+    )
+    expect(result.fixtures).toHaveLength(2)
+    const hero = selectNextFixture(result.fixtures, NOW_LIVERPOOL)
+    expect(hero!.title).toBe("Liverpool v Man Utd")
   })
 })

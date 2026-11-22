@@ -31,6 +31,7 @@ import {
 } from "@/scripts/lib/football-data.js"
 import { log } from "@/scripts/lib/log.js"
 import { epgListingMatchesKickoff } from "@/scripts/lib/sports-corner-v2-hub.js"
+import { sportsChannelPreferenceTier } from "@/scripts/lib/sports-fixture-scan.js"
 import {
   SPORTS_REMINDER_BANNER_DISMISS_MS,
   clearSportsReminder,
@@ -100,24 +101,47 @@ export function buildNextMatchRows(
     channelName: fixture.channelName,
     alsoOn: fixture.alsoOn.map((channel) => channel.channelName),
   }))
+  // Rank listings before matching (fix-3): matchFixtureStation()
+  // takes the FIRST listing matching teams + kick-off window, so
+  // scan order (earliest start first) used to hand the station
+  // string to an earlier-starting international feed while Sky
+  // carried the same match. Best-ranked carrier first, earliest
+  // start as the tie-break — the same order the Watch-target pick
+  // below uses, so station and Watch can never disagree.
+  const byStationRank = (
+    a: { channelName: string; startMs: number },
+    b: { channelName: string; startMs: number },
+  ): number =>
+    sportsChannelPreferenceTier(a.channelName) -
+      sportsChannelPreferenceTier(b.channelName) ||
+    a.startMs - b.startMs
+  listings.sort(byStationRank)
   const matched = matchFixtureStations(feedFixtures, listings)
   return matched.map((row, index) => {
     if (!row.stationKnown) return { matched: row, epgFixture: null }
     const fixture = feedFixtures[index]
     const home = normaliseTeamName(fixture.home)
     const away = normaliseTeamName(fixture.away)
-    const epgFixture =
-      epgFixtures.find((candidate) => {
-        if (!epgListingMatchesKickoff(candidate.startMs, fixture.startMs)) {
-          return false
-        }
-        const candidateHome = normaliseTeamName(candidate.teams[0])
-        const candidateAway = normaliseTeamName(candidate.teams[1])
-        return (
-          (candidateHome === home && candidateAway === away) ||
-          (candidateHome === away && candidateAway === home)
-        )
-      }) ?? null
+    // Several EPG rows can list the same match (a build-up slot on
+    // one channel, kick-off on another). The Watch target is the
+    // best-ranked carrier among them (fix-3): the first row in
+    // scan order used to win, which is how an earlier-starting
+    // international feed could become the tune-in target while
+    // Sky carried the same match. Earliest start is the tie-break
+    // only. The station string (from matchFixtureStation) and this
+    // target therefore always agree on the primary.
+    const candidates = epgFixtures.filter((candidate) => {
+      if (!epgListingMatchesKickoff(candidate.startMs, fixture.startMs)) {
+        return false
+      }
+      const candidateHome = normaliseTeamName(candidate.teams[0])
+      const candidateAway = normaliseTeamName(candidate.teams[1])
+      return (
+        (candidateHome === home && candidateAway === away) ||
+        (candidateHome === away && candidateAway === home)
+      )
+    })
+    const epgFixture = candidates.sort(byStationRank)[0] ?? null
     return { matched: row, epgFixture }
   })
 }

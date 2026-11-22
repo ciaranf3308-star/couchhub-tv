@@ -664,6 +664,107 @@ function matchDescFixture(
   )
 }
 
+// ── Station preference (fix-3, 2026-11-22) ─────────────────────
+// WHY STAN SPORT BEAT SKY SPORTS MAIN EVENT 4K, LIVE 22 NOV:
+// the scan made the FIRST listing in catalogue order the row's
+// primary station, and Stan Sport sits before Sky Sports Main
+// Event 4K in the user's 15,319-channel playlist. Catalogue order
+// is provider order, not a quality signal — an Australian feed
+// the user has never heard of, whose stream does not even load,
+// became the station string AND the Watch tune-in target (the
+// hero, Next Matches and reminders all tune fixture.channelId).
+// There was no broadcaster preference anywhere in the chain, and
+// no check that the channel plays.
+//
+// The primary is now chosen by broadcaster preference for a
+// UK/Irish household: the domestic rights holders first, every
+// other feed after. Within a tier, catalogue order still decides,
+// so behaviour is unchanged where no preferred broadcaster
+// carries the fixture. The ranking is name-based only — it never
+// invents a station: a fixture with no EPG listing is still
+// Station TBC, and a fixture carried only by an international
+// feed still shows that feed (it is the honest listing).
+
+/**
+ * Preference tier for a channel name, 0 (best) to 3. Pure and
+ * exported for the scan, the hero tie-break and the Next Matches
+ * Watch-target pick, so all three can never disagree.
+ */
+export function sportsChannelPreferenceTier(channelName: string): number {
+  const name = (channelName || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!name) return 3
+  const words = name.split(" ")
+  const hasWordStarting = (prefix: string): boolean =>
+    words.some((word) => word.startsWith(prefix))
+  // Tier 0 — UK/Irish primary Premier League rights holders.
+  // "4K" / "UHD" / "HD" suffixes ride along via includes().
+  if (
+    name.includes("sky sports main event") ||
+    name.includes("sky sports premier league") ||
+    name.includes("sky sports football")
+  ) {
+    return 0
+  }
+  // Tier 1 — other UK/Irish rights holders / free-to-air.
+  if (
+    name.includes("tnt sports") ||
+    name.includes("premier sports") ||
+    name.includes("bbc ") ||
+    name === "bbc" ||
+    hasWordStarting("itv") ||
+    words.includes("utv") ||
+    words.includes("stv") ||
+    hasWordStarting("rte") ||
+    name.includes("virgin media") ||
+    name.includes("channel 4") ||
+    words.includes("s4c")
+  ) {
+    return 1
+  }
+  // Tier 2 — other domestic sports channels.
+  if (
+    name.includes("sky sports") ||
+    words.includes("mutv") ||
+    name.includes("eurosport")
+  ) {
+    return 2
+  }
+  // Tier 3 — everything else: international feeds (Stan Sport,
+  // beIN, ESPN, DAZN, SuperSport, Paramount+, …).
+  return 3
+}
+
+/**
+ * True only when a channel row explicitly carries a blank stream
+ * URL — an M3U row whose `url` (or `streamUrl`) is present but
+ * empty has nothing to play. An ABSENT url is NOT unplayable:
+ * Xtream rows carry no url at all (the stream URL is built at
+ * tune time from server + creds + stream id), so absence is the
+ * normal playable shape. Only a present-but-blank URL demotes.
+ * This is the only static playability signal the scan has: a
+ * stream that exists in the playlist but does not load (Stan
+ * Sport on 22 Nov) cannot be detected without a live probe, and
+ * the scan never probes — the preference ranking above is what
+ * keeps such feeds from being primary while a domestic carrier
+ * lists the fixture.
+ */
+function channelStreamUrlIsBlank(channel: SportsScanChannel): boolean {
+  const values: unknown[] = [
+    channel.url,
+    (channel as { streamUrl?: unknown }).streamUrl,
+  ]
+  for (const value of values) {
+    if (typeof value === "string") return value.trim() === ""
+  }
+  return false
+}
+
 // ── Scan ────────────────────────────────────────────────────────
 
 /**
@@ -927,6 +1028,17 @@ export function splitSportsFixtures(
  * fixture live now or upcoming. A live fixture beats an upcoming
  * one — the live match is what the user wants to watch. Possible
  * fixtures and other-squad fixtures NEVER feed the hero.
+ *
+ * Same-fixture exception (fix-3, 2026-11-22): one match can be
+ * listed twice with different starts (a build-up slot on one
+ * channel, kick-off on another). Those two rows are the SAME
+ * fixture — same sides, same squad, starts within the 60-minute
+ * pre-match window — so the earliest-start rule must not hand the
+ * hero to the earlier-starting international feed. Between two
+ * listings of the same fixture the better-ranked primary wins;
+ * the earliest-start rule only decides between different
+ * fixtures, and between same-fixture listings on equally-ranked
+ * channels.
  */
 export function selectNextFixture(
   fixtures: ReadonlyArray<SportsFixture>,
@@ -944,6 +1056,20 @@ export function selectNextFixture(
       continue
     }
     const bestState = fixtureStateOf(best, nowMs)
+    if (isSameFixtureListing(best, fixture)) {
+      const tierDiff =
+        sportsChannelPreferenceTier(fixture.channelName) -
+        sportsChannelPreferenceTier(best.channelName)
+      if (tierDiff < 0) best = fixture
+      else if (
+        tierDiff === 0 &&
+        state === bestState &&
+        fixture.startMs < best.startMs
+      ) {
+        best = fixture
+      }
+      continue
+    }
     // Live beats upcoming regardless of start order; otherwise earliest wins.
     if (state === "now" && bestState !== "now") best = fixture
     else if (state === bestState && fixture.startMs < best.startMs) {
@@ -954,10 +1080,37 @@ export function selectNextFixture(
 }
 
 /**
+ * Two rows are listings of the same fixture when the sides match
+ * (canonicalised, order-insensitive — the group key with the
+ * start zeroed out), the squad matches, and the starts are within
+ * the 60-minute pre-match window of each other (SPORTS_PREMATCH_WINDOW_MS
+ * in sports-corner-v2-hub.ts; mirrored here as a literal so this
+ * module does not import the hub — the two must stay in step).
+ */
+function isSameFixtureListing(
+  a: SportsFixture,
+  b: SportsFixture,
+): boolean {
+  if (a.squad !== b.squad) return false
+  if (
+    groupKeyFor(a.teams, 0, a.squad) !== groupKeyFor(b.teams, 0, b.squad)
+  ) {
+    return false
+  }
+  return Math.abs(a.startMs - b.startMs) <= 60 * 60_000
+}
+
+/**
  * Scan the EPG state for United fixtures. Single pass over the
  * batch loader's output; simulcasts group by (canonicalised sides,
- * exact start, squad). The first listing in catalogue order is the
- * row's primary station; the rest fold into "Also on".
+ * exact start, squad). The row's primary station is the
+ * best-ranked carrier (fix-3: broadcaster preference, unplayable
+ * rows last, catalogue order as the tie-break) — NOT the first
+ * listing in catalogue order, which is how Stan Sport beat Sky
+ * Sports Main Event 4K on 22 Nov. The remaining carriers fold
+ * into "Also on" in the same ranked order, so the station string
+ * ("Sky Sports Main Event 4K · Sky Sports Premier League") and
+ * the Watch tune-in target always agree on the primary.
  */
 export function scanSportsFixtures(
   channels: ReadonlyArray<SportsScanChannel>,
@@ -971,7 +1124,22 @@ export function scanSportsFixtures(
   const byId = new Map<string, SportsScanChannel>()
   for (const channel of channels) byId.set(String(channel.id), channel)
 
-  const groups = new Map<string, SportsFixture>()
+  interface GroupCandidate {
+    fixture: SportsFixture
+    /** Encounter order (playlist order). Tie-break within a tier. */
+    order: number
+    tier: number
+    /** Explicitly blank stream URL — nothing to play. */
+    unplayable: boolean
+  }
+  const compareCandidates = (a: GroupCandidate, b: GroupCandidate): number => {
+    if (a.unplayable !== b.unplayable) return a.unplayable ? 1 : -1
+    if (a.tier !== b.tier) return a.tier - b.tier
+    return a.order - b.order
+  }
+
+  const groups = new Map<string, GroupCandidate[]>()
+  let order = 0
   for (const [channelId, programmes] of loaded.programmesByChannel) {
     const channel = byId.get(channelId)
     if (!channel) continue
@@ -991,21 +1159,31 @@ export function scanSportsFixtures(
         programme.startMs,
         match.squad,
       )
-      const existing = groups.get(key)
-      if (!existing) {
-        groups.set(key, fixture)
-        continue
+      const candidate: GroupCandidate = {
+        fixture,
+        order: order++,
+        tier: sportsChannelPreferenceTier(channelName),
+        unplayable: channelStreamUrlIsBlank(channel),
       }
-      existing.alsoOn.push({
-        channelId: fixture.channelId,
-        channelName: fixture.channelName,
-      })
+      const list = groups.get(key)
+      if (list) list.push(candidate)
+      else groups.set(key, [candidate])
     }
   }
 
-  const fixtures = [...groups.values()].sort(
-    (a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title),
-  )
+  const fixtures = [...groups.values()]
+    .map((candidates) => {
+      const ranked = [...candidates].sort(compareCandidates)
+      const primary = ranked[0]!.fixture
+      primary.alsoOn = ranked.slice(1).map((candidate) => ({
+        channelId: candidate.fixture.channelId,
+        channelName: candidate.fixture.channelName,
+      }))
+      return primary
+    })
+    .sort(
+      (a, b) => a.startMs - b.startMs || a.title.localeCompare(b.title),
+    )
   return {
     fixtures,
     scannedAt: new Date(nowMs).toISOString(),

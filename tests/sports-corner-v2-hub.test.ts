@@ -526,6 +526,71 @@ describe("T-v2-3 — Liverpool shows its station + Watch once inside the EPG win
   })
 })
 
+describe("T-v2-3b — Stan Sport never wins the Liverpool Watch target (fix-3, 2026-11-22)", () => {
+  const KICKOFF = Date.UTC(2026, 10, 22, 16, 30, 0)
+  const stanEpg = fixture({
+    title: "Liverpool v Man Utd",
+    teams: ["Liverpool", "Man Utd"],
+    channelId: 301,
+    channelName: "Stan Sport",
+    alsoOn: [],
+    startMs: KICKOFF - HOUR,
+    stopMs: KICKOFF + HOUR,
+    id: "301:1795:liverpool v man utd",
+  })
+  const skyEpg = fixture({
+    title: "Liverpool v Man Utd",
+    teams: ["Liverpool", "Man Utd"],
+    channelId: 302,
+    channelName: "Sky Sports Main Event 4K",
+    alsoOn: [{ channelId: 303, channelName: "Sky Sports Premier League" }],
+    startMs: KICKOFF,
+    stopMs: KICKOFF + 2 * HOUR,
+    id: "302:1795:liverpool v man utd",
+  })
+
+  it("earlier-starting Stan Sport listing loses to Sky on station, Watch target and hero alike", async () => {
+    const { tableResult, feedResult } = await feedResults(FRIDAY)
+    // Stan Sport first, as scan order (earliest start) would hand it over.
+    const nextMatches = buildNextMatchRows(feedResult.fixtures ?? [], [
+      stanEpg,
+      skyEpg,
+    ])
+    expect(nextMatches[0].matched.stationKnown).toBe(true)
+    expect(nextMatches[0].matched.station).toContain(
+      "Sky Sports Main Event 4K",
+    )
+    expect(nextMatches[0].matched.station).not.toContain("Stan Sport")
+    expect(nextMatches[0].epgFixture).not.toBeNull()
+    expect(nextMatches[0].epgFixture!.channelName).toBe(
+      "Sky Sports Main Event 4K",
+    )
+    const model = buildSportsHubModel({
+      followed: true,
+      hasPlaylist: true,
+      hasChannels: true,
+      epgStatus: "ready",
+      scanResult: scanResult([stanEpg, skyEpg]),
+      nowMs: FRIDAY,
+      tableResult,
+      feedResult,
+      nextMatches,
+    })
+    const callbacks = stubCallbacks()
+    renderSportsHub(hubRoot(), model, callbacks, FRIDAY)
+    const rows = [...document.querySelectorAll(".rs-sports-next-row")]
+    const liverpoolStation =
+      rows[0].querySelector(".rs-sports-next-station")?.textContent ?? ""
+    expect(liverpoolStation).toContain("Sky Sports Main Event 4K")
+    expect(liverpoolStation).not.toContain("Stan Sport")
+    const watches = [...document.querySelectorAll(".rs-sports-next-watch")]
+    expect(watches).toHaveLength(1)
+    watches[0].dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    // Watch tunes Sky, never the Stan Sport listing.
+    expect(callbacks.calls).toEqual([{ action: "watch", fixture: skyEpg }])
+  })
+})
+
 describe("T-v2-5 — feed down / stale / no-key states stay honest", () => {
   it("feed down → 'table unavailable' copy, EPG fixtures still render", async () => {
     localStorage.setItem(FOOTBALL_DATA_KEY_STORAGE_KEY, runtimeTestKey())
