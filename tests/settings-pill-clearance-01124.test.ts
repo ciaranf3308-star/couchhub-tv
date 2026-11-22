@@ -173,3 +173,35 @@ describe("GAP 3 (c) — Settings-scoped idle auto-hide", () => {
     expect(hints).not.toMatch(/isSettingsHints = false/)
   })
 })
+
+describe("GAP 6 — pill hints follow focus (override must not shadow them)", () => {
+  it("editing / OSK legend beats an owner-claimed config", () => {
+    const hints = HINTS()
+    expect(hints).toContain("EDITING_HINTS")
+    expect(hints).toContain("hintsForOsk(view)")
+    // Precedence: cursor > editing > osk > override > view. The
+    // ternary chain must test editing/osk BEFORE the override.
+    const chain = hints.match(
+      /const config = cursorActive[\s\S]*?\(override \?\? hintsForView/,
+    )
+    expect(chain, "config precedence chain").not.toBeNull()
+    expect(chain![0]).toMatch(/editing\s*\?\s*EDITING_HINTS/)
+    expect(chain![0]).toMatch(/osk\s*\?\s*hintsForOsk\(view\)/)
+    expect(chain![0].indexOf("EDITING_HINTS")).toBeLessThan(
+      chain![0].indexOf("override ?? hintsForView"),
+    )
+  })
+
+  it("a dialog hides the pill even when a page claimed the legend", () => {
+    const hints = HINTS()
+    // The hide no longer has a blanket `!override` gate…
+    expect(hints).not.toMatch(/const hidden =\s*!override &&/)
+    // …instead it tracks the override that was current before the
+    // dialog opened; only a claim made BY the dialog (a different
+    // object after it opened) keeps the pill up.
+    expect(hints).toMatch(/let overrideBeforeDialog/)
+    expect(hints).toMatch(/if \(dialogIsOpen && !dialogWasOpen\) overrideBeforeDialog = override/)
+    expect(hints).toMatch(/const dialogClaimedHints = dialogIsOpen && override !== overrideBeforeDialog/)
+    expect(hints).toMatch(/dialogIsOpen && !dialogClaimedHints/)
+  })
+})

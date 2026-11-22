@@ -17,6 +17,11 @@
 // Controller 2.0 (§42): a surface that owns input claims the legend
 // via setControllerHints() and its config wins over the view-derived
 // one until it clears (null) — hints always name the actual owner.
+// Two exceptions (0.11.24, GAP 6): a focused text field always wins
+// with the minimal editing legend (only B + View+Menu work while
+// typing), and a modal hides the legend unless the modal itself
+// claimed it after opening (a page-level claim must not keep stale
+// hints up over a dialog).
 // The legend hides while a modal dialog owns input,
 // and in fullscreen playback while the OSD or any playback overlay
 // (options / Quick Surf / channel browser / error) is visible — those
@@ -62,7 +67,9 @@ const initial: HintConfig = hintsForView(view);
 <script>
   import {
     CONTROLLER_HINTS_CHANGE_EVENT,
+    EDITING_HINTS,
     getControllerHints,
+    hintsForOsk,
     hintsForView,
     hintListHtml,
   } from "@/scripts/lib/couch-button-hints.ts";
@@ -91,6 +98,16 @@ const initial: HintConfig = hintsForView(view);
     // driven by data-hidden + the hidden attribute.
     const OVERLAY_SELECTORS =
       "[data-livetv-osd], [data-livetv-options], [data-livetv-quicksurf], [data-livetv-play-browser], [data-livetv-error]";
+
+    // Dialog ownership vs page override (0.11.24, GAP 6): a page
+    // (Settings) claims the legend once at load, and that claim must
+    // NOT keep the pill visible over a modal — the legend hides while
+    // a modal owns input, unless the modal (or its owner) claims the
+    // legend for itself after opening. Track the override object
+    // that was current before the dialog opened; a different object
+    // while open means the dialog claimed it.
+    let overrideBeforeDialog: HintConfig | null = null;
+    let dialogWasOpen = false;
 
     function isEditingTarget(target: EventTarget | null): boolean {
       const el = target as HTMLElement | null;
@@ -137,22 +154,38 @@ const initial: HintConfig = hintsForView(view);
       // Cursor Mode (W6) wins over both while active — the
       // pointer's legend, not the screen's — via the
       // html[data-cursor-mode] signal cursor-mode.ts owns.
+      // Editing / OSK win over an owner claim (0.11.24, GAP 6):
+      // while a text field owns the controller only B + View+Menu
+      // work, so the minimal editing legend is the truth even on a
+      // page that claimed the legend (Settings kept showing "Y
+      // Settings search" while typing, where Y does nothing).
       const override = getControllerHints();
       const cursorActive =
         document.documentElement.dataset.cursorMode === "active";
       const config = cursorActive
         ? CURSOR_MODE_HINTS
-        : (override ?? hintsForView(view, { livetvMode: mode, guideMode, editing, osk }));
+        : editing
+          ? EDITING_HINTS
+          : osk
+            ? hintsForOsk(view)
+            : (override ?? hintsForView(view, { livetvMode: mode, guideMode }));
       // Hide while a dialog owns input; in Live TV playback hide
       // while the OSD / an overlay is up (it names its own keys).
-      // An owner-claimed config bypasses the hide: the owner claimed
-      // the legend for its own surface (e.g. a modal's hints), so
-      // hiding it would leave the surface legend-less.
+      // A page-level owner claim does NOT keep the pill up over a
+      // dialog — only a claim made by the dialog itself (a different
+      // override object after it opened) does.
+      const dialogIsOpen = dialogOpen();
+      if (dialogIsOpen && !dialogWasOpen) overrideBeforeDialog = override;
+      if (!dialogIsOpen) overrideBeforeDialog = null;
+      dialogWasOpen = dialogIsOpen;
+      const dialogClaimedHints = dialogIsOpen && override !== overrideBeforeDialog;
       const hidden =
-        !override &&
         !cursorActive &&
-        (dialogOpen() ||
-          (view === "livetv" && mode === "playback" && overlayVisible()));
+        ((dialogIsOpen && !dialogClaimedHints) ||
+          (!override &&
+            view === "livetv" &&
+            mode === "playback" &&
+            overlayVisible()));
       nav.toggleAttribute("hidden", hidden);
       nav.dataset.config = config.id;
       const html = hintListHtml(config);
