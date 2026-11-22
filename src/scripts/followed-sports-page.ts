@@ -555,27 +555,101 @@ interface RowContext {
   callbacks: SportsHubCallbacks
   /** "possible" rows carry the Unconfirmed-team badge. */
   showPossibleBadge: boolean
+  /** Card treatment: upcoming = full colour, possible = dashed
+   *  outline, recent/other = muted thumb. Defaults to "upcoming". */
+  variant?: "upcoming" | "possible" | "recent" | "other"
 }
 
+// ── Next-fixture card art (visual rebuild, fix-3) ───────────────
+// Opponent stadium photography from the bundled, licence-verified
+// sports library (public/art/sports/, manifest
+// sports-artwork-manifest.ts) — the same photos the enrichment
+// hierarchy already serves. Home fixtures get Old Trafford; an
+// away ground with no bundled photo gets the branded red gradient
+// + crest fallback, never a guessed stadium photo. Venues are only
+// named where the bundle actually has the ground: Anfield
+// (Liverpool), Gtech (Brentford), St James' Park (Newcastle).
+export const OLD_TRAFFORD_ART = "/art/sports/football-man-utd-old-trafford.jpg"
+const OPPONENT_STADIUM_ART: ReadonlyArray<{
+  match: RegExp
+  art: string
+}> = [
+  { match: /liverpool/i, art: "/art/sports/football-liverpool-anfield-kop.jpg" },
+  { match: /brentford/i, art: "/art/sports/football-brentford-gtech-lineup.jpg" },
+  { match: /newcastle/i, art: "/art/sports/football-newcastle-st-james.jpg" },
+]
+
+/**
+ * Card art for one Next-fixtures column: the opponent's ground
+ * when the bundle has it, Old Trafford when United host, null
+ * when neither is known (the card renders the branded gradient).
+ */
+export function nextFixtureArt(
+  fixture: FeedFixture,
+): string | null {
+  const opponent = feedFixtureOpponent(fixture)
+  for (const entry of OPPONENT_STADIUM_ART) {
+    if (entry.match.test(opponent)) return entry.art
+  }
+  return feedFixtureHomeAway(fixture) === "HOME" ? OLD_TRAFFORD_ART : null
+}
+
+/** "22" + "NOV" — the date badge on a Next-fixtures card thumb. */
+export function formatFixtureDayBadge(startMs: number): {
+  day: string
+  month: string
+} {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "Europe/Dublin",
+  }).formatToParts(new Date(startMs))
+  const get = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? ""
+  return { day: get("day"), month: get("month").toUpperCase() }
+}
+
+/**
+ * One EPG fixture as a horizontal card (visual rebuild, fix-3):
+ * artwork thumb left (programme art via applyFixtureCardArtwork,
+ * branded red gradient + crest watermark until it lands), title +
+ * meta + description right, action pill at the end. The whole card
+ * stays one focusable button with the same data-couch-key and
+ * data-fixture-id as the old list row — controller nav and the X
+ * menu are untouched. Variants: "possible" gets a dashed outline
+ * and keeps the Unconfirmed-team badge; "recent" gets a muted
+ * thumb (the match is over); "other" is the Other Squads card.
+ */
 function buildFixtureRow(
   fixture: SportsFixture,
   ctx: RowContext,
 ): HTMLButtonElement {
-  const row = el("button", "rs-sports-row")
+  const variant = ctx.variant ?? "upcoming"
+  const row = el(
+    "button",
+    `rs-sports-row rs-sports-row--${variant}`,
+  )
   row.type = "button"
   row.setAttribute("data-couch-key", `sports:fixture:${fixture.id}`)
   row.setAttribute("data-fixture-id", fixture.id)
   const state = sportsFixtureState(fixture, ctx.nowMs)
 
+  // Artwork thumb. The art itself is applied after render by
+  // applyFixtureCardArtwork (one enrichment call per card); the
+  // CSS fallback is the branded gradient + crest watermark, so a
+  // card never shows a broken or empty thumb.
+  const thumb = el("div", "rs-sports-row-thumb")
+  thumb.setAttribute("aria-hidden", "true")
+  const nowLabel = sportsFixtureLiveBadge(fixture, ctx.nowMs)
+  if (nowLabel) {
+    thumb.appendChild(el("span", "rs-sports-badge rs-sports-badge-live", nowLabel))
+  }
+  row.appendChild(thumb)
+
+  const body = el("div", "rs-sports-row-body")
   const main = el("div", "rs-sports-row-main")
   const titleRow = el("div", "rs-sports-row-title-row")
   titleRow.appendChild(el("span", "rs-sports-row-title", fixture.title))
-  // ON NOW vs LIVE (bug 4a): "LIVE" only for live football — a
-  // classic/replay/highlights programme on now reads "ON NOW".
-  const nowLabel = sportsFixtureLiveBadge(fixture, ctx.nowMs)
-  if (nowLabel) {
-    titleRow.appendChild(el("span", "rs-sports-badge rs-sports-badge-live", nowLabel))
-  }
   if (ctx.showPossibleBadge) {
     titleRow.appendChild(
       el("span", "rs-sports-badge rs-sports-badge-possible", "Unconfirmed team"),
@@ -591,7 +665,7 @@ function buildFixtureRow(
     const desc = el("div", "rs-sports-row-desc", fixture.desc)
     main.appendChild(desc)
   }
-  row.appendChild(main)
+  body.appendChild(main)
 
   const action = el("div", "rs-sports-row-action")
   action.appendChild(
@@ -604,7 +678,8 @@ function buildFixtureRow(
       action.appendChild(el("span", "rs-sports-row-catchup", badge))
     }
   }
-  row.appendChild(action)
+  body.appendChild(action)
+  row.appendChild(body)
 
   row.addEventListener("click", () => {
     const primary = fixturePrimaryAction(fixture, Date.now())
@@ -626,7 +701,15 @@ function buildSection(
   if (rows.length === 0 && emptyLine === null) return null
   const section = el("section", "rs-sports-section")
   if (sectionKey) section.setAttribute("data-sports-section", sectionKey)
-  section.appendChild(el("h2", "rs-sports-section-title", heading))
+  // Section header: title + count pill (the pill is a span inside
+  // the h2, so the heading text still reads exactly as before).
+  const title = el("h2", "rs-sports-section-title", heading)
+  if (rows.length > 0) {
+    title.appendChild(
+      el("span", "rs-sports-section-count", String(rows.length)),
+    )
+  }
+  section.appendChild(title)
   if (explainer) {
     section.appendChild(el("p", "rs-sports-section-note", explainer))
   }
@@ -648,7 +731,15 @@ function buildOtherSquadsSection(
   if (upcoming.length === 0 && recent.length === 0) return null
   const section = el("section", "rs-sports-section")
   section.setAttribute("data-sports-section", "other-squads")
-  section.appendChild(el("h2", "rs-sports-section-title", "Other Squads"))
+  const title = el("h2", "rs-sports-section-title", "Other Squads")
+  title.appendChild(
+    el(
+      "span",
+      "rs-sports-section-count",
+      String(upcoming.length + recent.length),
+    ),
+  )
+  section.appendChild(title)
   section.appendChild(
     el(
       "p",
@@ -656,16 +747,23 @@ function buildOtherSquadsSection(
       "Women's, youth and academy fixtures, kept separate from the first team.",
     ),
   )
+  const otherCtx: RowContext = { ...ctx, variant: "other" }
   const upcomingList = el("div", "rs-sports-list")
   for (const fixture of upcoming) {
-    upcomingList.appendChild(buildFixtureRow(fixture, ctx))
+    upcomingList.appendChild(buildFixtureRow(fixture, otherCtx))
   }
   section.appendChild(upcomingList)
   if (recent.length > 0) {
-    section.appendChild(el("h3", "rs-sports-subhead", "Recent"))
+    const subhead = el("h3", "rs-sports-subhead", "Recent")
+    subhead.appendChild(
+      el("span", "rs-sports-section-count", String(recent.length)),
+    )
+    section.appendChild(subhead)
     const recentList = el("div", "rs-sports-list")
     for (const fixture of recent) {
-      recentList.appendChild(buildFixtureRow(fixture, ctx))
+      recentList.appendChild(
+        buildFixtureRow(fixture, { ...otherCtx, variant: "recent" }),
+      )
     }
     section.appendChild(recentList)
   }
@@ -701,6 +799,19 @@ function buildTableSection(
 ): HTMLElement {
   const section = el("section", "rs-sports-section rs-sports-table-section")
   section.setAttribute("data-sports-section", "table")
+  // Panel head (visual rebuild, fix-3): mini crest + competition
+  // name, so the panel reads as a designed card rather than bare
+  // text above a table. The crest is the genuine bundled asset.
+  const panelHead = el("div", "rs-sports-table-panel-head")
+  const panelCrest = el("img", "rs-sports-table-panel-crest")
+  panelCrest.src = MAN_UTD_CREST_SRC
+  panelCrest.alt = ""
+  panelCrest.decoding = "async"
+  panelHead.appendChild(panelCrest)
+  panelHead.appendChild(
+    el("span", "rs-sports-table-panel-comp", "Premier League"),
+  )
+  section.appendChild(panelHead)
   section.appendChild(el("h2", "rs-sports-table-heading", "League position"))
 
   const table = tableResult.table
@@ -837,11 +948,15 @@ function buildTableSection(
 // ── Next Matches (v2 §4.1) ──────────────────────────────────────
 
 /**
- * One feed-driven Next Fixtures column (mockup row, 0.11.17):
- * day/time, opponent, HOME/AWAY · competition, station line, then
- * the Phase 3 reminder slot (bell, then Watch when the EPG listing
- * exists and is tunable). The slot's children are exactly the bell
- * and optionally Watch — the reminders tests pin that shape.
+ * One feed-driven Next Fixtures card (visual rebuild, fix-3):
+ * stadium-photo thumb with a red-to-black fade and a date badge
+ * (day + month), then opponent, HOME/AWAY · competition, station
+ * line, then the Phase 3 reminder slot (bell, then Watch when the
+ * EPG listing exists and is tunable). The slot's children are
+ * exactly the bell and optionally Watch — the reminders tests pin
+ * that shape. The card keeps its .rs-sports-next-row class,
+ * data-feed-fixture-id, .rs-sports-next-when / -opponent /
+ * .rs-sports-row-meta / .rs-sports-next-station children.
  *
  * Phase 3 reminder toggle (v2 plan §4.3, D2-A): one focusable
  * bell button lives inside the actions area, BEFORE the Watch
@@ -863,13 +978,44 @@ function buildNextMatchRow(
   const fixture = row.matched.fixture
   const column = el("div", "rs-sports-next-row")
   column.setAttribute("data-feed-fixture-id", fixture.id)
-  column.appendChild(
+
+  // Stadium thumb: bundled ground photo when known (see
+  // nextFixtureArt), branded red gradient + crest watermark
+  // otherwise. The date badge sits on the thumb, over the fade.
+  const art = nextFixtureArt(fixture)
+  const thumb = el(
+    "div",
+    `rs-sports-next-thumb${art ? " rs-sports-next-thumb-has-art" : ""}`,
+  )
+  thumb.setAttribute("aria-hidden", "true")
+  if (art) thumb.style.setProperty("--rs-sports-next-art", `url("${art}")`)
+  const badge = formatFixtureDayBadge(fixture.startMs)
+  const dateBadge = el("div", "rs-sports-next-date")
+  dateBadge.appendChild(el("span", "rs-sports-next-date-day", badge.day))
+  dateBadge.appendChild(el("span", "rs-sports-next-date-mon", badge.month))
+  thumb.appendChild(dateBadge)
+  // Venue label only where the ground is actually known: Old
+  // Trafford for home fixtures, Anfield for Liverpool away (plan
+  // §2). Other away grounds are omitted, never guessed.
+  const venue =
+    feedFixtureHomeAway(fixture) === "HOME"
+      ? "Old Trafford"
+      : /liverpool/i.test(feedFixtureOpponent(fixture))
+        ? "Anfield"
+        : null
+  if (venue) {
+    thumb.appendChild(el("span", "rs-sports-next-venue", venue))
+  }
+  column.appendChild(thumb)
+
+  const body = el("div", "rs-sports-next-body")
+  body.appendChild(
     el("div", "rs-sports-next-when", formatFixtureDayTime(fixture.startMs)),
   )
-  column.appendChild(
+  body.appendChild(
     el("div", "rs-sports-next-opponent", feedFixtureOpponent(fixture)),
   )
-  column.appendChild(
+  body.appendChild(
     el(
       "div",
       "rs-sports-row-meta",
@@ -879,7 +1025,7 @@ function buildNextMatchRow(
   // Station, honestly: the listing's channels when the EPG knows
   // this fixture, else Station TBC (mockup has no station line
   // here, but the hub never hides a TBC behind a missing Watch).
-  column.appendChild(
+  body.appendChild(
     el(
       "div",
       "rs-sports-next-station",
@@ -923,7 +1069,8 @@ function buildNextMatchRow(
     })
     actions.appendChild(watch)
   }
-  column.appendChild(actions)
+  body.appendChild(actions)
+  column.appendChild(body)
   return column
 }
 
@@ -1206,6 +1353,43 @@ export async function applyOnTvNowArtwork(
     }
     thumb.style.setProperty("--rs-sports-onnow-art", `url("${url}")`)
     thumb.classList.add("rs-sports-onnow-thumb-has-art")
+    return url
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Fixture-card artwork (visual rebuild, fix-3): the same
+ * enrichment call as the on-TV-now cards, applied to an EPG
+ * fixture row's thumb (`.rs-sports-row-thumb`). A null URL leaves
+ * the branded gradient + crest watermark untouched — never a
+ * stretched logo, never a broken image.
+ */
+export async function applyFixtureCardArtwork(
+  cardElement: HTMLElement,
+  fixture: SportsFixture,
+): Promise<string | null> {
+  try {
+    const art = await enrichProgramme({
+      title: fixture.title,
+      channelName: fixture.channelName,
+      startMs: fixture.startMs,
+      endMs: fixture.stopMs,
+      category: fixture.channelCategory,
+      channelLogoUrl: fixture.channelLogo,
+    })
+    const url = pickArtworkUrl(art, "backdrop")
+    if (!url) return null
+    const thumb = cardElement.querySelector<HTMLElement>(
+      ".rs-sports-row-thumb",
+    )
+    if (!thumb || !cardElement.isConnected) return null
+    if (cardElement.getAttribute("data-fixture-id") !== fixture.id) {
+      return null
+    }
+    thumb.style.setProperty("--rs-sports-row-art", `url("${url}")`)
+    thumb.classList.add("rs-sports-row-thumb-has-art")
     return url
   } catch {
     return null
@@ -1530,7 +1714,7 @@ export function renderSportsHub(
       "Possible Matches",
       "These titles say 'United' without naming the club.",
       possible,
-      { ...ctx, showPossibleBadge: true },
+      { ...ctx, showPossibleBadge: true, variant: "possible" },
       null,
       "possible",
     )
@@ -1545,7 +1729,7 @@ export function renderSportsHub(
       "Recent Matches",
       null,
       recent,
-      ctx,
+      { ...ctx, variant: "recent" },
       null,
       "recent",
     )
@@ -2098,6 +2282,20 @@ export function mountSportsHubPage(): void {
       if (!fixture) continue
       card.setAttribute("data-art-applied", "1")
       void applyOnTvNowArtwork(card, fixture)
+    }
+    // Fixture-row card artwork (visual rebuild, fix-3): same
+    // one-call-per-card shape, for the Upcoming / Possible /
+    // Other Squads / Recent card thumbs.
+    for (const card of shell!.querySelectorAll<HTMLElement>(
+      ".rs-sports-row:not([data-art-applied])",
+    )) {
+      const fixtureId = card.getAttribute("data-fixture-id")
+      const fixture = currentFixtures().find(
+        (candidate) => candidate.id === fixtureId,
+      )
+      if (!fixture) continue
+      card.setAttribute("data-art-applied", "1")
+      void applyFixtureCardArtwork(card, fixture)
     }
     if (!controller) {
       controller = installSportsHubController(
