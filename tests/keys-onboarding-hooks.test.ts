@@ -204,9 +204,12 @@ describe("launch gate (runKeysLaunchGate)", () => {
     expect(result).toBeNull()
   })
 
-  it("fail-safe is real: a failed AI presence check resolves to 'do not show', never a prompt", async () => {
-    // Real core (no shouldShow fake): the AI check throws, so the
-    // status check rejects and the gate's catch resolves to null.
+  it("fail-safe is real: a failed AI presence check never prompts for the AI key — and stays silent when the other keys are saved", async () => {
+    // Real core (no shouldShow fake): the AI check throws, so the AI
+    // key counts as saved (fail closed); TMDB + football are saved
+    // too, so there is nothing to ask for.
+    localStorage.setItem("xt_tmdb_key", runtimeKey("tmdb-"))
+    localStorage.setItem(FOOTBALL_DATA_KEY_STORAGE_KEY, runtimeKey("fd-"))
     const open = vi.fn(async () => ({
       outcome: "completed" as const,
       saved: [],
@@ -222,7 +225,33 @@ describe("launch gate (runKeysLaunchGate)", () => {
     expect(open).not.toHaveBeenCalled()
   })
 
-  it("a failed AI presence check stays silent from a feature entry too", async () => {
+  it("a failed AI presence check does not block the prompt for a genuinely missing key (per-key rule, settings-polish-95 w3)", async () => {
+    // AI unreadable counts as saved, so the gate never asks for it —
+    // but TMDB is genuinely missing, so the gate still opens (at the
+    // TMDB step, never at AI). 0.11.22 stayed silent for every key
+    // here; one unreadable key must not block the keys that read
+    // cleanly.
+    const open = vi.fn(async () => ({
+      outcome: "completed" as const,
+      saved: [],
+      reason: "launch" as const,
+    }))
+    const result = await runKeysLaunchGate({
+      hasAiKey: async () => {
+        throw new Error("STORE:locked")
+      },
+      open,
+    })
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(open).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "launch" }),
+    )
+    expect(result).not.toBeNull()
+  })
+
+  it("a failed AI presence check stays silent from a feature entry too when nothing else is missing", async () => {
+    localStorage.setItem("xt_tmdb_key", runtimeKey("tmdb-"))
+    localStorage.setItem(FOOTBALL_DATA_KEY_STORAGE_KEY, runtimeKey("fd-"))
     const open = vi.fn(async () => ({
       outcome: "completed" as const,
       saved: [],

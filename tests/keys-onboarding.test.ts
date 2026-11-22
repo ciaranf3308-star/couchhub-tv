@@ -198,36 +198,48 @@ describe("getKeysOnboardingStatus", () => {
   })
 })
 
-describe("AI presence-check failure is fail-closed, never missing (0.11.22)", () => {
+describe("AI presence-check failure is fail-closed, never missing (0.11.22, per-key since settings-polish-95 w3)", () => {
   const storeFailure = async () => {
     throw new Error("STORE:locked")
   }
 
-  it("getKeysOnboardingStatus REJECTS when the AI check fails — it never reports the key missing", async () => {
-    await expect(
-      getKeysOnboardingStatus({ hasAiKey: storeFailure }),
-    ).rejects.toThrow("STORE:locked")
+  it("an AI check failure counts the AI key as saved — and still evaluates TMDB / football-data on their own", async () => {
+    const status = await getKeysOnboardingStatus({ hasAiKey: storeFailure })
+    const ai = status.entries.find((entry) => entry.id === "ai")!
+    expect(ai.saved).toBe(true)
+    expect(ai.unreadable).toBe(true)
+    expect(status.unreadable).toEqual(["ai"])
     // The old code swallowed this into aiSaved=false, so the gate
     // re-prompted for a saved key (false-missing, 22 Nov).
+    expect(status.missing).not.toContain("ai")
+    // …but the failure no longer blocks the other keys: both are
+    // genuinely missing here, so they are still reported (rule 3 —
+    // 0.11.22 rejected the whole status, silencing every prompt).
+    expect(status.missing).toEqual(["tmdb", "football-data"])
   })
 
-  it("shouldShowKeysOnboarding propagates the AI-check failure so the gate fail-safe engages", async () => {
-    await expect(
-      shouldShowKeysOnboarding({ hasAiKey: storeFailure }),
-    ).rejects.toThrow("STORE:locked")
+  it("shouldShowKeysOnboarding still prompts for a genuinely missing key when the AI check fails", async () => {
+    await expect(shouldShowKeysOnboarding({ hasAiKey: storeFailure })).resolves.toBe(true)
   })
 
-  it("a transient AI-check failure still rejects at this layer — the retry lives inside hasAiKey itself", async () => {
+  it("shouldShowKeysOnboarding stays quiet when only the AI check fails and the other keys are saved", async () => {
+    localStorage.setItem("xt_tmdb_key", runtimeKey("tmdb-"))
+    localStorage.setItem(FOOTBALL_DATA_KEY_STORAGE_KEY, runtimeKey("fd-"))
+    await expect(shouldShowKeysOnboarding({ hasAiKey: storeFailure })).resolves.toBe(false)
+  })
+
+  it("a transient AI-check failure still resolves at this layer — the retry lives inside hasAiKey itself", async () => {
     const flaky = vi
       .fn()
       .mockRejectedValueOnce(new Error("STORE:locked"))
       .mockResolvedValue(true)
-    // A deps-level check is called once and its failure propagates;
-    // the real hasAiKey retries internally before it ever gets here.
-    await expect(
-      getKeysOnboardingStatus({ hasAiKey: flaky }),
-    ).rejects.toThrow("STORE:locked")
+    // A deps-level check is called once and its failure is treated as
+    // unreadable (saved); the real hasAiKey retries internally before
+    // it ever gets here.
+    const status = await getKeysOnboardingStatus({ hasAiKey: flaky })
     expect(flaky).toHaveBeenCalledTimes(1)
+    expect(status.entries.find((entry) => entry.id === "ai")!.saved).toBe(true)
+    expect(status.unreadable).toEqual(["ai"])
   })
 })
 

@@ -31,13 +31,20 @@
 // `shouldShowKeysOnboarding()` stays false for that key. The onboarding
 // only ever appears for keys that are actually missing.
 //
-// CHECK-FAILURE RULE (0.11.22): a presence check that FAILS is not
-// "missing" either. `hasAiKey()` rejects when the store cannot be
-// reached, `getKeysOnboardingStatus()` propagates that rejection, and
-// `maybeOpenKeysOnboarding()` catches it into "do not show" (fail
-// closed). The old code swallowed the failure into `aiSaved = false`
-// twice upstream, so the gate re-prompted for a saved key — the
-// false-missing bug (22 Nov 2026).
+// CHECK-FAILURE RULE (0.11.22, per-key since settings-polish-95 w3):
+// a presence check that FAILS is not "missing" either. `hasAiKey()`
+// rejects when the store cannot be reached and the TMDB /
+// football-data presence helpers return "unreadable" when localStorage
+// cannot be read; `getKeysOnboardingStatus()` treats each such key as
+// saved (fail closed) and records it in `status.unreadable`, while
+// still evaluating the other two keys on their own — one unreadable
+// key never blocks or re-asks for the keys that read cleanly. The old
+// code swallowed the AI failure into `aiSaved = false` twice upstream,
+// so the gate re-prompted for a saved key — the false-missing bug
+// (22 Nov 2026). 0.11.22 then rejected the whole status on an AI
+// failure, which stayed silent for every key; the per-key rule above
+// supersedes that trade-off (the AI key itself is still never
+// reported missing on a failed check).
 //
 // SKIP RULE: skip / "I'll do it later" / B / Escape dismisses the
 // CURRENT prompt only. The dismissal is session-scoped
@@ -59,7 +66,9 @@ import {
   getAiEnabled,
   getAiModel,
   getFootballDataApiKey,
+  getFootballDataApiKeyPresence,
   getTmdbApiKey,
+  getTmdbApiKeyPresence,
   setAiEnabled,
   setAiEndpoint,
   setAiModel,
@@ -137,8 +146,12 @@ export const KEY_ONBOARDING_DEFS: Record<KeyOnboardingId, KeyOnboardingDefinitio
 
 export interface KeyOnboardingEntry extends KeyOnboardingDefinition {
   id: KeyOnboardingId
-  /** A key is stored. Presence only — never validity (see header). */
+  /** A key is stored. Presence only — never validity (see header).
+   *  Fail-closed: an unreadable key counts as saved, never missing. */
   saved: boolean
+  /** True when this key's presence could not be read (see `unreadable`
+   *  on the status). The entry still reports `saved: true`. */
+  unreadable?: boolean
   /** Masked display (last 4 chars). Null for the AI key: the keystore
    *  never reads the key back, so there is nothing to mask. */
   masked: string | null
@@ -150,6 +163,9 @@ export interface KeysOnboardingStatus {
   entries: KeyOnboardingEntry[]
   /** Missing keys, in canonical step order. */
   missing: KeyOnboardingId[]
+  /** Keys whose presence could not be read. Each is treated as saved
+   *  (fail closed) and never appears in `missing`. */
+  unreadable: KeyOnboardingId[]
   allSaved: boolean
   savedCount: number
 }
@@ -243,28 +259,48 @@ function clearSessionFlag(): void {
 
 /** Compose the three statuses into one. Presence only — a stored key
  *  counts as saved even if it would fail validation (see header).
- *  TRI-STATE (0.11.22): when the AI presence check fails, this REJECTS
- *  instead of reporting the AI key missing. A failed check is
- *  indistinguishable from "no key" only if it is swallowed — swallowing
- *  it is the false-missing bug (22 Nov): the gate asked for a saved
- *  key. The rejection propagates through `shouldShowKeysOnboarding`
- *  to `maybeOpenKeysOnboarding`, whose catch resolves it to
- *  "do not show" (fail closed, never blocks the app). */
+ *  TRI-STATE PER KEY (settings-polish-95 w3 — supersedes the 0.11.22
+ *  all-or-nothing rejection): each credential is checked on its own.
+ *  - AI: `hasAiKey()` rejects when presence is unknown; that key is
+ *    treated as saved (fail closed) and recorded in `unreadable` —
+ *    it is never reported missing, and the failure no longer aborts
+ *    the TMDB / football-data checks. (0.11.22 rejected the whole
+ *    status here, so one broken AI store silenced the prompts for
+ *    the other two keys too — the "blocks" half of the rule.)
+ *  - TMDB / football-data: tri-state presence via app-settings; a
+ *    failed localStorage read is "unreadable", treated as saved, and
+ *    recorded — never folded into missing.
+ *  The gate therefore prompts exactly for the keys whose read
+ *  SUCCEEDS and finds nothing stored. This function no longer
+ *  rejects for a presence failure; `maybeOpenKeysOnboarding`'s
+ *  catch stays as a backstop for anything else. */
 export async function getKeysOnboardingStatus(
   deps: KeysOnboardingDeps = {},
 ): Promise<KeysOnboardingStatus> {
   const checkAi = deps.hasAiKey ?? hasAiKey
-  // No try/catch here on purpose: hasAiKey() rejects when presence is
-  // unknown, and that rejection IS the signal (see doc above).
-  const aiSaved = (await checkAi()) === true
-  const tmdbKey = getTmdbApiKey()
-  const footballKey = getFootballDataApiKey()
+  const unreadable: KeyOnboardingId[] = []
+  let aiSaved: boolean
+  let aiUnreadable = false
+  try {
+    aiSaved = (await checkAi()) === true
+  } catch {
+    // Presence UNKNOWN — fail closed for this key only.
+    aiSaved = true
+    aiUnreadable = true
+    unreadable.push("ai")
+  }
+  const tmdbPresence = getTmdbApiKeyPresence()
+  const footballPresence = getFootballDataApiKeyPresence()
+  if (tmdbPresence === "unreadable") unreadable.push("tmdb")
+  if (footballPresence === "unreadable") unreadable.push("football-data")
+  const tmdbKey = tmdbPresence === "present" ? getTmdbApiKey() : ""
+  const footballKey = footballPresence === "present" ? getFootballDataApiKey() : ""
   const model = getAiModel().trim()
 
   let aiSetupNote: string | undefined
-  if (aiSaved && !model) {
+  if (aiSaved && !aiUnreadable && !model) {
     aiSetupNote = "Key saved — pick a model to finish AI setup."
-  } else if (aiSaved && !getAiEnabled()) {
+  } else if (aiSaved && !aiUnreadable && !getAiEnabled()) {
     aiSetupNote = "Key saved — AI Discovery is off. Turn it on to use it."
   }
 
@@ -275,6 +311,7 @@ export async function getKeysOnboardingStatus(
         id,
         ...def,
         saved: aiSaved,
+        ...(aiUnreadable ? { unreadable: true as const } : {}),
         masked: null,
         ...(aiSetupNote ? { setupNote: aiSetupNote } : {}),
       }
@@ -283,14 +320,16 @@ export async function getKeysOnboardingStatus(
       return {
         id,
         ...def,
-        saved: !!tmdbKey,
+        saved: tmdbPresence !== "absent",
+        ...(tmdbPresence === "unreadable" ? { unreadable: true as const } : {}),
         masked: tmdbKey ? maskKeyForDisplay(tmdbKey) : null,
       }
     }
     return {
       id,
       ...def,
-      saved: !!footballKey,
+      saved: footballPresence !== "absent",
+      ...(footballPresence === "unreadable" ? { unreadable: true as const } : {}),
       masked: footballKey ? maskKeyForDisplay(footballKey) : null,
     }
   })
@@ -298,6 +337,7 @@ export async function getKeysOnboardingStatus(
   return {
     entries,
     missing,
+    unreadable,
     allSaved: missing.length === 0,
     savedCount: entries.length - missing.length,
   }
@@ -326,10 +366,10 @@ export function clearKeysOnboardingDismissal(): void {
  * stored key that would fail validation (that is an error state, see
  * `validateSavedKey()`, not a prompt). The legacy AI-only flag is
  * never consulted.
- * FAIL-SAFE (0.11.22): when the AI presence check fails, this REJECTS
- * (via `getKeysOnboardingStatus`) instead of answering "show" — the
- * caller (`maybeOpenKeysOnboarding`) catches that into "do not show",
- * so a store error can never re-prompt for a key that is saved.
+ * FAIL-SAFE (per-key, settings-polish-95 w3): a key whose presence
+ * check failed counts as saved, so it never triggers this — but the
+ * other keys are still evaluated on their own, so one unreadable
+ * key never silences the prompt for a key that is genuinely missing.
  */
 export async function shouldShowKeysOnboarding(
   deps: KeysOnboardingDeps = {},
@@ -510,6 +550,16 @@ export async function validateSavedKey(
     return { ok: false, error: code, message: aiStatusMessage(code) }
   }
   if (id === "tmdb") {
+    // Fail-closed: a stored key whose read fails is "unavailable",
+    // never "no_key" — reporting "No TMDB key is saved" for a key
+    // that may be saved is the false-missing bug (see header).
+    if (getTmdbApiKeyPresence() === "unreadable") {
+      return {
+        ok: false,
+        error: "unavailable",
+        message: "The saved key couldn't be checked — storage couldn't be read. Nothing was changed.",
+      }
+    }
     const stored = getTmdbApiKey()
     if (!stored) {
       return { ok: false, error: "no_key", message: "No TMDB key is saved." }
@@ -521,6 +571,15 @@ export async function validateSavedKey(
       "The saved key was rejected. Check the key in Settings and try again.",
       "TMDB couldn't be reached. Check your connection and try again.",
     )
+  }
+  // Fail-closed, as for TMDB above: unreadable is "unavailable",
+  // never "no_key".
+  if (getFootballDataApiKeyPresence() === "unreadable") {
+    return {
+      ok: false,
+      error: "unavailable",
+      message: "The saved key couldn't be checked — storage couldn't be read. Nothing was changed.",
+    }
   }
   const stored = getFootballDataApiKey()
   if (!stored) {

@@ -1200,6 +1200,39 @@ export function getTmdbApiKey() {
 }
 
 /**
+ * Tri-state presence for a localStorage-backed key (fail-closed,
+ * settings-polish-95 w3). `readLS` folds a read error into "" (absent),
+ * which is the false-missing bug: a key that IS saved reads as missing
+ * whenever storage cannot be read, and Settings / the keys gate then
+ * ask for a key the user already saved. Presence reads therefore go
+ * through here: one retry, then "unreadable" — never "absent" — with
+ * the error recorded in diagnostics (log.warn). Callers treat
+ * "unreadable" as present at any gate and stay quiet.
+ */
+export function readLocalKeyPresence(key) {
+  let raw = null
+  try {
+    raw = localStorage.getItem(key)
+  } catch (firstError) {
+    // Retry once before deciding: a transient WebView/profile hiccup
+    // must not report a saved key missing.
+    try {
+      raw = localStorage.getItem(key)
+    } catch (secondError) {
+      log.warn("[xt:settings] key presence check failed for", key, secondError)
+      return "unreadable"
+    }
+    log.warn("[xt:settings] key presence check failed once for", key, firstError)
+  }
+  return raw != null && String(raw).trim() !== "" ? "present" : "absent"
+}
+
+/** Tri-state TMDB key presence: "present" | "absent" | "unreadable". */
+export function getTmdbApiKeyPresence() {
+  return readLocalKeyPresence(KEY_TMDB_KEY)
+}
+
+/**
  * Store the TMDB key. Returns true only when the write landed (verified
  * by reading it back): a localStorage write that reports nothing while
  * the key is gone on the next launch used to fail silently — the Settings
@@ -1281,11 +1314,15 @@ export function isTmdbActive() {
  * Honest enrichment state for the Settings toggle (0.11.4): with no key,
  * On and Off are indistinguishable to the user, so the UI must say so.
  * "active" — toggle on and a key is saved; "on-no-key" — toggle on but
- * no key, so nothing is enriched; "off" — toggle off.
+ * no key, so nothing is enriched; "off" — toggle off; "unknown" — the
+ * key could not be read (fail-closed, settings-polish-95 w3): never
+ * report "on-no-key" for a key that may be saved.
  */
 export function getTmdbEnrichmentState() {
   if (!getTmdbEnabled()) return "off"
-  return getTmdbApiKey() ? "active" : "on-no-key"
+  const presence = getTmdbApiKeyPresence()
+  if (presence === "unreadable") return "unknown"
+  return presence === "present" ? "active" : "on-no-key"
 }
 
 export function isEnrichmentActive() {
@@ -1306,6 +1343,11 @@ export function getFootballDataApiKey() {
   return readLS(FOOTBALL_DATA_KEY_STORAGE_KEY, "").trim()
 }
 
+/** Tri-state football-data.org key presence: "present" | "absent" | "unreadable". */
+export function getFootballDataApiKeyPresence() {
+  return readLocalKeyPresence(FOOTBALL_DATA_KEY_STORAGE_KEY)
+}
+
 /**
  * Store the football-data.org key. Returns true only when the write
  * landed (verified by reading it back), mirroring setTmdbApiKey: a
@@ -1324,9 +1366,14 @@ export function setFootballDataApiKey(key) {
   return verified
 }
 
-/** Honest Sports Corner feed state for Settings: active only with a key. */
+/** Honest Sports Corner feed state for Settings: active only with a key.
+ *  "unknown" when the key could not be read (fail-closed,
+ *  settings-polish-95 w3): never report "no-key" for a key that may be
+ *  saved. */
 export function getFootballDataEnrichmentState() {
-  return getFootballDataApiKey() ? "active" : "no-key"
+  const presence = getFootballDataApiKeyPresence()
+  if (presence === "unreadable") return "unknown"
+  return presence === "present" ? "active" : "no-key"
 }
 
 export const AI_SETTINGS_EVENT = "xt:ai-settings-changed"

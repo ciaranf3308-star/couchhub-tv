@@ -18,13 +18,12 @@
 // - It never throws and never blocks the caller: a store error in the
 //   status check resolves to "do not show", and an open failure resolves
 //   to null. The app behind the gate always stays usable.
-//   FAIL-SAFE (0.11.22): this catch is real now — `shouldShowKeysOnboarding`
-//   propagates an AI presence-check failure (a store that cannot be
-//   reached) instead of swallowing it into "missing", so a failed
-//   check lands here and resolves to null ("do not show", fail closed)
-//   rather than re-prompting for a saved key. The trade-off is
-//   deliberate: on an AI store error the gate stays silent for every
-//   key this launch; the keys can still be added in Settings.
+//   FAIL-SAFE (0.11.22, per-key since settings-polish-95 w3): the
+//   status check itself now treats an unreadable key as saved and
+//   still evaluates the others, so this catch is a backstop for
+//   anything else that throws — a failed check can never re-prompt
+//   for a key that is saved, and one unreadable key never silences
+//   the prompt for a key that is genuinely missing.
 
 import {
   shouldShowKeysOnboarding,
