@@ -716,6 +716,17 @@ async function fetchJson(
           response.status,
         )
       }
+      // The provider answers a bad token with HTTP 400 and the body
+      // {"message":"Your API token is invalid.","errorCode":400}
+      // (verified live 2026-11-22 with a 32-char dummy token) — that
+      // is an auth failure, not a network failure, so it must read as
+      // a key rejection everywhere, never as "couldn't be reached".
+      if (await responseBodySaysTokenInvalid(response)) {
+        throw new FootballDataError(
+          "Football-data.org rejected the API key (check the key in Settings)",
+          response.status,
+        )
+      }
       throw new FootballDataError(
         `Football-data.org request failed (${response.status})`,
         response.status,
@@ -735,6 +746,26 @@ async function fetchJson(
     )
   } finally {
     if (timer !== null) clearTimeout(timer)
+  }
+}
+
+/**
+ * True when an error response's JSON body says the API token is
+ * invalid (the provider's bad-token shape). Never throws: an
+ * unreadable or non-JSON body is simply not a token error.
+ */
+async function responseBodySaysTokenInvalid(
+  response: FootballDataFetchResponse,
+): Promise<boolean> {
+  try {
+    const body: unknown = await response.json()
+    if (!isRecord(body)) return false
+    const message = body.message
+    return (
+      typeof message === "string" && /api token is invalid/i.test(message)
+    )
+  } catch {
+    return false
   }
 }
 

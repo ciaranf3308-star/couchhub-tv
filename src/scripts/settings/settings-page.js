@@ -2853,7 +2853,13 @@
         if (result.ok) {
           flashMsg(footballDataMsgEl, "Key works")
           flashSuccess(footballDataTestBtn)
-        } else if (result.status === 401 || result.status === 403) {
+        } else if (
+          result.status === 400 ||
+          result.status === 401 ||
+          result.status === 403
+        ) {
+          // 400 is the provider's bad-token answer
+          // ({"message":"Your API token is invalid."}).
           flashMsg(footballDataMsgEl, "football-data.org rejected this key")
         } else {
           flashMsg(footballDataMsgEl, "Couldn't reach football-data.org")

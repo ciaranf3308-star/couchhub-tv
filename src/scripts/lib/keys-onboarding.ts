@@ -404,13 +404,28 @@ function unavailableOutcome(message: string): KeyTestOutcome {
   return { ok: false, error: "unavailable", message }
 }
 
+/**
+ * Map a validator's { ok, status } onto the onboarding outcome.
+ * `invalidStatuses` are the HTTP statuses that mean "the key was
+ * rejected" for this provider — TMDB rejects with 401, while
+ * football-data.org rejects a bad token with 400
+ * ({"message":"Your API token is invalid."}, verified live
+ * 2026-11-22) as well as 401/403, so its callers pass [400, 401,
+ * 403]. Anything else without a status is unreachable, never a key
+ * problem — a bad key must never read as "couldn't be reached".
+ */
 function mapHttpValidation(
   result: { ok: boolean; status?: number },
   invalidMessage: string,
   unreachableMessage: string,
+  invalidStatuses: ReadonlyArray<number> = [401],
 ): KeyTestOutcome {
   if (result.ok) return { ok: true }
-  if (result.status === 401) return invalidKeyOutcome(invalidMessage)
+  if (
+    result.status !== undefined &&
+    invalidStatuses.includes(result.status)
+  )
+    return invalidKeyOutcome(invalidMessage)
   if (result.status === 429) {
     return {
       ok: false,
@@ -456,6 +471,7 @@ export async function testOnboardingKey(
       result,
       "That key was rejected. Check the key and try again.",
       "football-data.org couldn't be reached. Check your connection and try again.",
+      [400, 401, 403],
     )
   }
   // AI: apply endpoint/model first, save the typed key, then test the
@@ -595,6 +611,7 @@ export async function validateSavedKey(
     result,
     "The saved key was rejected. Check the key in Settings and try again.",
     "football-data.org couldn't be reached. Check your connection and try again.",
+    [400, 401, 403],
   )
 }
 
