@@ -177,16 +177,16 @@ describe("settings polish 0.11.24 — anchor scroll-margin consistent (gap 5)", 
 })
 
 describe("settings polish 0.11.24 — version bump", () => {
-  it("package.json, Cargo.toml and tauri.conf.json all say 0.11.25", () => {
+  it("package.json, Cargo.toml and tauri.conf.json all say 0.11.26", () => {
     const pkg = JSON.parse(read("package.json")) as { version: string }
-    expect(pkg.version).toBe("0.11.25")
-    expect(read("src-tauri/Cargo.toml")).toContain('version = "0.11.25"')
+    expect(pkg.version).toBe("0.11.26")
+    expect(read("src-tauri/Cargo.toml")).toContain('version = "0.11.26"')
     const conf = JSON.parse(read("src-tauri/tauri.conf.json")) as {
       version: string
       bundle: { android: { versionCode: number } }
     }
-    expect(conf.version).toBe("0.11.25")
+    expect(conf.version).toBe("0.11.26")
     // sync-version formula: major*1e8 + minor*1e6 + patch*1e4 + 9000.
-    expect(conf.bundle.android.versionCode).toBe(11_259_000)
+    expect(conf.bundle.android.versionCode).toBe(11_269_000)
   })
 })

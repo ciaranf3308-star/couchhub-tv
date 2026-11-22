@@ -47,7 +47,6 @@ import {
   enrichProgramme,
   pickArtworkUrl,
 } from "@/scripts/lib/livetv-enrichment.js"
-import { log } from "@/scripts/lib/log.js"
 import {
   isTitleContextMenuOpen,
   openTitleContextMenu,
