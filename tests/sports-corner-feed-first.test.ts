@@ -542,10 +542,15 @@ describe("feed-first — on-TV-now is driven by feed fixtures only", () => {
     ).toContain("No Manchester United programmes on TV right now")
   })
 
-  it("pre-match feed fixture (kick-off in 30 min) + build-up on air → card with LIVE badge and Starts in 30 min", () => {
+  it("pre-match feed fixture (kick-off in 30 min) + build-up on air → card with ON NOW badge and Starts in 30 min", () => {
     // The build-up listing carries the plain match title, so the
-    // badge rule reads the coverage on air as LIVE; the meta
-    // follows kick-off, not the programme start.
+    // EPG badge rule on its own would read the coverage on air as
+    // LIVE — but the football has not kicked off, and a LIVE badge
+    // next to "Starts in 30 min" is the 0.11.17 mislabel (an "On
+    // now" becoming "LIVE" for football that is not being played).
+    // The pre-match badge is capped to ON NOW: the coverage is on
+    // air, the match is not live yet. The meta follows kick-off,
+    // not the programme start.
     const buildup = liverpoolListing({
       startMs: KICKOFF - 30 * MINUTE,
       stopMs: KICKOFF + 113 * MINUTE,
@@ -566,7 +571,7 @@ describe("feed-first — on-TV-now is driven by feed fixtures only", () => {
     const cards = [...document.querySelectorAll(".rs-sports-onnow-card")]
     expect(cards).toHaveLength(1)
     expect(cards[0]?.querySelector(".rs-sports-badge")?.textContent).toBe(
-      "LIVE",
+      "ON NOW",
     )
     expect(cards[0]?.querySelector(".rs-sports-onnow-meta")?.textContent).toBe(
       "Sky Sports Main Event · Premier League · Starts in 30 min",

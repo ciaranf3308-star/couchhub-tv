@@ -146,7 +146,7 @@ async function startAuthForwarder(): Promise<{
   return { port, close: () => server.close() }
 }
 
-test.beforeAll(async (_fixtures, testInfo) => {
+test.beforeAll(async ({}, testInfo) => {
   // Playwright hooks take no timeout argument (the 150_000 that used
   // to sit here was silently ignored — the hook ran under the 30s
   // default and a cold astro start timed it out). Set it on testInfo.

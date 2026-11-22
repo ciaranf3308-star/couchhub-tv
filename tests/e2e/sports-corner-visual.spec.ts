@@ -1,11 +1,19 @@
-// Sports Corner visual rebuild (fix-3, workstream 3) — real-browser
-// screenshots at 1672x941 and 1920x1080.
+// Sports Corner visual rebuild (fix-3, workstream 3; feed-first,
+// 0.11.26) — real-browser screenshots at 1672x941 and 1920x1080.
 //
 // Seeds the same fixture playlist + EPG as tests/e2e/flow.spec.ts,
 // but with Manchester United programmes on the sports channels, and
 // intercepts api.football-data.org with the mock payloads (real
 // facts: United 18th / 8 pts / D L L D D, next 5 as of 21 Nov 2026).
 // No real key, no network to the feed, no TheSportsDB.
+//
+// Feed-first (0.11.26): on-TV-now is driven by the FEED, not the
+// EPG — so the seed must make the feed say Liverpool is live too.
+// The live-window call (dateFrom = yesterday) gets the PL payload
+// with the Liverpool match flipped to IN_PLAY; the EPG's Liverpool
+// listing is anchored to the mock kick-off (16:30) so station
+// matching works at any runtime. The EPG programme alone no longer
+// produces an on-TV-now card.
 import { test, expect, type Page } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -61,7 +69,16 @@ const CHANNELS: Array<{ tvgId: string; name: string }> = [
 /** United programmes relative to real now, across the sports channels.
  * Explicit offsets (not hourly blocks): this shape rendered
  * end-to-end in the first screenshot run. Filler blocks cover the
- * non-sports channels so the guide looks real elsewhere. */
+ * non-sports channels so the guide looks real elsewhere.
+ *
+ * The Liverpool listing is the exception: it is anchored to the
+ * mock kick-off (Sun 22 Nov 2026 16:30 UTC) instead of real now,
+ * so the feed fixture and its EPG listing agree on kick-off and
+ * station matching (listing starts 30 min before kick-off) works
+ * whenever the spec runs. At runtimes far from matchday the
+ * listing is simply past — the feed seed is frozen to 22 Nov too.
+ */
+const MOCK_KICKOFF_MS = Date.UTC(2026, 10, 22, 16, 30, 0)
 function buildSportsEpg(): string {
   const hourMs = 60 * 60 * 1000
   const minuteMs = 60 * 1000
@@ -83,10 +100,12 @@ function buildSportsEpg(): string {
     // Live now: the Liverpool match (on air) + a classic.
     // "Man Utd" is a confirmed alias; bare "United" would
     // classify possible-tier and vanish while on air.
+    // Anchored to the mock kick-off (see buildSportsEpg header):
+    // build-up from 16:00, match to 18:53.
     programme(
       "sports-plus",
-      -10 * minuteMs,
-      80 * minuteMs,
+      MOCK_KICKOFF_MS - 30 * minuteMs - now,
+      MOCK_KICKOFF_MS + 143 * minuteMs - now,
       "Liverpool v Manchester United",
       "Premier League live from Anfield.",
     ),
@@ -120,7 +139,9 @@ function buildSportsEpg(): string {
       "Manchester United Women v Arsenal Women",
       "Women's Super League.",
     ),
-    // Recent (past).
+    // Recorded, not Recent (feed-first, 0.11.26): a highlights
+    // programme is a TV programme, never a fixture — it appears
+    // nowhere as a row, which is itself part of the proof.
     programme(
       "sports-prime",
       -3 * hourMs,
@@ -155,10 +176,28 @@ async function mockFixtureRoutes(page: Page, epgText: string) {
       payload = MOCK_STANDINGS_RESPONSE
     } else if (url.pathname.includes("/competitions/PL/matches")) {
       const dateFrom = url.searchParams.get("dateFrom") ?? ""
-      payload =
-        dateFrom !== "" && dateFrom < "2026-11-20"
-          ? MOCK_PL_RESULTS_RESPONSE
-          : MOCK_PL_MATCHES_RESPONSE
+      // Yesterday's date (UTC): the live window's dateFrom.
+      const yesterdayStr = new Date(Date.now() - 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10)
+      if (dateFrom !== "" && dateFrom < "2026-11-20") {
+        payload = MOCK_PL_RESULTS_RESPONSE
+      } else if (dateFrom === yesterdayStr) {
+        // Live window (feed-first, 0.11.26): the feed must say
+        // Liverpool is IN_PLAY, or on-TV-now has no live card —
+        // the EPG listing alone no longer drives it. Clone: the
+        // mock const is shared across calls.
+        const live = JSON.parse(
+          JSON.stringify(MOCK_PL_MATCHES_RESPONSE),
+        ) as {
+          matches: Array<{ id: number; status: string }>
+        }
+        const liverpool = live.matches.find((m) => m.id === 535101)
+        if (liverpool) liverpool.status = "IN_PLAY"
+        payload = live
+      } else {
+        payload = MOCK_PL_MATCHES_RESPONSE
+      }
     } else if (url.pathname.includes("/competitions/CL/matches")) {
       payload = MOCK_CL_MATCHES_RESPONSE
     }
@@ -227,7 +266,7 @@ async function seedAppState(page: Page) {
   })
 }
 
-const SHOT_DIR = join(here, "../visual/sports-corner-fix-3")
+const SHOT_DIR = join(here, "../visual/sports-corner-feed-first")
 
 test("sports corner visual rebuild — screenshots at 1672x941 and 1920x1080", async ({
   page,
@@ -290,10 +329,14 @@ test("sports corner visual rebuild — screenshots at 1672x941 and 1920x1080", a
   await expect(page.locator(".rs-sports-next-row").first()).toBeVisible()
   await expect(page.locator(".rs-sports-table")).toBeVisible()
   await expect(page.locator(".rs-sports-hero")).toBeVisible()
-  // Live state: the Liverpool match is on now (on-TV-now card),
-  // so the feed hero leads with the next fixture, Sporting CP.
-  // EPG-dependent: the guide load is slow in this environment,
-  // so these waits get 30s, not the default 5s.
+  // Live state: the Liverpool match is live in the FEED (IN_PLAY
+  // in the live window) with its station from the EPG, so the
+  // on-TV-now card carries it; the feed hero leads with the next
+  // fixture, Sporting CP. EPG-dependent: the guide load is slow in
+  // this environment, so these waits get 30s, not the default 5s.
+  // Time-of-day honest: this only holds while the match is live
+  // (16:30–~18:15 on 22 Nov); outside that window the live card
+  // is gone and the section shows its honest empty line.
   await expect(
     page.locator('[data-sports-section="on-tv-now"]'),
   ).toContainText("Liverpool", { timeout: 30_000 })

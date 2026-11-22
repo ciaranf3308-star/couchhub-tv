@@ -1363,11 +1363,19 @@ function buildOnTvNowSection(
     const thumb = el("div", "rs-sports-onnow-thumb")
     // Badge: the feed is the truth about live — a live feed
     // fixture is LIVE; a pre-match fixture gets the EPG badge
-    // (ON NOW when build-up coverage is airing).
+    // (ON NOW when build-up coverage is airing). The badge must
+    // NEVER claim LIVE before kick-off: the EPG badge reads the
+    // listing on air, so a build-up listing carrying the plain
+    // match title would read LIVE while the meta says "Starts in
+    // 30 min" — the same LIVE-mislabel the user called out in
+    // 0.11.17. A pre-match LIVE is capped to ON NOW.
     const badge = live
       ? "LIVE"
       : epgFixture
-        ? sportsFixtureLiveBadge(epgFixture, nowMs)
+        ? (() => {
+            const epgBadge = sportsFixtureLiveBadge(epgFixture, nowMs)
+            return epgBadge === "LIVE" ? "ON NOW" : epgBadge
+          })()
         : null
     if (badge) {
       thumb.appendChild(
@@ -2444,7 +2452,7 @@ export function mountSportsHubPage(): void {
           getLeagueTable(),
           getNextFixtures(5),
           getRecentForm(5),
-          getLiveFixtures(5),
+          getLiveFixtures(),
         ])
       if (!mounted) return
       runtime.tableResult = tableResult
