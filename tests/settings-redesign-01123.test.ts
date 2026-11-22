@@ -22,7 +22,7 @@
 //      the matching anchor.
 //   6. Danger-zone / Backup copy is honest about what Reset and
 //      backups never touch (Q3/Q10).
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect } from "vitest"
 import { readFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 import { SETTINGS_SECTIONS, searchSettingsIndex } from "../src/scripts/settings/settings-index.ts"

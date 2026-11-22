@@ -45,7 +45,7 @@ function buildDiscoverDom(): HTMLElement {
   document.body.innerHTML = `
     <div id="discover-root">
       <header>
-        <a href="/settings/discover-ai" id="prefs">Discovery preferences</a>
+        <a href="/settings#card-ai-discovery" id="prefs">Discovery preferences</a>
       </header>
       <div data-nav-region="search">
         <input id="query" type="search" />

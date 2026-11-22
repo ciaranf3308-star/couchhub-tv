@@ -11,6 +11,10 @@
 // src/scripts/settings/settings-page.js. The `settings` source below is
 // the home + every section page + the shared script, so the static
 // guards keep checking the same controls in their new homes.
+// 0.11.23: Settings is one page again — the sections live as components
+// under src/components/settings/sections/*.astro, composed by
+// src/pages/settings.astro; the old /settings/<slug> routes are
+// redirects to the matching anchor. The loader below follows them.
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { readFileSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
@@ -53,9 +57,9 @@ const repo = join(here, "..")
 const read = (rel: string) => readFileSync(join(repo, rel), "utf8")
 const settings = [
   read("src/pages/settings.astro"),
-  ...readdirSync(join(repo, "src/pages/settings"))
+  ...readdirSync(join(repo, "src/components/settings/sections"))
     .filter((f) => f.endsWith(".astro"))
-    .map((f) => read(`src/pages/settings/${f}`)),
+    .map((f) => read(`src/components/settings/sections/${f}`)),
   read("src/scripts/settings/settings-page.js"),
 ].join("\n")
 const backupJs = read("src/scripts/lib/backup.js")
@@ -240,7 +244,7 @@ describe("Resume last channel control (fix #11)", () => {
 describe("Backup copy is honest (fixes #7, #10)", () => {
   it("says the TMDb + AI keys are never included", () => {
     expect(enJson["settings.backup.helperLong"]).toContain(
-      "The TMDb key and the AI key are never included"
+      "The TMDb key, the football-data key and the AI key are never included"
     )
     expect(enJson["settings.backup.helperLong"]).toContain("followed series")
     expect(enJson["settings.backup.helperLong"]).toContain("profiles")
@@ -257,11 +261,13 @@ describe("Backup copy is honest (fixes #7, #10)", () => {
 
   it("reset dialog says what the snapshot restores — and what it does not", () => {
     expect(enJson["settings.danger.dialogBody"]).toContain("Restore last backup brings back")
-    expect(enJson["settings.danger.dialogBody"]).toContain("TMDb key (never stored in a backup")
+    expect(enJson["settings.danger.dialogBody"]).toContain(
+      "TMDb key and the football-data key (never stored in a backup"
+    )
     expect(enJson["settings.danger.dialogBody"]).toContain("cached lists (they rebuild")
     expect(enJson["settings.danger.dialogBody"]).not.toContain("This can't be undone")
     expect(enJson["settings.danger.restoreLastHelper"]).toContain(
-      "It does not restore the TMDb key or cached lists."
+      "It does not restore the TMDb key, the football-data key or cached lists."
     )
   })
 })

@@ -129,7 +129,7 @@ describe("sports artwork manifest (0.11.12)", () => {
   });
 
   it("the Settings Licenses section renders credits from this manifest", () => {
-    const page = readFileSync(join(root, "src", "pages", "settings", "app-updates.astro"), "utf8");
+    const page = readFileSync(join(root, "src", "components", "settings", "sections", "app-updates.astro"), "utf8");
     expect(page).toContain("sports-artwork-manifest");
     expect(page).toContain("SPORT_ARTWORK_MANIFEST");
     expect(page).toContain("Sports photography");

@@ -35,8 +35,10 @@ const couchLayout = readFileSync(
 );
 // 0.11.4 W1: Settings is split — the diagnostics line lives on the
 // App & Updates page, the fill code in the shared settings-page.js.
+// 0.11.23: Settings is one page — the App & Updates section lives in
+// src/components/settings/sections/app-updates.astro.
 const settings = readFileSync(
-  join(repo, "src/pages/settings/app-updates.astro"),
+  join(repo, "src/components/settings/sections/app-updates.astro"),
   "utf8",
 );
 const settingsScript = readFileSync(

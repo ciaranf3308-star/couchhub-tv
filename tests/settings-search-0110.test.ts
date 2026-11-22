@@ -41,9 +41,9 @@ function buildFixture(): {
       <div id="settings-search-xpage" hidden></div>
     </div>
     <div id="settings-home-list">
-      <a class="settings-home-row" href="/settings/playlists" data-search-text="playlists sources xtream m3u">Playlists</a>
-      <a class="settings-home-row" href="/settings/display" data-search-text="display font scale density">Display</a>
-      <a class="settings-home-row" href="/settings/playback" data-search-text="playback player audio captions">Playback</a>
+      <a class="settings-home-row" href="/settings#playlists" data-search-text="playlists sources xtream m3u">Playlists</a>
+      <a class="settings-home-row" href="/settings#display" data-search-text="display font scale density">Display</a>
+      <a class="settings-home-row" href="/settings#playback" data-search-text="playback player audio captions">Playback</a>
     </div>
   `
   const input = document.getElementById(INPUT_ID) as HTMLInputElement

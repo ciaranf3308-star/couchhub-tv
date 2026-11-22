@@ -210,14 +210,19 @@ const BASELINE_LOGIN_IDS: string[] = [
 // src/components/settings/SettingsShell.astro, shared behaviour in
 // src/scripts/settings/settings-page.js. Control ids live on their
 // section page (or the shell, for the search box), never all in one file.
+// 0.11.23: Settings is one page again — the sections live as components
+// under src/components/settings/sections/*.astro, composed by
+// src/pages/settings.astro; the old /settings/<slug> routes are
+// redirects to the matching anchor. Control ids live on their section
+// component (or the shell, for the search box).
 function settingsSources(): string {
-  const pages = readdirSync(resolve(root, "src/pages/settings"))
+  const sections = readdirSync(resolve(root, "src/components/settings/sections"))
     .filter((f) => f.endsWith(".astro"))
-    .map((f) => pageSource(`src/pages/settings/${f}`));
+    .map((f) => pageSource(`src/components/settings/sections/${f}`));
   return [
     pageSource("src/pages/settings.astro"),
     pageSource("src/components/settings/SettingsShell.astro"),
-    ...pages,
+    ...sections,
   ].join("\n");
 }
 
@@ -263,10 +268,12 @@ describe("couch-settings: preservation", () => {
     expect(src).not.toContain("commitTheme(");
   });
 
-  it("settings is split into short pages with no Quick + Advanced split", () => {
+  it("settings is one page of grouped sections, with no Quick + Advanced split", () => {
     // 0.11.4 W1: the Quick/Advanced split is killed — one Settings, every
-    // control exactly one home. The shell owns the Couch layout; section
-    // pages mount through it.
+    // control exactly one home. The shell owns the Couch layout; the
+    // sections are components composed by the single page.
+    // 0.11.23: the 0.11.4 split into one page per section is undone for
+    // the same reason — one page, grouped sections, jump-to menu on top.
     const src = settingsSources();
     expect(src).not.toContain('id="settings-quick"');
     expect(src).not.toContain('id="settings-advanced"');
@@ -278,17 +285,28 @@ describe("couch-settings: preservation", () => {
     expect(shell).toContain('import CouchLayout from "@/layouts/CouchLayout.astro"');
     expect(shell).toContain("<CouchLayout");
     expect(shell).not.toContain('import Layout from "@/layouts/Layout.astro"');
-    const pages = readdirSync(resolve(root, "src/pages/settings"))
+    const sections = readdirSync(resolve(root, "src/components/settings/sections"))
       .filter((f) => f.endsWith(".astro"));
-    expect(pages.length).toBeGreaterThanOrEqual(11);
-    for (const f of pages) {
-      expect(pageSource(`src/pages/settings/${f}`)).toContain("SettingsShell");
+    expect(sections.length).toBe(12);
+    // The old section routes still exist, as redirects to the matching
+    // anchor on the single page.
+    const routes = readdirSync(resolve(root, "src/pages/settings"))
+      .filter((f) => f.endsWith(".astro"));
+    expect(routes.length).toBe(12);
+    for (const f of routes) {
+      const slug = f.replace(/\.astro$/, "");
+      expect(pageSource(`src/pages/settings/${f}`)).toContain(`/settings#${slug}`);
     }
-    // The old 6,305-line monolith is a short home listing the sections.
+    // The single page composes all twelve sections and stays short —
+    // the old 6,305-line monolith is not back.
     const home = pageSource("src/pages/settings.astro");
-    expect(home.split("\n").length).toBeLessThan(120);
+    expect(home.split("\n").length).toBeLessThan(300);
     expect(home).toContain('id="settings-home-list"');
     expect(home).toContain('id="settings-exit-row"');
+    for (const f of sections) {
+      const slug = f.replace(/\.astro$/, "");
+      expect(home).toContain(`id="${slug}"`);
+    }
   });
 
   it("every app-settings storage key is still referenced by app-settings.js", async () => {
