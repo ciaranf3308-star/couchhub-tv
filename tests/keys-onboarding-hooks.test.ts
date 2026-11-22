@@ -203,6 +203,40 @@ describe("launch gate (runKeysLaunchGate)", () => {
     })
     expect(result).toBeNull()
   })
+
+  it("fail-safe is real: a failed AI presence check resolves to 'do not show', never a prompt", async () => {
+    // Real core (no shouldShow fake): the AI check throws, so the
+    // status check rejects and the gate's catch resolves to null.
+    const open = vi.fn(async () => ({
+      outcome: "completed" as const,
+      saved: [],
+      reason: "launch" as const,
+    }))
+    const result = await runKeysLaunchGate({
+      hasAiKey: async () => {
+        throw new Error("STORE:locked")
+      },
+      open,
+    })
+    expect(result).toBeNull()
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it("a failed AI presence check stays silent from a feature entry too", async () => {
+    const open = vi.fn(async () => ({
+      outcome: "completed" as const,
+      saved: [],
+      reason: "ai" as const,
+    }))
+    const result = await maybeOpenKeysOnboarding("ai", {
+      hasAiKey: async () => {
+        throw new Error("STORE:locked")
+      },
+      open,
+    })
+    expect(result).toBeNull()
+    expect(open).not.toHaveBeenCalled()
+  })
 })
 
 describe("session skip suppresses every entry (no double-prompt)", () => {

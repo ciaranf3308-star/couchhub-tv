@@ -24,6 +24,8 @@ export async function initAI(): Promise<void> {
   try {
     keyPresent = await hasAiKey()
   } catch {
+    // hasAiKey() throws when presence is UNKNOWN (store unreachable):
+    // a failed check is "AI off", never a crash and never a prompt.
     keyPresent = false
   }
 }

@@ -2956,7 +2956,17 @@
 
     async function syncAiKeyStatus() {
       if (!aiKeyStatusEl) return
-      const has = await hasAiKey()
+      let has
+      try {
+        has = await hasAiKey()
+      } catch {
+        // Presence UNKNOWN (store unreachable, 0.11.22): never claim
+        // "No key saved" for a key that may be saved, and never throw
+        // out of a status sync (callers await this after a save — a
+        // throw here would flash a false save-failure). Leave the row
+        // showing its previous state (blank on first load = unknown).
+        return
+      }
       aiKeyStatusEl.textContent = has ? t("settings.ai.keySaved") : t("settings.ai.keyMissing")
       if (aiClearBtn) aiClearBtn.disabled = !has
       // Saved state on the field itself (0.11.4): the input stays empty

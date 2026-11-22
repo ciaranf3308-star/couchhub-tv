@@ -321,6 +321,12 @@ export const SUPPORTED_MODELS: ReadonlyArray<{ id: string; label: string }> = [
   { id: "o4-mini", label: "o4-mini — reasoning, low cost" },
 ]
 
+/** The model pre-filled where no model is saved yet (keys onboarding
+ *  AI step, 0.11.22): the key test requires a model — an empty model
+ *  fails as `invalid_model` — so a step with no saved model must not
+ *  sit on "Custom…" with an empty box. */
+export const DEFAULT_AI_MODEL: string = SUPPORTED_MODELS[0].id
+
 export const OPENAI_ENDPOINT = "https://api.openai.com/v1"
 export const OPENAI_KEYS_URL = "https://platform.openai.com/api-keys"
 
@@ -510,7 +516,9 @@ export async function getAiStatus(): Promise<AiStatus> {
   try {
     keySaved = await hasAiKey()
   } catch {
-    // hasAiKey() never throws by contract; stay unsaved if it ever does.
+    // hasAiKey() throws when presence is UNKNOWN (store unreachable):
+    // a failed check is "AI off / unknown", never a crash and never a
+    // prompt — Discover falls back to local recommendations.
   }
   const canAskAi = enabled && keySaved && !!endpoint && !!model
   if (!enabled) {
