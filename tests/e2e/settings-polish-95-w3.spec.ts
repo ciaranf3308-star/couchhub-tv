@@ -201,25 +201,25 @@ test.describe("R3: locales render the friendly copy (real browser)", () => {
   const cases = [
     {
       code: "de",
-      sub: "Alles darüber, wie die App aussieht, abspielt und sich verbindet — an einem Ort. Wähle unten einen Bereich oder scrolle einfach.",
+      sub: "Alles darüber, wie die App aussieht, abspielt und sich verbindet — an einem Ort. Springe oben zu einem Bereich oder scrolle einfach.",
       danger: "fast alle",
       backup: "football-data-Schlüssel",
     },
     {
       code: "fr",
-      sub: "Tout sur l'apparence, la lecture et les connexions de l'app — au même endroit. Choisissez une section ci-dessous, ou faites simplement défiler.",
+      sub: "Tout sur l'apparence, la lecture et les connexions de l'app — au même endroit. Allez à une section ci-dessus, ou faites simplement défiler.",
       danger: "presque toutes",
       backup: "clé football-data",
     },
     {
       code: "es",
-      sub: "Todo sobre cómo se ve, suena y se conecta la app — en un solo lugar. Elige una sección abajo, o simplemente desplázate.",
+      sub: "Todo sobre cómo se ve, suena y se conecta la app — en un solo lugar. Salta a una sección arriba, o simplemente desplázate.",
       danger: "casi todos",
       backup: "clave de football-data",
     },
     {
       code: "ja",
-      sub: "アプリの見た目、再生、接続について、すべてここに。以下のセクションを選ぶか、そのままスクロールしてください。",
+      sub: "アプリの見た目、再生、接続について、すべてここに。上のセクションへ移動するか、そのままスクロールしてください。",
       danger: "ほぼすべて",
       backup: "football-dataキー",
     },

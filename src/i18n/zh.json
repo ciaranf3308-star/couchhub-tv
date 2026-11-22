@@ -1117,7 +1117,7 @@
   "aria.backToLiveTv": "返回直播",
   "aria.showEpgDefault": "默认显示 EPG",
   "aria.channelColumnWidth": "频道列宽",
-  "page.settings.sub": "关于应用的外观、播放和连接的一切 — 都在这里。请选择下面的分区，或直接滚动浏览。",
+  "page.settings.sub": "关于应用的外观、播放和连接的一切 — 都在这里。请跳到上方分区,或直接滚动浏览。",
   "catalog.warming": "正在加载目录",
   "catalog.retry": "重试",
   "catalog.partialFailed": "部分项目无法加载",
