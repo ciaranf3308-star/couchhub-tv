@@ -85,9 +85,20 @@ export const FOOTBALL_DATA_FIXTURES_CACHE_KEY =
   "xt_football_data_fixtures_cache"
 export const FOOTBALL_DATA_RESULTS_CACHE_KEY =
   "xt_football_data_results_cache"
+/** Live fixtures cache key. Live data goes stale in minutes, not
+ *  hours — see FOOTBALL_DATA_LIVE_TTL_MS. */
+export const FOOTBALL_DATA_LIVE_CACHE_KEY = "xt_football_data_live_cache"
 
 /** Default cache TTL: 1h (plan §5.1). */
 export const FOOTBALL_DATA_DEFAULT_TTL_MS = 60 * 60 * 1000
+
+/** Live-fixtures cache TTL: 5 minutes. A match's live state
+ *  changes by the minute (kick-off, half-time, full-time), so a
+ *  1h cache would keep showing a finished match as live. The hub
+ *  re-fetches live fixtures on mount and whenever a kick-off
+ *  boundary passes, so the 5-minute TTL is a backstop, not the
+ *  refresh mechanism. */
+export const FOOTBALL_DATA_LIVE_TTL_MS = 5 * 60 * 1000
 
 /** A table older than this is never presented as current: the UI must
  *  flag it "may be out of date" (plan §5.1, T-v2-5). */
@@ -315,6 +326,7 @@ interface Cached<T> {
 let memoryTable: Cached<LeagueTable> | null = null
 let memoryFixtures: Cached<FeedFixture[]> | null = null
 let memoryResults: Cached<FeedFixture[]> | null = null
+let memoryLive: Cached<FeedFixture[]> | null = null
 
 function readCache<T>(key: string): Cached<T> | null {
   const raw = lsGet(key)
@@ -337,9 +349,11 @@ export function clearFootballDataCache(): void {
   memoryTable = null
   memoryFixtures = null
   memoryResults = null
+  memoryLive = null
   lsRemove(FOOTBALL_DATA_TABLE_CACHE_KEY)
   lsRemove(FOOTBALL_DATA_FIXTURES_CACHE_KEY)
   lsRemove(FOOTBALL_DATA_RESULTS_CACHE_KEY)
+  lsRemove(FOOTBALL_DATA_LIVE_CACHE_KEY)
 }
 
 // ── Team-name normalisation (shared by fixture filter + matcher) ──
@@ -605,6 +619,23 @@ const UPCOMING_STATUSES: ReadonlySet<string> = new Set([
 /** The feed's own status value for a match with a final score. */
 const FINISHED_STATUSES: ReadonlySet<string> = new Set(["FINISHED"])
 
+/** The feed's own status values for a match currently being played.
+ *  Feed-first (0.11.26): the hub's on-TV-now section is driven by
+ *  these (plus the pre-match window on the upcoming list) — a match
+ *  the feed says is live, with its station from the EPG. No feed
+ *  fixture, no on-TV-now entry. */
+const LIVE_STATUSES: ReadonlySet<string> = new Set(["IN_PLAY", "PAUSED"])
+
+/**
+ * A match can be live for at most ~2.5 hours (90 minutes +
+ * stoppage + extra time + penalties). A "live" fixture whose
+ * kick-off is older than this is stale data (a finished match a
+ * failed refresh left behind), never a match still playing — the
+ * live filter drops it so a stale cache can never keep a finished
+ * match on TV now.
+ */
+const LIVE_FIXTURE_MAX_AGE_MS = 3 * 60 * 60 * 1000
+
 function matchStatusOf(match: unknown): string | null {
   return isRecord(match) ? nonEmptyString(match.status) : null
 }
@@ -865,6 +896,26 @@ export async function getLeagueTable(
   }
 }
 
+/**
+ * Live-window matches URL: the same `/competitions/{PL,CL}/matches`
+ * endpoint the fixtures call uses, with the window centred on today
+ * (yesterday → tomorrow) so a match that kicked off earlier today
+ * is in the payload. The live filter (status IN_PLAY/PAUSED) does
+ * the rest — a SCHEDULED row in this window is dropped, never shown
+ * as live.
+ */
+function liveMatchesUrl(
+  competition: (typeof FOOTBALL_DATA_FIXTURE_COMPETITIONS)[number],
+  nowMs: number,
+): string {
+  const from = footballDataDate(new Date(nowMs - 24 * 60 * 60 * 1000))
+  const to = footballDataDate(new Date(nowMs + 24 * 60 * 60 * 1000))
+  return (
+    `${FOOTBALL_DATA_BASE_URL}/competitions/${competition}/matches` +
+    `?dateFrom=${from}&dateTo=${to}`
+  )
+}
+
 function matchesUrl(
   competition: (typeof FOOTBALL_DATA_FIXTURE_COMPETITIONS)[number],
   nowMs: number,
@@ -992,6 +1043,131 @@ export async function getNextFixtures(
       return {
         status: "stale",
         fixtures: upcomingFrom(cached.data).slice(0, n),
+        stale: true,
+        mayBeOutOfDate: age > FOOTBALL_DATA_MAX_TABLE_AGE_MS,
+        fetchedAt: cached.fetchedAt,
+        fromCache: true,
+        error: message,
+      }
+    }
+    return {
+      status: "error",
+      fixtures: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: message,
+    }
+  }
+}
+
+/**
+ * The Manchester United fixtures currently being played (Premier
+ * League + Champions League, feed statuses IN_PLAY / PAUSED),
+ * earliest kick-off first. Feed-first (0.11.26): this is the live
+ * half of the hub's on-TV-now section — getNextFixtures only ever
+ * returns fixtures that have NOT kicked off, so without this call
+ * the hub could not know a match was live from the feed at all,
+ * and on-TV-now would have to guess from the EPG. Same typed
+ * failure states as the other getters; same United filter; a
+ * 5-minute cache TTL (live state changes by the minute). A fixture
+ * whose kick-off is more than 3 hours ago is dropped even from a
+ * stale cache — it cannot still be live.
+ */
+export async function getLiveFixtures(
+  options: FootballDataCallOptions = {},
+): Promise<FeedFixturesResult> {
+  const nowMs = options.nowMs ?? Date.now()
+  const ttlMs = options.ttlMs ?? FOOTBALL_DATA_LIVE_TTL_MS
+  const apiKey = getFootballDataApiKey()
+  if (!apiKey) {
+    return {
+      status: "no-key",
+      fixtures: null,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: null,
+      fromCache: false,
+      error: "No football-data.org API key saved in Settings.",
+    }
+  }
+  const liveFrom = (list: FeedFixture[]): FeedFixture[] =>
+    list
+      .filter(
+        (fixture) =>
+          fixture.status !== undefined &&
+          LIVE_STATUSES.has(fixture.status) &&
+          fixture.startMs <= nowMs &&
+          nowMs - fixture.startMs <= LIVE_FIXTURE_MAX_AGE_MS,
+      )
+      .sort((a, b) => a.startMs - b.startMs)
+  const cached = cachedEntry<FeedFixture[]>(
+    memoryLive,
+    FOOTBALL_DATA_LIVE_CACHE_KEY,
+  )
+  if (cached && !options.forceRefresh && ageMs(cached, nowMs) <= ttlMs) {
+    return {
+      status: "ok",
+      fixtures: liveFrom(cached.data),
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: cached.fetchedAt,
+      fromCache: true,
+    }
+  }
+  const fetchImpl = options.fetchImpl ?? (await defaultFetch())
+  try {
+    const payloads = await Promise.all(
+      FOOTBALL_DATA_FIXTURE_COMPETITIONS.map((competition) =>
+        fetchJson(fetchImpl, liveMatchesUrl(competition, nowMs), apiKey),
+      ),
+    )
+    // Statuses and the United filter are applied to the RAW payloads
+    // first, so the parser only ever sees matches that matter — the
+    // same shape as getNextFixtures' selectUpcomingUnited, with the
+    // status set flipped to live.
+    const selectLiveUnited = (payload: unknown): unknown[] => {
+      if (!isRecord(payload) || !Array.isArray(payload.matches)) return []
+      return payload.matches.filter((match) => {
+        const status = matchStatusOf(match)
+        if (status === null || !LIVE_STATUSES.has(status)) return false
+        if (!isRecord(match)) return false
+        const home = isRecord(match.homeTeam)
+          ? nonEmptyString(match.homeTeam.name)
+          : null
+        const away = isRecord(match.awayTeam)
+          ? nonEmptyString(match.awayTeam.name)
+          : null
+        if (home === null || away === null) return false
+        return (
+          normaliseTeamName(home) === "manchester united" ||
+          normaliseTeamName(away) === "manchester united"
+        )
+      })
+    }
+    const selected = payloads.flatMap(selectLiveUnited)
+    const live = liveFrom(parseMatchesResponse({ matches: selected }))
+    const entry: Cached<FeedFixture[]> = { fetchedAt: nowMs, data: live }
+    memoryLive = entry
+    writeCache(FOOTBALL_DATA_LIVE_CACHE_KEY, entry)
+    return {
+      status: "ok",
+      fixtures: live,
+      stale: false,
+      mayBeOutOfDate: false,
+      fetchedAt: nowMs,
+      fromCache: false,
+    }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Feed request failed"
+    log.warn("[xt:football-data] live fixtures fetch failed:", message)
+    if (cached) {
+      const age = ageMs(cached, nowMs)
+      return {
+        status: "stale",
+        fixtures: liveFrom(cached.data),
         stale: true,
         mayBeOutOfDate: age > FOOTBALL_DATA_MAX_TABLE_AGE_MS,
         fetchedAt: cached.fetchedAt,

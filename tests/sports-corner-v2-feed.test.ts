@@ -18,6 +18,7 @@ import {
   FOOTBALL_DATA_FIXTURE_COMPETITIONS,
   FOOTBALL_DATA_KEY_STORAGE_KEY,
   FOOTBALL_DATA_LEAGUE_CUP_CODE,
+  FOOTBALL_DATA_LIVE_CACHE_KEY,
   FOOTBALL_DATA_RESULTS_CACHE_KEY,
   FOOTBALL_DATA_TABLE_CACHE_KEY,
   STATION_TBC,
@@ -26,6 +27,7 @@ import {
   fixtureResultFor,
   getFootballDataKeyState,
   getLeagueTable,
+  getLiveFixtures,
   getNextFixtures,
   getRecentForm,
   matchFixtureStation,
@@ -673,5 +675,199 @@ describe("Last five — recent form from finished PL results (mockup rebuild, 21
     expect(stale.stale).toBe(true)
     expect(stale.mayBeOutOfDate).toBe(true)
     expect(stale.form).toEqual(["D", "L", "L", "D", "D"])
+  })
+})
+
+describe("getLiveFixtures — live United fixtures for on-TV-now (feed-first, 0.11.26)", () => {
+  // Sun 22 Nov 2026 17:33 — Liverpool v Man Utd kicked off 16:30
+  // and is IN_PLAY. The live call is the feed half of on-TV-now:
+  // getNextFixtures only ever returns fixtures that have NOT kicked
+  // off, so without this the hub could not know a match was live
+  // from the feed at all.
+  const SUNDAY_1733 = Date.UTC(2026, 10, 22, 17, 33, 0)
+
+  function liveMatch(
+    id: number,
+    utcDate: string,
+    status: string,
+    homeTeam: string,
+    awayTeam: string,
+    competition = "Premier League",
+  ) {
+    return {
+      id,
+      utcDate,
+      status,
+      homeTeam: { name: homeTeam },
+      awayTeam: { name: awayTeam },
+      score: { fullTime: { home: 1, away: 0 } },
+      competition: { name: competition },
+    }
+  }
+
+  function liveFetch() {
+    const calls: string[] = []
+    const impl = (async (url: string) => {
+      calls.push(url)
+      const matches = url.includes("/competitions/PL/")
+        ? [
+            liveMatch(
+              535101,
+              "2026-11-22T16:30:00Z",
+              "IN_PLAY",
+              "Liverpool FC",
+              "Manchester United FC",
+            ),
+            liveMatch(
+              535102,
+              "2026-11-22T14:00:00Z",
+              "IN_PLAY",
+              "Arsenal FC",
+              "Chelsea FC",
+            ),
+            liveMatch(
+              535103,
+              "2026-11-22T19:45:00Z",
+              "SCHEDULED",
+              "Manchester City FC",
+              "Tottenham Hotspur FC",
+            ),
+          ]
+        : [
+            liveMatch(
+              535201,
+              "2026-11-22T18:45:00Z",
+              "PAUSED",
+              "Real Madrid CF",
+              "Manchester United FC",
+              "UEFA Champions League",
+            ),
+          ]
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ matches }),
+        headers: { get: () => null },
+      }
+    }) as unknown as Parameters<typeof getLiveFixtures>[0]["fetchImpl"]
+    return { impl, calls }
+  }
+
+  it("returns the IN_PLAY United fixture; SCHEDULED and non-United live rows are dropped", async () => {
+    setKey(runtimeTestKey())
+    const { impl, calls } = liveFetch()
+    const live = await getLiveFixtures({ fetchImpl: impl, nowMs: SUNDAY_1733 })
+    expect(live.status).toBe("ok")
+    expect(live.fixtures).toHaveLength(1)
+    expect(live.fixtures![0]!.home).toBe("Liverpool FC")
+    expect(live.fixtures![0]!.away).toBe("Manchester United FC")
+    expect(live.fixtures![0]!.status).toBe("IN_PLAY")
+    // The live window is centred on today (yesterday → tomorrow),
+    // so a match that kicked off earlier today is in the payload.
+    expect(calls).toHaveLength(2)
+    expect(calls[0]).toContain("/competitions/PL/matches")
+    expect(calls[0]).toContain("dateFrom=2026-11-21")
+    expect(calls[0]).toContain("dateTo=2026-11-23")
+    expect(calls[1]).toContain("/competitions/CL/matches")
+  })
+
+  it("a PAUSED United fixture is live too; a SCHEDULED one is not", async () => {
+    setKey(runtimeTestKey())
+    const { impl } = liveFetch()
+    // 18:45 kick-off, PAUSED at half-time — live, but it has not
+    // kicked off yet at 17:33, so the live filter drops it (a
+    // fixture cannot be live before kick-off).
+    const beforeKickoff = await getLiveFixtures({
+      fetchImpl: impl,
+      nowMs: SUNDAY_1733,
+    })
+    expect(
+      beforeKickoff.fixtures!.some((f) => f.id === "fd-535201"),
+    ).toBe(false)
+    const atHalfTime = await getLiveFixtures({
+      fetchImpl: impl,
+      nowMs: Date.UTC(2026, 10, 22, 19, 30, 0),
+      forceRefresh: true,
+    })
+    expect(atHalfTime.fixtures!.some((f) => f.id === "fd-535201")).toBe(true)
+  })
+
+  it("a live fixture whose kick-off is more than 3 hours ago is dropped, even from cache", async () => {
+    setKey(runtimeTestKey())
+    const { impl } = liveFetch()
+    const live = await getLiveFixtures({
+      fetchImpl: impl,
+      nowMs: Date.UTC(2026, 10, 22, 22, 0, 0),
+      forceRefresh: true,
+    })
+    // Liverpool kicked off 16:30 — five and a half hours ago — and
+    // Real Madrid 18:45, over three hours ago. Neither can still
+    // be live; the stale rows are dropped, never shown as on TV now.
+    expect(live.fixtures).toHaveLength(0)
+  })
+
+  it("no key → no-key + null + no fetch; feed down → error + null", async () => {
+    const { impl } = liveFetch()
+    const noKey = await getLiveFixtures({ fetchImpl: impl, nowMs: SUNDAY_1733 })
+    expect(noKey.status).toBe("no-key")
+    expect(noKey.fixtures).toBeNull()
+    expect(impl).not.toBeNull()
+
+    setKey(runtimeTestKey())
+    const down = await getLiveFixtures({
+      fetchImpl: createFailingFetch(500),
+      nowMs: SUNDAY_1733,
+    })
+    expect(down.status).toBe("error")
+    expect(down.fixtures).toBeNull()
+  })
+
+  it("5-minute TTL: a second call inside it is cached; past it, it refetches", async () => {
+    setKey(runtimeTestKey())
+    const { impl, calls } = liveFetch()
+    const first = await getLiveFixtures({ fetchImpl: impl, nowMs: SUNDAY_1733 })
+    expect(first.status).toBe("ok")
+    expect(first.fromCache).toBe(false)
+    expect(calls).toHaveLength(2)
+    const cached = await getLiveFixtures({
+      fetchImpl: impl,
+      nowMs: SUNDAY_1733 + 4 * 60_000,
+    })
+    expect(cached.fromCache).toBe(true)
+    expect(calls).toHaveLength(2)
+    const refetched = await getLiveFixtures({
+      fetchImpl: impl,
+      nowMs: SUNDAY_1733 + 6 * 60_000,
+    })
+    expect(refetched.fromCache).toBe(false)
+    expect(calls).toHaveLength(4)
+  })
+
+  it("stale cache is served with the stale flag when the feed fails", async () => {
+    setKey(runtimeTestKey())
+    const live = parseMatchesResponse({
+      matches: [
+        liveMatch(
+          535101,
+          "2026-11-22T16:30:00Z",
+          "IN_PLAY",
+          "Liverpool FC",
+          "Manchester United FC",
+        ),
+      ],
+    })
+    localStorage.setItem(
+      FOOTBALL_DATA_LIVE_CACHE_KEY,
+      JSON.stringify({ fetchedAt: SUNDAY_1733 - 10 * 60_000, data: live }),
+    )
+    const stale = await getLiveFixtures({
+      fetchImpl: createFailingFetch(500),
+      nowMs: SUNDAY_1733,
+      ttlMs: 0,
+    })
+    expect(stale.status).toBe("stale")
+    expect(stale.stale).toBe(true)
+    expect(stale.fixtures).toHaveLength(1)
+    expect(stale.fixtures![0]!.home).toBe("Liverpool FC")
   })
 })

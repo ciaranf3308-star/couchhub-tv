@@ -89,12 +89,27 @@ export interface NextMatchRow {
  * teams, start within the same minute); the EPG fixture is found
  * with the same rule, so the two can never disagree about which
  * listing a match belongs to.
+ *
+ * Feed-first (0.11.26): recorded programmes (tier "recorded" —
+ * replays, classics, highlights, build-ups) NEVER supply a station
+ * or a Watch target. A replay listing names a channel showing an
+ * old match at that time, not the channel carrying this live
+ * broadcast — matching it would tune the user into a replay while
+ * the real match plays elsewhere. Only a listing of the live
+ * broadcast carries the station; when the guide has none, the row
+ * is honestly Station TBC. (The live listing itself starts at
+ * kick-off, so it is always in the window when the guide has it —
+ * filtering recorded listings loses no station in practice.)
  */
 export function buildNextMatchRows(
   feedFixtures: ReadonlyArray<FeedFixture>,
   epgFixtures: ReadonlyArray<SportsFixture>,
 ): NextMatchRow[] {
-  const listings: EpgStationListing[] = epgFixtures.map((fixture) => ({
+  // A recorded programme is not a listing of this broadcast.
+  const liveFixtures = epgFixtures.filter(
+    (fixture) => fixture.tier !== "recorded",
+  )
+  const listings: EpgStationListing[] = liveFixtures.map((fixture) => ({
     home: fixture.teams[0],
     away: fixture.teams[1],
     startMs: fixture.startMs,
@@ -130,7 +145,7 @@ export function buildNextMatchRows(
     // Sky carried the same match. Earliest start is the tie-break
     // only. The station string (from matchFixtureStation) and this
     // target therefore always agree on the primary.
-    const candidates = epgFixtures.filter((candidate) => {
+    const candidates = liveFixtures.filter((candidate) => {
       if (!epgListingMatchesKickoff(candidate.startMs, fixture.startMs)) {
         return false
       }
