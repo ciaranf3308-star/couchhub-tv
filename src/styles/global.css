@@ -2517,6 +2517,19 @@ html[data-density="comfortable"] :is(#movie-grid, #series-grid) { gap: 1.5rem; }
 /* ────────────────────────────── */
 /* Settings page rhythm           */
 /* ────────────────────────────── */
+/* Settings polish (0.11.24, GAP 3): the fixed controller pill sits
+   0.75rem above the viewport bottom and its top edge reaches ~2.9rem
+   up (measured 39.6px @1672px, 45.2px @1920px — pill 29.2/33.2px
+   tall + 0.75rem offset). Anchor jumps and focus scrolling must
+   never land content under it, so Settings pages reserve that strip
+   at the bottom of the scrollport. The matching scroll-padding-top
+   lives in SettingsShell (sticky header); this is the bottom half,
+   kept in global.css per the polish split. rem units track the
+   viewport-scaled root font-size, so the reserve scales with the
+   pill itself; 4.5rem is ~1.6x the measured extent. */
+html:has(.settings-page) {
+    scroll-padding-bottom: 4.5rem;
+}
 .settings-stack {
     display: flex;
     flex-direction: column;

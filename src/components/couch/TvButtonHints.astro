@@ -185,6 +185,82 @@ const initial: HintConfig = hintsForView(view);
     document.addEventListener("focusin", render);
     document.addEventListener("focusout", render);
     window.addEventListener(CONTROLLER_HINTS_CHANGE_EVENT, render);
+
+    // ── Settings-only idle auto-hide (0.11.24 polish, GAP 3) ──
+    // Why this exists: the pill is position:fixed, so ANY content
+    // scrolled to the viewport bottom sits under it at a mid-scroll
+    // rest position — measured on 0.11.23 (Help card, TVDB helper,
+    // Continue-watching helper, Reset button all covered in the
+    // verifier shots). The footer spacer + .rs-main padding only
+    // clear the page END (139.8px @1672px, 160.3px @1920px vs a
+    // ~40–45px pill extent — already ample), and scroll-padding
+    // only protects anchor/focus scrolling. A fixed overlay can
+    // never be "never covering" while it is painted, so on Settings
+    // the pill stops being painted at rest: it hides the moment the
+    // user scrolls to read (wheel / scroll) and 4 s after the last
+    // input, and reappears on the next keydown (physical keys AND
+    // the gamepad's synthetic KeyboardEvents from gamepad.ts),
+    // pointer press, or focus move. While it is visible,
+    // scroll-padding-bottom (global.css) keeps the focused element
+    // above it. Scoped to Settings by the view prop + .settings-page
+    // presence; every other page keeps the always-on legend, and
+    // Cursor Mode keeps it too (a visible pointer means the user is
+    // steering, not reading).
+    const isSettingsHints =
+      view === "settings" || !!document.querySelector(".settings-page");
+    const PILL_IDLE_HIDE_MS = 4000;
+    const PILL_FOCUS_SCROLL_WINDOW_MS = 600;
+    let pillIdleHidden = false;
+    let pillIdleTimer = 0;
+    let pillLastActivityAt = 0;
+    function setPillIdleHidden(hidden: boolean): void {
+      // Cursor Mode steers a visible pointer: never idle-hide under it.
+      if (hidden && document.documentElement.dataset.cursorMode === "active") return;
+      pillIdleHidden = hidden;
+      nav.classList.toggle("rs-button-hints--idle-hidden", hidden);
+    }
+    function armPillIdleTimer(): void {
+      window.clearTimeout(pillIdleTimer);
+      pillIdleTimer = window.setTimeout(
+        () => setPillIdleHidden(true),
+        PILL_IDLE_HIDE_MS,
+      );
+    }
+    function notePillActivity(): void {
+      pillLastActivityAt = Date.now();
+      if (pillIdleHidden) setPillIdleHidden(false);
+      armPillIdleTimer();
+    }
+    if (isSettingsHints) {
+      window.addEventListener("keydown", notePillActivity);
+      window.addEventListener("pointerdown", notePillActivity);
+      document.addEventListener("focusin", notePillActivity);
+      // Wheel = the user is scrolling to read: hide at once, not
+      // after the idle timeout — otherwise the pill sits over
+      // content at the new rest position until the timer fires.
+      window.addEventListener("wheel", () => setPillIdleHidden(true), {
+        passive: true,
+      });
+      window.addEventListener(
+        "scroll",
+        () => {
+          // A scroll right after a key/pointer/focus move is the
+          // focus walk scrolling its new target into view — leave
+          // the pill up (scroll-padding-bottom keeps the target
+          // clear of it). Any other scroll (scrollbar drag, touch
+          // scroll, anchor jump) hides the pill so the rest
+          // position is uncovered.
+          if (Date.now() - pillLastActivityAt < PILL_FOCUS_SCROLL_WINDOW_MS) {
+            armPillIdleTimer();
+            return;
+          }
+          setPillIdleHidden(true);
+        },
+        { passive: true, capture: true },
+      );
+      armPillIdleTimer();
+    }
+
     render();
   }
 </script>
@@ -197,8 +273,12 @@ const initial: HintConfig = hintsForView(view);
      at html[data-couch] so nothing leaks onto non-Couch pages.
      Fixed bottom-anchored pill bar. pointer-events:none so it can
      never swallow a click meant for the page; the bar is display
-     only. .rs-main already carries 3rem of bottom padding, so the
-     bar sits in that clearance and covers no content. */
+     only. The footer spacer + .rs-main padding clear it at the page
+     END only — at any mid-scroll rest position the pill still sits
+     over whatever content is at the viewport bottom, so on Settings
+     pages the script below auto-hides it at rest (0.11.24, GAP 3)
+     and scroll-padding-bottom (global.css) keeps focus/anchor
+     scrolling clear of it while it is visible. */
   html[data-couch] .rs-button-hints {
     position: fixed;
     left: 50%;
@@ -207,9 +287,31 @@ const initial: HintConfig = hintsForView(view);
     z-index: 60;
     max-width: calc(100vw - 2rem);
     pointer-events: none;
+    /* Settings polish (0.11.24, GAP 3): the idle fade below needs a
+       transition; visibility flips with opacity so the hidden pill
+       never intercepts hit-testing (it has pointer-events:none
+       anyway) and never paints over content at rest. */
+    transition:
+      opacity 250ms ease,
+      visibility 250ms ease;
   }
   html[data-couch] .rs-button-hints[hidden] {
     display: none;
+  }
+  /* Settings-only idle hide (GAP 3): on Settings pages the pill
+     auto-hides at rest so a mid-scroll rest position never leaves
+     content under it — the class is only ever added by the
+     Settings-scoped script below, so every other page keeps the
+     always-on legend. visibility:hidden (not display:none) keeps
+     the fade smooth and the layout untouched (fixed element). */
+  html[data-couch] .rs-button-hints--idle-hidden {
+    opacity: 0;
+    visibility: hidden;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html[data-couch] .rs-button-hints {
+      transition: none;
+    }
   }
   html[data-couch] .rs-button-hints__list {
     display: flex;
