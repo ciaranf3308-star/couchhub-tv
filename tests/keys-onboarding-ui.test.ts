@@ -247,8 +247,7 @@ describe("mountKeysOnboarding", () => {
     })
   })
 
-  it("all saved: completion panel with masked rows, Done resolves completed without skipping", async () => {
-    hoisted.aiKeyPresent.value = true
+  it("all saved: completion panel with masked rows, Done resolves completed without skipping", async () => {    hoisted.aiKeyPresent.value = true
     const tmdbKey = runtimeKey("tmdb-")
     const footballKey = runtimeKey("fd-")
     localStorage.setItem("xt_tmdb_key", tmdbKey)
@@ -270,5 +269,74 @@ describe("mountKeysOnboarding", () => {
       reason: "launch",
     })
     expect(sessionStorage.getItem("rs-keys-onboarding-dismissed-v1")).toBeNull()
+  })
+})
+
+describe("AI step model pre-fill (0.11.22)", () => {
+  function modelSelect(): HTMLSelectElement {
+    return dialog().querySelector<HTMLSelectElement>(
+      '[data-role="model-select"]',
+    )!
+  }
+
+  function modelCustomInput(): HTMLInputElement {
+    return dialog().querySelector<HTMLInputElement>(
+      '[data-role="model-custom-input"]',
+    )!
+  }
+
+  it("no saved model pre-fills gpt-4o-mini — never 'Custom…' with an empty box", async () => {
+    const promise = mountKeysOnboarding({ deps: makeDeps() })
+    await flush()
+    expect(stepTitle()).toBe("AI key")
+    // The key test requires a model (empty fails as invalid_model),
+    // so the step must open in a testable state.
+    expect(modelSelect().value).toBe("gpt-4o-mini")
+    expect(modelCustomInput().classList.contains("hidden")).toBe(true)
+    dialog()
+      .querySelector<HTMLButtonElement>('[data-role="skip"]')!
+      .click()
+    await expect(promise).resolves.toMatchObject({ outcome: "skipped" })
+  })
+
+  it("a saved model is kept, not overwritten by the default", async () => {
+    localStorage.setItem("xt_ai_model", "gpt-4o")
+    const promise = mountKeysOnboarding({ deps: makeDeps() })
+    await flush()
+    expect(stepTitle()).toBe("AI key")
+    expect(modelSelect().value).toBe("gpt-4o")
+    expect(modelCustomInput().classList.contains("hidden")).toBe(true)
+    dialog()
+      .querySelector<HTMLButtonElement>('[data-role="skip"]')!
+      .click()
+    await expect(promise).resolves.toMatchObject({ outcome: "skipped" })
+  })
+
+  it("Test with the pre-filled model applies it, so the step is completable with a valid key", async () => {
+    const promise = mountKeysOnboarding({ deps: makeDeps() })
+    await flush()
+    expect(stepTitle()).toBe("AI key")
+    const keyInput = dialog().querySelector<HTMLInputElement>(
+      '[data-role="key-input"]',
+    )!
+    const testBtn = dialog().querySelector<HTMLButtonElement>(
+      '[data-role="test"]',
+    )!
+    const saveBtn = dialog().querySelector<HTMLButtonElement>(
+      '[data-role="save"]',
+    )!
+    typeInto(keyInput, runtimeKey("sk-"))
+    testBtn.click()
+    await flush()
+    expect(
+      dialog().querySelector('[data-role="message"]')?.textContent,
+    ).toMatch(/verified/i)
+    expect(saveBtn.disabled).toBe(false)
+    // The pre-filled model, not an empty string, is what the test ran with.
+    expect(localStorage.getItem("xt_ai_model")).toBe("gpt-4o-mini")
+    dialog()
+      .querySelector<HTMLButtonElement>('[data-role="skip"]')!
+      .click()
+    await expect(promise).resolves.toMatchObject({ outcome: "skipped" })
   })
 })

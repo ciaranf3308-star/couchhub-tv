@@ -198,6 +198,39 @@ describe("getKeysOnboardingStatus", () => {
   })
 })
 
+describe("AI presence-check failure is fail-closed, never missing (0.11.22)", () => {
+  const storeFailure = async () => {
+    throw new Error("STORE:locked")
+  }
+
+  it("getKeysOnboardingStatus REJECTS when the AI check fails — it never reports the key missing", async () => {
+    await expect(
+      getKeysOnboardingStatus({ hasAiKey: storeFailure }),
+    ).rejects.toThrow("STORE:locked")
+    // The old code swallowed this into aiSaved=false, so the gate
+    // re-prompted for a saved key (false-missing, 22 Nov).
+  })
+
+  it("shouldShowKeysOnboarding propagates the AI-check failure so the gate fail-safe engages", async () => {
+    await expect(
+      shouldShowKeysOnboarding({ hasAiKey: storeFailure }),
+    ).rejects.toThrow("STORE:locked")
+  })
+
+  it("a transient AI-check failure still rejects at this layer — the retry lives inside hasAiKey itself", async () => {
+    const flaky = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("STORE:locked"))
+      .mockResolvedValue(true)
+    // A deps-level check is called once and its failure propagates;
+    // the real hasAiKey retries internally before it ever gets here.
+    await expect(
+      getKeysOnboardingStatus({ hasAiKey: flaky }),
+    ).rejects.toThrow("STORE:locked")
+    expect(flaky).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("shouldShowKeysOnboarding / skip", () => {
   it("shows when a key is missing", async () => {
     await expect(shouldShowKeysOnboarding()).resolves.toBe(true)

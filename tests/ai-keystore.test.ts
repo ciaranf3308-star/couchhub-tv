@@ -62,16 +62,49 @@ describe("AI keystore", () => {
     expect(calls).not.toContain("ai_key_get")
   })
 
-  it("hasAiKey is false — never throwing — when the store is unreachable", async () => {
+  it("hasAiKey THROWS (never false) when the store is unreachable — presence unknown, not missing", async () => {
+    const { hasAiKey } = await loadKeystore()
+    invokeMock.mockRejectedValue(new Error("STORE:locked"))
+    await expect(hasAiKey()).rejects.toMatchObject({ kind: "store_error" })
+    // One retry, then the failure surfaces — it must never read as "no key".
+    expect(invokeMock).toHaveBeenCalledTimes(2)
+    expect(invokeMock).toHaveBeenCalledWith("ai_key_has", {})
+  })
+
+  it("hasAiKey retries once and succeeds when the first read fails transiently", async () => {
     const { hasAiKey } = await loadKeystore()
     invokeMock.mockRejectedValueOnce(new Error("STORE:locked"))
-    await expect(hasAiKey()).resolves.toBe(false)
+    invokeMock.mockResolvedValueOnce(true)
+    await expect(hasAiKey()).resolves.toBe(true)
+    expect(invokeMock).toHaveBeenCalledTimes(2)
   })
 
   it("hasAiKey is false outside the desktop app", async () => {
     const { hasAiKey } = await loadKeystore(false)
     await expect(hasAiKey()).resolves.toBe(false)
     expect(invokeMock).not.toHaveBeenCalled()
+  })
+
+  it("isTauri is evaluated at call time: a bridge injected after import is seen", async () => {
+    // Import with no bridge present (the old import-time snapshot
+    // would have frozen isTauri=false for the whole page load)…
+    const { hasAiKey } = await loadKeystore(false)
+    // …then the bridge lands late.
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    invokeMock.mockResolvedValueOnce(true)
+    await expect(hasAiKey()).resolves.toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("ai_key_has", {})
+  })
+
+  it("a bridge injected during the retry delay rescues the presence check", async () => {
+    const { hasAiKey } = await loadKeystore(false)
+    invokeMock.mockResolvedValue(true)
+    const pending = hasAiKey()
+    // The first attempt throws "unavailable" (no bridge yet); the
+    // bridge lands before the retry fires.
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+    await expect(pending).resolves.toBe(true)
+    expect(invokeMock).toHaveBeenCalledWith("ai_key_has", {})
   })
 
   it("deletes through ai_key_delete and reports whether a key was removed", async () => {
