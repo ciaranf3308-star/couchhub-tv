@@ -14,16 +14,21 @@
 //       their data-i18n wiring is worker 1's file, so they are NOT
 //       asserted here yet.
 //
-// RUN:  pnpm build && pnpm test:e2e -- tests/e2e/settings-polish-95-w3.spec.ts
+// RUN:  pnpm build && npx playwright test --project=e2e tests/e2e/settings-polish-95-w3.spec.ts
 import { test, expect, type Page } from "@playwright/test"
 
 test.use({ viewport: { width: 1672, height: 941 } })
+
+// Serial in this file: one Chromium at a time. Parallel workers in this
+// sandbox OOM the renderer ("Page crashed" on plain navigations) and two
+// full page loads + the 3 s gate settle can exceed the 30 s default.
+test.describe.configure({ mode: "serial" })
+test.setTimeout(120_000)
 
 const DIALOG_ID = "xt-keys-onboarding-dialog"
 const SHOTS =
   "/home/hatch/workspace/goals/couchhub-tv-controller-first-iptv-app/hidden_files/settings-polish-95"
 const FD_KEY = "synthetic-football-data-key-for-e2e-only"
-const TMDB_KEY = "synthetic-tmdb-key-for-e2e-only"
 
 async function gotoSettings(page: Page) {
   await page.goto("/settings#discover-ai", { waitUntil: "domcontentloaded" })
@@ -140,9 +145,12 @@ test.describe("R2: fail-closed presence in the real app", () => {
     const dialog = page.locator(`#${DIALOG_ID}`)
     await expect(dialog).toBeVisible()
     // Per-key rule: the unreadable AI key counts as saved, so the
-    // first missing key — TMDB — is the first step.
+    // first missing key — TMDB — is the first step. The dialog counts
+    // only the missing steps (2: TMDB + football-data) and shows the
+    // saved AI key as a done row, never as a step to re-enter.
     await expect(dialog.locator("h3")).toHaveText("TMDB key")
-    await expect(dialog).toContainText("Step 1 of 3")
+    await expect(dialog).toContainText("Step 1 of 2")
+    await expect(dialog).toContainText("AI key — saved in the OS credential store")
   })
 
   test("TMDB / football-data reads throwing — Settings shows unknown + retest, never a prompt", async ({

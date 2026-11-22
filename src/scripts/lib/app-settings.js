@@ -1210,7 +1210,7 @@ export function getTmdbApiKey() {
  * "unreadable" as present at any gate and stay quiet.
  */
 export function readLocalKeyPresence(key) {
-  let raw = null
+  let raw
   try {
     raw = localStorage.getItem(key)
   } catch (firstError) {
