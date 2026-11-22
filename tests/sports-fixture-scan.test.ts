@@ -11,6 +11,7 @@ import { buildChannelNameIndex } from "@/scripts/lib/epg-data.js"
 import {
   getSportsScan,
   getSportsScanRunCount,
+  isNonLiveProgrammeText,
   matchUnitedFixture,
   resetSportsScanCache,
   scanSportsFixtures,
@@ -98,16 +99,29 @@ describe("matchUnitedFixture — confirmed fixtures (T1, T2, T12)", () => {
     expect(JSON.stringify(match)).not.toContain("Manchester United")
   })
 
-  it("T12: fixture-shaped highlights/build-up → CONFIRMED, title verbatim", () => {
+  // T12 OVERTURNED (feed-first rebuild, 0.11.26): a fixture-shaped
+  // highlights / build-up programme is a RECORDED programme, not a
+  // CONFIRMED fixture. It used to pin highlights as CONFIRMED,
+  // which is how a replay of the 4 Oct 2025 Sunderland win became
+  // the hub's "next match" on 22 Nov 2026. The programme still
+  // matches (its sides are known — the badge and the programme-type
+  // label need it), but its tier says recorded, so the split puts
+  // it in no fixture list and selectNextFixture never picks it.
+  // A plain fixture-shaped title with no non-live marker is still
+  // CONFIRMED.
+  it("T12 (overturned): fixture-shaped highlights/build-up → RECORDED, never a fixture", () => {
     expect(
       matchUnitedFixture(
         "Manchester United v Sunderland: Highlights",
         "",
         "",
       )?.tier,
-    ).toBe("confirmed")
+    ).toBe("recorded")
     expect(
       matchUnitedFixture("Man Utd v Chelsea: Build-Up", "", "")?.tier,
+    ).toBe("recorded")
+    expect(
+      matchUnitedFixture("Manchester United v Sunderland", "", "")?.tier,
     ).toBe("confirmed")
   })
 
@@ -561,6 +575,176 @@ describe("splitSportsFixtures + selectNextFixture", () => {
   })
 })
 
+describe("recorded programmes are never fixtures (feed-first, 0.11.26)", () => {
+  function scanFor(
+    entries: Array<{ id: string; name: string; programmes: unknown[] }>,
+  ) {
+    const channels = entries.map((entry, i) =>
+      channel(i + 1, entry.name, entry.id),
+    )
+    return scanSportsFixtures(channels, epgState(entries), {}, "pl1", NOW)
+  }
+
+  it("a replay/classic/highlights programme is recorded in the scan but in no split list", () => {
+    const result = scanFor([
+      {
+        id: "mutv",
+        name: "MUTV",
+        programmes: [
+          programme(
+            NOW + 2 * HOUR,
+            NOW + 4 * HOUR,
+            "Manchester United v Sunderland",
+            "Full match replay: Manchester United 2-0 Sunderland, 4 October 2025.",
+          ),
+          programme(
+            NOW + 5 * HOUR,
+            NOW + 5 * HOUR + 30 * 60_000,
+            "Manchester United v Sunderland: Highlights",
+          ),
+          programme(
+            NOW + 6 * HOUR,
+            NOW + 8 * HOUR,
+            "Football Classics",
+            "Manchester United v Sunderland, 4 October 2025.",
+          ),
+        ],
+      },
+    ])
+    // All three still scan — the badge and the station lookup need
+    // them — but none is a fixture.
+    expect(result.fixtures).toHaveLength(3)
+    expect(result.fixtures.map((f) => f.tier)).toEqual([
+      "recorded",
+      "recorded",
+      "recorded",
+    ])
+    const split = splitSportsFixtures(result.fixtures, NOW)
+    expect(split.upcoming).toEqual([])
+    expect(split.possible).toEqual([])
+    expect(split.recent).toEqual([])
+    expect(split.otherSquadsUpcoming).toEqual([])
+    expect(split.otherSquadsRecent).toEqual([])
+    expect(selectNextFixture(result.fixtures, NOW)).toBeNull()
+  })
+
+  it("a replay that already aired never lands in Recent", () => {
+    const result = scanFor([
+      {
+        id: "mutv",
+        name: "MUTV",
+        programmes: [
+          programme(
+            NOW - 3 * HOUR,
+            NOW - HOUR,
+            "Manchester United v Sunderland",
+            "Full match replay: Manchester United 2-0 Sunderland, 4 October 2025.",
+          ),
+          programme(
+            NOW - 5 * HOUR,
+            NOW - 3 * HOUR,
+            "Liverpool v Man Utd",
+          ),
+        ],
+      },
+    ])
+    const split = splitSportsFixtures(result.fixtures, NOW)
+    // Only the live broadcast that actually happened is Recent.
+    expect(split.recent.map((f) => f.title)).toEqual(["Liverpool v Man Utd"])
+  })
+
+  it("a recorded programme with uncertain teams never lands in Possible", () => {
+    const result = scanFor([
+      {
+        id: "mutv",
+        name: "MUTV",
+        programmes: [
+          programme(
+            NOW + 2 * HOUR,
+            NOW + 4 * HOUR,
+            "United v Sunderland: Highlights",
+          ),
+        ],
+      },
+    ])
+    expect(result.fixtures).toHaveLength(1)
+    expect(result.fixtures[0]!.tier).toBe("recorded")
+    expect(splitSportsFixtures(result.fixtures, NOW).possible).toEqual([])
+  })
+
+  it("a build-up slot never feeds the hero, even when it is the only upcoming row", () => {
+    const result = scanFor([
+      {
+        id: "sky",
+        name: "Sky Sports",
+        programmes: [
+          programme(
+            NOW + HOUR,
+            NOW + 2 * HOUR,
+            "Man Utd v Chelsea: Build-Up",
+          ),
+        ],
+      },
+    ])
+    expect(result.fixtures).toHaveLength(1)
+    expect(result.fixtures[0]!.tier).toBe("recorded")
+    expect(selectNextFixture(result.fixtures, NOW)).toBeNull()
+    expect(splitSportsFixtures(result.fixtures, NOW).upcoming).toEqual([])
+  })
+
+  it("a live row and a recorded row with the same teams and start never group", () => {
+    const start = NOW + 2 * HOUR
+    const result = scanFor([
+      {
+        id: "sky",
+        name: "Sky Sports Main Event",
+        programmes: [
+          programme(start, start + 2 * HOUR, "Man Utd v Sunderland"),
+        ],
+      },
+      {
+        id: "mutv",
+        name: "MUTV",
+        programmes: [
+          programme(
+            start,
+            start + 2 * HOUR,
+            "Man Utd v Sunderland: Full Match Replay",
+          ),
+        ],
+      },
+    ])
+    // Two rows: the live broadcast, and the replay beside it — the
+    // replay must never fold into the live row's "Also on".
+    expect(result.fixtures).toHaveLength(2)
+    const live = result.fixtures.find((f) => f.tier === "confirmed")!
+    const recorded = result.fixtures.find((f) => f.tier === "recorded")!
+    expect(live.channelName).toBe("Sky Sports Main Event")
+    expect(live.alsoOn).toEqual([])
+    expect(recorded.channelName).toBe("MUTV")
+  })
+
+  it("isNonLiveProgrammeText is the one rule the matcher and the badge share", () => {
+    // The badge already knew; the matcher now asks the same
+    // question. A plain fixture title is live; any marker word in
+    // the title or the description makes the programme recorded.
+    expect(isNonLiveProgrammeText("Man Utd v Sunderland")).toBe(false)
+    expect(
+      isNonLiveProgrammeText("Man Utd v Sunderland: Highlights"),
+    ).toBe(true)
+    expect(
+      isNonLiveProgrammeText(
+        "Manchester United v Sunderland",
+        "Full match replay: Manchester United 2-0 Sunderland.",
+      ),
+    ).toBe(true)
+    expect(isNonLiveProgrammeText("Football Classics")).toBe(true)
+    expect(
+      isNonLiveProgrammeText("Man Utd v Chelsea: Build-Up"),
+    ).toBe(true)
+  })
+})
+
 describe("batch-loader discipline (T14)", () => {
   it("T14: the scan module uses the batch loader and never per-channel resolution", () => {
     const here = dirname(fileURLToPath(import.meta.url))
@@ -665,7 +849,13 @@ describe("synthetic 15,319-channel scan (T15)", () => {
 })
 
 describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () => {
-  it("generic title + fixture in the description → CONFIRMED, teams from the description", () => {
+  // Feed-first (0.11.26): "Football Classics" carries a non-live
+  // marker in its title, so every programme below is a RECORDED
+  // programme, not a fixture — the fixture is still recovered from
+  // the description (teams, squad, competition all apply), it just
+  // never counts as a next match. These tests used to pin
+  // CONFIRMED/POSSIBLE for the same inputs; the tier is what changed.
+  it("generic title + fixture in the description → RECORDED, teams from the description", () => {
     const match = matchUnitedFixture(
       "Football Classics",
       "Sky Sports Premier League",
@@ -673,7 +863,7 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
       "Manchester United v Arsenal, Premier League, 1999.",
     )
     expect(match).not.toBeNull()
-    expect(match!.tier).toBe("confirmed")
+    expect(match!.tier).toBe("recorded")
     expect(match!.squad).toBe("first-team")
     expect(match!.classification.teams).toEqual([
       "Manchester United",
@@ -681,21 +871,21 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
     ])
   })
 
-  it("generic title + United as the away side in the description → CONFIRMED", () => {
+  it("generic title + United as the away side in the description → RECORDED", () => {
     const match = matchUnitedFixture(
       "Football Classics",
       "Sky Sports Premier League",
       "Sports",
       "A classic from 1999: Arsenal v Manchester United at Highbury.",
     )
-    expect(match?.tier).toBe("confirmed")
+    expect(match?.tier).toBe("recorded")
     expect(match!.classification.teams).toEqual([
       "Arsenal",
       "Manchester United",
     ])
   })
 
-  it("generic title + description naming United without a fixture → POSSIBLE", () => {
+  it("generic title + description naming United without a fixture → RECORDED (the title names a classic)", () => {
     const match = matchUnitedFixture(
       "Football Classics",
       "Sky Sports Premier League",
@@ -703,7 +893,7 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
       "A look back at Manchester United's treble-winning season.",
     )
     expect(match).not.toBeNull()
-    expect(match!.tier).toBe("possible")
+    expect(match!.tier).toBe("recorded")
     expect(match!.classification.teams?.[0]).toBe("Manchester United")
   })
 
@@ -737,14 +927,14 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
     ).toBeNull()
   })
 
-  it("bare United fixture in the description + sports channel → POSSIBLE (corroboration)", () => {
+  it("bare United fixture in the description + sports channel → RECORDED (the title names a classic)", () => {
     const match = matchUnitedFixture(
       "Football Classics",
       "Sky Sports Main Event",
       "Sports",
       "United v Sunderland from 1999.",
     )
-    expect(match?.tier).toBe("possible")
+    expect(match?.tier).toBe("recorded")
     expect(match!.classification.teams).toEqual(["United", "Sunderland"])
   })
 
@@ -759,29 +949,36 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
     ).toBeNull()
   })
 
-  it("a title match wins — the description is never consulted then", () => {
+  it("a title match wins — the description is never mined for a fixture, but its marker still marks the programme recorded", () => {
+    // The teams come from the title, never the description — that
+    // is what this test pins. The tier is recorded because the
+    // description ("a documentary about something else") carries a
+    // non-live marker, and the marker rule reads title + description
+    // (the same signal the ON NOW badge uses): a programme
+    // described as a documentary is not the live match, even when
+    // its title is fixture-shaped.
     const match = matchUnitedFixture(
       "Man Utd v Liverpool",
       "",
       "",
       "A documentary about something else entirely.",
     )
-    expect(match?.tier).toBe("confirmed")
+    expect(match?.tier).toBe("recorded")
     expect(match!.classification.teams).toEqual(["Man Utd", "Liverpool"])
   })
 
-  it("women's fixture in the description → CONFIRMED, other-squad", () => {
+  it("women's fixture in the description → RECORDED, other-squad", () => {
     const match = matchUnitedFixture(
       "Football Classics",
       "Sky Sports Premier League",
       "Sports",
       "Manchester United Women v Arsenal Women, 2023.",
     )
-    expect(match?.tier).toBe("confirmed")
+    expect(match?.tier).toBe("recorded")
     expect(match?.squad).toBe("other-squad")
   })
 
-  it("scan: a description-matched programme reaches the result with its description kept", () => {
+  it("scan: a description-matched programme reaches the result with its description kept — as a recorded programme", () => {
     const start = NOW + 2 * HOUR
     const state = epgState([
       {
@@ -808,7 +1005,7 @@ describe("matchUnitedFixture — description matching (bug 3, 2026-11-21)", () =
     const fixture = result.fixtures[0]!
     expect(fixture.title).toBe("Football Classics")
     expect(fixture.teams).toEqual(["Manchester United", "Arsenal"])
-    expect(fixture.tier).toBe("confirmed")
+    expect(fixture.tier).toBe("recorded")
     expect(fixture.desc).toBe(
       "Manchester United v Arsenal, Premier League, 1999.",
     )

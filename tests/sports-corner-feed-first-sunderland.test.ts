@@ -285,11 +285,17 @@ describe("Sunderland replay must not be the next match (22 Nov 2026)", () => {
     expect(sportsFixtureLiveBadge(fixtures[0]!, NOW_1733)).toBe("ON NOW")
   })
 
-  it("mechanism: all three replay shapes classify CONFIRMED today", () => {
-    // Documents the root cause — the matcher never consults the
-    // non-live markers. If the rebuild fixes this at the matcher,
-    // this test's expectations flip with it and the presentation
-    // tests above are what must stay green.
+  it("mechanism: all three replay shapes classify RECORDED after the rebuild", () => {
+    // Feed-first rebuild (0.11.26): the matcher now consults the
+    // non-live markers, so the three replay shapes are RECORDED
+    // programmes, never CONFIRMED fixtures. The diagnosis file
+    // anticipated this flip ("if the rebuild fixes this at the
+    // matcher, this test's expectations flip with it") — the
+    // presentation tests above are what must stay green, and they
+    // do: the recorded tier keeps these programmes in the scan
+    // (badge, station lookup) while the split and the hero ignore
+    // them. T12 in sports-fixture-scan.test.ts was overturned the
+    // same way.
     expect(
       matchUnitedFixture(
         "Manchester United v Sunderland",
@@ -297,14 +303,14 @@ describe("Sunderland replay must not be the next match (22 Nov 2026)", () => {
         "Sports",
         "Full match replay: Manchester United 2-0 Sunderland, 4 October 2025.",
       )?.tier,
-    ).toBe("confirmed")
+    ).toBe("recorded")
     expect(
       matchUnitedFixture(
         "Manchester United v Sunderland: Highlights",
         "MUTV",
         "Sports",
       )?.tier,
-    ).toBe("confirmed")
+    ).toBe("recorded")
     expect(
       matchUnitedFixture(
         "Football Classics",
@@ -312,7 +318,7 @@ describe("Sunderland replay must not be the next match (22 Nov 2026)", () => {
         "Sports",
         "Manchester United v Sunderland, 4 October 2025.",
       )?.tier,
-    ).toBe("confirmed")
+    ).toBe("recorded")
   })
 })
 

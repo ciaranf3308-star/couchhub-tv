@@ -1,11 +1,23 @@
 // Sports Corner — EPG fixture scan (0.11.13, plan §4 + §8).
 //
 // Pure scan: given the cached channel list and the already-loaded EPG
-// state, find every Manchester United fixture in the guide window and
-// group simulcasts into one row per fixture. Fixtures are DERIVED,
+// state, find every Manchester United programme in the guide window
+// and group simulcasts into one row per fixture. Fixtures are DERIVED,
 // never persisted — every render recomputes from the current EPG
 // state, so a stale, moved or cancelled listing is never shown as
 // fact (plan §3.1).
+//
+// FEED-FIRST (0.11.26): the scan is a PROGRAMME scan, not a fixture
+// oracle. A programme the non-live markers describe (replay, classic,
+// highlights, build-up, preview, documentary — see
+// NON_LIVE_PROGRAMME_MARKERS) is tier "recorded": it still scans (the
+// badge, the programme-type label and the station lookup need it),
+// but it NEVER counts as a fixture — the split puts it in no list
+// and selectNextFixture never picks it. The feed
+// (football-data.org) is the single source of truth for fixtures;
+// the EPG supplies stations and TV listings only. This is the fix
+// for 22 Nov 2026, when a replay of the 4 Oct 2025 Sunderland win
+// classified CONFIRMED and became the hub's "next match".
 //
 // PERFORMANCE (plan §8): the scan runs the Guide's own batch loader,
 // which resolves every channel through ONE pre-built name index with
@@ -37,7 +49,22 @@ import {
 } from "./couch-livetv-epg.ts"
 import type { CatchupCapableChannel } from "./catchup.ts"
 
-export type FixtureTier = "confirmed" | "possible"
+export type FixtureTier = "confirmed" | "possible" | "recorded"
+
+/**
+ * "recorded" is NOT a fixture: the programme is a replay / classic /
+ * highlights / build-up / preview / documentary about a match (see
+ * NON_LIVE_PROGRAMME_MARKERS below) — a TV programme, not a match
+ * that is about to be played. Recorded programmes are still scanned
+ * (the on-TV-now badge, the programme-type label and the station
+ * lookup all need them) but they NEVER count as fixtures: the split
+ * puts them in no list, selectNextFixture never picks them, and
+ * buildNextMatchRows never takes a station from them. Feed-first
+ * rebuild (0.11.26): this tier is what overturns T12 — a
+ * fixture-shaped highlights programme used to be CONFIRMED, which
+ * is how a replay of the 4 Oct 2025 Sunderland win became the
+ * "next match" on 22 Nov 2026.
+ */
 export type FixtureState = "upcoming" | "now" | "past"
 
 /**
@@ -368,14 +395,39 @@ export function matchUnitedFixture(
   const rawTitle = (title || "").trim()
   if (!rawTitle) return null
   const titleOutcome = matchTitleFixture(rawTitle, channelName, category)
-  if (titleOutcome.match) return titleOutcome.match
-  return matchDescFixture(
+  if (titleOutcome.match) {
+    return withRecordedTier(titleOutcome.match, rawTitle, desc)
+  }
+  const descMatch = matchDescFixture(
     rawTitle,
     titleOutcome.classification,
     desc,
     channelName,
     category,
   )
+  if (!descMatch) return null
+  return withRecordedTier(descMatch, rawTitle, desc)
+}
+
+/**
+ * Feed-first (0.11.26): a programme the non-live markers describe
+ * (replay, classic, highlights, build-up, …) is a recorded
+ * programme, never a confirmed/possible fixture — whatever tier the
+ * title/description matching produced. The marker signal is the
+ * same one the ON NOW badge reads (title + description), so the
+ * matcher and the badge can never disagree about whether a
+ * programme is live. The teams/squad/classification are untouched:
+ * a replay still names its sides, it just does not count as a
+ * fixture. This is the T12 overturn: "Manchester United v
+ * Sunderland: Highlights" is recorded, not CONFIRMED.
+ */
+function withRecordedTier(
+  match: UnitedMatch,
+  title: string,
+  desc: string,
+): UnitedMatch {
+  if (!isNonLiveProgrammeText(title, desc)) return match
+  return { ...match, tier: "recorded" }
 }
 
 interface TitleMatchOutcome {
@@ -963,6 +1015,26 @@ const NON_LIVE_PROGRAMME_MARKERS: ReadonlyArray<RegExp> = [
 ]
 
 /**
+ * True when the programme's title or description carries a non-live
+ * marker (replay, classic, highlights, build-up, preview, …). This
+ * is THE live-vs-recorded signal: the matcher (withRecordedTier
+ * above) and the ON NOW badge (sportsFixtureLiveBadge below) both
+ * read it, so a programme the badge calls ON NOW can never count
+ * as a fixture. The marker list is deliberately narrow
+ * (programme-type words, not teams or competitions): a plain
+ * "Man Utd v Liverpool" with no marker still reads as the live
+ * broadcast — only positive evidence of non-live content
+ * downgrades it.
+ */
+export function isNonLiveProgrammeText(
+  title: string,
+  desc = "",
+): boolean {
+  const text = `${title || ""} ${desc || ""}`
+  return NON_LIVE_PROGRAMME_MARKERS.some((pattern) => pattern.test(text))
+}
+
+/**
  * The on-now badge for one fixture: "LIVE" for live football,
  * "ON NOW" for any other programme on now, null when the fixture
  * is not on now. Pure — the row renderer calls this, so the
@@ -973,10 +1045,7 @@ export function sportsFixtureLiveBadge(
   nowMs: number = Date.now(),
 ): SportsNowLabel | null {
   if (fixtureStateOf(fixture, nowMs) !== "now") return null
-  const text = `${fixture.title} ${fixture.desc ?? ""}`
-  if (
-    NON_LIVE_PROGRAMME_MARKERS.some((pattern) => pattern.test(text))
-  ) {
+  if (isNonLiveProgrammeText(fixture.title, fixture.desc ?? "")) {
     return "ON NOW"
   }
   return "LIVE"
@@ -986,6 +1055,15 @@ export function sportsFixtureLiveBadge(
  * Split fixtures into the hub's sections. The hero fixture ALSO
  * appears in `upcoming` — the hero is a featured presentation, not
  * a replacement, so the list stays the complete record.
+ *
+ * Feed-first (0.11.26): recorded programmes (tier "recorded" —
+ * replays, classics, highlights, build-ups, …) go in NO list.
+ * They are TV programmes, not fixtures: a replay of an old win
+ * must never sit in Upcoming as the "next match", never linger in
+ * Recent as a match that happened, and never appear in Possible
+ * as an unconfirmed fixture. They stay in scanResult.fixtures
+ * (station lookup, badge, programme-type label) — they just do not
+ * count as fixtures anywhere in the split.
  */
 export function splitSportsFixtures(
   fixtures: ReadonlyArray<SportsFixture>,
@@ -997,6 +1075,8 @@ export function splitSportsFixtures(
   const otherSquadsRecent: SportsFixture[] = []
   const recent: SportsFixture[] = []
   for (const fixture of fixtures) {
+    // A recorded programme is not a fixture — no list, no section.
+    if (fixture.tier === "recorded") continue
     const state = fixtureStateOf(fixture, nowMs)
     if (fixture.tier === "possible") {
       // Possible fixtures matter for upcoming tune-in, not history.
@@ -1027,7 +1107,11 @@ export function splitSportsFixtures(
  * The next-match hero fixture: the earliest CONFIRMED first-team
  * fixture live now or upcoming. A live fixture beats an upcoming
  * one — the live match is what the user wants to watch. Possible
- * fixtures and other-squad fixtures NEVER feed the hero.
+ * fixtures and other-squad fixtures NEVER feed the hero — and
+ * neither do recorded programmes (tier "recorded"): a replay is
+ * not a next match, however early it airs. Feed-first (0.11.26):
+ * this is what stops the Sunderland replay becoming the hero after
+ * Liverpool ends.
  *
  * Same-fixture exception (fix-3, 2026-11-22): one match can be
  * listed twice with different starts (a build-up slot on one
@@ -1154,11 +1238,16 @@ export function scanSportsFixtures(
       )
       if (!match) continue
       const fixture = buildFixture(programme, channel, match, nowMs)
-      const key = groupKeyFor(
+      // The tier is part of the group key (feed-first, 0.11.26): a
+      // recorded programme (replay/classic) is a DIFFERENT programme
+      // from the live broadcast of the same fixture at the same
+      // start, so it must never fold into the live row's "Also on"
+      // — a channel showing a replay is not carrying the live match.
+      const key = `${groupKeyFor(
         match.classification.teams as [string, string],
         programme.startMs,
         match.squad,
-      )
+      )}|${match.tier}`
       const candidate: GroupCandidate = {
         fixture,
         order: order++,
