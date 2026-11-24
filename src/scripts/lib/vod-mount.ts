@@ -35,7 +35,12 @@ import {
   createRemuxFailureHandler,
   handlePlayerStartError,
   attachVodStallWatchdog,
+  tryPinMkvToRemuxAndRetry,
 } from "@/scripts/lib/vod-remux-recovery.ts"
+import {
+  attachVodDeadAudioWatchdog,
+  type DeadAudioWatchdogHandle,
+} from "@/scripts/lib/vod-dead-audio-watchdog.ts"
 
 export interface VodMountOptions {
   logTag: string
@@ -80,6 +85,8 @@ export interface VodMountOptions {
   setAudioDiscoveryController(controller: AbortController): void
   /** Detaches any previous stall watchdog before storing the new one. */
   replaceStallWatchdog(detach: StallWatchdogHandle | null): void
+  /** Detaches any previous dead-audio watchdog before storing the new one. */
+  replaceDeadAudioWatchdog(detach: DeadAudioWatchdogHandle | null): void
   setQualityChipDetach(detach: (() => void) | null): void
   /** Registers the timeupdate/ended listeners exactly once for the page's lifetime. */
   bindProgressListenersOnce(registerListeners: () => void): void
@@ -294,6 +301,7 @@ export async function mountVodPlayback(options: VodMountOptions): Promise<void> 
   let initialAudioSource: AudioTrackSource | null = null
   // Only this pipeline's switcher, so a superseded pipeline tears down its own sessions and never the live one's.
   let ownAudioSwitcher: VodAudioSwitcher | null = null
+  let deadAudioDetach: DeadAudioWatchdogHandle | null = null
 
   function buildAudioSwitcher(tracks: VodAudioTrackOption[]): VodAudioSwitcher {
     return createVodAudioSwitcher({
@@ -324,6 +332,8 @@ export async function mountVodPlayback(options: VodMountOptions): Promise<void> 
 
   // Dispose first: stops any remux session before the tee that feeds it goes away.
   function abandonOwnPipeline() {
+    deadAudioDetach?.()
+    deadAudioDetach = null
     ownAudioSwitcher?.dispose()
     if (options.getAudioSwitcher() === ownAudioSwitcher) options.setAudioSwitcher(null)
     preparedPlayback.mkvSession?.stop()
@@ -366,6 +376,40 @@ export async function mountVodPlayback(options: VodMountOptions): Promise<void> 
     recoverRemuxStall: () => ownAudioSwitcher?.recoverRemuxStall(),
     mountEmbeddedSrc,
   }))
+
+  // Dead-audio watchdog (0.11.27): a direct-played MKV with an
+  // undecodable audio codec plays video with no audio and no error
+  // event, so the code-4 recovery above never runs. Only direct
+  // mounts arm it — in remux mode the switcher owns recovery and
+  // the stall path owns stalls, and a remux retry re-plans to remux
+  // so this mount's watchdog is gone by then.
+  if (containerPlan.mode === "direct") {
+    deadAudioDetach = attachVodDeadAudioWatchdog({
+      logTag: options.logTag,
+      getVideo: () => mountedPlayer.getMediaElement?.() ?? null,
+      getAudioCodec: () => mountedPlayer.codecInfo?.()?.audioCodec ?? null,
+      isStale: options.isStale,
+      onDeadAudio: (detail) => {
+        if (options.isStale()) return
+        const pinned = tryPinMkvToRemuxAndRetry({
+          logTag: options.logTag,
+          desktopPlatform,
+          remuxAvailable,
+          activePlaylistId: options.playlistId,
+          contentKey: remuxContentKey,
+          localDownloadPath: options.localDownloadPath,
+          resolvedContainer,
+          playSrc,
+          retirePreviousPlaybackAndRetryRemux: options.retirePreviousPlaybackAndRetryRemux,
+        })
+        if (pinned) return
+        // No remux to retry through (non-desktop, no ffmpeg, or no
+        // playlist): fail honestly instead of playing silent video.
+        handleRemuxFailure(`audio codec unsupported: ${detail.audioCodec ?? "unknown"}`)
+      },
+    })
+    options.replaceDeadAudioWatchdog(deadAudioDetach)
+  }
   if (options.playerWrap) options.setQualityChipDetach(attachQualityChip(options.playerWrap, mountedPlayer))
   options.applyVideoScale()
 
