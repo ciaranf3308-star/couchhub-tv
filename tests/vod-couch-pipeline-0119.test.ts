@@ -507,3 +507,191 @@ describe("Couch VOD pipeline (0.11.9)", () => {
     player?.dispose();
   });
 });
+
+describe("Dead-audio watchdog on direct play (0.11.27)", () => {
+  // Every test gets its own content id: the pin cache is module-level
+  // and survives localStorage.clear(), and the 0.11.9 tests above
+  // already pinned content 42 — a shared id would make a fresh
+  // direct mount plan remux instead.
+  let contentCounter = 42;
+  function freshContent() {
+    contentCounter += 1;
+    const contentId = contentCounter;
+    return {
+      contentId,
+      contentKey: buildRemuxContentKey("movie", contentId),
+      src: `https://provider.invalid/movie/user/pass/${contentId}.mkv`,
+      remuxContext(onRemuxRetry: () => void) {
+        return {
+          playlistId: PLAYLIST_ID,
+          contentKind: "movie" as const,
+          contentId,
+          nameHintSource: `Test Movie ${contentId}`,
+          onRemuxRetry,
+        };
+      },
+    };
+  }
+
+  // jsdom's media element never plays, so patch the fields the
+  // watchdog reads to look like a playing video with the chosen
+  // audio-decode state.
+  function patchPlayingVideo(
+    options: { audioBytes?: number; frames?: number } = {},
+  ) {
+    const video = document.getElementById(
+      "test-player",
+    ) as HTMLVideoElement & Record<string, unknown>;
+    let currentTimeValue = 0;
+    Object.defineProperty(video, "currentTime", {
+      get: () => currentTimeValue,
+      set: (value: number) => {
+        currentTimeValue = value;
+      },
+      configurable: true,
+    });
+    Object.defineProperty(video, "paused", {
+      get: () => false,
+      configurable: true,
+    });
+    Object.defineProperty(video, "muted", {
+      get: () => false,
+      configurable: true,
+    });
+    Object.defineProperty(video, "volume", {
+      get: () => 1,
+      configurable: true,
+    });
+    Object.defineProperty(video, "videoWidth", {
+      get: () => 1280,
+      configurable: true,
+    });
+    Object.defineProperty(video, "webkitAudioDecodedByteCount", {
+      get: () => options.audioBytes ?? 0,
+      configurable: true,
+    });
+    video.getVideoPlaybackQuality = () => ({
+      totalVideoFrames: options.frames ?? 40,
+      droppedVideoFrames: 0,
+    });
+    return {
+      setCurrentTime: (seconds: number) => {
+        currentTimeValue = seconds;
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    harness.desktopPlatform = true;
+    harness.isWindows = true;
+    harness.remuxAvailable = true;
+    harness.audioTracks = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a silent direct MKV pins the content and retries through remux", async () => {
+    const content = freshContent();
+    const onRemuxRetry = vi.fn();
+    const onError = vi.fn();
+    const { setCurrentTime } = patchPlayingVideo();
+    const player = await createCouchVodPlayer(
+      baseOptions({
+        src: content.src,
+        remux: content.remuxContext(onRemuxRetry),
+        onError,
+      }),
+    );
+    expect(player).not.toBeNull();
+    // Windows plays MKV direct first (no pin yet): the player mounted it.
+    expect(harness.handles[0].srcCalls).toHaveLength(1);
+    expect(isRemuxPinnedContent(PLAYLIST_ID, content.contentKey)).toBe(false);
+
+    // Video plays, audio bytes stay at zero: the watchdog verdict.
+    setCurrentTime(4);
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(isRemuxPinnedContent(PLAYLIST_ID, content.contentKey)).toBe(true);
+    expect(onRemuxRetry).toHaveBeenCalledTimes(1);
+    // The failed mount released its engine before the retry.
+    expect(harness.handles[0].resetCalls).toBe(1);
+    // A retry is in flight, so no terminal error is surfaced.
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("fires with no audio switcher — a single-track episode has no other escape", async () => {
+    // audioTracks stays [] (single track): no switcher is ever built.
+    const content = freshContent();
+    const onRemuxRetry = vi.fn();
+    const { setCurrentTime } = patchPlayingVideo();
+    const player = await createCouchVodPlayer(
+      baseOptions({
+        src: content.src,
+        remux: content.remuxContext(onRemuxRetry),
+      }),
+    );
+    expect(player).not.toBeNull();
+    expect(harness.switchers).toHaveLength(0);
+    setCurrentTime(4);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(onRemuxRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("a remux-mode mount arms no watchdog", async () => {
+    const content = freshContent();
+    rememberRemuxPinnedContent(PLAYLIST_ID, content.contentKey);
+    const onRemuxRetry = vi.fn();
+    const { setCurrentTime } = patchPlayingVideo();
+    const player = await createCouchVodPlayer(
+      baseOptions({
+        src: content.src,
+        remux: content.remuxContext(onRemuxRetry),
+      }),
+    );
+    expect(player).not.toBeNull();
+    expect(harness.switchers).toHaveLength(1);
+    setCurrentTime(4);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(onRemuxRetry).not.toHaveBeenCalled();
+    player?.dispose();
+  });
+
+  it("no verdict when audio bytes decode", async () => {
+    const content = freshContent();
+    const onRemuxRetry = vi.fn();
+    const { setCurrentTime } = patchPlayingVideo({ audioBytes: 8192 });
+    const player = await createCouchVodPlayer(
+      baseOptions({
+        src: content.src,
+        remux: content.remuxContext(onRemuxRetry),
+      }),
+    );
+    expect(player).not.toBeNull();
+    setCurrentTime(4);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(onRemuxRetry).not.toHaveBeenCalled();
+    expect(isRemuxPinnedContent(PLAYLIST_ID, content.contentKey)).toBe(false);
+    player?.dispose();
+  });
+
+  it("disposing the player detaches the watchdog", async () => {
+    const content = freshContent();
+    const onRemuxRetry = vi.fn();
+    const { setCurrentTime } = patchPlayingVideo();
+    const player = await createCouchVodPlayer(
+      baseOptions({
+        src: content.src,
+        remux: content.remuxContext(onRemuxRetry),
+      }),
+    );
+    expect(player).not.toBeNull();
+    player?.dispose();
+    setCurrentTime(4);
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(onRemuxRetry).not.toHaveBeenCalled();
+  });
+
+});
