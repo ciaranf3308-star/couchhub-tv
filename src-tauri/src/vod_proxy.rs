@@ -461,6 +461,15 @@ async fn handle_stream(
     };
 
     let status = upstream_response.status();
+    if matches!(status.as_u16(), 429 | 458 | 509) {
+        // A provider connection-limit refusal, logged loud so the next
+        // report of it is distinguishable from silent audio: the tee
+        // would otherwise pass the refusal through with no trace.
+        log::error!(
+            "[vod-proxy] upstream refused session {} with connection-limit status {status} — provider connection limit, not silent audio",
+            session.session_id
+        );
+    }
     if let Some(requested_start) = requested_range_start {
         if ranged_response_is_corrupted(status, upstream_response.headers(), requested_start) {
             log::warn!("[vod-proxy] upstream sent a 206 starting at the wrong byte for range {requested_start}");

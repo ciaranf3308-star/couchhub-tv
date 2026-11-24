@@ -308,6 +308,13 @@ export function createVodAudioSwitcher(options: VodAudioSwitcherOptions): VodAud
   /** Shared by the vodaudio-error listener and the stall watchdog's recovery hook. */
   function attemptMidPlayRestart(deadSessionId: string | null, detail: string): void {
     if (disposed || midPlayRestartInFlight) return
+    // A remux that mapped no audio stream can never heal on retry —
+    // the audio index is wrong every time — so surface the honest
+    // error at once instead of burning two restart attempts on it.
+    if (detail.startsWith("REMUX_NO_AUDIO")) {
+      finalizeMidPlayUnrecoverable(deadSessionId, detail)
+      return
+    }
     if (midPlayRestartAttempts >= MAX_MIDPLAY_RESTART_ATTEMPTS) {
       finalizeMidPlayUnrecoverable(deadSessionId, detail)
       return

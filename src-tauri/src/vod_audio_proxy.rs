@@ -33,6 +33,9 @@ const OUTPUT_CHANNEL_CAPACITY: usize = 256;
 const STDERR_RING_CAPACITY: usize = 10;
 const STARTUP_SILENCE_TIMEOUT: Duration = Duration::from_secs(10);
 const STDOUT_STALL_TIMEOUT: Duration = Duration::from_secs(20);
+// Grace after the first output byte for ffmpeg's stderr "Stream mapping:"
+// block to be parsed before the no-audio verdict fires.
+const AUDIO_MAPPING_GRACE: Duration = Duration::from_secs(2);
 // Fires only when no client is attached; a connected-but-slow client gets CLIENT_BACKPRESSURE_TIMEOUT instead.
 const CLIENT_RECONNECT_GRACE: Duration = Duration::from_secs(120);
 // Backstop for a client that stays connected but stops reading; generous enough to survive a long pause.
@@ -91,6 +94,10 @@ struct VodAudioSession {
     // Wakes stdout delivery on client connect or replace.
     client_notify: Notify,
     stderr_tail: Mutex<VecDeque<String>>,
+    // Parsed from ffmpeg's stderr "Stream mapping:" block; the watchdog
+    // fails the remux loudly when ffmpeg mapped no audio stream instead
+    // of playing silent video-only output.
+    stream_mapping: Mutex<StreamMappingParser>,
     // Held only until run_watchdog takes ownership.
     child: tokio::sync::Mutex<Option<Child>>,
     // Wakes teardown without touching the child mutex.
@@ -191,6 +198,7 @@ pub async fn register_vod_audio_remux(
         current_client: Mutex::new(None),
         client_notify: Notify::new(),
         stderr_tail: Mutex::new(VecDeque::new()),
+        stream_mapping: Mutex::new(StreamMappingParser::default()),
         child: tokio::sync::Mutex::new(None),
         kill_notify: Notify::new(),
         io_tasks: Mutex::new(Vec::new()),
@@ -397,8 +405,12 @@ fn http_input_reconnect_args(input_url: &str) -> Vec<String> {
 fn build_ffmpeg_args(input_url: &str, audio_stream_index: u32, start_seconds: f64, transcode_audio: bool) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-hide_banner".to_string(),
+        // info (not warning) so ffmpeg prints the "Stream mapping:"
+        // block the no-audio guard parses; -nostats keeps the progress
+        // lines out of the stderr ring.
         "-loglevel".to_string(),
-        "warning".to_string(),
+        "info".to_string(),
+        "-nostats".to_string(),
     ];
     // -noaccurate_seek keeps audio pre-roll aligned with the copied video.
     if start_seconds > 0.1 {
@@ -1130,6 +1142,13 @@ fn spawn_stderr_task(
     tauri::async_runtime::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            {
+                let mut parser = session
+                    .stream_mapping
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                parser.feed(&line);
+            }
             let mut tail = session
                 .stderr_tail
                 .lock()
@@ -1154,6 +1173,95 @@ fn stderr_tail_suffix(session: &VodAudioSession) -> String {
     }
 }
 
+// --- Stream mapping parser (candidate-3 guard) ---
+
+/// Parses ffmpeg's stderr to learn whether an audio stream was actually
+/// mapped into the remux output. The remux args map the audio stream
+/// optionally (`-map 0:a:{index}?`), so a wrong index silently drops the
+/// audio and ffmpeg still produces valid video-only output — this parser
+/// is the only thing that notices, and the watchdog fails loudly
+/// instead of playing silent video.
+#[derive(Debug, Default)]
+struct StreamMappingParser {
+    /// Input indices that are audio streams, learned from the
+    /// `Stream #0:1(eng): Audio:` lines printed before the mapping block.
+    audio_inputs: std::collections::HashSet<(u32, u32)>,
+    in_mapping: bool,
+    saw_mapping: bool,
+    audio_mapped: bool,
+}
+
+impl StreamMappingParser {
+    fn feed(&mut self, line: &str) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("Stream mapping:") {
+            self.in_mapping = true;
+            self.saw_mapping = true;
+            return;
+        }
+        if self.in_mapping {
+            if let Some(source) = parse_mapping_source(trimmed) {
+                if self.audio_inputs.contains(&source) {
+                    self.audio_mapped = true;
+                }
+                return;
+            }
+            // Any non-entry line ends the mapping block.
+            if !trimmed.is_empty() {
+                self.in_mapping = false;
+            }
+            return;
+        }
+        if let Some((index, is_audio)) = parse_input_stream(trimmed) {
+            if is_audio {
+                self.audio_inputs.insert(index);
+            }
+        }
+    }
+
+    /// None until a mapping block has been seen; Some(true) when an audio
+    /// stream is mapped, Some(false) when the block closed with no audio
+    /// stream in it.
+    fn verdict(&self) -> Option<bool> {
+        if !self.saw_mapping {
+            None
+        } else {
+            Some(self.audio_mapped)
+        }
+    }
+}
+
+/// `Stream #0:1 -> #0:1 (aac (native) -> aac (native))` -> Some((0, 1)).
+fn parse_mapping_source(line: &str) -> Option<(u32, u32)> {
+    if !line.contains(" -> ") {
+        return None;
+    }
+    let rest = line.strip_prefix("Stream #")?;
+    let (first, rest) = parse_stream_index(rest)?;
+    let rest = rest.strip_prefix(':')?;
+    let (second, _) = parse_stream_index(rest)?;
+    Some((first, second))
+}
+
+/// `Stream #0:1(eng): Audio: ac3, ...` -> Some(((0, 1), true));
+/// `Stream #0:0: Video: h264, ...` -> Some(((0, 0), false)).
+fn parse_input_stream(line: &str) -> Option<((u32, u32), bool)> {
+    let rest = line.strip_prefix("Stream #")?;
+    let (first, rest) = parse_stream_index(rest)?;
+    let rest = rest.strip_prefix(':')?;
+    let (second, rest) = parse_stream_index(rest)?;
+    Some(((first, second), rest.contains(": Audio:")))
+}
+
+fn parse_stream_index(text: &str) -> Option<(u32, &str)> {
+    let digits: String = text.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let value = digits.parse().ok()?;
+    Some((value, &text[digits.len()..]))
+}
+
 // --- Watchdog ---
 
 // Resolves only when stdout stalls and the reader isn't blocked on the consumer.
@@ -1171,6 +1279,25 @@ async fn wait_for_stdout_stall(session: &Arc<VodAudioSession>) {
         if elapsed >= STDOUT_STALL_TIMEOUT {
             return;
         }
+    }
+}
+
+// Resolves only when ffmpeg's stderr mapping block closed with no
+// audio stream in it — the optional `-map 0:a:{index}?` silently
+// dropped the audio. Never fires while no mapping block has been
+// parsed, so an ffmpeg that prints no mapping stays innocent.
+async fn wait_for_no_audio_mapping(session: &Arc<VodAudioSession>) {
+    tokio::time::sleep(AUDIO_MAPPING_GRACE).await;
+    loop {
+        let verdict = session
+            .stream_mapping
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .verdict();
+        if verdict == Some(false) {
+            return;
+        }
+        tokio::time::sleep(STALL_CHECK_INTERVAL).await;
     }
 }
 
@@ -1273,6 +1400,20 @@ async fn run_watchdog(
                     &app,
                     &session,
                     format!("{detail}{}", stderr_tail_suffix(&session)),
+                )
+                .await;
+                return;
+            }
+            _ = wait_for_no_audio_mapping(&session) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                finish_with_error(
+                    &app,
+                    &session,
+                    format!(
+                        "REMUX_NO_AUDIO:ffmpeg mapped no audio stream (wrong audio index?){}",
+                        stderr_tail_suffix(&session)
+                    ),
                 )
                 .await;
                 return;
@@ -1460,7 +1601,8 @@ mod tests {
             vec![
                 "-hide_banner",
                 "-loglevel",
-                "warning",
+                "info",
+                "-nostats",
                 "-reconnect",
                 "1",
                 "-reconnect_streamed",
@@ -1502,7 +1644,8 @@ mod tests {
             vec![
                 "-hide_banner",
                 "-loglevel",
-                "warning",
+                "info",
+                "-nostats",
                 "-reconnect",
                 "1",
                 "-reconnect_streamed",
@@ -1840,6 +1983,7 @@ mod tests {
             current_client: Mutex::new(None),
             client_notify: Notify::new(),
             stderr_tail: Mutex::new(VecDeque::new()),
+            stream_mapping: Mutex::new(StreamMappingParser::default()),
             child: tokio::sync::Mutex::new(None),
             kill_notify: Notify::new(),
             io_tasks: Mutex::new(Vec::new()),
@@ -1867,6 +2011,7 @@ mod tests {
             current_client: Mutex::new(None),
             client_notify: Notify::new(),
             stderr_tail: Mutex::new(tail),
+            stream_mapping: Mutex::new(StreamMappingParser::default()),
             child: tokio::sync::Mutex::new(None),
             kill_notify: Notify::new(),
             io_tasks: Mutex::new(Vec::new()),
@@ -1893,6 +2038,7 @@ mod tests {
             current_client: Mutex::new(None),
             client_notify: Notify::new(),
             stderr_tail: Mutex::new(VecDeque::new()),
+            stream_mapping: Mutex::new(StreamMappingParser::default()),
             child: tokio::sync::Mutex::new(None),
             kill_notify: Notify::new(),
             io_tasks: Mutex::new(Vec::new()),
@@ -2244,5 +2390,94 @@ mod tests {
             outcome.is_err(),
             "a still-draining session must not be torn down by the upstream-EOF expiry"
         );
+    }
+
+    // 0.11.27 candidate-3 guard: the optional `-map 0:a:{index}?` must not
+    // silently drop the audio. Realistic ffmpeg stderr excerpts.
+    const FFMPEG_HEADER: &[&str] = &[
+        "Input #0, matroska,webm, from 'http://127.0.0.1:9000/forward/abc/stream':",
+        "  Metadata:",
+        "    title           : Test Movie",
+        "  Duration: 01:45:00.00, start: 0.000000, bitrate: 8000 kb/s",
+        "  Stream #0:0: Video: h264 (High), yuv420p(progressive), 1920x1080 [SAR 1:1 DAR 16:9], 23.98 fps, 23.98 tbr, 1k tbn (default)",
+        "  Stream #0:1(eng): Audio: ac3, 48000 Hz, 5.1(side), fltp, 640 kb/s (default)",
+    ];
+
+    fn feed_lines(parser: &mut StreamMappingParser, lines: &[&str]) {
+        for line in lines {
+            parser.feed(line);
+        }
+    }
+
+    #[test]
+    fn stream_mapping_verdict_is_none_before_any_mapping_block() {
+        let mut parser = StreamMappingParser::default();
+        feed_lines(&mut parser, FFMPEG_HEADER);
+        assert_eq!(parser.verdict(), None);
+    }
+
+    #[test]
+    fn stream_mapping_verdict_is_true_when_audio_is_mapped() {
+        let mut parser = StreamMappingParser::default();
+        feed_lines(&mut parser, FFMPEG_HEADER);
+        feed_lines(
+            &mut parser,
+            &[
+                "Stream mapping:",
+                "  Stream #0:0 -> #0:0 (copy)",
+                "  Stream #0:1 -> #0:1 (aac (native) -> aac (native))",
+                "Press [q] to stop, [?] for help",
+            ],
+        );
+        assert_eq!(parser.verdict(), Some(true));
+    }
+
+    #[test]
+    fn stream_mapping_verdict_is_false_when_only_video_is_mapped() {
+        // The wrong audio index (0:a:5?) was dropped by the optional map:
+        // ffmpeg maps video only and still produces valid output.
+        let mut parser = StreamMappingParser::default();
+        feed_lines(&mut parser, FFMPEG_HEADER);
+        feed_lines(
+            &mut parser,
+            &[
+                "Stream mapping:",
+                "  Stream #0:0 -> #0:0 (copy)",
+                "Press [q] to stop, [?] for help",
+            ],
+        );
+        assert_eq!(parser.verdict(), Some(false));
+    }
+
+    #[test]
+    fn stream_mapping_verdict_is_true_when_audio_is_copied() {
+        let mut parser = StreamMappingParser::default();
+        feed_lines(&mut parser, FFMPEG_HEADER);
+        feed_lines(
+            &mut parser,
+            &[
+                "Stream mapping:",
+                "  Stream #0:0 -> #0:0 (copy)",
+                "  Stream #0:1 -> #0:1 (copy)",
+            ],
+        );
+        assert_eq!(parser.verdict(), Some(true));
+    }
+
+    #[test]
+    fn stream_mapping_ignores_non_audio_input_streams() {
+        let mut parser = StreamMappingParser::default();
+        feed_lines(
+            &mut parser,
+            &[
+                "  Stream #0:0: Video: h264 (High), yuv420p(progressive), 1920x1080, 23.98 fps",
+                "  Stream #0:1(eng): Subtitle: ass (default)",
+                "Stream mapping:",
+                "  Stream #0:0 -> #0:0 (copy)",
+                "  Stream #0:1 -> #0:1 (copy)",
+            ],
+        );
+        // Only a subtitle was mapped; no audio stream exists or was mapped.
+        assert_eq!(parser.verdict(), Some(false));
     }
 }
