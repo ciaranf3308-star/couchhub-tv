@@ -533,7 +533,9 @@ export async function createCouchVodPlayer(
     stallWatchdogDetach = null;
     try {
       deadAudioDetach?.();
-    } catch {}
+    } catch {
+      // Detach is best-effort; a throw here must not block disposal.
+    }
     deadAudioDetach = null;
     try {
       audioDiscoveryController?.abort();

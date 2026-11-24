@@ -573,6 +573,8 @@ describe("Dead-audio watchdog on direct play (0.11.27)", () => {
     video.getVideoPlaybackQuality = () => ({
       totalVideoFrames: options.frames ?? 40,
       droppedVideoFrames: 0,
+      corruptedVideoFrames: 0,
+      creationTime: 0,
     });
     return {
       setCurrentTime: (seconds: number) => {
