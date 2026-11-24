@@ -35,6 +35,11 @@ const STDERR_RING_CAPACITY: usize = 10;
 const STARTUP_SILENCE_TIMEOUT: Duration = Duration::from_secs(10);
 const STDOUT_STALL_TIMEOUT: Duration = Duration::from_secs(20);
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(1);
+// A Live TV audio-proxy session with no connected playback client for
+// this long is orphaned (the page that owned it navigated away and its
+// best-effort pagehide release never landed); reap it so ffmpeg stops
+// holding the provider slot.
+const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ---------------------------------------------------------------------------
 // State
@@ -108,6 +113,10 @@ struct AudioSession {
     watchdog_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     // Reset on every stdout read; the watchdog compares its age against STDOUT_STALL_TIMEOUT.
     last_activity: Mutex<Instant>,
+    // Last time a playback client was connected (or a chunk reached one);
+    // the watchdog reaps the session once this is older than
+    // CLIENT_IDLE_TIMEOUT with no client attached.
+    last_client_seen: Mutex<Instant>,
     // True while the output task is blocked pushing into the bounded channel, so a slow HTTP consumer never reads as a stall.
     blocked_on_send: AtomicBool,
 }
@@ -212,6 +221,7 @@ pub async fn register_audio_transcode(
         io_tasks: Mutex::new(Vec::new()),
         watchdog_task: Mutex::new(None),
         last_activity: Mutex::new(Instant::now()),
+        last_client_seen: Mutex::new(Instant::now()),
         blocked_on_send: AtomicBool::new(false),
     });
 
@@ -675,6 +685,7 @@ async fn handle_live(
             .unwrap_or_else(|poison| poison.into_inner());
         *guard = Some(sender);
     }
+    mark_client_seen(&session);
 
     let body_stream = futures_util::stream::poll_fn(move |cx| {
         receiver
@@ -837,6 +848,14 @@ fn mark_activity(session: &AudioSession) {
     *last_activity = Instant::now();
 }
 
+fn mark_client_seen(session: &AudioSession) {
+    let mut last_client_seen = session
+        .last_client_seen
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    *last_client_seen = Instant::now();
+}
+
 // Discards the chunk if no client is connected; stdout must still drain.
 async fn send_to_current_client(session: &Arc<AudioSession>, chunk: Bytes) {
     let sender = {
@@ -853,6 +872,9 @@ async fn send_to_current_client(session: &Arc<AudioSession>, chunk: Bytes) {
     session.blocked_on_send.store(true, Ordering::SeqCst);
     let send_result = sender.send(chunk).await;
     session.blocked_on_send.store(false, Ordering::SeqCst);
+    if send_result.is_ok() {
+        mark_client_seen(session);
+    }
     if send_result.is_err() {
         let mut guard = session
             .current_client
@@ -942,6 +964,34 @@ async fn wait_for_stdout_stall(session: &Arc<AudioSession>) {
     }
 }
 
+// Resolves once no playback client has been attached for
+// CLIENT_IDLE_TIMEOUT — the page that owned this session navigated
+// away and its best-effort pagehide release never landed, so ffmpeg
+// would otherwise keep pulling the live stream (and holding the
+// provider slot) forever. A connected client, however slow, never
+// trips this: only the absence of a client counts.
+async fn wait_for_client_idle_expiry(session: &Arc<AudioSession>) {
+    loop {
+        tokio::time::sleep(STALL_CHECK_INTERVAL).await;
+        let has_client = session
+            .current_client
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .is_some();
+        if has_client {
+            continue;
+        }
+        let idle_for = session
+            .last_client_seen
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .elapsed();
+        if idle_for >= CLIENT_IDLE_TIMEOUT {
+            return;
+        }
+    }
+}
+
 // Owns the child for its lifetime; teardown wakes it via kill_notify.
 async fn run_watchdog(
     app: AppHandle,
@@ -990,6 +1040,21 @@ async fn run_watchdog(
                     format!(
                         "TIMEOUT:no output from ffmpeg for {}s{}",
                         STDOUT_STALL_TIMEOUT.as_secs(),
+                        stderr_tail_suffix(&session)
+                    ),
+                )
+                .await;
+                return;
+            }
+            _ = wait_for_client_idle_expiry(&session) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                finish_with_error(
+                    &app,
+                    &session,
+                    format!(
+                        "TIMEOUT:no playback client for {}s (orphaned session reaped){}",
+                        CLIENT_IDLE_TIMEOUT.as_secs(),
                         stderr_tail_suffix(&session)
                     ),
                 )
@@ -1266,6 +1331,7 @@ mod tests {
             io_tasks: Mutex::new(Vec::new()),
             watchdog_task: Mutex::new(None),
             last_activity: Mutex::new(Instant::now()),
+            last_client_seen: Mutex::new(Instant::now()),
             blocked_on_send: AtomicBool::new(false),
         });
         assert_eq!(stderr_tail_suffix(&session), "");
@@ -1286,6 +1352,7 @@ mod tests {
             io_tasks: Mutex::new(Vec::new()),
             watchdog_task: Mutex::new(None),
             last_activity: Mutex::new(Instant::now()),
+            last_client_seen: Mutex::new(Instant::now()),
             blocked_on_send: AtomicBool::new(false),
         });
         assert_eq!(
@@ -1363,6 +1430,7 @@ mod tests {
             io_tasks: Mutex::new(Vec::new()),
             watchdog_task: Mutex::new(None),
             last_activity: Mutex::new(Instant::now()),
+            last_client_seen: Mutex::new(Instant::now()),
             blocked_on_send: AtomicBool::new(false),
         })
     }

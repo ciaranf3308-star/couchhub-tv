@@ -62,7 +62,13 @@ import {
   createRemuxFailureHandler,
   handlePlayerStartError,
   attachVodStallWatchdog,
+  tryPinMkvToRemuxAndRetry,
 } from "@/scripts/lib/vod-remux-recovery.ts";
+import {
+  attachVodDeadAudioWatchdog,
+  type DeadAudioWatchdogHandle,
+} from "@/scripts/lib/vod-dead-audio-watchdog.ts";
+import { describeAudioCodec } from "@/scripts/lib/codec-hints.ts";
 import { createVodPlaybackToasts } from "@/scripts/lib/vod-playback-toasts.ts";
 import type { StallWatchdogHandle } from "@/scripts/lib/stall-watchdog.ts";
 import { formatClock } from "@/scripts/movies/couch-movies.ts";
@@ -239,6 +245,7 @@ export async function createCouchVodPlayer(
   let preparedPlayback: VodProxySession | null = null;
   let activeMkvSession: { stop(): void } | null | undefined = null;
   let stallWatchdogDetach: StallWatchdogHandle | null = null;
+  let deadAudioDetach: DeadAudioWatchdogHandle | null = null;
   let audioDiscoveryController: AbortController | null = null;
   let onPlayerErrorRef: ((...args: unknown[]) => void) | null = null;
   let duration = opts.durationSeconds && opts.durationSeconds > 0 ? opts.durationSeconds : 0;
@@ -525,6 +532,12 @@ export async function createCouchVodPlayer(
     } catch {}
     stallWatchdogDetach = null;
     try {
+      deadAudioDetach?.();
+    } catch {
+      // Detach is best-effort; a throw here must not block disposal.
+    }
+    deadAudioDetach = null;
+    try {
       audioDiscoveryController?.abort();
     } catch {}
     audioDiscoveryController = null;
@@ -687,6 +700,14 @@ export async function createCouchVodPlayer(
     // sit black, so the detail page hides the player too.
     surfaceStartError();
   };
+  // One retry per tune: dispose this mount (releases the engine)
+  // before the detail page re-runs the tune; the pin makes the next
+  // plan remux. Shared by the code-4 error path and the dead-audio watchdog.
+  const retireForRemuxRetry = () => {
+    remuxRetryTriggered = true;
+    disposePlayer();
+    remux?.onRemuxRetry();
+  };
   const handleStartError = () => {
     if (isStaleNow()) return;
     handlePlayerStartError({
@@ -704,13 +725,7 @@ export async function createCouchVodPlayer(
       posterEl: null,
       playerWrap: null,
       handleRemuxFailure: wrappedRemuxFailure,
-      retirePreviousPlaybackAndRetryRemux: () => {
-        remuxRetryTriggered = true;
-        // Dispose this mount (releases the engine) before the detail
-        // page re-runs the tune; the pin makes the next plan remux.
-        disposePlayer();
-        remux?.onRemuxRetry();
-      },
+      retirePreviousPlaybackAndRetryRemux: retireForRemuxRetry,
       toasts,
     });
     if (!remuxRetryTriggered) surfaceStartError();
@@ -843,6 +858,50 @@ export async function createCouchVodPlayer(
         ownAudioSwitcher?.recoverRemuxStall();
       },
       mountEmbeddedSrc,
+    });
+  }
+
+  // Dead-audio watchdog (0.11.27): same silent-codec hole as the
+  // legacy mount — a direct-played MKV with undecodable audio plays
+  // video with no audio and no error event. Only direct mounts arm
+  // it; a remux retry re-plans to remux, so the watchdog is gone
+  // by then.
+  if (containerPlan.mode === "direct") {
+    deadAudioDetach = attachVodDeadAudioWatchdog({
+      logTag: opts.logTag,
+      getVideo: () => media(),
+      getAudioCodec: () => handle.codecInfo?.()?.audioCodec ?? null,
+      isStale: isStaleNow,
+      onDeadAudio: (detail) => {
+        if (isStaleNow() || remuxRetryTriggered) return;
+        const pinned = tryPinMkvToRemuxAndRetry({
+          logTag: opts.logTag,
+          desktopPlatform,
+          remuxAvailable,
+          activePlaylistId: remux?.playlistId ?? null,
+          contentKey,
+          localDownloadPath: null,
+          resolvedContainer,
+          playSrc,
+          retirePreviousPlaybackAndRetryRemux: retireForRemuxRetry,
+        });
+        if (pinned) return;
+        // No remux to retry through: fail honestly instead of
+        // playing silent video. The toast carries the specific
+        // reason; the status line must not sit black either.
+        handleRemuxFailure(
+          `audio codec unsupported: ${detail.audioCodec ?? "unknown"}`,
+        );
+        startErrorSurfaced = true;
+        const codecLabel = detail.audioCodec
+          ? describeAudioCodec(detail.audioCodec)
+          : null;
+        opts.onError?.(
+          codecLabel
+            ? `Audio format ${codecLabel} isn't supported on this device.`
+            : "This title played with no audio.",
+        );
+      },
     });
   }
 

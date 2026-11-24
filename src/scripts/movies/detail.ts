@@ -747,6 +747,8 @@ let audioDiscoveryController = null
 let activeMkvSession = null
 /** Detach for the stall-recovery watchdog on the currently mounted src, if any. */
 let stallWatchdogDetach = null
+/** Detach for the dead-audio watchdog on the currently mounted src, if any. */
+let deadAudioWatchdogDetach = null
 /** Detach for the auto-hiding quality chip overlaid on the player edge, if any. */
 let qualityChipDetach = null
 const RESUME_MIN_SECONDS = 30
@@ -880,6 +882,8 @@ function retirePreviousPlayback() {
   activeMkvSession = null
   stallWatchdogDetach?.()
   stallWatchdogDetach = null
+  deadAudioWatchdogDetach?.()
+  deadAudioWatchdogDetach = null
   qualityChipDetach?.()
   qualityChipDetach = null
 }
@@ -1054,6 +1058,10 @@ async function startPlayback(options = {}) {
     replaceStallWatchdog: (detach) => {
       stallWatchdogDetach?.()
       stallWatchdogDetach = detach
+    },
+    replaceDeadAudioWatchdog: (detach) => {
+      deadAudioWatchdogDetach?.()
+      deadAudioWatchdogDetach = detach
     },
     setQualityChipDetach: (detach) => { qualityChipDetach = detach },
     bindProgressListenersOnce: (registerListeners) => {

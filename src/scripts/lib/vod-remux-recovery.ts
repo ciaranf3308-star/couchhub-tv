@@ -103,6 +103,42 @@ export interface PlayerStartErrorOptions {
   toasts: VodPlaybackToasts
 }
 
+export interface PinMkvToRemuxOptions {
+  logTag: string
+  desktopPlatform: boolean
+  remuxAvailable: boolean
+  activePlaylistId: string | null
+  contentKey: string
+  localDownloadPath: string | null
+  resolvedContainer: "mkv" | "mp4" | null
+  playSrc: string
+  /** Ahead-of-the-error teardown then re-run the tune in remux mode. */
+  retirePreviousPlaybackAndRetryRemux(): void
+}
+
+/**
+ * Code-4 recovery, shared by the error path and the dead-audio
+ * watchdog: when a direct-played MKV cannot be handled by the
+ * WebView, pin the content to remux and retry once. Returns true
+ * when it pinned and retried; false when remux is unavailable or
+ * the container is not MKV, so the caller can fall through to its
+ * honest-error path instead.
+ */
+export function tryPinMkvToRemuxAndRetry(options: PinMkvToRemuxOptions): boolean {
+  if (!options.desktopPlatform || !options.remuxAvailable || !options.activePlaylistId) return false
+  const unsupportedContainer = options.localDownloadPath
+    ? detectVodContainerFromLocalPath(options.localDownloadPath)
+    : options.resolvedContainer || detectVodContainer(options.playSrc)
+  if (unsupportedContainer !== "mkv") return false
+  rememberRemuxPinnedContent(options.activePlaylistId, options.contentKey)
+  log.warn(`${options.logTag} WebView could not demux this MKV directly - remuxing with ffmpeg instead`, {
+    contentKey: options.contentKey,
+    container: unsupportedContainer,
+  })
+  options.retirePreviousPlaybackAndRetryRemux()
+  return true
+}
+
 /** Superseded runs must not report or seek; a code-4 native failure pins the content to remux and retries once, so it cannot re-fire. */
 export function handlePlayerStartError(options: PlayerStartErrorOptions) {
   if (options.isStale()) return
@@ -117,22 +153,24 @@ export function handlePlayerStartError(options: PlayerStartErrorOptions) {
     return
   }
   if (options.desktopPlatform && playerError?.code === 4) {
+    if (
+      tryPinMkvToRemuxAndRetry({
+        logTag: options.logTag,
+        desktopPlatform: options.desktopPlatform,
+        remuxAvailable: options.remuxAvailable,
+        activePlaylistId: options.activePlaylistId,
+        contentKey: options.contentKey,
+        localDownloadPath: options.localDownloadPath,
+        resolvedContainer: options.resolvedContainer,
+        playSrc: options.playSrc,
+        retirePreviousPlaybackAndRetryRemux: options.retirePreviousPlaybackAndRetryRemux,
+      })
+    ) {
+      return
+    }
     const unsupportedContainer = options.localDownloadPath
       ? detectVodContainerFromLocalPath(options.localDownloadPath)
       : options.resolvedContainer || detectVodContainer(options.playSrc)
-    if (
-      unsupportedContainer === "mkv" &&
-      options.remuxAvailable &&
-      options.activePlaylistId
-    ) {
-      rememberRemuxPinnedContent(options.activePlaylistId, options.contentKey)
-      log.warn(`${options.logTag} WebView could not demux this MKV directly - remuxing with ffmpeg instead`, {
-        contentKey: options.contentKey,
-        container: unsupportedContainer,
-      })
-      options.retirePreviousPlaybackAndRetryRemux()
-      return
-    }
     if (options.posterEl) options.posterEl.classList.remove("hidden")
     if (options.playerWrap) options.playerWrap.classList.add("hidden")
     if (unsupportedContainer) {

@@ -343,6 +343,49 @@ describe("createVodAudioSwitcher async state machine", () => {
     switcher.dispose()
   })
 
+  it("reports a no-audio remux failure at once instead of burning restart attempts", async () => {
+    // 0.11.27 candidate-3: ffmpeg mapped no audio stream, so the audio
+    // index is wrong every time — a retry can never heal it.
+    const handle = createFakeHandle()
+    const { trackDefault } = makeTracks()
+    const captured: { listener: ((payload: { sessionId: string; detail: string }) => void) | null } = { listener: null }
+    onVodAudioErrorMock.mockImplementation((listener: (payload: { sessionId: string; detail: string }) => void) => {
+      captured.listener = listener
+      return () => {}
+    })
+    startVodAudioRemuxMock.mockResolvedValueOnce({ sessionId: "session-0", playbackUrl: "http://127.0.0.1/live/session-0" })
+    const unrecoverable = vi.fn()
+
+    const switcher = createVodAudioSwitcher({
+      handle: handle as any,
+      originalSrc: "http://127.0.0.1/tee-token/stream.mkv",
+      originalMime: "video/x-matroska",
+      sourceUrl: "https://host.example/movie.mkv",
+      remuxInputUrl: "http://127.0.0.1/tee-token/stream.mkv",
+      getKnownDurationSeconds: () => 100,
+      tracks: [trackDefault],
+      mountRemuxImmediately: true,
+      initialStartSeconds: 12,
+      onRemuxUnrecoverable: unrecoverable,
+    })
+    await flushMicrotasks()
+
+    captured.listener?.({
+      sessionId: "session-0",
+      detail: "REMUX_NO_AUDIO:ffmpeg mapped no audio stream (wrong audio index?) (Stream #0:0 -> #0:0 (copy))",
+    })
+    await flushMicrotasks()
+
+    expect(stopVodAudioRemuxMock).toHaveBeenCalledWith("session-0")
+    expect(unrecoverable).toHaveBeenCalledTimes(1)
+    expect(unrecoverable.mock.calls[0][0]).toContain("REMUX_NO_AUDIO")
+    // No restart was attempted: the register mock was consumed once.
+    expect(startVodAudioRemuxMock).toHaveBeenCalledTimes(1)
+    expect(handle.src.mock.calls.length).toBe(1)
+
+    switcher.dispose()
+  })
+
   it("resets the restart budget after the session has been healthy for a while", async () => {
     vi.useFakeTimers()
     try {
